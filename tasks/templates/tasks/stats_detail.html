@@ -1,0 +1,56 @@
+{% extends "tasks/base.html" %}
+{% block title %}{{ title }} — Estadísticas{% endblock %}
+{% block content %}
+
+<a href="{% url 'tasks:stats_list' %}" class="back-link">← volver a estadísticas</a>
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">accountability</span>
+        <h1>{{ title }}</h1>
+    </div>
+</header>
+
+<div class="stamp-row">
+    <div class="stamp stamp--done">
+        <span class="stamp__number">{{ done_count }}</span>
+        <span class="stamp__label">hechas</span>
+    </div>
+    <div class="stamp stamp--undone">
+        <span class="stamp__number">{{ not_done_count }}</span>
+        <span class="stamp__label">no hechas</span>
+    </div>
+    <div class="stamp stamp--rate">
+        <span class="stamp__number">{{ success_rate }}%</span>
+        <span class="stamp__label">cumplido</span>
+    </div>
+</div>
+
+<div class="streak-row">
+    <div class="streak-card streak-card--current">
+        <span class="streak-card__icon">🔥</span>
+        <span class="streak-card__number">{{ current_streak }}</span>
+        <span class="streak-card__label">Racha actual</span>
+    </div>
+    <div class="streak-card streak-card--max">
+        <span class="streak-card__icon">⭐</span>
+        <span class="streak-card__number">{{ max_streak }}</span>
+        <span class="streak-card__label">Racha máxima</span>
+    </div>
+</div>
+
+<section class="task-section">
+    <h2 class="task-section__title">Historial</h2>
+    <ul class="history-list">
+        {% for occ in occurrences %}
+        <li class="history-row history-row--{{ occ.result }}">
+            <span class="history-dot"></span>
+            <span class="history-date">{{ occ.recorded_at|date:"d \d\e F, Y · H:i" }}</span>
+            <span class="history-result">
+                {{ occ.get_result_display }}{% if occ.auto_expired %} (auto){% endif %}
+            </span>
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+
+{% endblock %}

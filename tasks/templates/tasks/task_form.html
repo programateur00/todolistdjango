@@ -1,0 +1,120 @@
+{% extends "tasks/base.html" %}
+{% block title %}{% if task %}Editar tarea{% else %}Nueva tarea{% endif %} — Libreta{% endblock %}
+{% block content %}
+
+<a href="{% url 'tasks:task_list' %}" class="back-link">← volver a la libreta</a>
+
+<form class="task-form" method="post" action="{% if task %}{% url 'tasks:task_edit' task.pk %}{% else %}{% url 'tasks:task_create' %}{% endif %}">
+    {% csrf_token %}
+
+    <label class="field">
+        <span class="field__label">Título</span>
+        <input type="text" name="title" value="{{ task.title }}" placeholder="¿Qué hay que hacer?" required maxlength="255" autofocus>
+    </label>
+
+    <label class="field">
+        <span class="field__label">Notas</span>
+        <textarea name="notes" rows="4" placeholder="Detalles, enlaces, lo que sea…">{{ task.notes|default:'' }}</textarea>
+    </label>
+
+    <div class="field-row">
+        <label class="field">
+            <span class="field__label">Fecha de vencimiento</span>
+            <input type="date" name="due_date" value="{{ task.due_date|date:'Y-m-d'|default:'' }}">
+        </label>
+        <label class="field">
+            <span class="field__label">Hora límite</span>
+            <input type="time" name="due_time" value="{{ task.due_time|time:'H:i'|default:'' }}">
+            <span class="field__hint">Si pasa sin marcarla → auto no hecha</span>
+        </label>
+    </div>
+
+    <fieldset class="field">
+        <legend class="field__label">Repetir</legend>
+        <div class="repeat-options">
+            {% for value, label in repeat_choices %}
+            <label class="repeat-option">
+                <input type="radio" name="repeat" value="{{ value }}"
+                    {% if task and task.repeat == value %}checked{% elif not task and value == "none" %}checked{% endif %}
+                    data-repeat-toggle>
+                <span>{{ label }}</span>
+            </label>
+            {% endfor %}
+        </div>
+    </fieldset>
+
+    <fieldset class="field interval-field" id="interval-field">
+        <legend class="field__label">Cada cuánto</legend>
+        <div class="interval-row">
+            <span>Cada</span>
+            <input type="number" name="interval" min="1" max="52" value="{{ task.interval|default:1 }}" class="interval-input">
+            <span class="interval-unit" id="interval-unit">semanas</span>
+        </div>
+    </fieldset>
+
+    <fieldset class="field custom-days-field" id="custom-days-field">
+        <legend class="field__label">¿Qué días?</legend>
+        <div class="weekday-picker">
+            {% for value, label in weekdays %}
+            <label class="weekday-chip">
+                <input type="checkbox" name="custom_days" value="{{ value }}"
+                    {% if value in task.custom_days_list %}checked{% endif %}>
+                <span>{{ label|slice:":3" }}</span>
+            </label>
+            {% endfor %}
+        </div>
+    </fieldset>
+
+    <label class="field field--inline">
+        <input type="checkbox" name="is_important" {% if task.is_important %}checked{% endif %}>
+        <span class="field__label">Marcar como importante</span>
+    </label>
+
+    <fieldset class="field">
+        <legend class="field__label">Tipo de tarea</legend>
+        <div class="category-options" id="category-options">
+            {% for value, label in category_choices %}
+            <label class="category-option category-option--{{ value }}">
+                <input type="radio" name="category" value="{{ value }}"
+                    {% if task and task.category == value %}checked{% elif not task and value == "general" %}checked{% endif %}>
+                <span>{{ label }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        <span class="field__hint">
+            Define qué extras tendrá la tarea. <em>Estudio / Trabajo</em> → temporizador y pomodoro.
+            <em>Deporte</em> → temporizador + seguimiento con cámara (MediaPipe).
+            <em>General / Personal / Otro</em> → sin extras.
+        </span>
+    </fieldset>
+
+    <div class="task-form__actions">
+        <button type="submit" class="primary-btn">{% if task %}Guardar cambios{% else %}Crear tarea{% endif %}</button>
+        {% if task %}
+        <form action="{% url 'tasks:task_delete' task.pk %}" method="post" class="inline-delete">
+            {% csrf_token %}
+            <button type="submit" class="ghost-btn ghost-btn--danger">Eliminar</button>
+        </form>
+        {% endif %}
+    </div>
+</form>
+
+<script>
+(function(){
+    var customField   = document.getElementById('custom-days-field');
+    var intervalField = document.getElementById('interval-field');
+    var intervalUnit  = document.getElementById('interval-unit');
+    var radios = document.querySelectorAll('[data-repeat-toggle]');
+    var units  = { daily:'días', weekly:'semanas', monthly:'meses', yearly:'años', custom:'semanas' };
+
+    function update(){
+        var v = (document.querySelector('[data-repeat-toggle]:checked') || {}).value || 'none';
+        customField.style.display   = v === 'custom' ? 'block' : 'none';
+        intervalField.style.display = v === 'none'   ? 'none'  : 'block';
+        if(units[v]) intervalUnit.textContent = units[v];
+    }
+    radios.forEach(function(r){ r.addEventListener('change', update); });
+    update();
+})();
+</script>
+{% endblock %}

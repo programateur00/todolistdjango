@@ -1,0 +1,43 @@
+{% extends "tasks/base.html" %}
+{% block title %}Estadísticas — Libreta{% endblock %}
+{% block content %}
+
+<a href="{% url 'tasks:task_list' %}" class="back-link">← volver a la libreta</a>
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">accountability</span>
+        <h1>Estadísticas</h1>
+    </div>
+</header>
+
+{% if series_list %}
+<ul class="stats-list">
+    {% for s in series_list %}
+    <li class="stats-card">
+        <a href="{% url 'tasks:stats_detail' s.series_id %}" class="stats-card__link">
+            <div class="stats-card__top">
+                <p class="stats-card__title">{{ s.title }}</p>
+                <span class="stats-card__rate">{{ s.success_rate }}%</span>
+            </div>
+            <div class="stats-bar">
+                <div class="stats-bar__done" style="width:{{ s.success_rate }}%"></div>
+            </div>
+            <div class="stats-card__counts">
+                <span class="count-pill count-pill--done">{{ s.done }} hechas</span>
+                <span class="count-pill count-pill--not-done">{{ s.not_done }} no hechas</span>
+                {% if s.current_streak > 0 %}
+                <span class="count-pill count-pill--streak">🔥 {{ s.current_streak }} racha</span>
+                {% endif %}
+                {% if s.max_streak > 0 %}
+                <span class="count-pill count-pill--max">⭐ {{ s.max_streak }} máx</span>
+                {% endif %}
+            </div>
+        </a>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<p class="empty-state">Todavía no hay historial. Marca tareas como hechas o no hechas para ver tus estadísticas aquí.</p>
+{% endif %}
+
+{% endblock %}
