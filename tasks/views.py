@@ -1,10 +1,13 @@
+import json
+
 from django.contrib import messages
 from django.db.models import Count, Q
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
-from .models import Occurrence, Task
+from .models import Occurrence, Task, WorkoutSession
 
 
 def _read_category(request, default=Task.CATEGORY_GENERAL):
@@ -120,6 +123,55 @@ def task_mark_done(request, pk):
 def task_mark_not_done(request, pk):
     get_object_or_404(Task, pk=pk).mark_not_done()
     return redirect(reverse("tasks:task_list"))
+
+
+def task_workout(request, pk):
+    """Página con la cámara para grabar (en el navegador) una sesión
+    de ejercicio y contar dominadas con MediaPipe."""
+    task = get_object_or_404(Task, pk=pk)
+    return render(request, "tasks/task_workout.html", {"task": task})
+
+
+@require_POST
+def task_workout_save(request, pk):
+    """
+    Recibe (por fetch/AJAX, en JSON) las estadísticas ya calculadas en
+    el navegador al terminar la sesión, las guarda, y marca la tarea
+    como hecha. No se recibe ni se guarda ningún vídeo — solo números.
+    """
+    task = get_object_or_404(Task, pk=pk)
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({"ok": False, "error": "JSON inválido"}, status=400)
+
+    total_reps = int(data.get("total_reps", 0))
+    rep_durations = data.get("rep_durations", [])
+    if not isinstance(rep_durations, list):
+        rep_durations = []
+    rep_durations = [float(d) for d in rep_durations if isinstance(d, (int, float))]
+
+    avg_rep_seconds = round(sum(rep_durations) / len(rep_durations), 2) if rep_durations else None
+
+    WorkoutSession.objects.create(
+        task=task,
+        series_id=task.series_id,
+        exercise=WorkoutSession.EXERCISE_PULLUP,
+        total_reps=total_reps,
+        session_duration_seconds=int(data.get("session_duration_seconds", 0)),
+        avg_rep_seconds=avg_rep_seconds,
+        rest_alerts_triggered=int(data.get("rest_alerts_triggered", 0)),
+        rep_durations=rep_durations,
+    )
+
+    task.mark_done()
+
+    messages.success(
+        request,
+        f"Sesión guardada: {total_reps} dominadas"
+        + (f", ritmo medio {avg_rep_seconds}s/rep." if avg_rep_seconds else "."),
+    )
+    return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
 
 
 def stats_list(request):

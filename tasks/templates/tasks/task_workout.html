@@ -1,0 +1,55 @@
+{% extends "tasks/base.html" %}
+{% load static %}
+{% block title %}Entreno — {{ task.title }}{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">sesión de entreno</span>
+        <h1>{{ task.title }}</h1>
+    </div>
+    <a href="{% url 'tasks:task_list' %}" class="stats-link">← Volver</a>
+</header>
+
+<div id="workout-root"
+     data-save-url="{% url 'tasks:task_workout_save' task.pk %}"
+     data-cancel-url="{% url 'tasks:task_list' %}"
+     class="workout">
+    {% csrf_token %}
+
+    <div class="workout__camera">
+        <video id="workout-video" playsinline muted class="workout__video"></video>
+        <canvas id="workout-canvas" class="workout__canvas"></canvas>
+    </div>
+
+    <p id="workout-status" class="workout__status">Iniciando…</p>
+
+    <div class="workout__stats">
+        <div class="workout__stat">
+            <span class="workout__stat-value" id="workout-reps">0</span>
+            <span class="workout__stat-label">dominadas</span>
+        </div>
+        <div class="workout__stat">
+            <span class="workout__stat-value" id="workout-timer">0:00</span>
+            <span class="workout__stat-label">sesión</span>
+        </div>
+        <div class="workout__stat">
+            <span class="workout__stat-value" id="workout-rest">0:00</span>
+            <span class="workout__stat-label">descanso</span>
+        </div>
+    </div>
+
+    <div class="workout__actions">
+        <button type="button" id="workout-cancel" class="workout__btn workout__btn--ghost">Cancelar</button>
+        <button type="button" id="workout-finish" class="workout__btn workout__btn--primary">Terminar sesión</button>
+    </div>
+
+    <p class="workout__note">
+        Nada de esto se graba ni se sube a ningún sitio — el vídeo se queda en tu navegador.
+        Solo se guardan los números (dominadas, ritmo, avisos de descanso) al pulsar «Terminar sesión».
+    </p>
+</div>
+
+<script type="module" src="{% static 'js/workout.js' %}"></script>
+
+{% endblock %}

@@ -282,6 +282,36 @@ class Task(models.Model):
         return expired_tasks
 
 
+class WorkoutSession(models.Model):
+    """
+    Estadísticas de una sesión de entreno grabada con la cámara
+    (MediaPipe, en el navegador). No se guarda ningún vídeo, solo
+    los números que salen del conteo.
+    """
+    EXERCISE_PULLUP = "pullup"
+    EXERCISE_CHOICES = [
+        (EXERCISE_PULLUP, "Dominadas"),
+    ]
+
+    task = models.ForeignKey(
+        Task, on_delete=models.SET_NULL, null=True, blank=True, related_name="workout_sessions"
+    )
+    series_id = models.UUIDField(null=True, blank=True)
+    exercise = models.CharField(max_length=32, choices=EXERCISE_CHOICES, default=EXERCISE_PULLUP)
+    total_reps = models.PositiveIntegerField(default=0)
+    session_duration_seconds = models.PositiveIntegerField(default=0)
+    avg_rep_seconds = models.FloatField(null=True, blank=True)
+    rest_alerts_triggered = models.PositiveIntegerField(default=0)
+    rep_durations = models.JSONField(default=list, blank=True)  # [1.1, 1.3, ...] segundos por rep
+    recorded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-recorded_at"]
+
+    def __str__(self):
+        return f"{self.get_exercise_display()} — {self.total_reps} reps ({self.recorded_at:%Y-%m-%d %H:%M})"
+
+
 class Occurrence(models.Model):
     RESULT_DONE = "done"
     RESULT_NOT_DONE = "not_done"

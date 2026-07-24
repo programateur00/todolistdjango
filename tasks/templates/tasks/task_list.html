@@ -59,12 +59,18 @@
         {% with mins=task.minutes_remaining overdue=task.is_overdue %}
         <li class="task-card{% if task.is_important %} task-card--important{% endif %}{% if overdue %} task-card--overdue{% endif %}">
             <div class="task-card__actions">
+                {% if "pose_tracking" in task.category_capabilities %}
+                <a href="{% url 'tasks:task_workout' task.pk %}" class="workout-btn" title="Empezar sesión con cámara">
+                    <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+                </a>
+                {% else %}
                 <form action="{% url 'tasks:task_mark_done' task.pk %}" method="post">
                     {% csrf_token %}
                     <button type="submit" class="check-btn check-btn--done" title="Marcar como hecha">
                         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6"/></svg>
                     </button>
                 </form>
+                {% endif %}
                 <form action="{% url 'tasks:task_mark_not_done' task.pk %}" method="post">
                     {% csrf_token %}
                     <button type="submit" class="check-btn check-btn--undone" title="Marcar como no hecha">
