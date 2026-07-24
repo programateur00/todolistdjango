@@ -2,6 +2,13 @@
 Comando de gestión: marca como "no hecho" las tareas cuya hora límite
 ya ha pasado sin haber sido completadas.
 
+Nota: la app también hace esta comprobación sola cada vez que abres
+la lista de tareas (ver Task.expire_overdue en models.py), así que
+este comando ya NO es obligatorio para que funcione. Se deja aquí por
+si en algún momento tienes un cron disponible (hosting de pago, tu
+propio servidor, etc.) y prefieres que se revise en segundo plano
+aunque no abras la app.
+
 Uso en cron (cada minuto):
     * * * * * /ruta/al/venv/bin/python /ruta/proyecto/manage.py expire_tasks
 
@@ -9,10 +16,7 @@ O manualmente:
     python3 manage.py expire_tasks
 """
 
-import datetime
-
 from django.core.management.base import BaseCommand
-from django.utils import timezone
 
 from tasks.models import Task
 
@@ -28,39 +32,21 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         dry_run = options["dry_run"]
-        now_local = timezone.localtime(timezone.now()).replace(tzinfo=None)
-        today = now_local.date()
-        now_time = now_local.time()
+        expired = Task.expire_overdue(dry_run=dry_run)
 
-        # Tareas pendientes con due_time definido
-        candidates = Task.objects.filter(
-            is_done=False,
-            expired=False,
-            due_time__isnull=False,
-        )
-
-        expired_count = 0
-        for task in candidates:
-            if task.due_date is None:
-                should_expire = task.due_time < now_time
-            else:
-                deadline = datetime.datetime.combine(task.due_date, task.due_time)
-                should_expire = now_local > deadline
-
-            if should_expire:
-                if not dry_run:
-                    task.mark_expired()
-                self.stdout.write(
-                    self.style.WARNING(
-                        f"{'[DRY] ' if dry_run else ''}Expirada: «{task.title}» "
-                        f"(límite: {task.due_time:%H:%M})"
-                    )
-                )
-                expired_count += 1
-
-        if expired_count:
+        for task in expired:
             self.stdout.write(
-                self.style.SUCCESS(f"{expired_count} tarea(s) {'encontradas' if dry_run else 'marcadas'} como expiradas.")
+                self.style.WARNING(
+                    f"{'[DRY] ' if dry_run else ''}Expirada: «{task.title}» "
+                    f"(límite: {task.due_time:%H:%M})"
+                )
+            )
+
+        if expired:
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"{len(expired)} tarea(s) {'encontradas' if dry_run else 'marcadas'} como expiradas."
+                )
             )
         else:
             self.stdout.write(self.style.SUCCESS("Sin tareas expiradas en este ciclo."))

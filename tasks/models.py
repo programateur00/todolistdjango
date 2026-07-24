@@ -236,7 +236,7 @@ class Task(models.Model):
         )
 
     def mark_expired(self):
-        """Llamado por el comando expire_tasks cuando pasa la hora límite."""
+        """Llamado cuando pasa la hora límite sin completarse."""
         self.is_done = True
         self.expired = True
         self.completed_at = timezone.now()
@@ -247,6 +247,39 @@ class Task(models.Model):
             auto_expired=True,
         )
         self._spawn_next()
+
+    @classmethod
+    def expire_overdue(cls, dry_run=False):
+        """
+        Revisa las tareas pendientes con hora límite y marca como
+        expiradas las que ya han pasado esa hora.
+
+        Se llama "en caliente" desde la vista de la lista cada vez que
+        se abre la página — así funciona sin depender de un cron
+        externo (útil en hostings gratuitos que no lo ofrecen).
+        Devuelve la lista de tareas expiradas en esta pasada.
+        """
+        import datetime as _dt
+
+        now_local = timezone.localtime(timezone.now()).replace(tzinfo=None)
+        now_time = now_local.time()
+
+        candidates = cls.objects.filter(is_done=False, expired=False, due_time__isnull=False)
+
+        expired_tasks = []
+        for task in candidates:
+            if task.due_date is None:
+                should_expire = task.due_time < now_time
+            else:
+                deadline = _dt.datetime.combine(task.due_date, task.due_time)
+                should_expire = now_local > deadline
+
+            if should_expire:
+                if not dry_run:
+                    task.mark_expired()
+                expired_tasks.append(task)
+
+        return expired_tasks
 
 
 class Occurrence(models.Model):

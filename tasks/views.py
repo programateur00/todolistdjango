@@ -15,6 +15,13 @@ def _read_category(request, default=Task.CATEGORY_GENERAL):
 
 
 def task_list(request):
+    # Se comprueba en cada visita si alguna tarea con hora límite ya
+    # venció sin completarse, y se marca sola como "no hecha".
+    # (No usamos cron: en el hosting gratuito no está disponible, y al
+    # ser una app de un solo usuario, comprobarlo al abrir la página
+    # es suficiente.)
+    Task.expire_overdue()
+
     # Filtro opcional por categoría (?cat=sport, ?cat=study, …)
     cat = request.GET.get("cat") or ""
     valid_cats = {key for key, _ in Task.CATEGORY_CHOICES}
