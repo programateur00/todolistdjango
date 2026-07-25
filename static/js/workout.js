@@ -16,12 +16,12 @@ const BAR_MARGIN_FACTOR = 0.25; // cuanto por debajo de la barra ya cuenta como 
 const HANG_MARGIN_FACTOR = 0.08; // cuanto tienen que estar las munecas por encima de los hombros para considerar que estas colgado
 const SCALE_TOLERANCE = 0.3; // cuanto puede variar el ancho de hombros (te acercas/alejas) antes de desconfiar del frame
 const MIN_REP_SECONDS = 0.3; // por debajo de esto, se descarta como ruido
-const PREP_SECONDS = 6;       // tiempo para llegar a la barra y colgarte antes de calibrar
+const HANG_STABLE_MS = 500;   // cuanto tiempo seguido con los brazos en alto para empezar a calibrar
 const CALIBRATION_MS = 1200;  // tiempo colgado quieto que se usa como referencia
 const REST_ALERT_SECONDS = 90; // segundos de descanso antes del pitido
 
 // Índices de landmarks de MediaPipe Pose que usamos
-const NOSE = 0, L_SHOULDER = 11, R_SHOULDER = 12, L_WRIST = 15, R_WRIST = 16;
+const NOSE = 0, L_SHOULDER = 11, R_SHOULDER = 12, L_ELBOW = 13, R_ELBOW = 14, L_WRIST = 15, R_WRIST = 16;
 
 function el(id) { return document.getElementById(id); }
 
@@ -86,6 +86,7 @@ class WorkoutSession {
     this.calibrating = false;
     this.prepping = false;
     this.prepStartTs = null;
+    this.hangStableSince = null;
     this.calibrationSamples = [];
     this.calibrationStartTs = null;
     this.shoulderWidth = null;
@@ -280,33 +281,75 @@ class WorkoutSession {
     const nose = lm[NOSE];
     const lShoulder = lm[L_SHOULDER];
     const rShoulder = lm[R_SHOULDER];
+    const lElbow = lm[L_ELBOW];
+    const rElbow = lm[R_ELBOW];
     const lWrist = lm[L_WRIST];
     const rWrist = lm[R_WRIST];
     const shoulderWidth = Math.hypot(lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y);
     const y = nose.y; // 0 = arriba del todo del encuadre, 1 = abajo del todo
-    const wristY = (lWrist.y + rWrist.y) / 2;
+    const wristMidY = (lWrist.y + rWrist.y) / 2;
+    const elbowMidY = (lElbow.y + rElbow.y) / 2;
+    const wristVisible = ((lWrist.visibility ?? 1) + (rWrist.visibility ?? 1)) / 2 > 0.4;
+    const elbowVisible = ((lElbow.visibility ?? 1) + (rElbow.visibility ?? 1)) / 2 > 0.4;
+
+    const shoulderMidYRaw = (lShoulder.y + rShoulder.y) / 2;
+    // detección de "brazos en alto" usando la escala del frame actual
+    // (para poder usarla ANTES de tener una calibración de referencia)
+    const armsUpNow =
+      wristMidY < shoulderMidYRaw - HANG_MARGIN_FACTOR * shoulderWidth ||
+      (elbowVisible && elbowMidY < shoulderMidYRaw - HANG_MARGIN_FACTOR * shoulderWidth);
 
     if (this.prepping) {
-      const elapsed = now - this.prepStartTs;
-      const remaining = Math.max(0, Math.ceil((PREP_SECONDS - elapsed / 1000)));
-      this.setStatus(`Ve a la barra y cuélgate con los brazos estirados… (${remaining}s)`);
-      if (elapsed >= PREP_SECONDS * 1000) {
-        this.prepping = false;
-        this.calibrating = true;
-        this.calibrationStartTs = now;
+      const waitedSeconds = Math.floor((now - this.prepStartTs) / 1000);
+      if (armsUpNow) {
+        if (this.hangStableSince === null) this.hangStableSince = now;
+        if (now - this.hangStableSince >= HANG_STABLE_MS) {
+          // Llevas ya un ratito con los brazos en alto de verdad -> calibra ya,
+          // da igual si has tardado 3 segundos o 30 en llegar a la barra.
+          this.prepping = false;
+          this.calibrating = true;
+          this.calibrationStartTs = now;
+          this.calibrationSamples = [];
+        } else {
+          this.setStatus("Te veo colgado… confirmando (no te muevas)");
+        }
+      } else {
+        this.hangStableSince = null;
+        this.setStatus(
+          waitedSeconds < 8
+            ? "Ve a la barra y cuélgate con los brazos estirados…"
+            : `Esperando a verte colgado (llevas ${waitedSeconds}s)… comprueba que la cámara vea tus brazos y hombros enteros`
+        );
+      }
+      if (this.debugEl) {
+        this.debugEl.textContent = `brazos en alto: ${armsUpNow ? "sí" : "no"} | espera: ${waitedSeconds}s`;
       }
       return;
     }
 
     if (this.calibrating) {
-      this.calibrationSamples.push({ y, shoulderWidth, wristY });
+      // Si en medio de la calibración bajas los brazos (falsa alarma),
+      // aborta y vuelve a esperar en vez de calibrar con datos malos.
+      if (!armsUpNow) {
+        this.prepping = true;
+        this.calibrating = false;
+        this.hangStableSince = null;
+        this.prepStartTs = now;
+        this.calibrationSamples = [];
+        return;
+      }
+      // Para calibrar la altura de "la barra" usamos la muñeca si se ve
+      // bien; si no, el codo (menos preciso, pero mucho más fiable si la
+      // cámara no llega a ver bien las manos agarradas a la barra).
+      const barRefY = wristVisible ? wristMidY : elbowMidY;
+      this.calibrationSamples.push({ y, shoulderWidth, barRefY });
       const elapsed = now - this.calibrationStartTs;
       const remaining = Math.max(0, Math.ceil((CALIBRATION_MS - elapsed) / 1000));
       this.setStatus(`Calibrando, quédate colgado y quieto… (${remaining || 1}s)`);
       if (elapsed >= CALIBRATION_MS) {
         const ys = this.calibrationSamples.map((s) => s.y).sort((a, b) => a - b);
         const ws = this.calibrationSamples.map((s) => s.shoulderWidth).sort((a, b) => a - b);
-        const wy = this.calibrationSamples.map((s) => s.wristY).sort((a, b) => a - b);
+        const wy = this.calibrationSamples.map((s) => s.barRefY).sort((a, b) => a - b);
         this.shoulderWidth = ws[Math.floor(ws.length / 2)];
         this.localBottomY = ys[Math.floor(ys.length / 2)];
         this.localTopY = this.localBottomY;
@@ -323,13 +366,10 @@ class WorkoutSession {
 
     if (!this.shoulderWidth || this.barY === null) return;
 
-    const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
-    const wristMidY = (lWrist.y + rWrist.y) / 2;
-    const isHanging = wristMidY < shoulderMidY - HANG_MARGIN_FACTOR * this.shoulderWidth;
     const scaleChange = Math.abs(shoulderWidth - this.shoulderWidth) / this.shoulderWidth;
     const scaleOk = scaleChange < SCALE_TOLERANCE;
 
-    if (!isHanging || !scaleOk) {
+    if (!armsUpNow || !scaleOk) {
       // No pareces estar colgado de la barra (o te has acercado/alejado de
       // la cámara) — no cuentes nada de lo que pase ahora mismo, y cuando
       // vuelvas a agarrar la barra, empieza a medir desde cero otra vez.
@@ -337,7 +377,7 @@ class WorkoutSession {
       this.localTopY = null;
       this.liftoffTime = null;
       if (this.debugEl) {
-        this.debugEl.textContent = !isHanging
+        this.debugEl.textContent = !armsUpNow
           ? "esperando a que agarres la barra (brazos en alto)…"
           : "distancia a la cámara cambió demasiado, recalibra si sigue así";
       }
