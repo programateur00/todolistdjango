@@ -151,6 +151,17 @@ def task_workout_save(request, pk):
         rep_durations = []
     rep_durations = [float(d) for d in rep_durations if isinstance(d, (int, float))]
 
+    raw_sets = data.get("sets", [])
+    clean_sets = []
+    if isinstance(raw_sets, list):
+        for s in raw_sets:
+            if not isinstance(s, dict):
+                continue
+            s_reps = int(s.get("reps", 0))
+            s_durations = [float(d) for d in s.get("durations", []) if isinstance(d, (int, float))]
+            clean_sets.append({"reps": s_reps, "durations": s_durations})
+    total_sets = int(data.get("total_sets", len(clean_sets)))
+
     avg_rep_seconds = round(sum(rep_durations) / len(rep_durations), 2) if rep_durations else None
 
     WorkoutSession.objects.create(
@@ -158,6 +169,8 @@ def task_workout_save(request, pk):
         series_id=task.series_id,
         exercise=WorkoutSession.EXERCISE_PULLUP,
         total_reps=total_reps,
+        total_sets=total_sets,
+        sets=clean_sets,
         session_duration_seconds=int(data.get("session_duration_seconds", 0)),
         avg_rep_seconds=avg_rep_seconds,
         rest_alerts_triggered=int(data.get("rest_alerts_triggered", 0)),
@@ -168,7 +181,7 @@ def task_workout_save(request, pk):
 
     messages.success(
         request,
-        f"Sesión guardada: {total_reps} dominadas"
+        f"Sesión guardada: {total_reps} dominadas en {total_sets} serie(s)"
         + (f", ritmo medio {avg_rep_seconds}s/rep." if avg_rep_seconds else "."),
     )
     return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})

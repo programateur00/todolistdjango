@@ -13,6 +13,8 @@ const MODEL_URL =
 const MOVE_FACTOR = 0.12;
 const LIFTOFF_FACTOR = 0.04; // primer indicio de movimiento real (para medir bien la duracion)
 const BAR_MARGIN_FACTOR = 0.25; // cuanto por debajo de la barra ya cuenta como "llegaste arriba"
+const HANG_MARGIN_FACTOR = 0.08; // cuanto tienen que estar las munecas por encima de los hombros para considerar que estas colgado
+const SCALE_TOLERANCE = 0.3; // cuanto puede variar el ancho de hombros (te acercas/alejas) antes de desconfiar del frame
 const MIN_REP_SECONDS = 0.3; // por debajo de esto, se descarta como ruido
 const PREP_SECONDS = 6;       // tiempo para llegar a la barra y colgarte antes de calibrar
 const CALIBRATION_MS = 1200;  // tiempo colgado quieto que se usa como referencia
@@ -70,6 +72,7 @@ class WorkoutSession {
 
     this.statusEl = el("workout-status");
     this.repsEl = el("workout-reps");
+    this.setsEl = el("workout-sets");
     this.timerEl = el("workout-timer");
     this.restEl = el("workout-rest");
     this.finishBtn = el("workout-finish");
@@ -90,6 +93,9 @@ class WorkoutSession {
     this.state = "down"; // "down" | "up"
     this.reps = 0;
     this.repDurations = [];
+    this.sets = [];              // series ya cerradas: [{reps, durations}, ...]
+    this.currentSetReps = 0;     // reps de la serie en curso
+    this.currentSetDurations = [];
     this.localBottomY = null;  // y (0-1) del punto mas bajo visto en la fase actual
     this.localTopY = null;     // y (0-1) del punto mas alto visto en la fase actual
     this.barY = null;          // y (0-1) de la barra, medida por la altura de tus muñecas
@@ -167,6 +173,16 @@ class WorkoutSession {
     // Cuenta atrás para darte tiempo a llegar a la barra y colgarte
     // ANTES de que se tome ninguna medida (esto es lo que fallaba:
     // calibrar de golpe al abrir la cámara, con nadie aún en la barra).
+
+    // Cada (re)calibración marca el final de la serie en curso (si
+    // tenía alguna repetición) y el principio de la siguiente.
+    if (this.currentSetReps > 0) {
+      this.sets.push({ reps: this.currentSetReps, durations: [...this.currentSetDurations] });
+      this.currentSetReps = 0;
+      this.currentSetDurations = [];
+      this.updateSetDisplay();
+    }
+
     this.prepping = true;
     this.calibrating = false;
     this.prepStartTs = performance.now();
@@ -175,6 +191,10 @@ class WorkoutSession {
     this.localBottomY = null;
     this.localTopY = null;
     this.barY = null;
+  }
+
+  updateSetDisplay() {
+    if (this.setsEl) this.setsEl.textContent = String(this.sets.length + 1);
   }
 
   loop() {
@@ -294,12 +314,36 @@ class WorkoutSession {
         this.calibrating = false;
         this.repStartTime = now;
         this.lastRepTime = now;
+        this.restAlerted = false;
+        this.updateSetDisplay();
         this.setStatus("¡Listo! Empieza a hacer dominadas.");
       }
       return;
     }
 
     if (!this.shoulderWidth || this.barY === null) return;
+
+    const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
+    const wristMidY = (lWrist.y + rWrist.y) / 2;
+    const isHanging = wristMidY < shoulderMidY - HANG_MARGIN_FACTOR * this.shoulderWidth;
+    const scaleChange = Math.abs(shoulderWidth - this.shoulderWidth) / this.shoulderWidth;
+    const scaleOk = scaleChange < SCALE_TOLERANCE;
+
+    if (!isHanging || !scaleOk) {
+      // No pareces estar colgado de la barra (o te has acercado/alejado de
+      // la cámara) — no cuentes nada de lo que pase ahora mismo, y cuando
+      // vuelvas a agarrar la barra, empieza a medir desde cero otra vez.
+      this.localBottomY = null;
+      this.localTopY = null;
+      this.liftoffTime = null;
+      if (this.debugEl) {
+        this.debugEl.textContent = !isHanging
+          ? "esperando a que agarres la barra (brazos en alto)…"
+          : "distancia a la cámara cambió demasiado, recalibra si sigue así";
+      }
+      return;
+    }
+
     const moveThresh = MOVE_FACTOR * this.shoulderWidth;
     const barThresh = this.barY + BAR_MARGIN_FACTOR * this.shoulderWidth;
 
@@ -335,6 +379,8 @@ class WorkoutSession {
         if (duration >= MIN_REP_SECONDS) {
           this.reps += 1;
           this.repDurations.push(Math.round(duration * 100) / 100);
+          this.currentSetReps += 1;
+          this.currentSetDurations.push(Math.round(duration * 100) / 100);
           this.lastRepTime = now;
           this.restAlerted = false;
           this.repsEl.textContent = String(this.reps);
@@ -365,7 +411,8 @@ class WorkoutSession {
       this.restAlerted = true;
       this.restAlertsTriggered += 1;
       beep();
-      this.setStatus("⏰ ¡Descanso acabado! Vuelve a la barra.");
+      this.setStatus("⏰ ¡Descanso acabado! Volviendo a calibrar para la siguiente serie…");
+      this.beginPrep();
     }
   }
 
@@ -390,6 +437,13 @@ class WorkoutSession {
     this.finishBtn.disabled = true;
     this.finishBtn.textContent = "Guardando…";
 
+    // Cierra la serie que estuviera en curso (si tenía reps) antes de mandar los datos.
+    if (this.currentSetReps > 0) {
+      this.sets.push({ reps: this.currentSetReps, durations: [...this.currentSetDurations] });
+      this.currentSetReps = 0;
+      this.currentSetDurations = [];
+    }
+
     const sessionDuration = this.sessionStart ? (performance.now() - this.sessionStart) / 1000 : 0;
     this.stopCamera();
 
@@ -405,6 +459,8 @@ class WorkoutSession {
           rep_durations: this.repDurations,
           session_duration_seconds: Math.round(sessionDuration),
           rest_alerts_triggered: this.restAlertsTriggered,
+          sets: this.sets,
+          total_sets: this.sets.length,
         }),
       });
       const data = await resp.json();

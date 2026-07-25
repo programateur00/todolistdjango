@@ -299,6 +299,8 @@ class WorkoutSession(models.Model):
     series_id = models.UUIDField(null=True, blank=True)
     exercise = models.CharField(max_length=32, choices=EXERCISE_CHOICES, default=EXERCISE_PULLUP)
     total_reps = models.PositiveIntegerField(default=0)
+    total_sets = models.PositiveIntegerField(default=0)
+    sets = models.JSONField(default=list, blank=True)  # [{"reps": 8, "durations": [1.1, ...]}, ...]
     session_duration_seconds = models.PositiveIntegerField(default=0)
     avg_rep_seconds = models.FloatField(null=True, blank=True)
     rest_alerts_triggered = models.PositiveIntegerField(default=0)
