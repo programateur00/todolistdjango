@@ -23,6 +23,7 @@
     </div>
 
     <p id="workout-status" class="workout__status">Iniciando…</p>
+    <p id="workout-debug" class="workout__debug"></p>
 
     <div class="workout__stats">
         <div class="workout__stat">
@@ -41,9 +42,14 @@
 
     <div class="workout__actions">
         <button type="button" id="workout-cancel" class="workout__btn workout__btn--ghost">Cancelar</button>
+        <button type="button" id="workout-recalibrate" class="workout__btn workout__btn--ghost">↻ Recalibrar</button>
         <button type="button" id="workout-finish" class="workout__btn workout__btn--primary">Terminar sesión</button>
     </div>
 
+    <p class="workout__note">
+        <span style="color:#C9A227;">━</span> línea amarilla = altura de la barra (medida por tus muñecas al calibrar).
+        Si no coincide con tu barra real, pulsa «Recalibrar» estando ya colgado.
+    </p>
     <p class="workout__note">
         Nada de esto se graba ni se sube a ningún sitio — el vídeo se queda en tu navegador.
         Solo se guardan los números (dominadas, ritmo, avisos de descanso) al pulsar «Terminar sesión».

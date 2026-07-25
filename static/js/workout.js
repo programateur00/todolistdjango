@@ -8,15 +8,18 @@ const MEDIAPIPE_VERSION = "0.10.14";
 const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
 
-// Umbrales del conteo (proporcionales al ancho de hombros, para que
-// dé igual lo lejos o cerca que esté la cámara).
-const UP_FACTOR = 0.45;    // cuánto tiene que subir la nariz para contar "arriba"
-const DOWN_FACTOR = 0.15;  // cuánto tiene que bajar para contar "abajo" otra vez
-const CALIBRATION_MS = 2000; // tiempo colgado quieto para calibrar
+// Umbral de movimiento (proporcional al ancho de hombros) para
+// considerar que hay un cambio de estado real y no ruido de la cámara.
+const MOVE_FACTOR = 0.12;
+const LIFTOFF_FACTOR = 0.04; // primer indicio de movimiento real (para medir bien la duracion)
+const BAR_MARGIN_FACTOR = 0.25; // cuanto por debajo de la barra ya cuenta como "llegaste arriba"
+const MIN_REP_SECONDS = 0.3; // por debajo de esto, se descarta como ruido
+const PREP_SECONDS = 6;       // tiempo para llegar a la barra y colgarte antes de calibrar
+const CALIBRATION_MS = 1200;  // tiempo colgado quieto que se usa como referencia
 const REST_ALERT_SECONDS = 90; // segundos de descanso antes del pitido
 
 // Índices de landmarks de MediaPipe Pose que usamos
-const NOSE = 0, L_SHOULDER = 11, R_SHOULDER = 12;
+const NOSE = 0, L_SHOULDER = 11, R_SHOULDER = 12, L_WRIST = 15, R_WRIST = 16;
 
 function el(id) { return document.getElementById(id); }
 
@@ -71,21 +74,27 @@ class WorkoutSession {
     this.restEl = el("workout-rest");
     this.finishBtn = el("workout-finish");
     this.cancelBtn = el("workout-cancel");
+    this.debugEl = el("workout-debug");
 
     this.poseLandmarker = null;
     this.stream = null;
     this.running = false;
 
     this.calibrating = false;
+    this.prepping = false;
+    this.prepStartTs = null;
     this.calibrationSamples = [];
     this.calibrationStartTs = null;
-    this.baselineY = null;
     this.shoulderWidth = null;
 
     this.state = "down"; // "down" | "up"
     this.reps = 0;
     this.repDurations = [];
-    this.lastBottomTime = null;
+    this.localBottomY = null;  // y (0-1) del punto mas bajo visto en la fase actual
+    this.localTopY = null;     // y (0-1) del punto mas alto visto en la fase actual
+    this.barY = null;          // y (0-1) de la barra, medida por la altura de tus muñecas
+    this.repStartTime = null;
+    this.liftoffTime = null;   // instante en que detectamos que empezaste a moverte de verdad
 
     this.sessionStart = null;
     this.lastRepTime = null;
@@ -97,6 +106,10 @@ class WorkoutSession {
       this.stopCamera();
       window.location.href = root.dataset.cancelUrl;
     });
+    this.recalBtn = el("workout-recalibrate");
+    if (this.recalBtn) {
+      this.recalBtn.addEventListener("click", () => this.beginPrep());
+    }
   }
 
   setStatus(text) {
@@ -143,13 +156,25 @@ class WorkoutSession {
     }
 
     this.running = true;
-    this.calibrating = true;
-    this.calibrationStartTs = performance.now();
     this.sessionStart = performance.now();
-    this.setStatus("Cuélgate de la barra con los brazos estirados y quédate quieto 2 segundos…");
+    this.beginPrep();
 
     this.restIntervalId = setInterval(() => this.tickRestTimer(), 500);
     this.loop();
+  }
+
+  beginPrep() {
+    // Cuenta atrás para darte tiempo a llegar a la barra y colgarte
+    // ANTES de que se tome ninguna medida (esto es lo que fallaba:
+    // calibrar de golpe al abrir la cámara, con nadie aún en la barra).
+    this.prepping = true;
+    this.calibrating = false;
+    this.prepStartTs = performance.now();
+    this.calibrationSamples = [];
+    this.state = "down";
+    this.localBottomY = null;
+    this.localTopY = null;
+    this.barY = null;
   }
 
   loop() {
@@ -177,76 +202,158 @@ class WorkoutSession {
       ctx.arc(nose.x * this.canvas.width, nose.y * this.canvas.height, 8, 0, Math.PI * 2);
       ctx.fill();
 
-      if (this.baselineY !== null && this.shoulderWidth) {
-        const upY = (this.baselineY - UP_FACTOR * this.shoulderWidth) * this.canvas.height;
-        const downY = (this.baselineY - DOWN_FACTOR * this.shoulderWidth) * this.canvas.height;
-        ctx.strokeStyle = "rgba(122,139,111,0.8)";
-        ctx.setLineDash([6, 6]);
-        ctx.lineWidth = 2;
+      if (this.shoulderWidth && this.barY !== null) {
+        const moveThresh = MOVE_FACTOR * this.shoulderWidth;
+        const barThresh = (this.barY + BAR_MARGIN_FACTOR * this.shoulderWidth) * this.canvas.height;
+
+        // Línea de la barra (medida por tus muñecas al calibrar)
+        ctx.strokeStyle = "rgba(201,162,39,0.95)";
+        ctx.setLineDash([]);
+        ctx.lineWidth = 2.5;
         ctx.beginPath();
-        ctx.moveTo(0, upY);
-        ctx.lineTo(this.canvas.width, upY);
+        ctx.moveTo(0, this.barY * this.canvas.height);
+        ctx.lineTo(this.canvas.width, this.barY * this.canvas.height);
         ctx.stroke();
-        ctx.strokeStyle = "rgba(216,101,74,0.8)";
+
+        ctx.strokeStyle = "rgba(201,162,39,0.5)";
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.moveTo(0, downY);
-        ctx.lineTo(this.canvas.width, downY);
+        ctx.moveTo(0, barThresh);
+        ctx.lineTo(this.canvas.width, barThresh);
         ctx.stroke();
+
+        const ref = this.state === "down" ? this.localBottomY : this.localTopY;
+        if (ref !== null) {
+          const refY = ref * this.canvas.height;
+          const triggerY =
+            this.state === "down"
+              ? (ref - moveThresh) * this.canvas.height
+              : (ref + moveThresh) * this.canvas.height;
+          ctx.strokeStyle = "rgba(122,139,111,0.7)";
+          ctx.setLineDash([3, 5]);
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(0, refY);
+          ctx.lineTo(this.canvas.width, refY);
+          ctx.stroke();
+
+          ctx.strokeStyle = "rgba(216,101,74,0.9)";
+          ctx.setLineDash([6, 6]);
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(0, triggerY);
+          ctx.lineTo(this.canvas.width, triggerY);
+          ctx.stroke();
+        }
       }
     }
     ctx.restore();
   }
 
   processResult(result, now) {
-    if (!result.landmarks || !result.landmarks.length) return;
+    if (!result.landmarks || !result.landmarks.length) {
+      if (this.debugEl) this.debugEl.textContent = "sin detección — ¿sales entero en el encuadre?";
+      return;
+    }
     const lm = result.landmarks[0];
     const nose = lm[NOSE];
     const lShoulder = lm[L_SHOULDER];
     const rShoulder = lm[R_SHOULDER];
+    const lWrist = lm[L_WRIST];
+    const rWrist = lm[R_WRIST];
     const shoulderWidth = Math.hypot(lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y);
-    const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
-    // usamos nariz para el movimiento vertical, hombros para la escala
-    const y = nose.y;
+    const y = nose.y; // 0 = arriba del todo del encuadre, 1 = abajo del todo
+    const wristY = (lWrist.y + rWrist.y) / 2;
+
+    if (this.prepping) {
+      const elapsed = now - this.prepStartTs;
+      const remaining = Math.max(0, Math.ceil((PREP_SECONDS - elapsed / 1000)));
+      this.setStatus(`Ve a la barra y cuélgate con los brazos estirados… (${remaining}s)`);
+      if (elapsed >= PREP_SECONDS * 1000) {
+        this.prepping = false;
+        this.calibrating = true;
+        this.calibrationStartTs = now;
+      }
+      return;
+    }
 
     if (this.calibrating) {
-      this.calibrationSamples.push(y);
+      this.calibrationSamples.push({ y, shoulderWidth, wristY });
       const elapsed = now - this.calibrationStartTs;
       const remaining = Math.max(0, Math.ceil((CALIBRATION_MS - elapsed) / 1000));
-      this.setStatus(`Calibrando… quédate quieto (${remaining}s)`);
+      this.setStatus(`Calibrando, quédate colgado y quieto… (${remaining || 1}s)`);
       if (elapsed >= CALIBRATION_MS) {
-        const sorted = [...this.calibrationSamples].sort((a, b) => a - b);
-        this.baselineY = sorted[Math.floor(sorted.length / 2)];
-        this.shoulderWidth = shoulderWidth;
+        const ys = this.calibrationSamples.map((s) => s.y).sort((a, b) => a - b);
+        const ws = this.calibrationSamples.map((s) => s.shoulderWidth).sort((a, b) => a - b);
+        const wy = this.calibrationSamples.map((s) => s.wristY).sort((a, b) => a - b);
+        this.shoulderWidth = ws[Math.floor(ws.length / 2)];
+        this.localBottomY = ys[Math.floor(ys.length / 2)];
+        this.localTopY = this.localBottomY;
+        this.barY = wy[Math.floor(wy.length / 2)]; // altura de la barra = altura de tus muñecas al colgar
         this.calibrating = false;
-        this.lastBottomTime = now;
+        this.repStartTime = now;
         this.lastRepTime = now;
         this.setStatus("¡Listo! Empieza a hacer dominadas.");
       }
       return;
     }
 
-    if (!this.shoulderWidth) return;
-    const rise = this.baselineY - y; // positivo si la nariz sube
-    const upThresh = UP_FACTOR * this.shoulderWidth;
-    const downThresh = DOWN_FACTOR * this.shoulderWidth;
+    if (!this.shoulderWidth || this.barY === null) return;
+    const moveThresh = MOVE_FACTOR * this.shoulderWidth;
+    const barThresh = this.barY + BAR_MARGIN_FACTOR * this.shoulderWidth;
 
-    if (this.state === "down" && rise > upThresh) {
-      this.state = "up";
-    } else if (this.state === "up" && rise < downThresh) {
-      const duration = (now - this.lastBottomTime) / 1000;
-      this.reps += 1;
-      this.repDurations.push(Math.round(duration * 100) / 100);
-      this.lastBottomTime = now;
-      this.lastRepTime = now;
-      this.restAlerted = false;
-      this.state = "down";
-      this.repsEl.textContent = String(this.reps);
-      this.setStatus(`¡Dominada ${this.reps}! (${duration.toFixed(1)}s)`);
+    if (this.state === "down") {
+      // sigue bajando (o igual) -> este es el nuevo punto de referencia "abajo",
+      // y todavia no has "despegado" (reinicia la marca de despegue)
+      if (this.localBottomY === null || y > this.localBottomY) {
+        this.localBottomY = y;
+        this.liftoffTime = null;
+      }
+      const risenFromBottom = this.localBottomY - y;
+
+      // primer indicio de que te has empezado a mover de verdad
+      if (this.liftoffTime === null && risenFromBottom > LIFTOFF_FACTOR * this.shoulderWidth) {
+        this.liftoffTime = now;
+      }
+
+      const reachedBar = y <= barThresh;
+      if (reachedBar && risenFromBottom > moveThresh) {
+        this.state = "up";
+        this.localTopY = y;
+        this.repStartTime = this.liftoffTime ?? now;
+      }
+    } else {
+      // state === "up": sigue subiendo (o igual) -> nuevo punto de referencia "arriba"
+      if (this.localTopY === null || y < this.localTopY) {
+        this.localTopY = y;
+      }
+      const fallenFromTop = y - this.localTopY;
+      if (fallenFromTop > moveThresh) {
+        // ha vuelto a bajar lo suficiente -> repetición completa
+        const duration = (now - this.repStartTime) / 1000;
+        if (duration >= MIN_REP_SECONDS) {
+          this.reps += 1;
+          this.repDurations.push(Math.round(duration * 100) / 100);
+          this.lastRepTime = now;
+          this.restAlerted = false;
+          this.repsEl.textContent = String(this.reps);
+          this.setStatus(`¡Dominada ${this.reps}! (${duration.toFixed(1)}s)`);
+        }
+        this.state = "down";
+        this.localBottomY = y;
+      }
+    }
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `estado: ${this.state} | nariz-barra: ${((y - this.barY) / this.shoulderWidth).toFixed(2)} ` +
+        `(umbral ${BAR_MARGIN_FACTOR}) | hombros: ${this.shoulderWidth.toFixed(3)}`;
     }
   }
 
   tickRestTimer() {
-    if (!this.running || this.calibrating || !this.sessionStart) return;
+    if (!this.running || this.prepping || this.calibrating || !this.sessionStart) return;
     const now = performance.now();
     this.timerEl.textContent = this.formatTime((now - this.sessionStart) / 1000);
 
