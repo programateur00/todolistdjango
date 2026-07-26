@@ -183,6 +183,8 @@ class WorkoutSession {
       this.currentSetDurations = [];
       this.updateSetDisplay();
     }
+    // El contador grande siempre arranca en 0 al empezar una serie nueva.
+    if (this.repsEl) this.repsEl.textContent = "0";
 
     this.prepping = true;
     this.calibrating = false;
@@ -376,6 +378,18 @@ class WorkoutSession {
       this.localBottomY = null;
       this.localTopY = null;
       this.liftoffTime = null;
+
+      // Te has soltado de la barra de verdad (bajaste los brazos, no es solo
+      // que te acercaras/alejaras de la cámara): esto es el final de la
+      // serie en curso. Antes esto solo se detectaba tras 90s sin reps
+      // (aviso de descanso); ahora se cierra la serie en el momento.
+      if (!armsUpNow && this.currentSetReps > 0) {
+        const closedReps = this.currentSetReps;
+        this.setStatus(`Serie de ${closedReps} terminada. Cuélgate otra vez para empezar la siguiente.`);
+        this.beginPrep();
+        return;
+      }
+
       if (this.debugEl) {
         this.debugEl.textContent = !armsUpNow
           ? "esperando a que agarres la barra (brazos en alto)…"
@@ -423,8 +437,10 @@ class WorkoutSession {
           this.currentSetDurations.push(Math.round(duration * 100) / 100);
           this.lastRepTime = now;
           this.restAlerted = false;
-          this.repsEl.textContent = String(this.reps);
-          this.setStatus(`¡Dominada ${this.reps}! (${duration.toFixed(1)}s)`);
+          // Mostramos las reps de ESTA serie, no el total acumulado de toda
+          // la sesión (el total sigue guardándose bien en this.reps al terminar).
+          this.repsEl.textContent = String(this.currentSetReps);
+          this.setStatus(`¡Dominada ${this.currentSetReps} de esta serie! (${duration.toFixed(1)}s)`);
         }
         this.state = "down";
         this.localBottomY = y;
