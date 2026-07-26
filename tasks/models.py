@@ -282,6 +282,57 @@ class Task(models.Model):
         return expired_tasks
 
 
+class Exercise(models.Model):
+    """
+    Catálogo de ejercicios disponibles. Es la pieza base para poder montar
+    rutinas (ej. "Upper body" = dominadas + fondos + abdominales) sin tener
+    que crear una Task por cada ejercicio.
+
+    `mode` dice qué tipo de seguimiento necesita:
+      - pose:     la cámara cuenta las reps (MediaPipe). Necesita counter_key.
+      - manual:   el usuario escribe las reps/peso a mano (ej. mancuernas).
+      - timed:    solo se mide duración (ej. plancha).
+      - distance: cardio — distancia + tiempo (ej. correr).
+
+    `counter_key` identifica qué contador de workout.js usar cuando mode es
+    "pose" (ej. "pullup"). Varios ejercicios pueden compartir contador con
+    distinta config: "dominadas" y "dominadas anchas" usan el mismo
+    contador de dominadas, solo cambia `config` (umbrales, etc.).
+    """
+    MODE_POSE = "pose"
+    MODE_MANUAL = "manual"
+    MODE_TIMED = "timed"
+    MODE_DISTANCE = "distance"
+
+    MODE_CHOICES = [
+        (MODE_POSE, "Cámara (pose tracking)"),
+        (MODE_MANUAL, "Manual (reps a mano)"),
+        (MODE_TIMED, "Cronometrado"),
+        (MODE_DISTANCE, "Distancia (cardio)"),
+    ]
+
+    name = models.CharField(max_length=64)
+    slug = models.SlugField(max_length=64, unique=True)
+    mode = models.CharField(max_length=16, choices=MODE_CHOICES, default=MODE_MANUAL)
+    counter_key = models.CharField(
+        max_length=32, blank=True,
+        help_text="Qué contador de workout.js usar (solo aplica si mode='pose'). Ej: 'pullup'.",
+    )
+    config = models.JSONField(
+        default=dict, blank=True,
+        help_text="Umbrales/ajustes propios de este ejercicio para el contador (opcional).",
+    )
+    is_active = models.BooleanField(default=True)
+    order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["order", "name"]
+
+    def __str__(self):
+        return self.name
+
+
 class WorkoutSession(models.Model):
     """
     Estadísticas de una sesión de entreno grabada con la cámara
