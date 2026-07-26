@@ -481,7 +481,10 @@ class WorkoutSession {
   }
 
   tickRestTimer() {
-    if (!this.running || this.prepping || this.calibrating || !this.sessionStart) return;
+    // El cronómetro de sesión y el de descanso tienen que seguir corriendo
+    // aunque estés en "prepping" (esperando a colgarte) o calibrando: es
+    // justo el rato de descanso entre series, no hay motivo para congelarlos.
+    if (!this.running || !this.sessionStart) return;
     const now = performance.now();
     this.timerEl.textContent = this.formatTime((now - this.sessionStart) / 1000);
 
