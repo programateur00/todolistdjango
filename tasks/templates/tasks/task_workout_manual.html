@@ -1,0 +1,45 @@
+{% extends "tasks/base.html" %}
+{% block title %}{{ exercise.name }} — {{ task.title }}{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">{{ exercise.name }}</span>
+        <h1>{{ task.title }}</h1>
+    </div>
+    <a href="{% url 'tasks:task_workout' task.pk %}" class="stats-link">← Cambiar ejercicio</a>
+</header>
+
+<p class="workout__note">
+    Esto no usa la cámara — apunta lo que te diga la cinta, el reloj o la app que uses (Samsung Health, etc).
+    Con la distancia y la duración calculamos el ritmo solos.
+</p>
+
+<form class="task-form" method="post"
+      action="{% url 'tasks:task_workout_save_manual' task.pk %}?exercise={{ exercise.slug }}">
+    {% csrf_token %}
+
+    <div class="field-row">
+        <label class="field">
+            <span class="field__label">Distancia (km)</span>
+            <input type="number" name="distance_km" step="0.01" min="0" inputmode="decimal" placeholder="5.20">
+        </label>
+        <label class="field">
+            <span class="field__label">Duración (minutos)</span>
+            <input type="number" name="duration_minutes" step="0.1" min="0" inputmode="decimal" placeholder="28">
+        </label>
+    </div>
+
+    <label class="field">
+        <span class="field__label">Pasos (opcional)</span>
+        <input type="number" name="steps" step="1" min="0" inputmode="numeric" placeholder="6200">
+        <span class="field__hint">Si tu cinta o reloj los enseña — no hace falta para guardar.</span>
+    </label>
+
+    <div class="task-form__actions">
+        <button type="submit" class="primary-btn">Guardar sesión</button>
+        <a href="{% url 'tasks:task_list' %}" class="ghost-btn">Cancelar</a>
+    </div>
+</form>
+
+{% endblock %}

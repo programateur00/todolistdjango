@@ -17,6 +17,13 @@ def _read_category(request, default=Task.CATEGORY_GENERAL):
     return raw if raw in valid else default
 
 
+def _read_subcategory(request, default=""):
+    """Lee la subcategoría (solo tiene sentido si category=sport)."""
+    raw = request.POST.get("subcategory", default) or default
+    valid = {key for key, _ in Task.SUBCATEGORY_CHOICES}
+    return raw if raw in valid else default
+
+
 def task_list(request):
     # Se comprueba en cada visita si alguna tarea con hora límite ya
     # venció sin completarse, y se marca sola como "no hecha".
@@ -63,6 +70,7 @@ def task_create(request):
                 title=title,
                 notes=request.POST.get("notes", "").strip(),
                 category=_read_category(request),
+                subcategory=_read_subcategory(request),
                 due_date=request.POST.get("due_date") or None,
                 due_time=request.POST.get("due_time") or None,
                 repeat=request.POST.get("repeat", Task.REPEAT_NONE),
@@ -78,6 +86,7 @@ def task_create(request):
         "repeat_choices": Task.REPEAT_CHOICES,
         "weekdays": Task.WEEKDAYS,
         "category_choices": Task.CATEGORY_CHOICES,
+        "subcategory_choices": Task.SUBCATEGORY_CHOICES,
         "initial_title": initial_title,
     })
 
@@ -88,6 +97,7 @@ def task_edit(request, pk):
         task.title = request.POST.get("title", task.title).strip()
         task.notes = request.POST.get("notes", "").strip()
         task.category = _read_category(request, default=task.category)
+        task.subcategory = _read_subcategory(request, default=task.subcategory)
         task.due_date = request.POST.get("due_date") or None
         task.due_time = request.POST.get("due_time") or None
         task.repeat = request.POST.get("repeat", Task.REPEAT_NONE)
@@ -102,6 +112,7 @@ def task_edit(request, pk):
         "repeat_choices": Task.REPEAT_CHOICES,
         "weekdays": Task.WEEKDAYS,
         "category_choices": Task.CATEGORY_CHOICES,
+        "subcategory_choices": Task.SUBCATEGORY_CHOICES,
     })
 
 
@@ -129,28 +140,44 @@ def task_workout(request, pk):
     """
     Página de entreno para una tarea. En dos pasos:
     1. Sin ?exercise= en la URL: muestra el catálogo de ejercicios activos
-       para elegir cuál tocar hoy.
-    2. Con ?exercise=<slug>: abre la cámara y cuenta con MediaPipe (si ese
-       ejercicio ya tiene contador — de momento solo dominadas).
+       para elegir cuál tocar hoy — filtrado por la subcategoría de la
+       tarea (tren superior / tren inferior / running) si la tiene. Las
+       tareas sin subcategoría (o antiguas, de antes de que existiera)
+       ven el catálogo entero, para no dejar a nadie sin opciones.
+    2. Con ?exercise=<slug>:
+       - mode="pose" con contador ya construido (de momento solo
+         dominadas) -> cámara con MediaPipe.
+       - mode="distance" (running) -> formulario manual (cinta, reloj,
+         Samsung Health…), no hay cámara para esto.
+       - cualquier otro caso (ej. abdominales/sentadillas, que están en
+         el catálogo pero aún no tienen contador) -> vuelve al selector
+         con un aviso, en vez de romper.
     """
     task = get_object_or_404(Task, pk=pk)
     exercise_slug = request.GET.get("exercise")
 
+    exercises_qs = Exercise.objects.filter(is_active=True)
+    if task.subcategory:
+        exercises_qs = exercises_qs.filter(body_area=task.subcategory)
+
     if not exercise_slug:
-        exercises = Exercise.objects.filter(is_active=True)
         return render(request, "tasks/task_workout_select.html", {
-            "task": task, "exercises": exercises,
+            "task": task, "exercises": exercises_qs,
         })
 
     exercise = get_object_or_404(Exercise, slug=exercise_slug, is_active=True)
+
+    if exercise.mode == Exercise.MODE_DISTANCE:
+        return render(request, "tasks/task_workout_manual.html", {
+            "task": task, "exercise": exercise,
+        })
 
     # De momento el único contador que existe en workout.js es el de
     # dominadas. Cuando se añada uno nuevo, esta comprobación es lo único
     # que hay que ampliar (o quitar del todo si ya cubre todos los modos).
     if exercise.mode != Exercise.MODE_POSE or exercise.counter_key != "pullup":
-        exercises = Exercise.objects.filter(is_active=True)
         return render(request, "tasks/task_workout_select.html", {
-            "task": task, "exercises": exercises, "unsupported": exercise,
+            "task": task, "exercises": exercises_qs, "unsupported": exercise,
         })
 
     return render(request, "tasks/task_workout.html", {"task": task, "exercise": exercise})
@@ -214,6 +241,68 @@ def task_workout_save(request, pk):
         + (f", ritmo medio {avg_rep_seconds}s/rep." if avg_rep_seconds else "."),
     )
     return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
+
+
+@require_POST
+def task_workout_save_manual(request, pk):
+    """
+    Guarda una sesión escrita a mano (running: cinta, reloj, Samsung
+    Health…). A diferencia de task_workout_save, esto es un <form> normal
+    (no fetch/JSON) — se valida, se guarda y se redirige, sin JS de por
+    medio.
+    """
+    task = get_object_or_404(Task, pk=pk)
+    exercise_slug = request.GET.get("exercise", "running")
+    exercise = get_object_or_404(Exercise, slug=exercise_slug, mode=Exercise.MODE_DISTANCE)
+
+    def _to_float(raw):
+        try:
+            return float(str(raw).replace(",", "."))
+        except (TypeError, ValueError):
+            return None
+
+    def _to_int(raw):
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+
+    distance_km = _to_float(request.POST.get("distance_km"))
+    duration_minutes = _to_float(request.POST.get("duration_minutes"))
+    steps = _to_int(request.POST.get("steps"))
+
+    if not distance_km and not duration_minutes:
+        messages.error(request, "Pon al menos la distancia o la duración para guardar la sesión.")
+        return redirect(f"{reverse('tasks:task_workout', args=[task.pk])}?exercise={exercise.slug}")
+
+    session_duration_seconds = int(round(duration_minutes * 60)) if duration_minutes else 0
+    avg_rep_seconds = None
+    if distance_km and duration_minutes:
+        # "ritmo" en min/km, reutilizando avg_rep_seconds (en segundos) para no
+        # añadir otro campo solo para esto.
+        avg_rep_seconds = round((duration_minutes * 60) / distance_km, 2)
+
+    WorkoutSession.objects.create(
+        task=task,
+        series_id=task.series_id,
+        exercise=exercise.slug,
+        session_duration_seconds=session_duration_seconds,
+        avg_rep_seconds=avg_rep_seconds,
+        distance_km=distance_km,
+        steps=steps,
+    )
+
+    task.mark_done()
+
+    bits = []
+    if distance_km:
+        bits.append(f"{distance_km}km")
+    if duration_minutes:
+        bits.append(f"{duration_minutes:.0f} min")
+    if steps:
+        bits.append(f"{steps} pasos")
+    messages.success(request, "Sesión de running guardada: " + ", ".join(bits) + ".")
+    return redirect(reverse("tasks:task_list"))
 
 
 def stats_list(request):

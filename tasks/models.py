@@ -55,6 +55,19 @@ class Task(models.Model):
         CATEGORY_OTHER: [],
     }
 
+    # Subcategorías de "Deporte". Solo tienen sentido cuando category=sport;
+    # filtran qué ejercicios del catálogo (Exercise.body_area) aparecen en
+    # el selector al entrenar, para no mezclar dominadas con sentadillas.
+    SUBCATEGORY_UPPER_BODY = "upper_body"
+    SUBCATEGORY_LOWER_BODY = "lower_body"
+    SUBCATEGORY_RUNNING = "running"
+
+    SUBCATEGORY_CHOICES = [
+        (SUBCATEGORY_UPPER_BODY, "Tren superior"),
+        (SUBCATEGORY_LOWER_BODY, "Tren inferior"),
+        (SUBCATEGORY_RUNNING, "Running"),
+    ]
+
     WEEKDAYS = [
         ("0", "Lunes"),
         ("1", "Martes"),
@@ -73,6 +86,12 @@ class Task(models.Model):
         default=CATEGORY_GENERAL,
         db_index=True,
         help_text="Tipo de tarea. Define qué extras tendrá disponibles (timer, pose tracking, etc).",
+    )
+    subcategory = models.CharField(
+        max_length=16,
+        choices=SUBCATEGORY_CHOICES,
+        blank=True,
+        help_text="Solo aplica si category='sport'. Filtra qué ejercicios se ofrecen al entrenar.",
     )
     due_date = models.DateField(null=True, blank=True)
     due_time = models.TimeField(null=True, blank=True,
@@ -314,6 +333,14 @@ class Exercise(models.Model):
     name = models.CharField(max_length=64)
     slug = models.SlugField(max_length=64, unique=True)
     mode = models.CharField(max_length=16, choices=MODE_CHOICES, default=MODE_MANUAL)
+    body_area = models.CharField(
+        max_length=16,
+        choices=Task.SUBCATEGORY_CHOICES,
+        blank=True,
+        db_index=True,
+        help_text="A qué subcategoría de Deporte pertenece (tren superior/inferior/running). "
+                   "Vacío = aparece en el selector pase lo que pase.",
+    )
     counter_key = models.CharField(
         max_length=32, blank=True,
         help_text="Qué contador de workout.js usar (solo aplica si mode='pose'). Ej: 'pullup'.",
@@ -335,13 +362,22 @@ class Exercise(models.Model):
 
 class WorkoutSession(models.Model):
     """
-    Estadísticas de una sesión de entreno grabada con la cámara
-    (MediaPipe, en el navegador). No se guarda ningún vídeo, solo
-    los números que salen del conteo.
+    Estadísticas de una sesión de entreno. La mayoría se graban con la
+    cámara (MediaPipe, en el navegador) — no se guarda ningún vídeo, solo
+    los números que salen del conteo. Las de running (mode=distance) se
+    escriben a mano (cinta, reloj, Samsung Health…): ahí total_reps se
+    queda a 0 y lo que importa es distance_km / steps.
     """
     EXERCISE_PULLUP = "pullup"
     EXERCISE_CHOICES = [
         (EXERCISE_PULLUP, "Dominadas"),
+        ("wide-pullup", "Dominadas anchas"),
+        ("chinup", "Chin ups"),
+        ("weighted-pullup", "Dominadas con peso"),
+        ("jumping-pullup", "Dominadas con salto"),
+        ("situp", "Abdominales"),
+        ("squat", "Sentadillas"),
+        ("running", "Correr"),
     ]
 
     task = models.ForeignKey(
@@ -356,12 +392,16 @@ class WorkoutSession(models.Model):
     avg_rep_seconds = models.FloatField(null=True, blank=True)
     rest_alerts_triggered = models.PositiveIntegerField(default=0)
     rep_durations = models.JSONField(default=list, blank=True)  # [1.1, 1.3, ...] segundos por rep
+    distance_km = models.FloatField(null=True, blank=True, help_text="Solo running: km recorridos.")
+    steps = models.PositiveIntegerField(null=True, blank=True, help_text="Solo running: pasos, si los tienes (cinta, reloj…).")
     recorded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["-recorded_at"]
 
     def __str__(self):
+        if self.distance_km is not None:
+            return f"{self.get_exercise_display()} — {self.distance_km}km ({self.recorded_at:%Y-%m-%d %H:%M})"
         return f"{self.get_exercise_display()} — {self.total_reps} reps ({self.recorded_at:%Y-%m-%d %H:%M})"
 
 

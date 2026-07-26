@@ -76,6 +76,7 @@
             {% for value, label in category_choices %}
             <label class="category-option category-option--{{ value }}">
                 <input type="radio" name="category" value="{{ value }}"
+                    data-category-toggle
                     {% if task and task.category == value %}checked{% elif not task and value == "general" %}checked{% endif %}>
                 <span>{{ label }}</span>
             </label>
@@ -85,6 +86,22 @@
             Define qué extras tendrá la tarea. <em>Estudio / Trabajo</em> → temporizador y pomodoro.
             <em>Deporte</em> → temporizador + seguimiento con cámara (MediaPipe).
             <em>General / Personal / Otro</em> → sin extras.
+        </span>
+    </fieldset>
+
+    <fieldset class="field subcategory-field" id="subcategory-field">
+        <legend class="field__label">¿Qué toca hoy?</legend>
+        <div class="repeat-options">
+            {% for value, label in subcategory_choices %}
+            <label class="repeat-option">
+                <input type="radio" name="subcategory" value="{{ value }}"
+                    {% if task and task.subcategory == value %}checked{% endif %}>
+                <span>{{ label }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        <span class="field__hint">
+            Filtra qué ejercicios se ofrecen al entrenar (dominadas para tren superior, etc). Solo aplica a tareas de Deporte.
         </span>
     </fieldset>
 
@@ -115,6 +132,16 @@
     }
     radios.forEach(function(r){ r.addEventListener('change', update); });
     update();
+
+    var subcategoryField = document.getElementById('subcategory-field');
+    var categoryRadios = document.querySelectorAll('[data-category-toggle]');
+
+    function updateSubcategory(){
+        var v = (document.querySelector('[data-category-toggle]:checked') || {}).value || 'general';
+        subcategoryField.style.display = v === 'sport' ? 'block' : 'none';
+    }
+    categoryRadios.forEach(function(r){ r.addEventListener('change', updateSubcategory); });
+    updateSubcategory();
 })();
 </script>
 {% endblock %}

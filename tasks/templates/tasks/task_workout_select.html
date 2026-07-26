@@ -16,7 +16,9 @@
 </p>
 {% endif %}
 
-<p class="exercise-picker__hint">¿Qué toca hoy?</p>
+<p class="exercise-picker__hint">
+    {% if task.subcategory %}¿Qué toca hoy de {{ task.get_subcategory_display|lower }}?{% else %}¿Qué toca hoy?{% endif %}
+</p>
 
 <ul class="exercise-picker">
     {% for exercise in exercises %}

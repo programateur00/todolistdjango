@@ -195,7 +195,7 @@ button { font-family:var(--font-b); cursor:pointer; }
 .repeat-option input { accent-color:var(--coral); }
 .repeat-option:has(input:checked) { border-color:var(--coral); background:var(--coral-soft); }
 
-.custom-days-field, .interval-field { display:none; }
+.custom-days-field, .interval-field, .subcategory-field { display:none; }
 .interval-row  { display:flex; align-items:center; gap:8px; font-size:14px; }
 .interval-input{ width:60px; font-family:var(--font-b); font-size:15px; padding:8px 10px;
   border:1px solid var(--line); border-radius:8px; background:var(--cream); color:var(--ink); text-align:center; }
@@ -214,7 +214,7 @@ button { font-family:var(--font-b); cursor:pointer; }
   border-radius:10px; padding:11px 20px; font-size:14px; font-weight:600; }
 .primary-btn:hover { background:#C0563D; }
 .ghost-btn { background:transparent; border:1px solid var(--line); border-radius:10px;
-  padding:10px 16px; font-size:13px; color:var(--ink-faded); }
+  padding:10px 16px; font-size:13px; color:var(--ink-faded); display:inline-block; text-decoration:none; }
 .ghost-btn--danger:hover { border-color:var(--coral); color:var(--coral); background:var(--coral-soft); }
 .inline-delete { display:inline; }
 
