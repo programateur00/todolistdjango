@@ -13,6 +13,7 @@ const MODEL_URL =
 const MOVE_FACTOR = 0.12;
 const LIFTOFF_FACTOR = 0.04; // primer indicio de movimiento real (para medir bien la duracion)
 const BAR_MARGIN_FACTOR = 0.25; // cuanto por debajo de la barra ya cuenta como "llegaste arriba"
+const BAR_OFFSET_FACTOR = 0.05; // empuja la linea de la barra un poco mas arriba (dedos != barra exacta)
 const HANG_MARGIN_FACTOR = 0.08; // cuanto tienen que estar las munecas por encima de los hombros para considerar que estas colgado
 const SCALE_TOLERANCE = 0.3; // cuanto puede variar el ancho de hombros (te acercas/alejas) antes de desconfiar del frame
 const MIN_REP_SECONDS = 0.3; // por debajo de esto, se descarta como ruido
@@ -22,6 +23,9 @@ const REST_ALERT_SECONDS = 90; // segundos de descanso antes del pitido
 
 // Índices de landmarks de MediaPipe Pose que usamos
 const NOSE = 0, L_SHOULDER = 11, R_SHOULDER = 12, L_ELBOW = 13, R_ELBOW = 14, L_WRIST = 15, R_WRIST = 16;
+// Dedos: mas cerca del punto real de agarre que la muñeca, se usan para
+// calibrar la altura de la barra (la muñeca solo queda como reserva).
+const L_PINKY = 17, R_PINKY = 18, L_INDEX = 19, R_INDEX = 20;
 
 function el(id) { return document.getElementById(id); }
 
@@ -287,19 +291,30 @@ class WorkoutSession {
     const rElbow = lm[R_ELBOW];
     const lWrist = lm[L_WRIST];
     const rWrist = lm[R_WRIST];
+    const lIndex = lm[L_INDEX];
+    const rIndex = lm[R_INDEX];
+    const lPinky = lm[L_PINKY];
+    const rPinky = lm[R_PINKY];
     const shoulderWidth = Math.hypot(lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y);
     const y = nose.y; // 0 = arriba del todo del encuadre, 1 = abajo del todo
     const wristMidY = (lWrist.y + rWrist.y) / 2;
     const elbowMidY = (lElbow.y + rElbow.y) / 2;
+    const indexMidY = (lIndex.y + rIndex.y) / 2;
+    const pinkyMidY = (lPinky.y + rPinky.y) / 2;
     const wristVisible = ((lWrist.visibility ?? 1) + (rWrist.visibility ?? 1)) / 2 > 0.4;
     const elbowVisible = ((lElbow.visibility ?? 1) + (rElbow.visibility ?? 1)) / 2 > 0.4;
+    const indexVisible = ((lIndex.visibility ?? 1) + (rIndex.visibility ?? 1)) / 2 > 0.4;
+    const pinkyVisible = ((lPinky.visibility ?? 1) + (rPinky.visibility ?? 1)) / 2 > 0.4;
 
     const shoulderMidYRaw = (lShoulder.y + rShoulder.y) / 2;
     // detección de "brazos en alto" usando la escala del frame actual
-    // (para poder usarla ANTES de tener una calibración de referencia)
-    const armsUpNow =
-      wristMidY < shoulderMidYRaw - HANG_MARGIN_FACTOR * shoulderWidth ||
-      (elbowVisible && elbowMidY < shoulderMidYRaw - HANG_MARGIN_FACTOR * shoulderWidth);
+    // (para poder usarla ANTES de tener una calibración de referencia).
+    // Si la muñeca se ve bien, manda ella sola (si la muñeca está claramente
+    // abajo, un codo todavía algo elevado ya no debe contar como "colgado").
+    // El codo solo se usa como reserva cuando no se ve bien la muñeca.
+    const armsUpNow = wristVisible
+      ? wristMidY < shoulderMidYRaw - HANG_MARGIN_FACTOR * shoulderWidth
+      : elbowVisible && elbowMidY < shoulderMidYRaw - HANG_MARGIN_FACTOR * shoulderWidth;
 
     if (this.prepping) {
       const waitedSeconds = Math.floor((now - this.prepStartTs) / 1000);
@@ -340,10 +355,18 @@ class WorkoutSession {
         this.calibrationSamples = [];
         return;
       }
-      // Para calibrar la altura de "la barra" usamos la muñeca si se ve
-      // bien; si no, el codo (menos preciso, pero mucho más fiable si la
-      // cámara no llega a ver bien las manos agarradas a la barra).
-      const barRefY = wristVisible ? wristMidY : elbowMidY;
+      // Para calibrar la altura de "la barra" preferimos los dedos (índice,
+      // si no meñique), que quedan más cerca del punto real de agarre que
+      // la muñeca. Si no se ven bien los dedos, caemos a muñeca y luego a
+      // codo (menos preciso, pero mucho más fiable si la cámara no llega a
+      // ver bien las manos agarradas a la barra).
+      const barRefY = indexVisible
+        ? indexMidY
+        : pinkyVisible
+        ? pinkyMidY
+        : wristVisible
+        ? wristMidY
+        : elbowMidY;
       this.calibrationSamples.push({ y, shoulderWidth, barRefY });
       const elapsed = now - this.calibrationStartTs;
       const remaining = Math.max(0, Math.ceil((CALIBRATION_MS - elapsed) / 1000));
@@ -355,7 +378,10 @@ class WorkoutSession {
         this.shoulderWidth = ws[Math.floor(ws.length / 2)];
         this.localBottomY = ys[Math.floor(ys.length / 2)];
         this.localTopY = this.localBottomY;
-        this.barY = wy[Math.floor(wy.length / 2)]; // altura de la barra = altura de tus muñecas al colgar
+        // altura de la barra = altura de tus dedos al colgar, con un empujón
+        // extra hacia arriba (BAR_OFFSET_FACTOR) para que cuadre mejor con
+        // la barra real y no con el punto exacto donde MediaPipe ve tu mano.
+        this.barY = wy[Math.floor(wy.length / 2)] - BAR_OFFSET_FACTOR * this.shoulderWidth;
         this.calibrating = false;
         this.repStartTime = now;
         this.lastRepTime = now;
