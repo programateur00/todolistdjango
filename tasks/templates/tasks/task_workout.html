@@ -5,15 +5,16 @@
 
 <header class="topbar">
     <div class="topbar__title">
-        <span class="topbar__eyebrow">sesión de entreno</span>
+        <span class="topbar__eyebrow">{{ exercise.name }}</span>
         <h1>{{ task.title }}</h1>
     </div>
-    <a href="{% url 'tasks:task_list' %}" class="stats-link">← Volver</a>
+    <a href="{% url 'tasks:task_workout' task.pk %}" class="stats-link">← Cambiar ejercicio</a>
 </header>
 
 <div id="workout-root"
-     data-save-url="{% url 'tasks:task_workout_save' task.pk %}"
+     data-save-url="{% url 'tasks:task_workout_save' task.pk %}?exercise={{ exercise.slug }}"
      data-cancel-url="{% url 'tasks:task_list' %}"
+     data-exercise-slug="{{ exercise.slug }}"
      class="workout">
     {% csrf_token %}
 
@@ -28,7 +29,7 @@
     <div class="workout__stats">
         <div class="workout__stat">
             <span class="workout__stat-value" id="workout-reps">0</span>
-            <span class="workout__stat-label">dominadas</span>
+            <span class="workout__stat-label">{{ exercise.name|lower }}</span>
         </div>
         <div class="workout__stat">
             <span class="workout__stat-value" id="workout-sets">1</span>

@@ -1,0 +1,36 @@
+{% extends "tasks/base.html" %}
+{% block title %}Elegir ejercicio — {{ task.title }}{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">sesión de entreno</span>
+        <h1>{{ task.title }}</h1>
+    </div>
+    <a href="{% url 'tasks:task_list' %}" class="stats-link">← Volver</a>
+</header>
+
+{% if unsupported %}
+<p class="workout__note workout__note--warn">
+    «{{ unsupported.name }}» todavía no tiene contador por cámara — elige otro ejercicio por ahora.
+</p>
+{% endif %}
+
+<p class="exercise-picker__hint">¿Qué toca hoy?</p>
+
+<ul class="exercise-picker">
+    {% for exercise in exercises %}
+    <li>
+        <a href="?exercise={{ exercise.slug }}" class="exercise-picker__item">
+            <span class="exercise-picker__name">{{ exercise.name }}</span>
+            <span class="exercise-picker__mode">{{ exercise.get_mode_display }}</span>
+        </a>
+    </li>
+    {% empty %}
+    <li class="exercise-picker__empty">
+        Todavía no hay ejercicios en el catálogo. Añádelos desde /admin.
+    </li>
+    {% endfor %}
+</ul>
+
+{% endblock %}

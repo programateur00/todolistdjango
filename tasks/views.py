@@ -7,7 +7,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
-from .models import Occurrence, Task, WorkoutSession
+from .models import Exercise, Occurrence, Task, WorkoutSession
 
 
 def _read_category(request, default=Task.CATEGORY_GENERAL):
@@ -126,10 +126,34 @@ def task_mark_not_done(request, pk):
 
 
 def task_workout(request, pk):
-    """Página con la cámara para grabar (en el navegador) una sesión
-    de ejercicio y contar dominadas con MediaPipe."""
+    """
+    Página de entreno para una tarea. En dos pasos:
+    1. Sin ?exercise= en la URL: muestra el catálogo de ejercicios activos
+       para elegir cuál tocar hoy.
+    2. Con ?exercise=<slug>: abre la cámara y cuenta con MediaPipe (si ese
+       ejercicio ya tiene contador — de momento solo dominadas).
+    """
     task = get_object_or_404(Task, pk=pk)
-    return render(request, "tasks/task_workout.html", {"task": task})
+    exercise_slug = request.GET.get("exercise")
+
+    if not exercise_slug:
+        exercises = Exercise.objects.filter(is_active=True)
+        return render(request, "tasks/task_workout_select.html", {
+            "task": task, "exercises": exercises,
+        })
+
+    exercise = get_object_or_404(Exercise, slug=exercise_slug, is_active=True)
+
+    # De momento el único contador que existe en workout.js es el de
+    # dominadas. Cuando se añada uno nuevo, esta comprobación es lo único
+    # que hay que ampliar (o quitar del todo si ya cubre todos los modos).
+    if exercise.mode != Exercise.MODE_POSE or exercise.counter_key != "pullup":
+        exercises = Exercise.objects.filter(is_active=True)
+        return render(request, "tasks/task_workout_select.html", {
+            "task": task, "exercises": exercises, "unsupported": exercise,
+        })
+
+    return render(request, "tasks/task_workout.html", {"task": task, "exercise": exercise})
 
 
 @require_POST
@@ -140,6 +164,11 @@ def task_workout_save(request, pk):
     como hecha. No se recibe ni se guarda ningún vídeo — solo números.
     """
     task = get_object_or_404(Task, pk=pk)
+    exercise_slug = request.GET.get("exercise", "pullup")
+    exercise = Exercise.objects.filter(slug=exercise_slug).first()
+    exercise_value = exercise.slug if exercise else WorkoutSession.EXERCISE_PULLUP
+    exercise_label = exercise.name.lower() if exercise else "dominadas"
+
     try:
         data = json.loads(request.body)
     except (json.JSONDecodeError, TypeError):
@@ -167,7 +196,7 @@ def task_workout_save(request, pk):
     WorkoutSession.objects.create(
         task=task,
         series_id=task.series_id,
-        exercise=WorkoutSession.EXERCISE_PULLUP,
+        exercise=exercise_value,
         total_reps=total_reps,
         total_sets=total_sets,
         sets=clean_sets,
@@ -181,7 +210,7 @@ def task_workout_save(request, pk):
 
     messages.success(
         request,
-        f"Sesión guardada: {total_reps} dominadas en {total_sets} serie(s)"
+        f"Sesión guardada: {total_reps} {exercise_label} en {total_sets} serie(s)"
         + (f", ritmo medio {avg_rep_seconds}s/rep." if avg_rep_seconds else "."),
     )
     return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})

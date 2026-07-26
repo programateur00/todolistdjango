@@ -295,6 +295,17 @@ button { font-family:var(--font-b); cursor:pointer; }
 .workout__btn--primary:disabled { opacity:.6; }
 .workout__btn--ghost { background:var(--paper); color:var(--ink); }
 .workout__note { font-size:12px; color:var(--ink-faded); text-align:center; margin:0; }
+.workout__note--warn { color:var(--danger); }
+
+.exercise-picker__hint { font-family:var(--font-d); font-size:19px; margin:4px 0 2px; }
+.exercise-picker { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }
+.exercise-picker__item { display:flex; align-items:center; justify-content:space-between; gap:12px;
+  background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
+  padding:16px 18px; box-shadow:var(--shadow); text-decoration:none; color:var(--ink); }
+.exercise-picker__item:hover { border-color:var(--coral); }
+.exercise-picker__name { font-weight:600; font-size:16px; }
+.exercise-picker__mode { font-size:12px; color:var(--ink-faded); text-transform:uppercase; letter-spacing:.04em; }
+.exercise-picker__empty { color:var(--ink-faded); font-size:14px; }
 
 .workout-btn { display:inline-flex; align-items:center; justify-content:center; width:40px; height:40px;
   border-radius:999px; background:var(--sport-soft, var(--sage-soft)); color:var(--sport, var(--sage));
