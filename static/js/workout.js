@@ -18,6 +18,7 @@ const HANG_MARGIN_FACTOR = 0.08; // cuanto tienen que estar las munecas por enci
 const SCALE_TOLERANCE = 0.3; // cuanto puede variar el ancho de hombros (te acercas/alejas) antes de desconfiar del frame
 const MIN_REP_SECONDS = 0.3; // por debajo de esto, se descarta como ruido
 const HANG_STABLE_MS = 500;   // cuanto tiempo seguido con los brazos en alto para empezar a calibrar
+const ARMS_DOWN_STABLE_MS = 400; // cuanto tiempo seguido con los brazos abajo para dar la serie por terminada (evita falsos positivos por un frame ruidoso)
 const CALIBRATION_MS = 1200;  // tiempo colgado quieto que se usa como referencia
 const REST_ALERT_SECONDS = 90; // segundos de descanso antes del pitido
 
@@ -91,6 +92,7 @@ class WorkoutSession {
     this.prepping = false;
     this.prepStartTs = null;
     this.hangStableSince = null;
+    this.armsDownSince = null; // desde cuándo llevas los brazos abajo seguido (para no cerrar la serie por un frame ruidoso)
     this.calibrationSamples = [];
     this.calibrationStartTs = null;
     this.shoulderWidth = null;
@@ -193,6 +195,8 @@ class WorkoutSession {
     this.prepping = true;
     this.calibrating = false;
     this.prepStartTs = performance.now();
+    this.hangStableSince = null;
+    this.armsDownSince = null;
     this.calibrationSamples = [];
     this.state = "down";
     this.localBottomY = null;
@@ -405,15 +409,24 @@ class WorkoutSession {
       this.localTopY = null;
       this.liftoffTime = null;
 
-      // Te has soltado de la barra de verdad (bajaste los brazos, no es solo
-      // que te acercaras/alejaras de la cámara): esto es el final de la
-      // serie en curso. Antes esto solo se detectaba tras 90s sin reps
-      // (aviso de descanso); ahora se cierra la serie en el momento.
-      if (!armsUpNow && this.currentSetReps > 0) {
-        const closedReps = this.currentSetReps;
-        this.setStatus(`Serie de ${closedReps} terminada. Cuélgate otra vez para empezar la siguiente.`);
-        this.beginPrep();
-        return;
+      if (!armsUpNow) {
+        // Te has soltado de la barra de verdad (bajaste los brazos, no es
+        // solo que te acercaras/alejaras de la cámara): esto es el final de
+        // la serie en curso. Pero solo lo damos por bueno si se mantiene
+        // un ratito seguido — un solo frame ruidoso (oclusión, ángulo raro
+        // agarrando la barra) no debe cerrar la serie por error.
+        if (this.armsDownSince === null) this.armsDownSince = now;
+        if (now - this.armsDownSince >= ARMS_DOWN_STABLE_MS && this.currentSetReps > 0) {
+          const closedReps = this.currentSetReps;
+          this.armsDownSince = null;
+          this.setStatus(`Serie de ${closedReps} terminada. Cuélgate otra vez para empezar la siguiente.`);
+          this.beginPrep();
+          return;
+        }
+      } else {
+        // scaleOk falló pero los brazos siguen arriba: no cuenta como que
+        // te soltaste, reinicia el contador de "brazos abajo".
+        this.armsDownSince = null;
       }
 
       if (this.debugEl) {
@@ -423,6 +436,8 @@ class WorkoutSession {
       }
       return;
     }
+
+    this.armsDownSince = null;
 
     const moveThresh = MOVE_FACTOR * this.shoulderWidth;
     const barThresh = this.barY + BAR_MARGIN_FACTOR * this.shoulderWidth;
