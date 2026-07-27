@@ -34,6 +34,7 @@ class Task(models.Model):
     CATEGORY_WORK = "work"
     CATEGORY_PERSONAL = "personal"
     CATEGORY_OTHER = "other"
+    CATEGORY_AVOID = "avoid"
 
     CATEGORY_CHOICES = [
         (CATEGORY_GENERAL, "General"),
@@ -42,6 +43,7 @@ class Task(models.Model):
         (CATEGORY_WORK, "Trabajo"),
         (CATEGORY_PERSONAL, "Personal"),
         (CATEGORY_OTHER, "Otro"),
+        (CATEGORY_AVOID, "Antitarea"),
     ]
 
     # Metadatos que describen qué "extras" admite cada categoría.
@@ -54,6 +56,7 @@ class Task(models.Model):
         CATEGORY_WORK: ["timer", "pomodoro"],
         CATEGORY_PERSONAL: [],
         CATEGORY_OTHER: [],
+        CATEGORY_AVOID: [],
     }
 
     # Subcategorías de "Deporte". Solo tienen sentido cuando category=sport;
@@ -94,12 +97,6 @@ class Task(models.Model):
         blank=True,
         help_text="Solo aplica si category='sport'. Filtra qué ejercicios se ofrecen al entrenar.",
     )
-    is_avoid = models.BooleanField(
-        default=False,
-        help_text="Antitarea: el objetivo es NO hacerlo (ej. \"no fumar\"). Si no marcas nada "
-                   "antes de la hora límite, cuenta como éxito — silencio es que lo evitaste. "
-                   "Solo hace falta tocar algo si caes.",
-    )
     due_date = models.DateField(null=True, blank=True)
     due_time = models.TimeField(null=True, blank=True,
         help_text="Hora límite. Si pasa sin marcarla, se auto-marca como no hecha.")
@@ -133,6 +130,18 @@ class Task(models.Model):
     def category_capabilities(self):
         """Lista de extras disponibles para esta categoría."""
         return self.CATEGORY_CAPABILITIES.get(self.category, [])
+
+    @property
+    def is_avoid(self):
+        """
+        True si es una antitarea (category='avoid'). Se calcula desde
+        category en vez de ser un campo aparte — "antitarea" es un tipo
+        de tarea más, no un check que se pone encima de otro tipo. Se
+        queda como propiedad de solo lectura para no tener que tocar
+        mark_expired()/mark_failed()/las plantillas, que ya comprobaban
+        task.is_avoid antes de este cambio.
+        """
+        return self.category == self.CATEGORY_AVOID
 
     def has_capability(self, capability):
         return capability in self.category_capabilities
@@ -244,7 +253,6 @@ class Task(models.Model):
                 due_date=self.next_due_date(), due_time=self.due_time,
                 repeat=self.repeat, interval=self.interval,
                 custom_days=self.custom_days, is_important=self.is_important,
-                is_avoid=self.is_avoid,
                 series_id=self.series_id, series_start_date=self.series_start_date,
                 user=self.user,
             )

@@ -71,28 +71,6 @@
     </label>
 
     <fieldset class="field">
-        <legend class="field__label">¿Qué tipo de tarea es?</legend>
-        <div class="task-type-options">
-            <label class="task-type-option task-type-option--do">
-                <input type="radio" name="task_type" value="do" {% if not task.is_avoid %}checked{% endif %}>
-                <span class="task-type-option__icon">✓</span>
-                <span class="task-type-option__text">
-                    <span class="task-type-option__title">Hacer</span>
-                    <span class="task-type-option__desc">La marcas cuando la haces.</span>
-                </span>
-            </label>
-            <label class="task-type-option task-type-option--avoid">
-                <input type="radio" name="task_type" value="avoid" {% if task.is_avoid %}checked{% endif %}>
-                <span class="task-type-option__icon">🚫</span>
-                <span class="task-type-option__text">
-                    <span class="task-type-option__title">Antitarea</span>
-                    <span class="task-type-option__desc">Algo que NO quieres hacer (ej. "no fumar"). Ponle hora límite por la noche: si no tocas nada antes de esa hora, cuenta como éxito — solo hace falta marcar algo si caes.</span>
-                </span>
-            </label>
-        </div>
-    </fieldset>
-
-    <fieldset class="field">
         <legend class="field__label">Tipo de tarea</legend>
         <div class="category-options" id="category-options">
             {% for value, label in category_choices %}
@@ -107,7 +85,9 @@
         <span class="field__hint">
             Define qué extras tendrá la tarea. <em>Estudio / Trabajo</em> → temporizador y pomodoro.
             <em>Deporte</em> → temporizador + seguimiento con cámara (MediaPipe).
-            <em>General / Personal / Otro</em> → sin extras.
+            <em>Antitarea</em> → algo que NO quieres hacer (ej. "no fumar"): ponle hora límite
+            por la noche y, si no tocas nada antes de esa hora, cuenta como éxito — solo hace
+            falta marcar algo si caes. <em>General / Personal / Otro</em> → sin extras.
         </span>
     </fieldset>
 

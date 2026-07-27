@@ -79,7 +79,6 @@ def task_create(request):
                 interval=request.POST.get("interval") or 1,
                 custom_days=",".join(request.POST.getlist("custom_days")),
                 is_important=bool(request.POST.get("is_important")),
-                is_avoid=request.POST.get("task_type") == "avoid",
                 user=get_current_user(),
             )
             messages.success(request, "Tarea creada.")
@@ -108,7 +107,6 @@ def task_edit(request, pk):
         task.interval = request.POST.get("interval") or 1
         task.custom_days = ",".join(request.POST.getlist("custom_days"))
         task.is_important = bool(request.POST.get("is_important"))
-        task.is_avoid = request.POST.get("task_type") == "avoid"
         task.save()
         messages.success(request, "Tarea actualizada.")
         return redirect(reverse("tasks:task_list"))

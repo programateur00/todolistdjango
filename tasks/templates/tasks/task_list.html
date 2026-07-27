@@ -85,9 +85,6 @@
                 <p class="task-card__title">{{ task.title }}</p>
                 <div class="task-card__meta">
                     <span class="meta-pill meta-pill--category meta-pill--{{ task.category }}">{{ task.get_category_display }}</span>
-                    {% if task.is_avoid %}
-                        <span class="meta-pill meta-pill--avoid" title="Silencio antes de la hora límite = éxito">🚫 antitarea</span>
-                    {% endif %}
                     {% if task.due_date %}
                         <span class="meta-pill meta-pill--date">{{ task.due_date|date:"d \d\e M" }}</span>
                     {% endif %}

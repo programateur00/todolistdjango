@@ -9,7 +9,7 @@ class TaskAdmin(admin.ModelAdmin):
         "title", "user", "category", "is_avoid", "due_date", "due_time",
         "repeat", "is_done", "is_important", "expired",
     )
-    list_filter = ("category", "is_avoid", "is_done", "is_important", "expired", "repeat")
+    list_filter = ("category", "is_done", "is_important", "expired", "repeat")
     search_fields = ("title", "notes")
     list_per_page = 50
 
