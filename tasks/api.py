@@ -93,6 +93,10 @@ def task_json(t):
         "expired": t.expired,
         "is_overdue": t.is_overdue(),
         "minutes_left": t.minutes_remaining(),
+        # La app programa el aviso a due_time y deja que el servidor
+        # resuelva sola la tarea pasado el margen. Se manda calculado para
+        # que app y web usen exactamente el mismo criterio.
+        "avoid_grace_hours": Task.AVOID_GRACE_HOURS if t.is_avoid else None,
         "updated_at": t.updated_at.isoformat(),
     }
 

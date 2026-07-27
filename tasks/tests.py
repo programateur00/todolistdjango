@@ -2,6 +2,7 @@ import json
 from datetime import date, time, timedelta
 
 from django.test import TestCase
+from django.utils import timezone
 from django.urls import reverse
 
 from .models import Exercise, Occurrence, Task
@@ -257,6 +258,61 @@ class OccurrenceIdempotencyTests(TestCase):
         self.assertNotEqual(a.uuid, b.uuid)
         self.assertIsNotNone(a.updated_at)
         self.assertIsNone(a.deleted_at)
+
+
+class AvoidGraceTests(TestCase):
+    """
+    Una antitarea NO debe resolverse sola en el mismo instante de la hora
+    límite: a esa hora salta el aviso, y hace falta un margen para poder
+    contestarlo. Antes se auto-completaba al segundo y contestar no
+    servía de nada.
+    """
+
+    def _avoid_task(self, hours_ago):
+        """Antitarea cuya hora límite fue hace `hours_ago` horas."""
+        now = timezone.localtime(timezone.now())
+        deadline = now - timedelta(hours=hours_ago)
+        return Task.objects.create(
+            title="No fumar", category=Task.CATEGORY_AVOID,
+            due_date=deadline.date(), due_time=deadline.time().replace(microsecond=0),
+            user=get_current_user(),
+        )
+
+    def test_not_resolved_right_at_deadline(self):
+        """Justo pasada la hora límite todavía no se resuelve: es el rato
+        que tienes para contestar la notificación."""
+        t = self._avoid_task(hours_ago=0.5)
+        self.assertFalse(t.is_overdue())
+        self.assertNotIn(t, Task.expire_overdue())
+
+    def test_resolved_after_grace(self):
+        """Pasado el margen sin contestar, sí se da por evitada."""
+        t = self._avoid_task(hours_ago=Task.AVOID_GRACE_HOURS + 1)
+        self.assertTrue(t.is_overdue())
+        self.assertIn(t, Task.expire_overdue())
+        occ = Occurrence.objects.filter(series_id=t.series_id).latest("recorded_at")
+        self.assertEqual(occ.result, Occurrence.RESULT_DONE)
+
+    def test_normal_task_has_no_grace(self):
+        """Una tarea normal sigue expirando en la hora límite, sin margen."""
+        now = timezone.localtime(timezone.now())
+        deadline = now - timedelta(minutes=30)
+        t = Task.objects.create(
+            title="Estudiar", category=Task.CATEGORY_STUDY,
+            due_date=deadline.date(), due_time=deadline.time().replace(microsecond=0),
+            user=get_current_user(),
+        )
+        self.assertTrue(t.is_overdue())
+
+    def test_answering_during_grace_wins(self):
+        """Si contestas dentro del margen, tu respuesta manda y la tarea
+        ya no se resuelve sola."""
+        t = self._avoid_task(hours_ago=0.5)
+        t.mark_failed()   # "he caído hoy"
+        t.refresh_from_db()
+        self.assertTrue(t.is_done)
+        occ = Occurrence.objects.filter(series_id=t.series_id, due_date=t.due_date).first()
+        self.assertEqual(occ.result, Occurrence.RESULT_NOT_DONE)
 
 
 class ApiTests(TestCase):

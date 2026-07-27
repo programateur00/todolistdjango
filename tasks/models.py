@@ -187,15 +187,36 @@ class Task(models.Model):
             return datetime.datetime.combine(self.due_date, self.due_time)
         return None
 
-    def is_overdue(self):
-        """True si la hora límite ya pasó y la tarea sigue pendiente."""
-        if self.is_done or self.expired:
-            return False
+    # Margen que se da a una antitarea DESPUÉS de la hora límite antes de
+    # darla por buena sola. La notificación salta a la hora límite; este
+    # margen es el rato que tienes para contestarla. Sin él, la tarea se
+    # resolvía en el mismo instante en que sonaba el aviso, y contestar no
+    # servía de nada.
+    AVOID_GRACE_HOURS = 2
+
+    def resolve_datetime(self):
+        """Momento a partir del cual la tarea se resuelve sola.
+
+        Para una tarea normal es la hora límite. Para una antitarea es la
+        hora límite MÁS el margen: a la hora límite salta el aviso, y solo
+        si no contestas en ese rato se da por evitada.
+        """
         dl = self.deadline_datetime()
         if dl is None:
+            return None
+        if self.is_avoid:
+            return dl + timedelta(hours=self.AVOID_GRACE_HOURS)
+        return dl
+
+    def is_overdue(self):
+        """True si ya toca resolverla sola y sigue pendiente."""
+        if self.is_done or self.expired:
+            return False
+        limit = self.resolve_datetime()
+        if limit is None:
             return False
         now = timezone.localtime(timezone.now()).replace(tzinfo=None)
-        return now > dl
+        return now > limit
 
     def minutes_remaining(self):
         """Minutos hasta el deadline (negativo = ya pasó)."""
@@ -374,10 +395,22 @@ class Task(models.Model):
         expired_tasks = []
         for task in candidates:
             if task.due_date is None:
-                should_expire = task.due_time < now_time
+                # Solo hay hora, sin fecha: se compara hora contra hora.
+                # A las antitareas se les suma el margen aquí también,
+                # aunque en la práctica una antitarea siempre lleva fecha
+                # (es lo que permite repetirla cada día).
+                limit_time = task.due_time
+                if task.is_avoid:
+                    limit_time = (
+                        _dt.datetime.combine(now_local.date(), task.due_time)
+                        + timedelta(hours=cls.AVOID_GRACE_HOURS)
+                    ).time()
+                should_expire = limit_time < now_time
             else:
-                deadline = _dt.datetime.combine(task.due_date, task.due_time)
-                should_expire = now_local > deadline
+                # resolve_datetime ya incluye el margen de las antitareas:
+                # a la hora límite salta el aviso, y solo pasado ese rato
+                # sin respuesta se resuelve sola.
+                should_expire = now_local > task.resolve_datetime()
 
             if should_expire:
                 if not dry_run:
