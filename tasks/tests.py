@@ -4,6 +4,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from .models import Occurrence, Task
+from .utils import get_current_user
 
 
 class CategoryModelTests(TestCase):
@@ -84,8 +85,8 @@ class CategoryViewTests(TestCase):
         self.assertEqual(t.category, Task.CATEGORY_GENERAL)
 
     def test_list_filter_by_category(self):
-        Task.objects.create(title="Hacer sentadillas", category=Task.CATEGORY_SPORT)
-        Task.objects.create(title="Estudiar cálculo", category=Task.CATEGORY_STUDY)
+        Task.objects.create(title="Hacer sentadillas", category=Task.CATEGORY_SPORT, user=get_current_user())
+        Task.objects.create(title="Estudiar cálculo", category=Task.CATEGORY_STUDY, user=get_current_user())
 
         resp = self.client.get(reverse("tasks:task_list") + "?cat=sport")
         self.assertEqual(resp.status_code, 200)
@@ -93,13 +94,13 @@ class CategoryViewTests(TestCase):
         self.assertNotContains(resp, "Estudiar cálculo")
 
     def test_list_renders_category_pill(self):
-        Task.objects.create(title="Ir al gym", category=Task.CATEGORY_SPORT)
+        Task.objects.create(title="Ir al gym", category=Task.CATEGORY_SPORT, user=get_current_user())
         resp = self.client.get(reverse("tasks:task_list"))
         self.assertContains(resp, "Deporte")  # get_category_display
         self.assertContains(resp, "meta-pill--sport")
 
     def test_edit_updates_category(self):
-        t = Task.objects.create(title="X", category=Task.CATEGORY_GENERAL)
+        t = Task.objects.create(title="X", category=Task.CATEGORY_GENERAL, user=get_current_user())
         resp = self.client.post(
             reverse("tasks:task_edit", args=[t.pk]),
             {

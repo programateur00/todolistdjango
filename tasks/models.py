@@ -1,6 +1,7 @@
 import uuid
 from datetime import timedelta
 
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -100,6 +101,13 @@ class Task(models.Model):
     interval = models.PositiveIntegerField(default=1)
     custom_days = models.CharField(max_length=20, blank=True)
     is_important = models.BooleanField(default=False)
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="tasks",
+        help_text="Dueño de la tarea. Hoy siempre es el usuario por defecto "
+                   "(ver tasks/utils.py:get_current_user) — preparado para cuando haya login real.",
+    )
 
     series_id = models.UUIDField(default=uuid.uuid4, editable=False)
     series_start_date = models.DateField(null=True, blank=True, editable=False)
@@ -231,6 +239,7 @@ class Task(models.Model):
                 repeat=self.repeat, interval=self.interval,
                 custom_days=self.custom_days, is_important=self.is_important,
                 series_id=self.series_id, series_start_date=self.series_start_date,
+                user=self.user,
             )
 
     def mark_done(self):
@@ -241,6 +250,7 @@ class Task(models.Model):
         Occurrence.objects.create(
             task=self, series_id=self.series_id, title=self.title,
             result=Occurrence.RESULT_DONE, due_date=self.due_date,
+            user=self.user,
         )
         self._spawn_next()
 
@@ -252,6 +262,7 @@ class Task(models.Model):
         Occurrence.objects.create(
             task=self, series_id=self.series_id, title=self.title,
             result=Occurrence.RESULT_NOT_DONE, due_date=self.due_date,
+            user=self.user,
         )
 
     def mark_expired(self):
@@ -264,6 +275,7 @@ class Task(models.Model):
             task=self, series_id=self.series_id, title=self.title,
             result=Occurrence.RESULT_NOT_DONE, due_date=self.due_date,
             auto_expired=True,
+            user=self.user,
         )
         self._spawn_next()
 
@@ -368,23 +380,24 @@ class WorkoutSession(models.Model):
     escriben a mano (cinta, reloj, Samsung Health…): ahí total_reps se
     queda a 0 y lo que importa es distance_km / steps.
     """
-    EXERCISE_PULLUP = "pullup"
-    EXERCISE_CHOICES = [
-        (EXERCISE_PULLUP, "Dominadas"),
-        ("wide-pullup", "Dominadas anchas"),
-        ("chinup", "Chin ups"),
-        ("weighted-pullup", "Dominadas con peso"),
-        ("jumping-pullup", "Dominadas con salto"),
-        ("situp", "Abdominales"),
-        ("squat", "Sentadillas"),
-        ("running", "Correr"),
-    ]
+    EXERCISE_PULLUP = "pullup"  # se usa como valor por defecto y de respaldo
 
     task = models.ForeignKey(
         Task, on_delete=models.SET_NULL, null=True, blank=True, related_name="workout_sessions"
     )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="workout_sessions",
+        help_text="Dueño de la sesión. Ver Task.user para el mismo criterio.",
+    )
     series_id = models.UUIDField(null=True, blank=True)
-    exercise = models.CharField(max_length=32, choices=EXERCISE_CHOICES, default=EXERCISE_PULLUP)
+    # Guarda el slug del Exercise (ej. "pullup", "squat"). Antes tenía
+    # choices=EXERCISE_CHOICES, una lista aparte que había que mantener a
+    # mano sincronizada con la tabla Exercise — si añadías un ejercicio
+    # desde /admin, no aparecía aquí y el nombre salía en crudo (el slug).
+    # Ahora el nombre se resuelve en caliente contra el catálogo, ver
+    # exercise_name más abajo: un único sitio de verdad.
+    exercise = models.CharField(max_length=32, default=EXERCISE_PULLUP)
     total_reps = models.PositiveIntegerField(default=0)
     total_sets = models.PositiveIntegerField(default=0)
     sets = models.JSONField(default=list, blank=True)  # [{"reps": 8, "durations": [1.1, ...]}, ...]
@@ -392,6 +405,10 @@ class WorkoutSession(models.Model):
     avg_rep_seconds = models.FloatField(null=True, blank=True)
     rest_alerts_triggered = models.PositiveIntegerField(default=0)
     rep_durations = models.JSONField(default=list, blank=True)  # [1.1, 1.3, ...] segundos por rep
+    added_weight_kg = models.FloatField(
+        null=True, blank=True,
+        help_text="Peso extra usado (ej. chaleco lastrado en dominadas con peso). No lo mide la cámara, se anota a mano.",
+    )
     distance_km = models.FloatField(null=True, blank=True, help_text="Solo running: km recorridos.")
     steps = models.PositiveIntegerField(null=True, blank=True, help_text="Solo running: pasos, si los tienes (cinta, reloj…).")
     recorded_at = models.DateTimeField(auto_now_add=True)
@@ -399,10 +416,19 @@ class WorkoutSession(models.Model):
     class Meta:
         ordering = ["-recorded_at"]
 
+    @property
+    def exercise_name(self):
+        """Nombre legible del ejercicio, resuelto contra el catálogo
+        Exercise. Si el slug no está en el catálogo (ej. se borró desde
+        /admin después de guardar esta sesión), cae al slug en crudo en
+        vez de romper."""
+        ex = Exercise.objects.filter(slug=self.exercise).first()
+        return ex.name if ex else self.exercise
+
     def __str__(self):
         if self.distance_km is not None:
-            return f"{self.get_exercise_display()} — {self.distance_km}km ({self.recorded_at:%Y-%m-%d %H:%M})"
-        return f"{self.get_exercise_display()} — {self.total_reps} reps ({self.recorded_at:%Y-%m-%d %H:%M})"
+            return f"{self.exercise_name} — {self.distance_km}km ({self.recorded_at:%Y-%m-%d %H:%M})"
+        return f"{self.exercise_name} — {self.total_reps} reps ({self.recorded_at:%Y-%m-%d %H:%M})"
 
 
 class Occurrence(models.Model):
@@ -415,6 +441,11 @@ class Occurrence(models.Model):
 
     task = models.ForeignKey(
         Task, on_delete=models.SET_NULL, null=True, blank=True, related_name="occurrences"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="occurrences",
+        help_text="Dueño de la ocurrencia. Ver Task.user para el mismo criterio.",
     )
     series_id = models.UUIDField()
     title = models.CharField(max_length=255)

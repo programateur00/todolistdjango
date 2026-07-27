@@ -1,12 +1,12 @@
 from django.contrib import admin
 
-from .models import Exercise, Occurrence, Task
+from .models import Exercise, Occurrence, Task, WorkoutSession
 
 
 @admin.register(Task)
 class TaskAdmin(admin.ModelAdmin):
     list_display = (
-        "title", "category", "due_date", "due_time",
+        "title", "user", "category", "due_date", "due_time",
         "repeat", "is_done", "is_important", "expired",
     )
     list_filter = ("category", "is_done", "is_important", "expired", "repeat")
@@ -16,7 +16,7 @@ class TaskAdmin(admin.ModelAdmin):
 
 @admin.register(Occurrence)
 class OccurrenceAdmin(admin.ModelAdmin):
-    list_display = ("title", "result", "due_date", "recorded_at", "auto_expired")
+    list_display = ("title", "user", "result", "due_date", "recorded_at", "auto_expired")
     list_filter = ("result", "auto_expired")
     search_fields = ("title",)
     list_per_page = 50
@@ -28,4 +28,14 @@ class ExerciseAdmin(admin.ModelAdmin):
     list_filter = ("mode", "is_active")
     search_fields = ("name", "slug")
     prepopulated_fields = {"slug": ("name",)}
+    list_per_page = 50
+
+
+@admin.register(WorkoutSession)
+class WorkoutSessionAdmin(admin.ModelAdmin):
+    list_display = (
+        "exercise", "user", "total_reps", "total_sets", "added_weight_kg",
+        "distance_km", "steps", "recorded_at",
+    )
+    list_filter = ("exercise",)
     list_per_page = 50

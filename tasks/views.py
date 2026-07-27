@@ -8,6 +8,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from .models import Exercise, Occurrence, Task, WorkoutSession
+from .utils import get_current_user
 
 
 def _read_category(request, default=Task.CATEGORY_GENERAL):
@@ -37,7 +38,7 @@ def task_list(request):
     valid_cats = {key for key, _ in Task.CATEGORY_CHOICES}
     active_category = cat if cat in valid_cats else ""
 
-    base_qs = Task.objects.all()
+    base_qs = Task.objects.filter(user=get_current_user())
     if active_category:
         base_qs = base_qs.filter(category=active_category)
 
@@ -46,7 +47,8 @@ def task_list(request):
 
     # Conteos por categoría para los chips de filtro
     counts = dict(
-        Task.objects.values_list("category").annotate(n=Count("id")).values_list("category", "n")
+        Task.objects.filter(user=get_current_user())
+        .values_list("category").annotate(n=Count("id")).values_list("category", "n")
     )
     category_counts = [
         {"key": key, "label": label, "count": counts.get(key, 0)}
@@ -77,6 +79,7 @@ def task_create(request):
                 interval=request.POST.get("interval") or 1,
                 custom_days=",".join(request.POST.getlist("custom_days")),
                 is_important=bool(request.POST.get("is_important")),
+                user=get_current_user(),
             )
             messages.success(request, "Tarea creada.")
         return redirect(reverse("tasks:task_list"))
@@ -92,7 +95,7 @@ def task_create(request):
 
 
 def task_edit(request, pk):
-    task = get_object_or_404(Task, pk=pk)
+    task = get_object_or_404(Task, pk=pk, user=get_current_user())
     if request.method == "POST":
         task.title = request.POST.get("title", task.title).strip()
         task.notes = request.POST.get("notes", "").strip()
@@ -118,7 +121,7 @@ def task_edit(request, pk):
 
 @require_POST
 def task_delete(request, pk):
-    task = get_object_or_404(Task, pk=pk)
+    task = get_object_or_404(Task, pk=pk, user=get_current_user())
     task.delete()
     messages.success(request, "Tarea eliminada.")
     return redirect(reverse("tasks:task_list"))
@@ -126,13 +129,13 @@ def task_delete(request, pk):
 
 @require_POST
 def task_mark_done(request, pk):
-    get_object_or_404(Task, pk=pk).mark_done()
+    get_object_or_404(Task, pk=pk, user=get_current_user()).mark_done()
     return redirect(reverse("tasks:task_list"))
 
 
 @require_POST
 def task_mark_not_done(request, pk):
-    get_object_or_404(Task, pk=pk).mark_not_done()
+    get_object_or_404(Task, pk=pk, user=get_current_user()).mark_not_done()
     return redirect(reverse("tasks:task_list"))
 
 
@@ -153,7 +156,7 @@ def task_workout(request, pk):
          el catálogo pero aún no tienen contador) -> vuelve al selector
          con un aviso, en vez de romper.
     """
-    task = get_object_or_404(Task, pk=pk)
+    task = get_object_or_404(Task, pk=pk, user=get_current_user())
     exercise_slug = request.GET.get("exercise")
 
     exercises_qs = Exercise.objects.filter(is_active=True)
@@ -190,7 +193,7 @@ def task_workout_save(request, pk):
     el navegador al terminar la sesión, las guarda, y marca la tarea
     como hecha. No se recibe ni se guarda ningún vídeo — solo números.
     """
-    task = get_object_or_404(Task, pk=pk)
+    task = get_object_or_404(Task, pk=pk, user=get_current_user())
     exercise_slug = request.GET.get("exercise", "pullup")
     exercise = Exercise.objects.filter(slug=exercise_slug).first()
     exercise_value = exercise.slug if exercise else WorkoutSession.EXERCISE_PULLUP
@@ -222,6 +225,7 @@ def task_workout_save(request, pk):
 
     WorkoutSession.objects.create(
         task=task,
+        user=get_current_user(),
         series_id=task.series_id,
         exercise=exercise_value,
         total_reps=total_reps,
@@ -251,7 +255,7 @@ def task_workout_save_manual(request, pk):
     (no fetch/JSON) — se valida, se guarda y se redirige, sin JS de por
     medio.
     """
-    task = get_object_or_404(Task, pk=pk)
+    task = get_object_or_404(Task, pk=pk, user=get_current_user())
     exercise_slug = request.GET.get("exercise", "running")
     exercise = get_object_or_404(Exercise, slug=exercise_slug, mode=Exercise.MODE_DISTANCE)
 
@@ -284,6 +288,7 @@ def task_workout_save_manual(request, pk):
 
     WorkoutSession.objects.create(
         task=task,
+        user=get_current_user(),
         series_id=task.series_id,
         exercise=exercise.slug,
         session_duration_seconds=session_duration_seconds,
@@ -307,7 +312,7 @@ def task_workout_save_manual(request, pk):
 
 def stats_list(request):
     summary = {}
-    for occ in Occurrence.objects.all().order_by("recorded_at"):
+    for occ in Occurrence.objects.filter(user=get_current_user()).order_by("recorded_at"):
         s = summary.setdefault(occ.series_id, {
             "title": occ.title, "done": 0, "not_done": 0, "series_id": occ.series_id,
         })
@@ -331,7 +336,9 @@ def stats_list(request):
 
 
 def stats_detail(request, series_id):
-    occurrences = Occurrence.objects.filter(series_id=series_id).order_by("-recorded_at")
+    occurrences = Occurrence.objects.filter(
+        series_id=series_id, user=get_current_user()
+    ).order_by("-recorded_at")
     if not occurrences.exists():
         messages.error(request, "No hay estadísticas para esa tarea.")
         return redirect(reverse("tasks:stats_list"))
