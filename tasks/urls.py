@@ -13,6 +13,11 @@ urlpatterns = [
     path("<int:pk>/entreno/", views.task_workout, name="task_workout"),
     path("<int:pk>/entreno/guardar/", views.task_workout_save, name="task_workout_save"),
     path("<int:pk>/entreno/guardar-manual/", views.task_workout_save_manual, name="task_workout_save_manual"),
+    path("<int:pk>/entreno/circuito/<int:routine_pk>/", views.routine_play, name="routine_play"),
+    path("<int:pk>/entreno/circuito/<int:routine_pk>/guardar/", views.routine_save, name="routine_save"),
+    path("circuitos/nuevo/", views.routine_create, name="routine_create"),
+    path("circuitos/<int:pk>/editar/", views.routine_edit, name="routine_edit"),
+    path("circuitos/<int:pk>/eliminar/", views.routine_delete, name="routine_delete"),
     path("estadisticas/", views.stats_list, name="stats_list"),
     path("estadisticas/<uuid:series_id>/", views.stats_detail, name="stats_detail"),
 ]

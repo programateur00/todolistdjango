@@ -1,0 +1,160 @@
+{% extends "tasks/base.html" %}
+{% load exercise_icons %}
+{% block title %}{% if routine %}Editar circuito{% else %}Nuevo circuito{% endif %}{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">circuito cronometrado</span>
+        <h1>{% if routine %}Editar «{{ routine.name }}»{% else %}Nuevo circuito{% endif %}</h1>
+    </div>
+    <a href="{{ next_url|default:'/tareas/' }}" class="stats-link">← Volver</a>
+</header>
+
+<form class="task-form routine-builder" method="post">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ next_url }}">
+    <input type="hidden" name="items" id="items-input" value="">
+
+    <label class="field">
+        <span class="field__label">Nombre del circuito</span>
+        <input type="text" name="name" maxlength="64" required
+               value="{{ routine.name|default:'Abdominales' }}">
+    </label>
+
+    <label class="field">
+        <span class="field__label">Subcategoría (opcional)</span>
+        <select name="subcategory">
+            <option value="">— sin filtrar —</option>
+            {% for value, label in subcategory_choices %}
+            <option value="{{ value }}" {% if value == initial_subcategory %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <span class="field__hint">Para que este circuito aparezca al entrenar tareas de esa subcategoría.</span>
+    </label>
+
+    <div class="field-row">
+        <label class="field">
+            <span class="field__label">Trabajo por defecto (segundos)</span>
+            <input type="number" name="default_work_seconds" min="5" step="5"
+                   value="{{ routine.default_work_seconds|default:40 }}">
+        </label>
+        <label class="field">
+            <span class="field__label">Descanso por defecto (segundos)</span>
+            <input type="number" name="default_rest_seconds" min="0" step="5"
+                   value="{{ routine.default_rest_seconds|default:20 }}">
+        </label>
+    </div>
+
+    <fieldset class="field routine-builder__picker">
+        <legend class="field__label">Ejercicios disponibles</legend>
+        <ul class="routine-builder__available" id="available-list">
+            {% for exercise in exercises %}
+            <li class="routine-builder__available-item">
+                <span class="routine-builder__icon">{% exercise_icon exercise.slug %}</span>
+                <span class="routine-builder__available-name">{{ exercise.name }}</span>
+                <button type="button" class="ghost-btn" data-add
+                        data-id="{{ exercise.pk }}" data-name="{{ exercise.name }}">+ Añadir</button>
+            </li>
+            {% empty %}
+            <li>No hay ejercicios cronometrados en el catálogo todavía.</li>
+            {% endfor %}
+        </ul>
+    </fieldset>
+
+    <fieldset class="field routine-builder__picker">
+        <legend class="field__label">Tu circuito, en orden</legend>
+        <p id="selected-empty" class="routine-builder__empty">Todavía no has añadido ningún ejercicio.</p>
+        <ol class="routine-builder__selected" id="selected-list">
+            {% for item in selected_items %}
+            <li data-seed data-id="{{ item.exercise.pk }}" data-name="{{ item.exercise.name }}"></li>
+            {% endfor %}
+        </ol>
+    </fieldset>
+
+    <div class="task-form__actions">
+        <button type="submit" class="primary-btn">Guardar circuito</button>
+    </div>
+</form>
+
+<script>
+(function(){
+    var available = document.getElementById('available-list');
+    var selected  = document.getElementById('selected-list');
+    var itemsInput = document.getElementById('items-input');
+    var emptyMsg = document.getElementById('selected-empty');
+    var order = [];
+
+    // Semilla desde los <li data-seed> que vinieron del servidor (modo
+    // edición) — se leen ANTES de que renderSelected() los borre.
+    selected.querySelectorAll('[data-seed]').forEach(function(li){
+        order.push({ id: li.dataset.id, name: li.dataset.name });
+    });
+
+    function sync(){
+        itemsInput.value = order.map(function(o){ return o.id; }).join(',');
+        emptyMsg.style.display = order.length ? 'none' : 'block';
+    }
+
+    function renderSelected(){
+        selected.innerHTML = '';
+        order.forEach(function(o, idx){
+            var li = document.createElement('li');
+            li.className = 'routine-builder__selected-item';
+
+            var name = document.createElement('span');
+            name.className = 'routine-builder__selected-name';
+            name.textContent = (idx + 1) + '. ' + o.name;
+
+            var actions = document.createElement('span');
+            actions.className = 'routine-builder__selected-actions';
+
+            var up = document.createElement('button');
+            up.type = 'button'; up.textContent = '↑'; up.setAttribute('aria-label', 'Subir');
+            up.addEventListener('click', function(){ move(idx, -1); });
+
+            var down = document.createElement('button');
+            down.type = 'button'; down.textContent = '↓'; down.setAttribute('aria-label', 'Bajar');
+            down.addEventListener('click', function(){ move(idx, 1); });
+
+            var remove = document.createElement('button');
+            remove.type = 'button'; remove.textContent = '✕'; remove.setAttribute('aria-label', 'Quitar');
+            remove.addEventListener('click', function(){ removeAt(idx); });
+
+            actions.appendChild(up);
+            actions.appendChild(down);
+            actions.appendChild(remove);
+            li.appendChild(name);
+            li.appendChild(actions);
+            selected.appendChild(li);
+        });
+        sync();
+    }
+
+    function move(idx, dir){
+        var target = idx + dir;
+        if (target < 0 || target >= order.length) return;
+        var tmp = order[idx]; order[idx] = order[target]; order[target] = tmp;
+        renderSelected();
+    }
+
+    function removeAt(idx){
+        order.splice(idx, 1);
+        renderSelected();
+    }
+
+    function add(id, name){
+        if (order.some(function(o){ return o.id === id; })) return;
+        order.push({ id: id, name: name });
+        renderSelected();
+    }
+
+    available.querySelectorAll('[data-add]').forEach(function(btn){
+        btn.addEventListener('click', function(){ add(btn.dataset.id, btn.dataset.name); });
+    });
+
+    renderSelected();
+})();
+</script>
+
+{% endblock %}

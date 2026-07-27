@@ -7,7 +7,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
-from .models import Exercise, Occurrence, Task, WorkoutSession
+from .models import Exercise, Occurrence, Routine, RoutineItem, Task, WorkoutSession
 from .utils import get_current_user
 
 
@@ -146,7 +146,10 @@ def task_workout(request, pk):
        para elegir cuál tocar hoy — filtrado por la subcategoría de la
        tarea (tren superior / tren inferior / running) si la tiene. Las
        tareas sin subcategoría (o antiguas, de antes de que existiera)
-       ven el catálogo entero, para no dejar a nadie sin opciones.
+       ven el catálogo entero, para no dejar a nadie sin opciones. Los
+       ejercicios mode="timed" (plancha, crunch…) NO salen aquí sueltos:
+       solo tienen sentido dentro de un circuito (Routine), así que se
+       ofrecen aparte, como circuitos completos.
     2. Con ?exercise=<slug>:
        - mode="pose" con contador ya construido (de momento solo
          dominadas) -> cámara con MediaPipe.
@@ -159,13 +162,15 @@ def task_workout(request, pk):
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
     exercise_slug = request.GET.get("exercise")
 
-    exercises_qs = Exercise.objects.filter(is_active=True)
+    exercises_qs = Exercise.objects.filter(is_active=True).exclude(mode=Exercise.MODE_TIMED)
+    routines_qs = Routine.objects.filter(user=get_current_user())
     if task.subcategory:
         exercises_qs = exercises_qs.filter(body_area=task.subcategory)
+        routines_qs = routines_qs.filter(subcategory=task.subcategory)
 
     if not exercise_slug:
         return render(request, "tasks/task_workout_select.html", {
-            "task": task, "exercises": exercises_qs,
+            "task": task, "exercises": exercises_qs, "routines": routines_qs,
         })
 
     exercise = get_object_or_404(Exercise, slug=exercise_slug, is_active=True)
@@ -180,7 +185,7 @@ def task_workout(request, pk):
     # que hay que ampliar (o quitar del todo si ya cubre todos los modos).
     if exercise.mode != Exercise.MODE_POSE or exercise.counter_key != "pullup":
         return render(request, "tasks/task_workout_select.html", {
-            "task": task, "exercises": exercises_qs, "unsupported": exercise,
+            "task": task, "exercises": exercises_qs, "routines": routines_qs, "unsupported": exercise,
         })
 
     return render(request, "tasks/task_workout.html", {"task": task, "exercise": exercise})
@@ -308,6 +313,174 @@ def task_workout_save_manual(request, pk):
         bits.append(f"{steps} pasos")
     messages.success(request, "Sesión de running guardada: " + ", ".join(bits) + ".")
     return redirect(reverse("tasks:task_list"))
+
+
+def _save_routine(request, routine=None):
+    """Crea o actualiza una Routine a partir del formulario del
+    constructor de circuitos. Compartido por routine_create/routine_edit."""
+    name = request.POST.get("name", "").strip() or "Circuito sin nombre"
+
+    subcategory = request.POST.get("subcategory", "")
+    valid_sub = {key for key, _ in Task.SUBCATEGORY_CHOICES}
+    if subcategory not in valid_sub:
+        subcategory = ""
+
+    try:
+        work = max(5, int(request.POST.get("default_work_seconds", 40)))
+    except (TypeError, ValueError):
+        work = 40
+    try:
+        rest = max(0, int(request.POST.get("default_rest_seconds", 20)))
+    except (TypeError, ValueError):
+        rest = 20
+
+    raw_items = request.POST.get("items", "")
+    exercise_ids = [int(x) for x in raw_items.split(",") if x.strip().isdigit()]
+    next_url = request.POST.get("next") or reverse("tasks:task_list")
+
+    if not exercise_ids:
+        messages.error(request, "Elige al menos un ejercicio para el circuito.")
+        back = reverse("tasks:routine_edit", args=[routine.pk]) if routine else reverse("tasks:routine_create")
+        return redirect(f"{back}?next={next_url}")
+
+    if routine is None:
+        routine = Routine.objects.create(
+            user=get_current_user(), name=name, subcategory=subcategory,
+            default_work_seconds=work, default_rest_seconds=rest,
+        )
+    else:
+        routine.name = name
+        routine.subcategory = subcategory
+        routine.default_work_seconds = work
+        routine.default_rest_seconds = rest
+        routine.save()
+        routine.items.all().delete()
+
+    # Solo se aceptan ejercicios mode="timed" reales — evita que alguien
+    # cuele por POST un id de ejercicio que no toca aquí.
+    valid_exercise_ids = set(
+        Exercise.objects.filter(id__in=exercise_ids, mode=Exercise.MODE_TIMED).values_list("id", flat=True)
+    )
+    order = 0
+    for eid in exercise_ids:
+        if eid not in valid_exercise_ids:
+            continue
+        RoutineItem.objects.create(routine=routine, exercise_id=eid, order=order)
+        order += 1
+
+    messages.success(request, f"Circuito «{routine.name}» guardado con {order} ejercicio(s).")
+    return redirect(next_url)
+
+
+def routine_create(request):
+    if request.method == "POST":
+        return _save_routine(request)
+    exercises = Exercise.objects.filter(
+        mode=Exercise.MODE_TIMED, is_active=True
+    ).exclude(slug="ab-circuit")
+    return render(request, "tasks/routine_form.html", {
+        "exercises": exercises,
+        "subcategory_choices": Task.SUBCATEGORY_CHOICES,
+        "initial_subcategory": request.GET.get("subcategory", ""),
+        "next_url": request.GET.get("next", ""),
+    })
+
+
+def routine_edit(request, pk):
+    routine = get_object_or_404(Routine, pk=pk, user=get_current_user())
+    if request.method == "POST":
+        return _save_routine(request, routine=routine)
+    exercises = Exercise.objects.filter(
+        mode=Exercise.MODE_TIMED, is_active=True
+    ).exclude(slug="ab-circuit")
+    return render(request, "tasks/routine_form.html", {
+        "routine": routine,
+        "exercises": exercises,
+        "subcategory_choices": Task.SUBCATEGORY_CHOICES,
+        "initial_subcategory": routine.subcategory,
+        "next_url": request.GET.get("next", ""),
+        "selected_items": list(routine.items.select_related("exercise")),
+    })
+
+
+@require_POST
+def routine_delete(request, pk):
+    routine = get_object_or_404(Routine, pk=pk, user=get_current_user())
+    routine.delete()
+    messages.success(request, "Circuito eliminado.")
+    return redirect(request.POST.get("next") or reverse("tasks:task_list"))
+
+
+def routine_play(request, pk, routine_pk):
+    """Reproductor del circuito: cronómetro por ejercicio + descanso,
+    encadenando todos los RoutineItem de la rutina. No usa cámara ni
+    MediaPipe — es solo temporizador (ver static/js/circuit.js)."""
+    task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    routine = get_object_or_404(Routine, pk=routine_pk, user=get_current_user())
+    items = list(routine.items.select_related("exercise"))
+
+    if not items:
+        messages.error(request, "Este circuito todavía no tiene ejercicios.")
+        return redirect(reverse("tasks:task_workout", args=[task.pk]))
+
+    items_data = [
+        {
+            "slug": it.exercise.slug,
+            "name": it.exercise.name,
+            "work": it.effective_work_seconds,
+            "rest": it.effective_rest_seconds,
+        }
+        for it in items
+    ]
+    return render(request, "tasks/routine_play.html", {
+        "task": task, "routine": routine, "items": items, "items_json": json.dumps(items_data),
+    })
+
+
+@require_POST
+def routine_save(request, pk, routine_pk):
+    """Guarda el resultado del circuito al terminar (o al cortarlo antes
+    de tiempo). Un único WorkoutSession con el desglose por ejercicio en
+    `sets`, igual que ya se hace con las series de dominadas."""
+    task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    routine = get_object_or_404(Routine, pk=routine_pk, user=get_current_user())
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({"ok": False, "error": "JSON inválido"}, status=400)
+
+    raw_breakdown = data.get("breakdown", [])
+    breakdown = []
+    total_seconds = 0
+    if isinstance(raw_breakdown, list):
+        for b in raw_breakdown:
+            if not isinstance(b, dict):
+                continue
+            slug = str(b.get("exercise", ""))[:32]
+            seconds = int(b.get("seconds", 0)) if isinstance(b.get("seconds"), (int, float)) else 0
+            breakdown.append({"exercise": slug, "seconds": seconds})
+            total_seconds += seconds
+
+    if not breakdown:
+        return JsonResponse({"ok": False, "error": "Sin datos que guardar"}, status=400)
+
+    WorkoutSession.objects.create(
+        task=task,
+        user=get_current_user(),
+        routine=routine,
+        exercise="ab-circuit",
+        session_duration_seconds=total_seconds,
+        sets=breakdown,
+        total_sets=len(breakdown),
+    )
+    task.mark_done()
+
+    messages.success(
+        request,
+        f"Circuito «{routine.name}» completado: {len(breakdown)} ejercicio(s), {total_seconds}s.",
+    )
+    return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
 
 
 def stats_list(request):

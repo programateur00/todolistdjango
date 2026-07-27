@@ -372,6 +372,67 @@ class Exercise(models.Model):
         return self.name
 
 
+class Routine(models.Model):
+    """
+    Circuito reutilizable de ejercicios cronometrados (ej. "Abdominales
+    completo"): una lista ordenada de Exercise con su tiempo de trabajo y
+    descanso, para no tener que montarlo cada vez desde cero. Pensada para
+    ejercicios mode='timed' (plancha, crunch…), aunque no se fuerza aquí —
+    quien monta la rutina decide qué mete.
+    """
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="routines",
+    )
+    name = models.CharField(max_length=64)
+    subcategory = models.CharField(
+        max_length=16, choices=Task.SUBCATEGORY_CHOICES, blank=True,
+        help_text="Para poder ofrecer esta rutina desde el selector de esa subcategoría de Deporte.",
+    )
+    default_work_seconds = models.PositiveIntegerField(default=40)
+    default_rest_seconds = models.PositiveIntegerField(default=20)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def total_seconds(self):
+        """Duración estimada del circuito completo, en orden (sin contar
+        que el usuario pueda saltarse o repetir ejercicios)."""
+        items = list(self.items.all())
+        work = sum(i.effective_work_seconds for i in items)
+        rest = sum(i.effective_rest_seconds for i in items[:-1])  # sin descanso tras el último
+        return work + rest
+
+
+class RoutineItem(models.Model):
+    """Un ejercicio dentro de una Routine, con su orden y tiempos propios
+    (si se dejan en blanco, usa los defaults de la rutina)."""
+    routine = models.ForeignKey(Routine, on_delete=models.CASCADE, related_name="items")
+    exercise = models.ForeignKey(Exercise, on_delete=models.CASCADE)
+    order = models.PositiveIntegerField(default=0)
+    work_seconds = models.PositiveIntegerField(null=True, blank=True)
+    rest_seconds = models.PositiveIntegerField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["order"]
+
+    def __str__(self):
+        return f"{self.routine.name} #{self.order}: {self.exercise.name}"
+
+    @property
+    def effective_work_seconds(self):
+        return self.work_seconds if self.work_seconds is not None else self.routine.default_work_seconds
+
+    @property
+    def effective_rest_seconds(self):
+        return self.rest_seconds if self.rest_seconds is not None else self.routine.default_rest_seconds
+
+
 class WorkoutSession(models.Model):
     """
     Estadísticas de una sesión de entreno. La mayoría se graban con la
@@ -384,6 +445,10 @@ class WorkoutSession(models.Model):
 
     task = models.ForeignKey(
         Task, on_delete=models.SET_NULL, null=True, blank=True, related_name="workout_sessions"
+    )
+    routine = models.ForeignKey(
+        Routine, on_delete=models.SET_NULL, null=True, blank=True, related_name="workout_sessions",
+        help_text="Si esta sesión vino de un circuito (Routine), cuál. En blanco para ejercicios sueltos.",
     )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,

@@ -35,4 +35,25 @@
     {% endfor %}
 </ul>
 
+<p class="exercise-picker__hint exercise-picker__hint--routines">O un circuito cronometrado</p>
+
+<ul class="exercise-picker">
+    {% for routine in routines %}
+    <li>
+        <a href="{% url 'tasks:routine_play' task.pk routine.pk %}" class="exercise-picker__item">
+            <span class="exercise-picker__name">{{ routine.name }}</span>
+            <span class="exercise-picker__mode">{{ routine.items.count }} ejercicios · ~{{ routine.total_seconds|floatformat:0 }}s</span>
+        </a>
+    </li>
+    {% empty %}
+    <li class="exercise-picker__empty">Todavía no has montado ningún circuito.</li>
+    {% endfor %}
+    <li>
+        <a href="{% url 'tasks:routine_create' %}?subcategory={{ task.subcategory }}&next={% url 'tasks:task_workout' task.pk %}"
+           class="exercise-picker__item exercise-picker__item--ghost">
+            <span class="exercise-picker__name">+ Montar circuito nuevo</span>
+        </a>
+    </li>
+</ul>
+
 {% endblock %}

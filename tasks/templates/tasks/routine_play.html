@@ -1,0 +1,67 @@
+{% extends "tasks/base.html" %}
+{% load static %}
+{% load exercise_icons %}
+{% block title %}{{ routine.name }} — {{ task.title }}{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">{{ routine.name }}</span>
+        <h1>{{ task.title }}</h1>
+    </div>
+    <a href="{% url 'tasks:task_workout' task.pk %}" class="stats-link">← Cambiar</a>
+</header>
+
+<div id="circuit-root"
+     data-save-url="{% url 'tasks:routine_save' task.pk routine.pk %}"
+     data-cancel-url="{% url 'tasks:task_list' %}"
+     data-items='{{ items_json }}'
+     class="circuit">
+    {% csrf_token %}
+
+    <div class="circuit__mode-select" id="circuit-mode-select">
+        <p class="circuit__mode-hint">{{ items|length }} ejercicios · ¿en orden o aleatorio?</p>
+        <div class="circuit__mode-buttons">
+            <button type="button" class="primary-btn" id="circuit-start-order">En orden</button>
+            <button type="button" class="ghost-btn" id="circuit-start-random">Aleatorio</button>
+        </div>
+    </div>
+
+    <div class="circuit__player" id="circuit-player" hidden>
+        <p class="circuit__progress" id="circuit-progress">Ejercicio 1 de {{ items|length }}</p>
+
+        <div class="circuit__icon" id="circuit-icon"></div>
+
+        <h2 class="circuit__exercise-name" id="circuit-exercise-name">—</h2>
+        <p class="circuit__phase" id="circuit-phase">Trabajo</p>
+
+        <div class="circuit__timer" id="circuit-timer">--</div>
+
+        <p class="circuit__next" id="circuit-next"></p>
+
+        <div class="circuit__controls">
+            <button type="button" class="workout__btn workout__btn--ghost" id="circuit-pause">Pausar</button>
+            <button type="button" class="workout__btn workout__btn--ghost" id="circuit-skip">Saltar ▸</button>
+            <button type="button" class="workout__btn workout__btn--ghost" id="circuit-quit">Terminar antes</button>
+        </div>
+    </div>
+
+    <div class="circuit__done" id="circuit-done" hidden>
+        <p class="circuit__done-title">¡Circuito completado! 💪</p>
+        <p id="circuit-done-summary"></p>
+        <button type="button" class="primary-btn" id="circuit-finish">Guardar y volver</button>
+    </div>
+</div>
+
+<!-- Ilustraciones precargadas y ocultas: circuit.js las va mostrando
+     según toca, sin tener que duplicar el diccionario de SVGs en JS. -->
+<div id="circuit-icons" hidden>
+    {% for item in items %}
+    <div data-slug="{{ item.exercise.slug }}">{% exercise_icon item.exercise.slug %}</div>
+    {% endfor %}
+    <div data-slug="generic">{% exercise_icon "generic" %}</div>
+</div>
+
+<script src="{% static 'js/circuit.js' %}"></script>
+
+{% endblock %}
