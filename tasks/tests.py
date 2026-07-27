@@ -197,3 +197,62 @@ class AntiTaskTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         t = Task.objects.get(title="Tarea normal")
         self.assertFalse(t.is_avoid)
+
+
+class OccurrenceIdempotencyTests(TestCase):
+    """
+    El resultado de un día es un hecho corregible, no un log que se apila.
+    Antes, marcar/desmarcar/marcar creaba 3 filas para el mismo día y
+    streak_stats() las contaba todas — rachas infladas. Además es lo que
+    permite que web y móvil resuelvan el mismo día sin duplicarlo.
+    """
+
+    def test_mark_done_twice_keeps_one_occurrence(self):
+        t = Task.objects.create(
+            title="Estudiar", due_date=date.today(), user=get_current_user(),
+        )
+        t.mark_done()
+        t.mark_not_done()
+        t.mark_done()
+        occs = Occurrence.objects.filter(series_id=t.series_id, due_date=date.today())
+        self.assertEqual(occs.count(), 1)
+        self.assertEqual(occs.first().result, Occurrence.RESULT_DONE)
+
+    def test_streak_not_inflated_by_toggling(self):
+        """Marcar y desmarcar el mismo día no debe subir la racha."""
+        t = Task.objects.create(
+            title="Leer", due_date=date.today(), user=get_current_user(),
+        )
+        t.mark_done()
+        t.mark_not_done()
+        t.mark_done()
+        stats = Occurrence.streak_stats(t.series_id)
+        self.assertEqual(stats["current_streak"], 1)
+
+    def test_two_clients_resolving_same_day_produce_one_row(self):
+        """Simula web y móvil resolviendo el mismo día por separado."""
+        t = Task.objects.create(
+            title="No fumar", due_date=date.today(), category=Task.CATEGORY_AVOID,
+            due_time=time(0, 1), user=get_current_user(),
+        )
+        t.mark_expired()          # lo resuelve el móvil
+        t2 = Task.objects.get(pk=t.pk)
+        t2.mark_expired()         # y luego la web, sin saberlo
+        self.assertEqual(
+            Occurrence.objects.filter(series_id=t.series_id, due_date=date.today()).count(), 1
+        )
+
+    def test_tasks_without_due_date_can_have_several_occurrences(self):
+        """Sin fecha no hay 'día' al que anclar: ahí sí se apilan."""
+        t = Task.objects.create(title="Cuando pueda", user=get_current_user())
+        t.mark_done()
+        t.mark_not_done()
+        self.assertEqual(Occurrence.objects.filter(series_id=t.series_id).count(), 2)
+
+    def test_sync_fields_are_unique_and_populated(self):
+        a = Task.objects.create(title="A", user=get_current_user())
+        b = Task.objects.create(title="B", user=get_current_user())
+        self.assertIsNotNone(a.uuid)
+        self.assertNotEqual(a.uuid, b.uuid)
+        self.assertIsNotNone(a.updated_at)
+        self.assertIsNone(a.deleted_at)

@@ -113,6 +113,13 @@ class Task(models.Model):
     )
 
     series_id = models.UUIDField(default=uuid.uuid4, editable=False)
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Borrado suave: si se borra de verdad, el otro dispositivo no puede "
+                   "enterarse al sincronizar y la resucitaría.",
+    )
     series_start_date = models.DateField(null=True, blank=True, editable=False)
 
     is_done = models.BooleanField(default=False)
@@ -257,16 +264,44 @@ class Task(models.Model):
                 user=self.user,
             )
 
+    def _record_occurrence(self, result, auto_expired=False):
+        """
+        Registra el resultado del día en Occurrence, de forma idempotente.
+
+        Si la tarea tiene due_date, el resultado de ESE día es un hecho
+        único que se puede corregir, no un registro que se apila: marcar
+        hecha, desmarcar y volver a marcar deja UNA sola ocurrencia con el
+        último valor, no tres. Antes se creaba una fila cada vez, lo que
+        descuadraba las rachas (ya había un duplicado real en la BD).
+
+        Además es lo que permite que web y móvil resuelvan el mismo día
+        por separado sin duplicarlo: los dos hacen update_or_create sobre
+        la misma clave y el resultado final es el mismo.
+
+        Sin due_date (tareas sueltas de "cuando pueda") no hay día al que
+        anclarlo, así que ahí sí se crea una fila normal.
+        """
+        if self.due_date is None:
+            return Occurrence.objects.create(
+                task=self, series_id=self.series_id, title=self.title,
+                result=result, due_date=None, auto_expired=auto_expired,
+                user=self.user,
+            )
+        obj, _ = Occurrence.objects.update_or_create(
+            series_id=self.series_id, due_date=self.due_date,
+            defaults=dict(
+                task=self, title=self.title, result=result,
+                auto_expired=auto_expired, user=self.user,
+            ),
+        )
+        return obj
+
     def mark_done(self):
         self.is_done = True
         self.expired = False
         self.completed_at = timezone.now()
         self.save()
-        Occurrence.objects.create(
-            task=self, series_id=self.series_id, title=self.title,
-            result=Occurrence.RESULT_DONE, due_date=self.due_date,
-            user=self.user,
-        )
+        self._record_occurrence(Occurrence.RESULT_DONE)
         self._spawn_next()
 
     def mark_not_done(self):
@@ -282,11 +317,7 @@ class Task(models.Model):
         self.expired = False
         self.completed_at = None
         self.save()
-        Occurrence.objects.create(
-            task=self, series_id=self.series_id, title=self.title,
-            result=Occurrence.RESULT_NOT_DONE, due_date=self.due_date,
-            user=self.user,
-        )
+        self._record_occurrence(Occurrence.RESULT_NOT_DONE)
 
     def mark_failed(self):
         """
@@ -301,11 +332,7 @@ class Task(models.Model):
         self.expired = False
         self.completed_at = timezone.now()
         self.save()
-        Occurrence.objects.create(
-            task=self, series_id=self.series_id, title=self.title,
-            result=Occurrence.RESULT_NOT_DONE, due_date=self.due_date,
-            user=self.user,
-        )
+        self._record_occurrence(Occurrence.RESULT_NOT_DONE)
         self._spawn_next()
 
     def mark_expired(self):
@@ -323,12 +350,7 @@ class Task(models.Model):
         self.completed_at = timezone.now()
         self.save()
         result = Occurrence.RESULT_DONE if self.is_avoid else Occurrence.RESULT_NOT_DONE
-        Occurrence.objects.create(
-            task=self, series_id=self.series_id, title=self.title,
-            result=result, due_date=self.due_date,
-            auto_expired=True,
-            user=self.user,
-        )
+        self._record_occurrence(result, auto_expired=True)
         self._spawn_next()
 
     @classmethod
@@ -444,6 +466,9 @@ class Routine(models.Model):
     default_work_seconds = models.PositiveIntegerField(default=40)
     default_rest_seconds = models.PositiveIntegerField(default=20)
     created_at = models.DateTimeField(auto_now_add=True)
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["name"]
@@ -529,6 +554,9 @@ class WorkoutSession(models.Model):
     distance_km = models.FloatField(null=True, blank=True, help_text="Solo running: km recorridos.")
     steps = models.PositiveIntegerField(null=True, blank=True, help_text="Solo running: pasos, si los tienes (cinta, reloj…).")
     recorded_at = models.DateTimeField(auto_now_add=True)
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-recorded_at"]
@@ -570,9 +598,23 @@ class Occurrence(models.Model):
     due_date = models.DateField(null=True, blank=True)
     auto_expired = models.BooleanField(default=False)
     recorded_at = models.DateTimeField(auto_now_add=True)
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-recorded_at"]
+        constraints = [
+            # Un único resultado por día y serie. Ver Task._record_occurrence:
+            # el resultado de un día es un hecho corregible, no un log que se
+            # apila. Solo aplica cuando hay due_date — las tareas sueltas sin
+            # fecha no tienen "día" al que anclarse.
+            models.UniqueConstraint(
+                fields=["series_id", "due_date"],
+                condition=models.Q(due_date__isnull=False),
+                name="unique_occurrence_per_series_day",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.title} — {self.get_result_display()} ({self.recorded_at:%Y-%m-%d})"
