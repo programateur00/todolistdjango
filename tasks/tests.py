@@ -180,8 +180,16 @@ class AntiTaskTests(TestCase):
 
     def test_create_form_saves_is_avoid(self):
         resp = self.client.post(reverse("tasks:task_create"), {
-            "title": "No fumar", "is_avoid": "on", "repeat": Task.REPEAT_NONE, "interval": 1,
+            "title": "No fumar", "task_type": "avoid", "repeat": Task.REPEAT_NONE, "interval": 1,
         })
         self.assertEqual(resp.status_code, 302)
         t = Task.objects.get(title="No fumar")
         self.assertTrue(t.is_avoid)
+
+    def test_create_form_defaults_to_do_type(self):
+        resp = self.client.post(reverse("tasks:task_create"), {
+            "title": "Tarea normal", "task_type": "do", "repeat": Task.REPEAT_NONE, "interval": 1,
+        })
+        self.assertEqual(resp.status_code, 302)
+        t = Task.objects.get(title="Tarea normal")
+        self.assertFalse(t.is_avoid)

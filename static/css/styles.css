@@ -180,7 +180,6 @@ button { font-family:var(--font-b); cursor:pointer; }
 .field--inline { flex-direction:row; align-items:center; gap:10px; }
 .field__label { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-faded); font-weight:600; }
 .field__hint  { font-size:11px; color:var(--ink-faded); margin-top:2px; }
-.field__hint--avoid { display:block; margin:-6px 0 4px; }
 .field input[type="text"],
 .field input[type="date"],
 .field input[type="time"],
@@ -255,6 +254,20 @@ button { font-family:var(--font-b); cursor:pointer; }
 .category-option--personal:has(input:checked) { background:var(--personal); border-color:var(--personal); }
 .category-option--general:has(input:checked)  { background:var(--sage); border-color:var(--sage); }
 .category-option--other:has(input:checked)    { background:var(--other); border-color:var(--other); }
+
+.task-type-options { display:flex; flex-direction:column; gap:8px; }
+.task-type-option { display:flex; align-items:flex-start; gap:10px; padding:12px 14px;
+  border:1px solid var(--line); border-radius:var(--radius); background:var(--paper);
+  cursor:pointer; transition:all .15s; }
+.task-type-option input { accent-color:var(--ink); margin-top:3px; }
+.task-type-option__icon { font-size:16px; line-height:1.3; }
+.task-type-option__text { display:flex; flex-direction:column; gap:2px; }
+.task-type-option__title { font-weight:600; font-size:14px; }
+.task-type-option__desc { font-size:12px; color:var(--ink-faded); }
+.task-type-option--do:has(input:checked)    { background:var(--sage-soft); border-color:var(--sage); }
+.task-type-option--avoid:has(input:checked) { background:var(--ink); border-color:var(--ink); }
+.task-type-option--avoid:has(input:checked) .task-type-option__title { color:var(--paper); }
+.task-type-option--avoid:has(input:checked) .task-type-option__desc  { color:var(--cream-soft); }
 
 .category-filter { display:flex; flex-wrap:wrap; gap:6px; margin:18px 0 6px; }
 .category-chip { display:inline-flex; align-items:center; gap:6px; padding:6px 12px;

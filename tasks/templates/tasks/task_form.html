@@ -70,15 +70,27 @@
         <span class="field__label">Marcar como importante</span>
     </label>
 
-    <label class="field field--inline">
-        <input type="checkbox" name="is_avoid" {% if task.is_avoid %}checked{% endif %}>
-        <span class="field__label">Es una antitarea (el objetivo es NO hacerlo)</span>
-    </label>
-    <span class="field__hint field__hint--avoid">
-        Para hábitos que quieres evitar (ej. "no fumar"). Ponle hora límite por la noche:
-        si no tocas nada antes de esa hora, cuenta automáticamente como éxito — solo hace
-        falta que marques algo si caes ese día.
-    </span>
+    <fieldset class="field">
+        <legend class="field__label">¿Qué tipo de tarea es?</legend>
+        <div class="task-type-options">
+            <label class="task-type-option task-type-option--do">
+                <input type="radio" name="task_type" value="do" {% if not task.is_avoid %}checked{% endif %}>
+                <span class="task-type-option__icon">✓</span>
+                <span class="task-type-option__text">
+                    <span class="task-type-option__title">Hacer</span>
+                    <span class="task-type-option__desc">La marcas cuando la haces.</span>
+                </span>
+            </label>
+            <label class="task-type-option task-type-option--avoid">
+                <input type="radio" name="task_type" value="avoid" {% if task.is_avoid %}checked{% endif %}>
+                <span class="task-type-option__icon">🚫</span>
+                <span class="task-type-option__text">
+                    <span class="task-type-option__title">Antitarea</span>
+                    <span class="task-type-option__desc">Algo que NO quieres hacer (ej. "no fumar"). Ponle hora límite por la noche: si no tocas nada antes de esa hora, cuenta como éxito — solo hace falta marcar algo si caes.</span>
+                </span>
+            </label>
+        </div>
+    </fieldset>
 
     <fieldset class="field">
         <legend class="field__label">Tipo de tarea</legend>
