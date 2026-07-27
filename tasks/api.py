@@ -18,7 +18,7 @@ protección CSRF existe para ataques basados en cookies, y aquí no aplica.
 import json
 from functools import wraps
 
-from django.http import JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils.dateparse import parse_date, parse_time
 from django.views.decorators.csrf import csrf_exempt
@@ -43,6 +43,14 @@ def api(*methods):
                 return view(request, *args, **kwargs)
             except json.JSONDecodeError:
                 return JsonResponse({"ok": False, "error": "JSON inválido"}, status=400)
+            except Http404:
+                # Sin esto Django devuelve su página HTML de "Page not
+                # found", la app hace resp.json(), revienta, y el usuario
+                # ve un error incomprensible en vez de saber qué pasó.
+                return JsonResponse(
+                    {"ok": False, "error": "No encontrado (¿ya se había borrado?)"},
+                    status=404,
+                )
         return wrapper
     return decorator
 

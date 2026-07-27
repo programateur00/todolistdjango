@@ -341,3 +341,21 @@ class ApiTests(TestCase):
         r = self.client.post("/api/tasks/create/", data="{no es json", content_type="application/json")
         self.assertEqual(r.status_code, 400)
         self.assertEqual(r.json()["ok"], False)
+
+    def test_not_found_returns_json_not_html(self):
+        """Regresión: pedir algo inexistente devolvía la página HTML de
+        Django, la app hacía resp.json(), reventaba, y el usuario veía un
+        error incomprensible en vez de saber qué había pasado."""
+        r = self.client.delete("/api/tasks/00000000-0000-0000-0000-000000000000/")
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(r["Content-Type"], "application/json")
+        self.assertFalse(r.json()["ok"])
+
+    def test_deleting_twice_gives_clean_json_error(self):
+        """Borrar dos veces (p.ej. reintento de la cola sin conexión) no
+        debe soltar HTML."""
+        uuid_ = self._post("/api/tasks/create/", {"title": "Doble borrado"}).json()["task"]["uuid"]
+        self.assertEqual(self.client.delete(f"/api/tasks/{uuid_}/").status_code, 200)
+        r2 = self.client.delete(f"/api/tasks/{uuid_}/")
+        self.assertEqual(r2.status_code, 404)
+        self.assertEqual(r2["Content-Type"], "application/json")
