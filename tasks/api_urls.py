@@ -1,0 +1,30 @@
+"""
+Rutas de la API JSON (para la app móvil). Se montan bajo /api/ — ver
+todoapp/urls.py. Ese prefijo es también el que usa CORS_URLS_REGEX en
+settings, así que si mueves esto de sitio, acuérdate de cambiarlo allí.
+"""
+from django.urls import path
+
+from . import api
+
+app_name = "api"
+
+urlpatterns = [
+    path("meta/", api.meta, name="meta"),
+
+    path("tasks/", api.task_list, name="task_list"),
+    path("tasks/create/", api.task_create, name="task_create"),
+    path("tasks/<uuid:uuid>/", api.task_detail, name="task_detail"),
+    path("tasks/<uuid:uuid>/mark/<str:action>/", api.task_mark, name="task_mark"),
+
+    path("exercises/", api.exercise_list, name="exercise_list"),
+
+    path("routines/", api.routine_list, name="routine_list"),
+    path("routines/<uuid:uuid>/", api.routine_detail, name="routine_detail"),
+
+    path("tasks/<uuid:uuid>/workout/", api.workout_save, name="workout_save"),
+    path("tasks/<uuid:uuid>/workout-manual/", api.workout_save_manual, name="workout_save_manual"),
+    path("tasks/<uuid:uuid>/circuit/<uuid:routine_uuid>/", api.routine_result, name="routine_result"),
+
+    path("stats/", api.stats_list, name="stats_list"),
+]

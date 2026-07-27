@@ -40,6 +40,34 @@ if DEBUG:
 CSRF_TRUSTED_ORIGINS = [f"https://{h}" for h in ALLOWED_HOSTS if h not in ("localhost", "127.0.0.1")]
 
 # --------------------------------------------------------------
+# CORS — para que la app móvil (Capacitor) pueda llamar a la API.
+# --------------------------------------------------------------
+# Capacitor no sirve la app desde tu dominio: en Android usa
+# "https://localhost" y en iOS "capacitor://localhost" como origen. Para
+# el navegador eso es un sitio DISTINTO al de tu servidor, así que sin
+# esto todas las llamadas de la app fallarían por política de mismo
+# origen — y el error que ves en consola no dice claramente el motivo.
+CORS_ALLOWED_ORIGINS = [
+    "https://localhost",
+    "http://localhost",
+    "capacitor://localhost",
+    "ionic://localhost",
+]
+# Durante el desarrollo con recarga en vivo, Capacitor sirve desde la IP
+# de tu ordenador en un puerto cualquiera. Añádelos aquí vía entorno,
+# separados por comas, en vez de abrir CORS a todo el mundo.
+_extra_cors = os.environ.get("EXTRA_CORS_ORIGINS", "")
+CORS_ALLOWED_ORIGINS += [o.strip() for o in _extra_cors.split(",") if o.strip()]
+
+# La API se autentica con la cabecera Authorization (Basic), no con
+# cookies de sesión, así que no hace falta permitir credenciales.
+CORS_ALLOW_CREDENTIALS = False
+
+# Solo se aplica CORS bajo /api/ — el resto del sitio (la web normal) no
+# necesita ni debe aceptar peticiones de otros orígenes.
+CORS_URLS_REGEX = r"^/api/.*$"
+
+# --------------------------------------------------------------
 # CANDADO DE USUARIO/CONTRASEÑA (solo para ti)
 # Define BASIC_AUTH_USER y BASIC_AUTH_PASSWORD como variables de
 # entorno en el hosting para proteger TODA la app con un login
@@ -60,11 +88,17 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'corsheaders',
     'tasks',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # CorsMiddleware tiene que ir lo más arriba posible, y SIEMPRE por
+    # encima de CommonMiddleware: si va por debajo, las respuestas de
+    # redirección salen sin las cabeceras CORS y el navegador de la app
+    # las bloquea sin decir por qué.
+    'corsheaders.middleware.CorsMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',

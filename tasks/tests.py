@@ -1,9 +1,10 @@
+import json
 from datetime import date, time, timedelta
 
 from django.test import TestCase
 from django.urls import reverse
 
-from .models import Occurrence, Task
+from .models import Exercise, Occurrence, Task
 from .utils import get_current_user
 
 
@@ -256,3 +257,87 @@ class OccurrenceIdempotencyTests(TestCase):
         self.assertNotEqual(a.uuid, b.uuid)
         self.assertIsNotNone(a.updated_at)
         self.assertIsNone(a.deleted_at)
+
+
+class ApiTests(TestCase):
+    """API JSON que consume la app móvil."""
+
+    def _post(self, url, payload):
+        return self.client.post(url, data=json.dumps(payload), content_type="application/json")
+
+    def _patch(self, url, payload):
+        return self.client.patch(url, data=json.dumps(payload), content_type="application/json")
+
+    def test_create_and_list(self):
+        r = self._post("/api/tasks/create/", {"title": "Desde la app", "category": "study"})
+        self.assertEqual(r.status_code, 201)
+        self.assertTrue(r.json()["ok"])
+        r = self.client.get("/api/tasks/")
+        self.assertEqual(len(r.json()["pending"]), 1)
+
+    def test_dates_are_parsed_not_passed_through(self):
+        """Regresión: asignar la fecha como cadena rompía el serializador."""
+        r = self._post("/api/tasks/create/", {"title": "Con fecha", "due_date": "2026-07-27", "due_time": "22:00"})
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.json()["task"]["due_date"], "2026-07-27")
+        self.assertEqual(r.json()["task"]["due_time"], "22:00")
+
+    def test_invalid_date_is_rejected_cleanly(self):
+        r = self._post("/api/tasks/create/", {"title": "X", "due_date": "27-07-2026"})
+        self.assertEqual(r.status_code, 400)
+
+    def test_invalid_category_falls_back(self):
+        """La app no debe poder meter valores fuera de los choices."""
+        r = self._post("/api/tasks/create/", {"title": "X", "category": "inventada"})
+        self.assertEqual(r.json()["task"]["category"], Task.CATEGORY_GENERAL)
+
+    def test_empty_title_rejected(self):
+        r = self._post("/api/tasks/create/", {"title": "   "})
+        self.assertEqual(r.status_code, 400)
+
+    def test_delete_is_soft_and_hides_task(self):
+        r = self._post("/api/tasks/create/", {"title": "Borrame"})
+        uuid_ = r.json()["task"]["uuid"]
+        self.client.delete(f"/api/tasks/{uuid_}/")
+        t = Task.objects.get(uuid=uuid_)
+        self.assertIsNotNone(t.deleted_at)  # la fila sigue existiendo
+        listed = self.client.get("/api/tasks/").json()
+        self.assertEqual(len(listed["pending"]) + len(listed["completed"]), 0)
+
+    def test_mark_actions(self):
+        r = self._post("/api/tasks/create/", {"title": "Marcame"})
+        uuid_ = r.json()["task"]["uuid"]
+        self.assertEqual(self.client.post(f"/api/tasks/{uuid_}/mark/done/").status_code, 200)
+        self.assertEqual(self.client.post(f"/api/tasks/{uuid_}/mark/inventada/").status_code, 400)
+
+    def test_routine_rejects_non_timed_exercises(self):
+        """Un circuito solo admite ejercicios cronometrados: por API no se
+        debe poder colar uno de cámara."""
+        Exercise.objects.create(slug="plank-t", name="Plancha", mode=Exercise.MODE_TIMED)
+        Exercise.objects.create(slug="pullup-t", name="Dominadas", mode=Exercise.MODE_POSE)
+        r = self._post("/api/routines/", {"name": "Mixto", "items": ["plank-t", "pullup-t"]})
+        self.assertEqual(r.status_code, 201)
+        slugs = [i["slug"] for i in r.json()["routine"]["items"]]
+        self.assertEqual(slugs, ["plank-t"])
+
+    def test_routine_needs_at_least_one_exercise(self):
+        r = self._post("/api/routines/", {"name": "Vacio", "items": []})
+        self.assertEqual(r.status_code, 400)
+
+    def test_cors_allows_capacitor_origin_only(self):
+        r = self.client.get("/api/tasks/", HTTP_ORIGIN="https://localhost")
+        self.assertEqual(r.headers.get("Access-Control-Allow-Origin"), "https://localhost")
+        r = self.client.get("/api/tasks/", HTTP_ORIGIN="https://evil.example.com")
+        self.assertIsNone(r.headers.get("Access-Control-Allow-Origin"))
+
+    def test_cors_not_applied_outside_api(self):
+        """La web normal no debe aceptar peticiones de otros orígenes."""
+        r = self.client.get(reverse("tasks:task_list"), HTTP_ORIGIN="https://localhost")
+        self.assertIsNone(r.headers.get("Access-Control-Allow-Origin"))
+
+    def test_malformed_json_returns_json_not_html(self):
+        """Si la app manda basura, debe recibir JSON — no una página de
+        error HTML que no sabría interpretar."""
+        r = self.client.post("/api/tasks/create/", data="{no es json", content_type="application/json")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.json()["ok"], False)
