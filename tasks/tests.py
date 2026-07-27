@@ -1,4 +1,4 @@
-from datetime import date, time
+from datetime import date, time, timedelta
 
 from django.test import TestCase
 from django.urls import reverse
@@ -113,3 +113,75 @@ class CategoryViewTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         t.refresh_from_db()
         self.assertEqual(t.category, Task.CATEGORY_WORK)
+
+
+class AntiTaskTests(TestCase):
+    def test_normal_task_silence_is_failure(self):
+        """Una tarea normal, si pasa la hora sin tocar nada, cuenta como fallo."""
+        t = Task.objects.create(
+            title="Estudiar", due_time=time(0, 1), is_avoid=False, user=get_current_user(),
+        )
+        t.mark_expired()
+        occ = Occurrence.objects.filter(series_id=t.series_id).latest("recorded_at")
+        self.assertEqual(occ.result, Occurrence.RESULT_NOT_DONE)
+        self.assertTrue(t.is_done)
+        self.assertTrue(t.expired)
+
+    def test_avoid_task_silence_is_success(self):
+        """Una antitarea, si pasa la hora sin tocar nada, cuenta como éxito
+        (silencio = lo evitaste) — justo lo contrario de una tarea normal."""
+        t = Task.objects.create(
+            title="No fumar", due_time=time(0, 1), is_avoid=True, user=get_current_user(),
+        )
+        t.mark_expired()
+        occ = Occurrence.objects.filter(series_id=t.series_id).latest("recorded_at")
+        self.assertEqual(occ.result, Occurrence.RESULT_DONE)
+        self.assertTrue(t.is_done)
+        self.assertTrue(t.expired)
+
+    def test_expire_overdue_picks_up_avoid_task(self):
+        """El barrido automático (el que se llama al abrir la lista) también
+        debe resolver en éxito una antitarea vencida, sin tocar nada a mano."""
+        t = Task.objects.create(
+            title="No gastar de más", due_time=time(0, 1), is_avoid=True, user=get_current_user(),
+        )
+        expired = Task.expire_overdue()
+        self.assertIn(t, expired)
+        t.refresh_from_db()
+        self.assertTrue(t.is_done)
+        occ = Occurrence.objects.filter(series_id=t.series_id).latest("recorded_at")
+        self.assertEqual(occ.result, Occurrence.RESULT_DONE)
+
+    def test_mark_failed_spawns_next_occurrence(self):
+        """"He caído hoy" en una antitarea diaria debe seguir generando
+        mañana — si no, la serie se quedaría colgada la primera vez que caes."""
+        t = Task.objects.create(
+            title="No fumar", due_date=date.today(), repeat=Task.REPEAT_DAILY,
+            interval=1, is_avoid=True, subcategory=Task.SUBCATEGORY_UPPER_BODY,
+            user=get_current_user(),
+        )
+        t.mark_failed()
+        occ = Occurrence.objects.filter(series_id=t.series_id).latest("recorded_at")
+        self.assertEqual(occ.result, Occurrence.RESULT_NOT_DONE)
+        self.assertTrue(t.is_done)  # se resuelve el dia, a diferencia de mark_not_done()
+
+        next_task = Task.objects.exclude(pk=t.pk).get(series_id=t.series_id)
+        self.assertEqual(next_task.due_date, date.today() + timedelta(days=1))
+        self.assertTrue(next_task.is_avoid)  # se propaga a la siguiente
+        self.assertEqual(next_task.subcategory, Task.SUBCATEGORY_UPPER_BODY)  # bonus: ya no se pierde
+
+    def test_mark_not_done_still_used_for_undo_stays_unchanged(self):
+        """mark_not_done() (el botón "Desmarcar") no debe tocarse: sigue
+        dejando is_done=False y sin generar la siguiente ocurrencia."""
+        t = Task.objects.create(title="X", is_avoid=True, user=get_current_user())
+        t.mark_done()
+        t.mark_not_done()
+        self.assertFalse(t.is_done)
+
+    def test_create_form_saves_is_avoid(self):
+        resp = self.client.post(reverse("tasks:task_create"), {
+            "title": "No fumar", "is_avoid": "on", "repeat": Task.REPEAT_NONE, "interval": 1,
+        })
+        self.assertEqual(resp.status_code, 302)
+        t = Task.objects.get(title="No fumar")
+        self.assertTrue(t.is_avoid)

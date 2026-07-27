@@ -66,14 +66,16 @@
                 {% else %}
                 <form action="{% url 'tasks:task_mark_done' task.pk %}" method="post">
                     {% csrf_token %}
-                    <button type="submit" class="check-btn check-btn--done" title="Marcar como hecha">
+                    <button type="submit" class="check-btn check-btn--done"
+                        title="{% if task.is_avoid %}Confirmar que lo he evitado hoy{% else %}Marcar como hecha{% endif %}">
                         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6"/></svg>
                     </button>
                 </form>
                 {% endif %}
-                <form action="{% url 'tasks:task_mark_not_done' task.pk %}" method="post">
+                <form action="{% if task.is_avoid %}{% url 'tasks:task_mark_failed' task.pk %}{% else %}{% url 'tasks:task_mark_not_done' task.pk %}{% endif %}" method="post">
                     {% csrf_token %}
-                    <button type="submit" class="check-btn check-btn--undone" title="Marcar como no hecha">
+                    <button type="submit" class="check-btn check-btn--undone"
+                        title="{% if task.is_avoid %}Marcar que he caído hoy{% else %}Marcar como no hecha{% endif %}">
                         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
                     </button>
                 </form>
@@ -83,11 +85,16 @@
                 <p class="task-card__title">{{ task.title }}</p>
                 <div class="task-card__meta">
                     <span class="meta-pill meta-pill--category meta-pill--{{ task.category }}">{{ task.get_category_display }}</span>
+                    {% if task.is_avoid %}
+                        <span class="meta-pill meta-pill--avoid" title="Silencio antes de la hora límite = éxito">🚫 antitarea</span>
+                    {% endif %}
                     {% if task.due_date %}
                         <span class="meta-pill meta-pill--date">{{ task.due_date|date:"d \d\e M" }}</span>
                     {% endif %}
                     {% if task.due_time %}
-                        {% if overdue %}
+                        {% if task.is_avoid %}
+                            <span class="meta-pill meta-pill--time">🌙 se resuelve sola a las {{ task.due_time|time:"H:i" }}</span>
+                        {% elif overdue %}
                             <span class="meta-pill meta-pill--time meta-pill--late">⏰ Hora límite pasada</span>
                         {% elif mins is not None and mins <= 60 %}
                             <span class="meta-pill meta-pill--time meta-pill--urgent">⚡ {{ mins }} min</span>
@@ -140,7 +147,13 @@
             <div class="task-card__body">
                 <p class="task-card__title task-card__title--struck">
                     <span class="strike-wrap">{{ task.title }}</span>
-                    {% if task.expired %}<span class="expired-badge">expirada</span>{% endif %}
+                    {% if task.expired %}
+                        {% if task.is_avoid %}
+                            <span class="expired-badge expired-badge--avoid-success">✓ evitado (sin marcar)</span>
+                        {% else %}
+                            <span class="expired-badge">expirada</span>
+                        {% endif %}
+                    {% endif %}
                 </p>
             </div>
             <form action="{% url 'tasks:task_delete' task.pk %}" method="post" class="task-card__delete">

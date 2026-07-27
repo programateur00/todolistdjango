@@ -10,6 +10,7 @@ urlpatterns = [
     path("<int:pk>/eliminar/", views.task_delete, name="task_delete"),
     path("<int:pk>/hecho/", views.task_mark_done, name="task_mark_done"),
     path("<int:pk>/no-hecho/", views.task_mark_not_done, name="task_mark_not_done"),
+    path("<int:pk>/caido/", views.task_mark_failed, name="task_mark_failed"),
     path("<int:pk>/entreno/", views.task_workout, name="task_workout"),
     path("<int:pk>/entreno/guardar/", views.task_workout_save, name="task_workout_save"),
     path("<int:pk>/entreno/guardar-manual/", views.task_workout_save_manual, name="task_workout_save_manual"),

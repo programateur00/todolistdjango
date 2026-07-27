@@ -94,6 +94,12 @@ class Task(models.Model):
         blank=True,
         help_text="Solo aplica si category='sport'. Filtra qué ejercicios se ofrecen al entrenar.",
     )
+    is_avoid = models.BooleanField(
+        default=False,
+        help_text="Antitarea: el objetivo es NO hacerlo (ej. \"no fumar\"). Si no marcas nada "
+                   "antes de la hora límite, cuenta como éxito — silencio es que lo evitaste. "
+                   "Solo hace falta tocar algo si caes.",
+    )
     due_date = models.DateField(null=True, blank=True)
     due_time = models.TimeField(null=True, blank=True,
         help_text="Hora límite. Si pasa sin marcarla, se auto-marca como no hecha.")
@@ -234,10 +240,11 @@ class Task(models.Model):
         if self.repeat != self.REPEAT_NONE and self.due_date:
             Task.objects.create(
                 title=self.title, notes=self.notes,
-                category=self.category,
+                category=self.category, subcategory=self.subcategory,
                 due_date=self.next_due_date(), due_time=self.due_time,
                 repeat=self.repeat, interval=self.interval,
                 custom_days=self.custom_days, is_important=self.is_important,
+                is_avoid=self.is_avoid,
                 series_id=self.series_id, series_start_date=self.series_start_date,
                 user=self.user,
             )
@@ -255,6 +262,14 @@ class Task(models.Model):
         self._spawn_next()
 
     def mark_not_done(self):
+        """
+        Se usa para "Desmarcar" una tarea ya hecha (volver a pendiente) y
+        también para loguear un "no" desde pendientes sin resolver el día.
+        A propósito NO genera la siguiente ocurrencia — si lo hiciera,
+        "Desmarcar" ya no podría deshacer nada (is_done volvería a True
+        en el mismo instante). Para antitareas, el botón "he caído hoy"
+        usa mark_failed() en su lugar, que sí resuelve el día.
+        """
         self.is_done = False
         self.expired = False
         self.completed_at = None
@@ -265,15 +280,44 @@ class Task(models.Model):
             user=self.user,
         )
 
-    def mark_expired(self):
-        """Llamado cuando pasa la hora límite sin completarse."""
+    def mark_failed(self):
+        """
+        Para antitareas: "he caído hoy". A diferencia de mark_not_done()
+        (que deja is_done=False porque también sirve para deshacer una
+        tarea ya hecha), esto SÍ resuelve el día como mark_done() —
+        is_done=True y genera la siguiente ocurrencia si se repite. Sin
+        esto, una antitarea diaria se quedaría colgada la primera vez que
+        cayeras, en vez de seguir pidiéndote el check-in cada noche.
+        """
         self.is_done = True
-        self.expired = True
+        self.expired = False
         self.completed_at = timezone.now()
         self.save()
         Occurrence.objects.create(
             task=self, series_id=self.series_id, title=self.title,
             result=Occurrence.RESULT_NOT_DONE, due_date=self.due_date,
+            user=self.user,
+        )
+        self._spawn_next()
+
+    def mark_expired(self):
+        """
+        Llamado cuando pasa la hora límite sin que se haya marcado nada.
+
+        Para una tarea normal, silencio = no lo hiciste (fallo). Para una
+        antitarea (is_avoid=True) es justo al revés: silencio = no caíste,
+        así que cuenta como éxito. La única diferencia está en qué
+        resultado se guarda; is_done/expired se comportan igual en ambos
+        casos (la tarea se resuelve sola, sin que tengas que tocar nada).
+        """
+        self.is_done = True
+        self.expired = True
+        self.completed_at = timezone.now()
+        self.save()
+        result = Occurrence.RESULT_DONE if self.is_avoid else Occurrence.RESULT_NOT_DONE
+        Occurrence.objects.create(
+            task=self, series_id=self.series_id, title=self.title,
+            result=result, due_date=self.due_date,
             auto_expired=True,
             user=self.user,
         )

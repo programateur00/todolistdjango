@@ -70,6 +70,16 @@
         <span class="field__label">Marcar como importante</span>
     </label>
 
+    <label class="field field--inline">
+        <input type="checkbox" name="is_avoid" {% if task.is_avoid %}checked{% endif %}>
+        <span class="field__label">Es una antitarea (el objetivo es NO hacerlo)</span>
+    </label>
+    <span class="field__hint field__hint--avoid">
+        Para hábitos que quieres evitar (ej. "no fumar"). Ponle hora límite por la noche:
+        si no tocas nada antes de esa hora, cuenta automáticamente como éxito — solo hace
+        falta que marques algo si caes ese día.
+    </span>
+
     <fieldset class="field">
         <legend class="field__label">Tipo de tarea</legend>
         <div class="category-options" id="category-options">

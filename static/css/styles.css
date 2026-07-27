@@ -128,6 +128,7 @@ button { font-family:var(--font-b); cursor:pointer; }
 .expired-badge { display:inline-block; font-size:10px; text-transform:uppercase;
   letter-spacing:.05em; background:var(--danger-soft); color:var(--danger);
   padding:1px 6px; border-radius:999px; margin-left:8px; vertical-align:middle; }
+.expired-badge--avoid-success { background:var(--sage-soft); color:var(--sage); }
 
 .task-card__meta { display:flex; gap:6px; flex-wrap:wrap; }
 .meta-pill { font-size:11px; padding:2px 8px; border-radius:999px;
@@ -136,6 +137,7 @@ button { font-family:var(--font-b); cursor:pointer; }
 .meta-pill--time   { background:var(--cream-soft); }
 .meta-pill--urgent { background:#FFF3CD; color:#7D5A00; font-weight:600; }
 .meta-pill--late   { background:var(--danger-soft); color:var(--danger); font-weight:600; }
+.meta-pill--avoid  { background:var(--ink); color:var(--paper); font-weight:600; }
 
 .task-card__delete button { border:none; background:transparent; color:var(--ink-faded);
   width:28px; height:28px; display:flex; align-items:center; justify-content:center; border-radius:8px; }
@@ -178,6 +180,7 @@ button { font-family:var(--font-b); cursor:pointer; }
 .field--inline { flex-direction:row; align-items:center; gap:10px; }
 .field__label { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-faded); font-weight:600; }
 .field__hint  { font-size:11px; color:var(--ink-faded); margin-top:2px; }
+.field__hint--avoid { display:block; margin:-6px 0 4px; }
 .field input[type="text"],
 .field input[type="date"],
 .field input[type="time"],

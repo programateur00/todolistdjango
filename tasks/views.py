@@ -79,6 +79,7 @@ def task_create(request):
                 interval=request.POST.get("interval") or 1,
                 custom_days=",".join(request.POST.getlist("custom_days")),
                 is_important=bool(request.POST.get("is_important")),
+                is_avoid=bool(request.POST.get("is_avoid")),
                 user=get_current_user(),
             )
             messages.success(request, "Tarea creada.")
@@ -107,6 +108,7 @@ def task_edit(request, pk):
         task.interval = request.POST.get("interval") or 1
         task.custom_days = ",".join(request.POST.getlist("custom_days"))
         task.is_important = bool(request.POST.get("is_important"))
+        task.is_avoid = bool(request.POST.get("is_avoid"))
         task.save()
         messages.success(request, "Tarea actualizada.")
         return redirect(reverse("tasks:task_list"))
@@ -136,6 +138,13 @@ def task_mark_done(request, pk):
 @require_POST
 def task_mark_not_done(request, pk):
     get_object_or_404(Task, pk=pk, user=get_current_user()).mark_not_done()
+    return redirect(reverse("tasks:task_list"))
+
+
+@require_POST
+def task_mark_failed(request, pk):
+    """Antitareas: "he caído hoy" — ver Task.mark_failed()."""
+    get_object_or_404(Task, pk=pk, user=get_current_user()).mark_failed()
     return redirect(reverse("tasks:task_list"))
 
 
