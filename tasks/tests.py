@@ -145,9 +145,15 @@ class AntiTaskTests(TestCase):
 
     def test_expire_overdue_picks_up_avoid_task(self):
         """El barrido automático (el que se llama al abrir la lista) también
-        debe resolver en éxito una antitarea vencida, sin tocar nada a mano."""
+        debe resolver en éxito una antitarea vencida, sin tocar nada a mano.
+
+        Lleva fecha de ayer a propósito: sin fecha, la hora se ancla al día
+        de creación, y una tarea creada ahora mismo aún no habría vencido.
+        """
+        yesterday = date.today() - timedelta(days=1)
         t = Task.objects.create(
-            title="No gastar de más", due_time=time(0, 1), category=Task.CATEGORY_AVOID, user=get_current_user(),
+            title="No gastar de más", due_date=yesterday, due_time=time(12, 0),
+            category=Task.CATEGORY_AVOID, user=get_current_user(),
         )
         expired = Task.expire_overdue()
         self.assertIn(t, expired)
@@ -351,11 +357,17 @@ class ReopenTests(TestCase):
         None y la protección de reapertura se saltaba por completo. El
         botón de deshacer parecía roto justo en ese caso.
         """
-        past = (timezone.localtime(timezone.now()) - timedelta(hours=5)).time().replace(microsecond=0)
         t = Task.objects.create(
             title="No fumar", category=Task.CATEGORY_AVOID,
-            due_date=None, due_time=past, user=get_current_user(),
+            due_date=None, due_time=time(12, 0), user=get_current_user(),
         )
+        # Sin fecha, la hora se ancla al día de creación. Para que esté
+        # vencida de verdad hay que simular que se creó ayer — si no, su
+        # límite sería hoy a las 12:00 y podría estar aún por llegar.
+        Task.objects.filter(pk=t.pk).update(
+            created_at=timezone.now() - timedelta(days=1)
+        )
+        t.refresh_from_db()
         Task.expire_overdue()
         t.refresh_from_db()
         self.assertTrue(t.is_done)      # se resolvió sola, correcto
@@ -364,6 +376,35 @@ class ReopenTests(TestCase):
         Task.expire_overdue()           # lo que pasa al recargar la lista
         t.refresh_from_db()
         self.assertFalse(t.is_done)     # y sigue arriba
+
+    def test_dateless_deadline_survives_midnight(self):
+        """
+        Regresión encontrada a las 00:45: una tarea con hora pero sin
+        fecha se comparaba hora contra hora, y pasada la medianoche la
+        cuenta salía al revés ("21:45 < 00:45" es falso), así que no
+        vencía nunca en esa franja. Ahora la hora se ancla al día de
+        creación, que da un instante absoluto.
+        """
+        t = Task.objects.create(
+            title="Estudiar", due_date=None, due_time=time(21, 0),
+            user=get_current_user(),
+        )
+        Task.objects.filter(pk=t.pk).update(
+            created_at=timezone.now() - timedelta(days=1)
+        )
+        t.refresh_from_db()
+        # Creada ayer con límite a las 21:00 de ayer: da igual la hora a
+        # la que se mire hoy, tiene que estar vencida.
+        self.assertTrue(t.is_overdue())
+        self.assertIn(t, Task.expire_overdue())
+
+    def test_dateless_deadline_not_yet_reached(self):
+        """Y creada hoy, su límite es hoy: todavía no vence."""
+        t = Task.objects.create(
+            title="Estudiar", due_date=None, due_time=time(23, 59),
+            user=get_current_user(),
+        )
+        self.assertFalse(t.is_overdue())
 
     def test_marking_done_twice_does_not_duplicate_future_task(self):
         """Marcar, deshacer y volver a marcar dejaba DOS tareas idénticas

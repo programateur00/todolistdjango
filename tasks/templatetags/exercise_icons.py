@@ -29,6 +29,16 @@ AVAILABLE = {
 # que hay que aguantar, en vez de fingir un movimiento.
 STATIC = {"plank", "side-plank"}
 
+# Variantes que comparten dibujo: el movimiento es el mismo y solo cambia
+# el agarre (ancho, supino) o si añades peso o impulso. Repetir la
+# ilustración es más honesto que dejar un hueco.
+ALIAS = {
+    "wide-pullup": "pullup",
+    "chinup": "pullup",
+    "weighted-pullup": "pullup",
+    "jumping-pullup": "pullup",
+}
+
 LABELS = {
     "plank": "Plancha", "crunch": "Crunch", "leg-raise": "Elevación de piernas",
     "bicycle-crunch": "Bicicleta", "mountain-climber": "Mountain climbers",
@@ -40,29 +50,29 @@ LABELS = {
 
 @register.simple_tag
 def exercise_icon(slug, compact=False):
+    """Bloque del ejercicio con sus dos posturas alternándose."""
     label = LABELS.get(slug, "Ejercicio")
+    art = ALIAS.get(slug, slug)   # las variantes reutilizan el dibujo base
 
-    if slug not in AVAILABLE:
+    if art not in AVAILABLE:
         return format_html(
             '<div class="ex-fig ex-fig--empty" role="img" aria-label="{}"><span>{}</span></div>',
             label, label,
         )
 
-    cls = "ex-fig ex-fig--compact" if compact else "ex-fig"
-
-    if slug in STATIC:
-        return format_html(
-            '<div class="{} ex-fig--static" role="img" aria-label="{}">'
-            '<img src="{}" alt=""><span class="ex-fig__hold">mantener</span></div>',
-            cls, label, static(f"exercises/{slug}-1.svg"),
-        )
+    is_static = art in STATIC
+    cls = " ".join(filter(None, [
+        "ex-fig",
+        "ex-fig--compact" if compact else "",
+        "ex-fig--static" if is_static else "",
+    ]))
+    hold = mark_safe('<span class="ex-fig__hold">mantener</span>') if is_static else ""
 
     return format_html(
-        '<div class="{}" role="img" aria-label="{}: postura inicial y final">'
-        '<img src="{}" alt="">'
-        '<span class="ex-fig__arrow" aria-hidden="true">→</span>'
-        '<img src="{}" alt=""></div>',
+        '<div class="{}" role="img" aria-label="{}">'
+        '<img src="{}" alt=""><img src="{}" alt="">{}</div>',
         cls, label,
-        static(f"exercises/{slug}-1.svg"),
-        static(f"exercises/{slug}-2.svg"),
+        static(f"exercises/{art}-1.svg"),
+        static(f"exercises/{art}-2.svg"),
+        hold,
     )

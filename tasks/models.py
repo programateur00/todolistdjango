@@ -199,11 +199,25 @@ class Task(models.Model):
         return ""
 
     def deadline_datetime(self):
-        """Devuelve el datetime naive del deadline, o None."""
-        if self.due_date and self.due_time:
-            import datetime
-            return datetime.datetime.combine(self.due_date, self.due_time)
-        return None
+        """
+        Momento límite como datetime naive, o None si no hay hora.
+
+        Si la tarea no tiene fecha, la hora se ancla al día en que se
+        creó. Sin ese ancla habría que comparar horas sueltas, y eso se
+        rompe al pasar la medianoche: una tarea de las 19:45 de ayer,
+        mirada a las 00:45, daba "21:45 < 00:45 = falso" y no vencía
+        nunca. Con el ancla hay un instante absoluto y la comparación
+        funciona siempre.
+        """
+        if not self.due_time:
+            return None
+        import datetime
+        day = self.due_date
+        if day is None:
+            if not self.created_at:
+                return None
+            day = timezone.localtime(self.created_at).date()
+        return datetime.datetime.combine(day, self.due_time)
 
     # Margen que se da a una antitarea DESPUÉS de la hora límite antes de
     # darla por buena sola. La notificación salta a la hora límite; este
@@ -504,49 +518,31 @@ class Task(models.Model):
 
         expired_tasks = []
         for task in candidates:
-            if task.due_date is None:
-                # Solo hay hora, sin fecha: se compara hora contra hora.
-                # A las antitareas se les suma el margen aquí también,
-                # aunque en la práctica una antitarea siempre lleva fecha
-                # (es lo que permite repetirla cada día).
-                limit_time = task.due_time
-                if task.is_avoid:
-                    limit_time = (
-                        _dt.datetime.combine(now_local.date(), task.due_time)
-                        + timedelta(hours=cls.AVOID_GRACE_HOURS)
-                    ).time()
-                should_expire = limit_time < now_time
+            # Ahora TODAS las tareas con hora tienen un momento límite
+            # absoluto (las que no llevan fecha se anclan a su día de
+            # creación — ver deadline_datetime), así que no hace falta la
+            # comparación de horas sueltas que fallaba al pasar la
+            # medianoche.
+            limit = task.resolve_datetime()
+            if limit is None:
+                continue
 
-                # Sin fecha no hay un "momento límite" absoluto contra el
-                # que comparar, así que la protección de reapertura se
-                # mide contra la hora límite de HOY. Sin esta rama, una
-                # tarea sin fecha se volvía a cerrar sola nada más
-                # recargar la lista y el botón de deshacer parecía roto.
-                if should_expire and task.reopened_at is not None:
-                    reopened = timezone.localtime(task.reopened_at).replace(tzinfo=None)
-                    limit_today = _dt.datetime.combine(now_local.date(), limit_time)
-                    if reopened > limit_today:
-                        continue
-            else:
-                # Si devolviste la tarea a pendientes DESPUÉS de su hora
-                # límite, es que ya decidiste tú: no se auto-resuelve.
-                #
-                # Se usa una marca explícita (reopened_at) y no "cuándo se
-                # modificó por última vez", porque una tarea CREADA después
-                # de su hora límite también se habría modificado después, y
-                # nunca llegaría a expirar.
-                limit = task.resolve_datetime()
-                if task.reopened_at is not None and limit is not None:
-                    reopened = timezone.localtime(task.reopened_at).replace(tzinfo=None)
-                    if reopened > limit:
-                        continue
+            # Si devolviste la tarea a pendientes DESPUÉS de su hora
+            # límite, es que ya decidiste tú: no se auto-resuelve.
+            #
+            # Se usa una marca explícita (reopened_at) y no "cuándo se
+            # modificó por última vez", porque una tarea CREADA después
+            # de su hora límite también se habría modificado después, y
+            # nunca llegaría a expirar.
+            if task.reopened_at is not None:
+                reopened = timezone.localtime(task.reopened_at).replace(tzinfo=None)
+                if reopened > limit:
+                    continue
 
-                # resolve_datetime ya incluye el margen de las antitareas:
-                # a la hora límite salta el aviso, y solo pasado ese rato
-                # sin respuesta se resuelve sola.
-                should_expire = now_local > limit
-
-            if should_expire:
+            # resolve_datetime ya incluye el margen de las antitareas: a
+            # la hora límite salta el aviso, y solo pasado ese rato sin
+            # respuesta se resuelve sola.
+            if now_local > limit:
                 if not dry_run:
                     task.mark_expired()
                 expired_tasks.append(task)
