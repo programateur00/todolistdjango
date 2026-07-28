@@ -89,6 +89,10 @@ button { font-family:var(--font-b); cursor:pointer; }
   padding-bottom:8px; border-bottom:1px solid var(--line); }
 .task-section__count { background:var(--cream-soft); color:var(--ink); font-size:11px;
   padding:1px 8px; border-radius:999px; font-family:var(--font-b); letter-spacing:0; }
+  .done-details > summary { cursor:pointer; list-style:none; }
+.done-details > summary::-webkit-details-marker { display:none; }
+.done-details > summary::before { content:"▸"; font-size:12px; }
+.done-details[open] > summary::before { content:"▾"; }
 .empty-state { color:var(--ink-faded); font-size:14px; padding:20px 4px; font-style:italic; }
 
 /* ── Task cards ─────────────────────────────────────────────────────── */

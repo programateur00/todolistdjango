@@ -129,7 +129,8 @@
 
 {% if completed_tasks %}
 <section class="task-section task-section--done">
-    <h2 class="task-section__title">Hechas <span class="task-section__count">{{ completed_tasks|length }}</span></h2>
+    <details class="done-details">
+    <summary class="task-section__title">Hechas <span class="task-section__count">{{ completed_tasks|length }}</span></summary>
     <ul class="task-list">
         {% for task in completed_tasks %}
         <li class="task-card task-card--done">
@@ -162,6 +163,8 @@
         </li>
         {% endfor %}
     </ul>
+  </details>
+
 </section>
 {% endif %}
 
