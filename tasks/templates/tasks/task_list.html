@@ -60,8 +60,7 @@
         <li class="task-card{% if task.is_important %} task-card--important{% endif %}{% if overdue %} task-card--overdue{% endif %}">
             <div class="task-card__actions">
                 {% if task.workout_kind %}
-                {# El icono depende de lo que la sesión vaya a hacer de verdad:
-                   cámara solo si va a contar repeticiones. #}
+                {# El icono depende de lo que la sesión vaya a hacer de verdad: cámara solo si va a contar repeticiones. #}
                 <a href="{% url 'tasks:task_workout' task.pk %}" class="workout-btn"
                    title="{% if task.workout_kind == 'camera' %}Contar repeticiones con la cámara{% elif task.workout_kind == 'timer' %}Empezar circuito cronometrado{% else %}Anotar la sesión{% endif %}">
                     {% if task.workout_kind == "camera" %}
