@@ -127,6 +127,8 @@ def routine_json(r):
                 "order": i.order,
                 "work": i.effective_work_seconds,
                 "rest": i.effective_rest_seconds,
+                "target_sets": i.target_sets,
+                "target_reps": i.target_reps,
             }
             for i in r.items.select_related("exercise")
         ],
@@ -344,7 +346,20 @@ def _apply_routine(r, data):
     r.save()
 
     if "items" in data:
-        slugs = data.get("items") or []
+        raw_items = data.get("items") or []
+        # Se admiten dos formatos: una lista de slugs sueltos (lo simple)
+        # o una lista de objetos con los objetivos de cada ejercicio
+        # {"slug": "pullup", "target_sets": 3, "target_reps": 8}. Lo
+        # segundo es lo que usa el constructor de la app y lo que hará
+        # falta para los planes progresivos.
+        normalized = []
+        for it in raw_items:
+            if isinstance(it, str):
+                normalized.append({"slug": it})
+            elif isinstance(it, dict) and it.get("slug"):
+                normalized.append(it)
+
+        slugs = [it["slug"] for it in normalized]
         # Se admite cualquier ejercicio activo, no solo los cronometrados:
         # un circuito de tren superior (dominadas, anchas, chin ups) es
         # tan válido como uno de abdominales. Cada uno se reproduce luego
@@ -352,11 +367,24 @@ def _apply_routine(r, data):
         by_slug = {e.slug: e for e in Exercise.objects.filter(slug__in=slugs, is_active=True)}
         r.items.all().delete()
         order = 0
-        for slug in slugs:
-            ex = by_slug.get(slug)
+        for it in normalized:
+            ex = by_slug.get(it["slug"])
             if not ex:
                 continue
-            RoutineItem.objects.create(routine=r, exercise=ex, order=order)
+
+            def _int(key, default):
+                try:
+                    return max(1, int(it.get(key, default)))
+                except (TypeError, ValueError):
+                    return default
+
+            RoutineItem.objects.create(
+                routine=r, exercise=ex, order=order,
+                target_sets=_int("target_sets", 3),
+                target_reps=_int("target_reps", 8),
+                work_seconds=it.get("work_seconds") or None,
+                rest_seconds=it.get("rest_seconds") if it.get("rest_seconds") is not None else None,
+            )
             order += 1
     return r
 

@@ -562,21 +562,48 @@ class Routine(models.Model):
     @property
     def total_seconds(self):
         """Duración estimada del circuito completo, en orden (sin contar
-        que el usuario pueda saltarse o repetir ejercicios)."""
-        items = list(self.items.all())
-        work = sum(i.effective_work_seconds for i in items)
-        rest = sum(i.effective_rest_seconds for i in items[:-1])  # sin descanso tras el último
-        return work + rest
+        que el usuario pueda saltarse o repetir ejercicios).
+
+        Los ejercicios de cámara no tienen duración fija — dependen de lo
+        rápido que hagas las reps — así que se estiman a 4 segundos por
+        repetición, solo para dar una idea del tamaño del circuito.
+        """
+        items = list(self.items.select_related("exercise"))
+        total = 0
+        for i, item in enumerate(items):
+            if item.exercise.mode == Exercise.MODE_POSE:
+                total += item.target_sets * item.target_reps * 4
+            else:
+                total += item.effective_work_seconds
+            if i < len(items) - 1:
+                total += item.effective_rest_seconds
+        return total
 
 
 class RoutineItem(models.Model):
     """Un ejercicio dentro de una Routine, con su orden y tiempos propios
-    (si se dejan en blanco, usa los defaults de la rutina)."""
+    (si se dejan en blanco, usa los defaults de la rutina).
+
+    Un circuito puede mezclar los dos tipos de ejercicio, y cada uno se
+    mide con lo que le corresponde:
+      - Cronometrados (plancha, crunch): work_seconds / rest_seconds.
+      - De cámara (dominadas, fondos): target_sets x target_reps. Contar
+        segundos de dominadas no dice nada; lo que importa son las reps.
+
+    Los objetivos son además la base del "planning" progresivo: subir de
+    3x8 a 3x9 la semana siguiente es cambiar un número aquí.
+    """
     routine = models.ForeignKey(Routine, on_delete=models.CASCADE, related_name="items")
     exercise = models.ForeignKey(Exercise, on_delete=models.CASCADE)
     order = models.PositiveIntegerField(default=0)
     work_seconds = models.PositiveIntegerField(null=True, blank=True)
     rest_seconds = models.PositiveIntegerField(null=True, blank=True)
+    target_sets = models.PositiveIntegerField(
+        default=3, help_text="Solo para ejercicios de cámara: series objetivo."
+    )
+    target_reps = models.PositiveIntegerField(
+        default=8, help_text="Solo para ejercicios de cámara: repeticiones por serie."
+    )
 
     class Meta:
         ordering = ["order"]
