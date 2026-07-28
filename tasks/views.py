@@ -146,6 +146,16 @@ def task_mark_failed(request, pk):
     return redirect(reverse("tasks:task_list"))
 
 
+@require_POST
+def task_reopen(request, pk):
+    """Deshacer: devuelve la tarea a pendiente y revierte lo que provocó
+    marcarla (la ocurrencia del día y la instancia futura), para que las
+    estadísticas vuelvan a estar como antes. Ver Task.reopen()."""
+    get_object_or_404(Task, pk=pk, user=get_current_user()).reopen()
+    messages.success(request, "Tarea devuelta a pendientes.")
+    return redirect(reverse("tasks:task_list"))
+
+
 def task_workout(request, pk):
     """
     Página de entreno para una tarea. En dos pasos:

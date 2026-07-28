@@ -116,6 +116,8 @@ button { font-family:var(--font-b); cursor:pointer; }
 .check-btn--checked       { background:var(--sage-soft); border-color:var(--sage); }
 .check-btn--undone        { color:var(--coral); width:30px; height:30px; margin-top:2px; }
 .check-btn--undone:hover  { background:var(--coral-soft); border-color:var(--coral); }
+.check-btn--undo          { color:var(--mustard); }
+.check-btn--undo:hover    { background:var(--mustard-soft); border-color:var(--mustard); }
 
 .task-card__body  { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; padding:4px 0; }
 .task-card__title { margin:0; font-size:15px; font-weight:500; word-break:break-word; }

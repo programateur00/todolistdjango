@@ -125,6 +125,11 @@ class Task(models.Model):
     is_done = models.BooleanField(default=False)
     expired = models.BooleanField(default=False)
     completed_at = models.DateTimeField(null=True, blank=True)
+    reopened_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Cuándo devolviste la tarea a pendientes a mano. Sirve para que el "
+                   "barrido automático no vuelva a cerrarla en el acto.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -274,16 +279,24 @@ class Task(models.Model):
         super().save(*args, **kwargs)
 
     def _spawn_next(self):
-        if self.repeat != self.REPEAT_NONE and self.due_date:
-            Task.objects.create(
-                title=self.title, notes=self.notes,
-                category=self.category, subcategory=self.subcategory,
-                due_date=self.next_due_date(), due_time=self.due_time,
-                repeat=self.repeat, interval=self.interval,
-                custom_days=self.custom_days, is_important=self.is_important,
-                series_id=self.series_id, series_start_date=self.series_start_date,
-                user=self.user,
-            )
+        if self.repeat == self.REPEAT_NONE or not self.due_date:
+            return
+        next_date = self.next_due_date()
+        # Idempotente a propósito: marcar, desmarcar y volver a marcar
+        # llamaba aquí dos veces y dejaba DOS tareas idénticas en el
+        # futuro. Si ya existe la de esa fecha en esta serie, no se crea
+        # otra.
+        if Task.objects.filter(series_id=self.series_id, due_date=next_date).exists():
+            return
+        Task.objects.create(
+            title=self.title, notes=self.notes,
+            category=self.category, subcategory=self.subcategory,
+            due_date=next_date, due_time=self.due_time,
+            repeat=self.repeat, interval=self.interval,
+            custom_days=self.custom_days, is_important=self.is_important,
+            series_id=self.series_id, series_start_date=self.series_start_date,
+            user=self.user,
+        )
 
     def _record_occurrence(self, result, auto_expired=False):
         """
@@ -321,6 +334,7 @@ class Task(models.Model):
         self.is_done = True
         self.expired = False
         self.completed_at = timezone.now()
+        self.reopened_at = None
         self.save()
         self._record_occurrence(Occurrence.RESULT_DONE)
         self._spawn_next()
@@ -373,6 +387,7 @@ class Task(models.Model):
         self.is_done = False
         self.expired = False
         self.completed_at = None
+        self.reopened_at = timezone.now()
         self.save()
 
     def mark_not_done(self):
@@ -387,6 +402,7 @@ class Task(models.Model):
         self.is_done = False
         self.expired = False
         self.completed_at = None
+        self.reopened_at = timezone.now()
         self.save()
         self._record_occurrence(Occurrence.RESULT_NOT_DONE)
 
@@ -402,6 +418,7 @@ class Task(models.Model):
         self.is_done = True
         self.expired = False
         self.completed_at = timezone.now()
+        self.reopened_at = None
         self.save()
         self._record_occurrence(Occurrence.RESULT_NOT_DONE)
         self._spawn_next()
@@ -419,6 +436,7 @@ class Task(models.Model):
         self.is_done = True
         self.expired = True
         self.completed_at = timezone.now()
+        self.reopened_at = None
         self.save()
         result = Occurrence.RESULT_DONE if self.is_avoid else Occurrence.RESULT_NOT_DONE
         self._record_occurrence(result, auto_expired=True)
@@ -444,6 +462,25 @@ class Task(models.Model):
 
         expired_tasks = []
         for task in candidates:
+            # Si devolviste la tarea a pendientes DESPUÉS de su hora
+            # límite, es que ya decidiste tú: no se auto-resuelve.
+            #
+            # Sin esto, deshacer una tarea vencida no servía de nada: la
+            # dejabas pendiente, se recargaba la lista, este barrido la
+            # veía vencida y la volvía a cerrar en el acto. Parecía que el
+            # botón no funcionaba.
+            #
+            # Se usa una marca explícita (reopened_at) y no "cuándo se
+            # modificó por última vez", porque una tarea CREADA después de
+            # su hora límite también se habría modificado después, y nunca
+            # llegaría a expirar.
+            if task.reopened_at is not None:
+                limit = task.resolve_datetime()
+                if limit is not None:
+                    reopened = timezone.localtime(task.reopened_at).replace(tzinfo=None)
+                    if reopened > limit:
+                        continue
+
             if task.due_date is None:
                 # Solo hay hora, sin fecha: se compara hora contra hora.
                 # A las antitareas se les suma el margen aquí también,

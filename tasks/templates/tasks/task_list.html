@@ -134,10 +134,10 @@
         {% for task in completed_tasks %}
         <li class="task-card task-card--done">
             <div class="task-card__actions">
-                <form action="{% url 'tasks:task_mark_not_done' task.pk %}" method="post">
+                <form action="{% url 'tasks:task_reopen' task.pk %}" method="post">
                     {% csrf_token %}
-                    <button type="submit" class="check-btn check-btn--done check-btn--checked" title="Desmarcar">
-                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6"/></svg>
+                    <button type="submit" class="check-btn check-btn--undo" title="Deshacer: volver a pendientes">
+                        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h11a5 5 0 0 1 0 10h-3M3 10l4-4M3 10l4 4"/></svg>
                     </button>
                 </form>
             </div>

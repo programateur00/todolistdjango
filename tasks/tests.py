@@ -322,6 +322,43 @@ class ReopenTests(TestCase):
     futura que se generó al marcarla.
     """
 
+    def test_reopened_task_is_not_immediately_reexpired(self):
+        """
+        Regresión del fallo más molesto: expire_overdue() se ejecuta al
+        cargar la lista, así que al devolver a pendientes una tarea cuya
+        hora ya pasó, el barrido la volvía a cerrar en el acto y parecía
+        que el botón de deshacer no hacía nada.
+        """
+        now = timezone.localtime(timezone.now())
+        past = now - timedelta(hours=3)
+        t = Task.objects.create(
+            title="Estudiar", due_date=past.date(),
+            due_time=past.time().replace(microsecond=0), user=get_current_user(),
+        )
+        t.mark_done()
+        t.reopen()
+        t.refresh_from_db()
+        self.assertFalse(t.is_done)
+
+        Task.expire_overdue()          # lo que pasa al recargar la lista
+        t.refresh_from_db()
+        self.assertFalse(t.is_done)    # sigue pendiente, como pediste
+
+    def test_marking_done_twice_does_not_duplicate_future_task(self):
+        """Marcar, deshacer y volver a marcar dejaba DOS tareas idénticas
+        en el futuro."""
+        t = Task.objects.create(
+            title="Diaria", due_date=date.today(), repeat=Task.REPEAT_DAILY,
+            interval=1, user=get_current_user(),
+        )
+        t.mark_done()
+        t.mark_not_done()
+        t.mark_done()
+        tomorrow = date.today() + timedelta(days=1)
+        self.assertEqual(
+            Task.objects.filter(series_id=t.series_id, due_date=tomorrow).count(), 1
+        )
+
     def test_reopen_removes_occurrence_and_restores_stats(self):
         t = Task.objects.create(
             title="Leer", due_date=date.today(), user=get_current_user(),
