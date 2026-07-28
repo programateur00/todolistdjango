@@ -307,39 +307,70 @@ def routine_list(request):
         return JsonResponse({"routines": [routine_json(r) for r in qs]})
 
     data = body(request)
-    name = (data.get("name") or "").strip() or "Circuito sin nombre"
     slugs = data.get("items") or []
     if not slugs:
         return JsonResponse({"ok": False, "error": "El circuito necesita al menos un ejercicio."}, status=400)
 
-    valid_sub = {k for k, _ in Task.SUBCATEGORY_CHOICES}
-    subcategory = data.get("subcategory") or ""
     r = Routine.objects.create(
-        user=_user(), name=name[:64],
-        subcategory=subcategory if subcategory in valid_sub else "",
-        default_work_seconds=max(5, int(data.get("default_work_seconds", 40))),
-        default_rest_seconds=max(0, int(data.get("default_rest_seconds", 20))),
+        user=_user(),
+        name=(data.get("name") or "").strip()[:64] or "Circuito sin nombre",
     )
-    # Solo ejercicios cronometrados: evita que por API se cuele en un
-    # circuito algo que no tiene sentido ahí (ej. dominadas con cámara).
-    by_slug = {
-        e.slug: e for e in Exercise.objects.filter(slug__in=slugs, mode=Exercise.MODE_TIMED)
-    }
-    order = 0
-    for slug in slugs:
-        ex = by_slug.get(slug)
-        if not ex:
-            continue
-        RoutineItem.objects.create(routine=r, exercise=ex, order=order)
-        order += 1
+    _apply_routine(r, data)
     return JsonResponse({"ok": True, "routine": routine_json(r)}, status=201)
 
 
-@api("GET", "DELETE")
+def _apply_routine(r, data):
+    """Campos editables de un circuito. Compartido por crear y editar."""
+    name = (data.get("name") or "").strip()
+    if name:
+        r.name = name[:64]
+    if "subcategory" in data:
+        valid = {k for k, _ in Task.SUBCATEGORY_CHOICES}
+        sub = data.get("subcategory") or ""
+        r.subcategory = sub if sub in valid else ""
+    for field in ("default_work_seconds", "default_rest_seconds"):
+        if field in data:
+            try:
+                value = int(data[field])
+            except (TypeError, ValueError):
+                continue
+            setattr(r, field, max(5 if "work" in field else 0, value))
+    r.save()
+
+    if "items" in data:
+        slugs = data.get("items") or []
+        # Solo ejercicios cronometrados: evita que por API se cuele en un
+        # circuito algo que no tiene sentido ahí (ej. dominadas con cámara).
+        by_slug = {
+            e.slug: e for e in Exercise.objects.filter(slug__in=slugs, mode=Exercise.MODE_TIMED)
+        }
+        r.items.all().delete()
+        order = 0
+        for slug in slugs:
+            ex = by_slug.get(slug)
+            if not ex:
+                continue
+            RoutineItem.objects.create(routine=r, exercise=ex, order=order)
+            order += 1
+    return r
+
+
+@api("GET", "PATCH", "DELETE")
 def routine_detail(request, uuid):
     r = get_object_or_404(Routine.objects.filter(user=_user(), deleted_at__isnull=True), uuid=uuid)
+
     if request.method == "GET":
         return JsonResponse({"routine": routine_json(r)})
+
+    if request.method == "PATCH":
+        data = body(request)
+        if "items" in data and not data["items"]:
+            return JsonResponse(
+                {"ok": False, "error": "El circuito necesita al menos un ejercicio."}, status=400
+            )
+        _apply_routine(r, data)
+        return JsonResponse({"ok": True, "routine": routine_json(r)})
+
     from django.utils import timezone
     r.deleted_at = timezone.now()
     r.save(update_fields=["deleted_at", "updated_at"])

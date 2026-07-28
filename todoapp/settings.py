@@ -53,6 +53,18 @@ CORS_ALLOWED_ORIGINS = [
     "capacitor://localhost",
     "ionic://localhost",
 ]
+# Para poder abrir la app en el navegador del ordenador mientras la
+# desarrollas, servida desde cualquier puerto local (npx serve, python
+# -m http.server, live reload de Capacitor...). Sin esto tendrías que ir
+# añadiendo el puerto a mano cada vez que cambia.
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https?://localhost:\d+$",
+    r"^https?://127\.0\.0\.1:\d+$",
+    # Recarga en vivo desde el móvil: Capacitor sirve desde la IP de tu
+    # ordenador en la red local (192.168.x.x o 10.x.x.x).
+    r"^https?://192\.168\.\d+\.\d+:\d+$",
+    r"^https?://10\.\d+\.\d+\.\d+:\d+$",
+]
 # Durante el desarrollo con recarga en vivo, Capacitor sirve desde la IP
 # de tu ordenador en un puerto cualquiera. Añádelos aquí vía entorno,
 # separados por comas, en vez de abrir CORS a todo el mundo.
