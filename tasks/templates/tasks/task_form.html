@@ -17,7 +17,6 @@
         <textarea name="notes" rows="4" placeholder="Detalles, enlaces, lo que sea…">{{ task.notes|default:'' }}</textarea>
     </label>
 
-    {# Las mismas dos casillas significan cosas distintas segun el tipo: en una tarea normal son un vencimiento; en una antitarea son cuando se te pregunta si has caido. Se cambian los textos por JS al elegir categoria (ver el script del final). #}
     <div class="field-row">
         <label class="field">
             <span class="field__label" data-label-date>Fecha de vencimiento</span>
