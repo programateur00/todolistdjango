@@ -51,7 +51,7 @@
         <ul class="routine-builder__available" id="available-list">
             {% for exercise in exercises %}
             <li class="routine-builder__available-item">
-                <span class="routine-builder__icon">{% exercise_icon exercise.slug %}</span>
+                <span class="routine-builder__icon">{% exercise_icon exercise.slug compact=True %}</span>
                 <span class="routine-builder__available-name">{{ exercise.name }}</span>
                 <button type="button" class="ghost-btn" data-add
                         data-id="{{ exercise.pk }}" data-name="{{ exercise.name }}">+ Añadir</button>
