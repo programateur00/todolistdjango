@@ -17,15 +17,20 @@
         <textarea name="notes" rows="4" placeholder="Detalles, enlaces, lo que sea…">{{ task.notes|default:'' }}</textarea>
     </label>
 
+    {# Las mismas dos casillas significan cosas distintas segun el tipo:
+       en una tarea normal son un vencimiento; en una antitarea son cuando
+       se te pregunta si has caido. Se cambian los textos por JS al elegir
+       categoria (ver el script del final). #}
     <div class="field-row">
         <label class="field">
-            <span class="field__label">Fecha de vencimiento</span>
+            <span class="field__label" data-label-date>Fecha de vencimiento</span>
             <input type="date" name="due_date" value="{{ task.due_date|date:'Y-m-d'|default:'' }}">
+            <span class="field__hint" data-hint-date hidden></span>
         </label>
         <label class="field">
-            <span class="field__label">Hora límite</span>
+            <span class="field__label" data-label-time>Hora límite</span>
             <input type="time" name="due_time" value="{{ task.due_time|time:'H:i'|default:'' }}">
-            <span class="field__hint">Si pasa sin marcarla → auto no hecha</span>
+            <span class="field__hint" data-hint-time>Si pasa sin marcarla → auto no hecha</span>
         </label>
     </div>
 
@@ -167,6 +172,20 @@
         var v = (document.querySelector('[data-category-toggle]:checked') || {}).value || 'general';
         subcategoryField.style.display = v === 'sport' ? 'block' : 'none';
         avoidFields.style.display = v === 'avoid' ? 'block' : 'none';
+
+        // Una antitarea no "vence": se te pregunta. Y como se repite a
+        // diario, la fecha es solo el punto de partida, no un final.
+        var esAnti = v === 'avoid';
+        document.querySelector('[data-label-date]').textContent =
+            esAnti ? 'Empieza el' : 'Fecha de vencimiento';
+        document.querySelector('[data-label-time]').textContent =
+            esAnti ? 'Hora del aviso' : 'Hora límite';
+        var hd = document.querySelector('[data-hint-date]');
+        hd.hidden = !esAnti;
+        hd.textContent = esAnti ? 'Si la repites, sigue indefinidamente.' : '';
+        document.querySelector('[data-hint-time]').textContent = esAnti
+            ? 'A esta hora te preguntamos si has caído.'
+            : 'Si pasa sin marcarla → auto no hecha';
     }
     categoryRadios.forEach(function(r){ r.addEventListener('change', updateSubcategory); });
     updateSubcategory();

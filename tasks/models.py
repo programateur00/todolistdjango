@@ -157,6 +157,25 @@ class Task(models.Model):
         return self.CATEGORY_CAPABILITIES.get(self.category, [])
 
     @property
+    def workout_kind(self):
+        """
+        Qué clase de sesión abre esta tarea, para que el botón de la lista
+        no prometa algo que no va a pasar.
+
+        Antes cualquier tarea de Deporte enseñaba el icono de cámara,
+        aunque fuera un circuito de abdominales a cronómetro o una salida
+        a correr que se rellena a mano. Enseñar una cámara ahí es
+        incongruente.
+        """
+        if self.category != self.CATEGORY_SPORT:
+            return None
+        if self.subcategory == self.SUBCATEGORY_RUNNING:
+            return "distance"      # se anota a mano
+        if self.subcategory == self.SUBCATEGORY_LOWER_BODY:
+            return "timer"         # circuitos cronometrados
+        return "camera"            # tren superior: conteo con cámara
+
+    @property
     def is_avoid(self):
         """
         True si es una antitarea (category='avoid'). Se calcula desde

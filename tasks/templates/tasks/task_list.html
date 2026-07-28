@@ -59,9 +59,18 @@
         {% with mins=task.minutes_remaining overdue=task.is_overdue %}
         <li class="task-card{% if task.is_important %} task-card--important{% endif %}{% if overdue %} task-card--overdue{% endif %}">
             <div class="task-card__actions">
-                {% if "pose_tracking" in task.category_capabilities %}
-                <a href="{% url 'tasks:task_workout' task.pk %}" class="workout-btn" title="Empezar sesión con cámara">
+                {% if task.workout_kind %}
+                {# El icono depende de lo que la sesión vaya a hacer de verdad:
+                   cámara solo si va a contar repeticiones. #}
+                <a href="{% url 'tasks:task_workout' task.pk %}" class="workout-btn"
+                   title="{% if task.workout_kind == 'camera' %}Contar repeticiones con la cámara{% elif task.workout_kind == 'timer' %}Empezar circuito cronometrado{% else %}Anotar la sesión{% endif %}">
+                    {% if task.workout_kind == "camera" %}
                     <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+                    {% elif task.workout_kind == "timer" %}
+                    <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M9 2h6"/></svg>
+                    {% else %}
+                    <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l4-8 4 3 4-7 4 4"/><circle cx="8" cy="9" r="1.6"/></svg>
+                    {% endif %}
                 </a>
                 {% else %}
                 <form action="{% url 'tasks:task_mark_done' task.pk %}" method="post">

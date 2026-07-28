@@ -83,6 +83,10 @@ def task_json(t):
         "subcategory": t.subcategory,
         "is_avoid": t.is_avoid,
         "capabilities": t.category_capabilities,
+        # Qué tipo de sesión abre: "camera", "timer", "distance" o null.
+        # La app elige el icono con esto, para no enseñar una cámara en
+        # una tarea que no va a grabar nada.
+        "workout_kind": t.workout_kind,
         "due_date": t.due_date.isoformat() if t.due_date else None,
         "due_time": t.due_time.strftime("%H:%M") if t.due_time else None,
         "repeat": t.repeat,

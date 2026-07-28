@@ -557,6 +557,39 @@ class AvoidLabelTests(TestCase):
         self.assertEqual(nxt.avoid_success_label, "Ni uno")
 
 
+class WorkoutKindTests(TestCase):
+    """
+    El botón de la lista debe prometer lo que la sesión va a hacer de
+    verdad. Antes cualquier tarea de Deporte enseñaba una cámara, aunque
+    fuera un circuito a cronómetro o una salida a correr que se rellena
+    a mano — incongruente.
+    """
+
+    def _kind(self, subcategory, category=Task.CATEGORY_SPORT):
+        return Task(category=category, subcategory=subcategory).workout_kind
+
+    def test_upper_body_uses_camera(self):
+        self.assertEqual(self._kind(Task.SUBCATEGORY_UPPER_BODY), "camera")
+
+    def test_lower_body_uses_timer(self):
+        self.assertEqual(self._kind(Task.SUBCATEGORY_LOWER_BODY), "timer")
+
+    def test_running_is_manual(self):
+        self.assertEqual(self._kind(Task.SUBCATEGORY_RUNNING), "distance")
+
+    def test_non_sport_has_no_workout_button(self):
+        self.assertIsNone(self._kind("", category=Task.CATEGORY_STUDY))
+        self.assertIsNone(self._kind("", category=Task.CATEGORY_AVOID))
+
+    def test_api_exposes_workout_kind(self):
+        t = Task.objects.create(
+            title="Abdos", category=Task.CATEGORY_SPORT,
+            subcategory=Task.SUBCATEGORY_LOWER_BODY, user=get_current_user(),
+        )
+        r = self.client.get(f"/api/tasks/{t.uuid}/")
+        self.assertEqual(r.json()["task"]["workout_kind"], "timer")
+
+
 class ApiTests(TestCase):
     """API JSON que consume la app móvil."""
 

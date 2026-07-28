@@ -396,10 +396,19 @@ button { font-family:var(--font-b); cursor:pointer; }
 .ex-fig img:nth-of-type(1) { animation: ex-a 2.6s ease-in-out infinite; }
 .ex-fig img:nth-of-type(2) { animation: ex-b 2.6s ease-in-out infinite; }
 
-/* Isométricos: las dos imágenes son la misma, así que no se anima nada
-   y se avisa de que hay que aguantar. */
-.ex-fig--static img { animation: none; }
-.ex-fig--static img:nth-of-type(2) { opacity: 0; }
+/* Isométricos (planchas): no hay dos posturas que alternar, pero una
+   imagen totalmente quieta deja la pantalla muerta. Se les da un latido
+   muy leve, como el temblor de aguantar la postura: transmite esfuerzo
+   sin inventarse un movimiento que el ejercicio no tiene. */
+@keyframes ex-hold {
+  0%, 100% { transform: scale(1) translateY(0); }
+  50%      { transform: scale(1.018) translateY(-1px); }
+}
+.ex-fig--static img:nth-of-type(1) {
+  animation: ex-hold 3.2s ease-in-out infinite;
+  opacity: 1;
+}
+.ex-fig--static img:nth-of-type(2) { animation: none; opacity: 0; }
 .ex-fig__hold {
   position: absolute; right: 4px; bottom: 2px;
   font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
