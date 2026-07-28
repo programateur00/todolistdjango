@@ -122,6 +122,8 @@ def routine_json(r):
             {
                 "slug": i.exercise.slug,
                 "name": i.exercise.name,
+                "mode": i.exercise.mode,
+                "counter_key": i.exercise.counter_key,
                 "order": i.order,
                 "work": i.effective_work_seconds,
                 "rest": i.effective_rest_seconds,
@@ -290,6 +292,10 @@ def task_mark(request, uuid, action):
         t.mark_not_done()
     elif action == "failed":
         t.mark_failed()
+    elif action == "reopen":
+        # Deshacer: revierte la ocurrencia y la instancia futura, para que
+        # las estadísticas vuelvan exactamente a como estaban.
+        t.reopen()
     else:
         return JsonResponse({"ok": False, "error": "Acción desconocida"}, status=400)
     return JsonResponse({"ok": True, "task": task_json(t)})
@@ -339,11 +345,11 @@ def _apply_routine(r, data):
 
     if "items" in data:
         slugs = data.get("items") or []
-        # Solo ejercicios cronometrados: evita que por API se cuele en un
-        # circuito algo que no tiene sentido ahí (ej. dominadas con cámara).
-        by_slug = {
-            e.slug: e for e in Exercise.objects.filter(slug__in=slugs, mode=Exercise.MODE_TIMED)
-        }
+        # Se admite cualquier ejercicio activo, no solo los cronometrados:
+        # un circuito de tren superior (dominadas, anchas, chin ups) es
+        # tan válido como uno de abdominales. Cada uno se reproduce luego
+        # con lo que le toque — cámara o cronómetro.
+        by_slug = {e.slug: e for e in Exercise.objects.filter(slug__in=slugs, is_active=True)}
         r.items.all().delete()
         order = 0
         for slug in slugs:
@@ -409,7 +415,10 @@ def workout_save(request, uuid):
         rep_durations=rep_durations,
         added_weight_kg=data.get("added_weight_kg"),
     )
-    t.mark_done()
+    # finish=false permite guardar un ejercicio y seguir con otro en la
+    # misma sesion: la tarea solo se cierra cuando el usuario lo dice.
+    if data.get("finish", True):
+        t.mark_done()
     return JsonResponse({"ok": True, "session_uuid": str(ws.uuid), "task": task_json(t)})
 
 
@@ -440,7 +449,10 @@ def workout_save_manual(request, uuid):
         distance_km=distance_km,
         steps=int(steps) if steps else None,
     )
-    t.mark_done()
+    # finish=false permite guardar un ejercicio y seguir con otro en la
+    # misma sesion: la tarea solo se cierra cuando el usuario lo dice.
+    if data.get("finish", True):
+        t.mark_done()
     return JsonResponse({"ok": True, "session_uuid": str(ws.uuid), "task": task_json(t)})
 
 
@@ -466,5 +478,8 @@ def routine_result(request, uuid, routine_uuid):
         exercise="ab-circuit", session_duration_seconds=total,
         sets=breakdown, total_sets=len(breakdown),
     )
-    t.mark_done()
+    # finish=false permite guardar un ejercicio y seguir con otro en la
+    # misma sesion: la tarea solo se cierra cuando el usuario lo dice.
+    if data.get("finish", True):
+        t.mark_done()
     return JsonResponse({"ok": True, "session_uuid": str(ws.uuid), "task": task_json(t)})

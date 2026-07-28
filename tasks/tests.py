@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.utils import timezone
 from django.urls import reverse
 
-from .models import Exercise, Occurrence, Task
+from .models import Exercise, Occurrence, Task, WorkoutSession
 from .utils import get_current_user
 
 
@@ -315,6 +315,80 @@ class AvoidGraceTests(TestCase):
         self.assertEqual(occ.result, Occurrence.RESULT_NOT_DONE)
 
 
+class ReopenTests(TestCase):
+    """
+    Deshacer una tarea marcada debe dejarlo TODO como estaba: la racha no
+    puede quedarse contando ese día, ni puede sobrevivir la instancia
+    futura que se generó al marcarla.
+    """
+
+    def test_reopen_removes_occurrence_and_restores_stats(self):
+        t = Task.objects.create(
+            title="Leer", due_date=date.today(), user=get_current_user(),
+        )
+        t.mark_done()
+        self.assertEqual(Occurrence.objects.filter(series_id=t.series_id).count(), 1)
+
+        t.reopen()
+        t.refresh_from_db()
+        self.assertFalse(t.is_done)
+        # La ocurrencia se borra, no se marca como fallo: si se quedara,
+        # la racha seguiría contando ese día.
+        self.assertEqual(Occurrence.objects.filter(series_id=t.series_id).count(), 0)
+        self.assertEqual(Occurrence.streak_stats(t.series_id)["current_streak"], 0)
+
+    def test_reopen_deletes_spawned_future_task(self):
+        """Marcar una tarea diaria genera la de mañana. Deshacer debe
+        borrarla, o quedaría una tarea duplicada en el futuro."""
+        t = Task.objects.create(
+            title="No fumar", due_date=date.today(), repeat=Task.REPEAT_DAILY,
+            interval=1, user=get_current_user(),
+        )
+        t.mark_done()
+        self.assertEqual(Task.objects.filter(series_id=t.series_id).count(), 2)
+
+        t.reopen()
+        self.assertEqual(Task.objects.filter(series_id=t.series_id).count(), 1)
+
+    def test_reopen_keeps_workout_sessions(self):
+        """Las repeticiones se hicieron de verdad: no se borran por
+        deshacer el marcado."""
+        t = Task.objects.create(
+            title="Dominadas", due_date=date.today(),
+            category=Task.CATEGORY_SPORT, user=get_current_user(),
+        )
+        WorkoutSession.objects.create(task=t, user=get_current_user(), total_reps=8)
+        t.mark_done()
+        t.reopen()
+        self.assertEqual(t.workout_sessions.count(), 1)
+
+    def test_reopen_differs_from_mark_not_done(self):
+        """mark_not_done registra un fallo; reopen no registra nada."""
+        a = Task.objects.create(title="A", due_date=date.today(), user=get_current_user())
+        a.mark_done()
+        a.mark_not_done()
+        self.assertEqual(Occurrence.objects.filter(series_id=a.series_id).count(), 1)
+
+        b = Task.objects.create(title="B", due_date=date.today(), user=get_current_user())
+        b.mark_done()
+        b.reopen()
+        self.assertEqual(Occurrence.objects.filter(series_id=b.series_id).count(), 0)
+
+    def test_reopen_via_api(self):
+        r = self.client.post(
+            "/api/tasks/create/",
+            data=json.dumps({"title": "X", "due_date": date.today().isoformat()}),
+            content_type="application/json",
+        )
+        uuid_ = r.json()["task"]["uuid"]
+        self.client.post(f"/api/tasks/{uuid_}/mark/done/")
+        self.assertTrue(Task.objects.get(uuid=uuid_).is_done)
+
+        r2 = self.client.post(f"/api/tasks/{uuid_}/mark/reopen/")
+        self.assertEqual(r2.status_code, 200)
+        self.assertFalse(Task.objects.get(uuid=uuid_).is_done)
+
+
 class ApiTests(TestCase):
     """API JSON que consume la app móvil."""
 
@@ -366,15 +440,22 @@ class ApiTests(TestCase):
         self.assertEqual(self.client.post(f"/api/tasks/{uuid_}/mark/done/").status_code, 200)
         self.assertEqual(self.client.post(f"/api/tasks/{uuid_}/mark/inventada/").status_code, 400)
 
-    def test_routine_rejects_non_timed_exercises(self):
-        """Un circuito solo admite ejercicios cronometrados: por API no se
-        debe poder colar uno de cámara."""
+    def test_routine_accepts_any_active_exercise(self):
+        """Un circuito puede mezclar cronometrados y de cámara: una serie
+        de tren superior (dominadas, anchas...) es tan válida como un
+        circuito de abdominales."""
         Exercise.objects.create(slug="plank-t", name="Plancha", mode=Exercise.MODE_TIMED)
         Exercise.objects.create(slug="pullup-t", name="Dominadas", mode=Exercise.MODE_POSE)
         r = self._post("/api/routines/", {"name": "Mixto", "items": ["plank-t", "pullup-t"]})
         self.assertEqual(r.status_code, 201)
         slugs = [i["slug"] for i in r.json()["routine"]["items"]]
-        self.assertEqual(slugs, ["plank-t"])
+        self.assertEqual(slugs, ["plank-t", "pullup-t"])
+
+    def test_routine_ignores_inactive_exercises(self):
+        Exercise.objects.create(slug="ok-t", name="Ok", mode=Exercise.MODE_TIMED)
+        Exercise.objects.create(slug="off-t", name="Off", mode=Exercise.MODE_TIMED, is_active=False)
+        r = self._post("/api/routines/", {"name": "X", "items": ["ok-t", "off-t"]})
+        self.assertEqual([i["slug"] for i in r.json()["routine"]["items"]], ["ok-t"])
 
     def test_routine_needs_at_least_one_exercise(self):
         r = self._post("/api/routines/", {"name": "Vacio", "items": []})

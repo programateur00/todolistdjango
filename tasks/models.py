@@ -325,6 +325,56 @@ class Task(models.Model):
         self._record_occurrence(Occurrence.RESULT_DONE)
         self._spawn_next()
 
+    def reopen(self, delete_sessions=False):
+        """
+        Deshace el haber marcado la tarea, dejándolo TODO como estaba.
+
+        Es distinto de mark_not_done(), que registra un "no la hice" (y
+        por tanto cuenta como fallo en la racha). Esto es "me equivoqué al
+        marcarla", así que hay que revertir las tres cosas que provocó
+        marcarla:
+
+          1. La tarea vuelve a pendiente.
+          2. Se BORRA la ocurrencia de ese día — no se cambia a "no
+             hecha", se elimina. Si no, la racha seguiría contando ese día
+             como registrado y las estadísticas no volverían a su sitio.
+          3. Se borra la instancia siguiente que se generó al marcarla
+             (mañana, la semana que viene...), siempre que nadie la haya
+             tocado todavía. Sin esto quedaría una tarea duplicada
+             flotando en el futuro.
+
+        Las sesiones de entreno se conservan por defecto: las
+        repeticiones las hiciste de verdad aunque te equivocaras al
+        marcar la tarea.
+        """
+        # 3. La instancia futura de la serie, si sigue intacta.
+        if self.repeat != self.REPEAT_NONE and self.due_date:
+            (
+                Task.objects.filter(
+                    series_id=self.series_id,
+                    due_date__gt=self.due_date,
+                    is_done=False,
+                    expired=False,
+                )
+                .exclude(pk=self.pk)
+                .delete()
+            )
+
+        # 2. La ocurrencia de este día.
+        if self.due_date is not None:
+            Occurrence.objects.filter(series_id=self.series_id, due_date=self.due_date).delete()
+        else:
+            Occurrence.objects.filter(series_id=self.series_id, task=self).delete()
+
+        if delete_sessions:
+            self.workout_sessions.all().delete()
+
+        # 1. La tarea vuelve a estar disponible.
+        self.is_done = False
+        self.expired = False
+        self.completed_at = None
+        self.save()
+
     def mark_not_done(self):
         """
         Se usa para "Desmarcar" una tarea ya hecha (volver a pendiente) y
