@@ -447,6 +447,75 @@ class ReopenTests(TestCase):
         self.assertFalse(Task.objects.get(uuid=uuid_).is_done)
 
 
+class CatchUpTests(TestCase):
+    """
+    Si pasas varios días sin abrir la app, TODOS deben quedar
+    registrados. Antes solo se registraba uno por recarga: el barrido
+    cerraba una tarea, generaba la siguiente, y ahí paraba. Los huecos
+    aparecían justo cuando peor lo habías hecho.
+    """
+
+    def test_missed_days_are_all_recorded_in_one_sweep(self):
+        four_days_ago = date.today() - timedelta(days=4)
+        now_time = timezone.localtime(timezone.now()).time().replace(microsecond=0)
+        t = Task.objects.create(
+            title="Estudiar", due_date=four_days_ago, due_time=now_time,
+            repeat=Task.REPEAT_DAILY, interval=1, user=get_current_user(),
+        )
+        Task.expire_overdue()
+        occs = Occurrence.objects.filter(series_id=t.series_id)
+        self.assertGreaterEqual(occs.count(), 4)
+        self.assertTrue(all(o.result == Occurrence.RESULT_NOT_DONE for o in occs))
+
+    def test_avoid_task_catch_up_counts_as_success(self):
+        """Lo mismo para antitareas, pero cada día cuenta como evitado."""
+        four_days_ago = date.today() - timedelta(days=4)
+        now_time = timezone.localtime(timezone.now()).time().replace(microsecond=0)
+        t = Task.objects.create(
+            title="No fumar", category=Task.CATEGORY_AVOID,
+            due_date=four_days_ago, due_time=now_time,
+            repeat=Task.REPEAT_DAILY, interval=1, user=get_current_user(),
+        )
+        Task.expire_overdue()
+        occs = Occurrence.objects.filter(series_id=t.series_id)
+        self.assertGreaterEqual(occs.count(), 3)
+        self.assertTrue(all(o.result == Occurrence.RESULT_DONE for o in occs))
+
+
+class AvoidLabelTests(TestCase):
+    def test_custom_labels_are_exposed_with_defaults(self):
+        t = Task.objects.create(
+            title="No fumar", category=Task.CATEGORY_AVOID, user=get_current_user(),
+        )
+        r = self.client.get(f"/api/tasks/{t.uuid}/")
+        data = r.json()["task"]
+        self.assertEqual(data["avoid_success_label"], "No he caído")
+        self.assertEqual(data["avoid_question"], "¿Has caído hoy?")
+
+    def test_custom_labels_round_trip(self):
+        r = self.client.post("/api/tasks/create/", data=json.dumps({
+            "title": "No fumar", "category": "avoid",
+            "avoid_question": "¿Has fumado hoy?",
+            "avoid_success_label": "Ni uno",
+            "avoid_fail_label": "He fumado",
+        }), content_type="application/json")
+        data = r.json()["task"]
+        self.assertEqual(data["avoid_question"], "¿Has fumado hoy?")
+        self.assertEqual(data["avoid_success_label"], "Ni uno")
+
+    def test_labels_propagate_to_next_occurrence(self):
+        """Si no se propagan, mañana la notificación vuelve a los textos
+        genéricos."""
+        t = Task.objects.create(
+            title="No fumar", category=Task.CATEGORY_AVOID, due_date=date.today(),
+            repeat=Task.REPEAT_DAILY, interval=1, avoid_success_label="Ni uno",
+            user=get_current_user(),
+        )
+        t.mark_done()
+        nxt = Task.objects.exclude(pk=t.pk).get(series_id=t.series_id)
+        self.assertEqual(nxt.avoid_success_label, "Ni uno")
+
+
 class ApiTests(TestCase):
     """API JSON que consume la app móvil."""
 

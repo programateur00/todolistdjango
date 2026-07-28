@@ -89,10 +89,22 @@ button { font-family:var(--font-b); cursor:pointer; }
   padding-bottom:8px; border-bottom:1px solid var(--line); }
 .task-section__count { background:var(--cream-soft); color:var(--ink); font-size:11px;
   padding:1px 8px; border-radius:999px; font-family:var(--font-b); letter-spacing:0; }
-  .done-details > summary { cursor:pointer; list-style:none; }
-.done-details > summary::-webkit-details-marker { display:none; }
-.done-details > summary::before { content:"▸"; font-size:12px; }
-.done-details[open] > summary::before { content:"▾"; }
+
+/* Sección "Hechas" plegable, con <details>/<summary> — sin JavaScript.
+   OJO: el <summary> NO reutiliza .task-section__title a propósito. Esa
+   clase lleva `display:flex`, y cambiarle el display a un <summary> le
+   quita su `display:list-item` nativo, que es de donde salen la flecha y
+   parte del comportamiento. Aquí se replica el mismo aspecto pero
+   respetando lo que el navegador espera. */
+.done-summary { font-family:var(--font-d); font-size:15px; font-weight:600;
+  text-transform:uppercase; letter-spacing:.06em; color:var(--ink-faded);
+  margin:0 0 12px; padding-bottom:8px; border-bottom:1px solid var(--line);
+  cursor:pointer; user-select:none; }
+.done-summary::marker { content:""; }              /* navegadores modernos */
+.done-summary::-webkit-details-marker { display:none; }  /* Chrome y Safari antiguos */
+.done-summary::before { content:"▸ "; font-size:12px; }
+.done-details[open] > .done-summary::before { content:"▾ "; }
+.done-details[open] > .done-summary { margin-bottom:12px; }
 .empty-state { color:var(--ink-faded); font-size:14px; padding:20px 4px; font-style:italic; }
 
 /* ── Task cards ─────────────────────────────────────────────────────── */

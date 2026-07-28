@@ -97,6 +97,9 @@ def task_json(t):
         # resuelva sola la tarea pasado el margen. Se manda calculado para
         # que app y web usen exactamente el mismo criterio.
         "avoid_grace_hours": Task.AVOID_GRACE_HOURS if t.is_avoid else None,
+        "avoid_question": t.avoid_question or "¿Has caído hoy?",
+        "avoid_success_label": t.avoid_success_label or "No he caído",
+        "avoid_fail_label": t.avoid_fail_label or "He caído",
         "updated_at": t.updated_at.isoformat(),
     }
 
@@ -246,6 +249,9 @@ def _apply_task_fields(t, data):
             t.custom_days = ",".join(str(d) for d in days if str(d) in valid)
     if "is_important" in data:
         t.is_important = bool(data["is_important"])
+    for field, limit in (("avoid_question", 120), ("avoid_success_label", 32), ("avoid_fail_label", 32)):
+        if field in data:
+            setattr(t, field, (data.get(field) or "").strip()[:limit])
     return None
 
 

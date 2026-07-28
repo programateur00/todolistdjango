@@ -104,6 +104,19 @@ class Task(models.Model):
     interval = models.PositiveIntegerField(default=1)
     custom_days = models.CharField(max_length=20, blank=True)
     is_important = models.BooleanField(default=False)
+    avoid_success_label = models.CharField(
+        max_length=32, blank=True,
+        help_text="Antitareas: texto del botón de la notificación para \"lo he evitado\". "
+                   "En blanco usa \"No he caído\".",
+    )
+    avoid_fail_label = models.CharField(
+        max_length=32, blank=True,
+        help_text="Antitareas: texto del botón para \"he caído\". En blanco usa \"He caído\".",
+    )
+    avoid_question = models.CharField(
+        max_length=120, blank=True,
+        help_text="Antitareas: la pregunta de la notificación. En blanco usa \"¿Has caído hoy?\".",
+    )
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
@@ -294,6 +307,9 @@ class Task(models.Model):
             due_date=next_date, due_time=self.due_time,
             repeat=self.repeat, interval=self.interval,
             custom_days=self.custom_days, is_important=self.is_important,
+            avoid_success_label=self.avoid_success_label,
+            avoid_fail_label=self.avoid_fail_label,
+            avoid_question=self.avoid_question,
             series_id=self.series_id, series_start_date=self.series_start_date,
             user=self.user,
         )
@@ -445,8 +461,34 @@ class Task(models.Model):
     @classmethod
     def expire_overdue(cls, dry_run=False):
         """
-        Revisa las tareas pendientes con hora límite y marca como
-        expiradas las que ya han pasado esa hora.
+        Cierra las tareas vencidas y registra su resultado.
+
+        Se repite hasta que no quede nada por cerrar: al cerrar una tarea
+        repetida se genera la siguiente, y si esa TAMBIÉN está vencida hay
+        que cerrarla igual. Sin este bucle, pasar cuatro días sin abrir la
+        app registraba un solo día en vez de cuatro — justo lo contrario
+        de lo que se busca, porque los huecos aparecían cuando peor lo
+        habías hecho.
+
+        El tope de vueltas es una red de seguridad: si algo hiciera que
+        una tarea nunca deje de estar vencida, esto se para en vez de
+        colgar la página.
+        """
+        expired_tasks = []
+        for _ in range(400):   # ~un año de tareas diarias atrasadas
+            done_this_round = cls._expire_pass(dry_run=dry_run)
+            expired_tasks.extend(done_this_round)
+            # En dry_run no se marca nada, así que la siguiente vuelta
+            # encontraría lo mismo: una pasada es suficiente.
+            if not done_this_round or dry_run:
+                break
+        return expired_tasks
+
+    @classmethod
+    def _expire_pass(cls, dry_run=False):
+        """
+        Una sola pasada. Revisa las tareas pendientes con hora límite y
+        marca como expiradas las que ya han pasado esa hora.
 
         Se llama "en caliente" desde la vista de la lista cada vez que
         se abre la página — así funciona sin depender de un cron
