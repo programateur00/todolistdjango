@@ -462,25 +462,6 @@ class Task(models.Model):
 
         expired_tasks = []
         for task in candidates:
-            # Si devolviste la tarea a pendientes DESPUÉS de su hora
-            # límite, es que ya decidiste tú: no se auto-resuelve.
-            #
-            # Sin esto, deshacer una tarea vencida no servía de nada: la
-            # dejabas pendiente, se recargaba la lista, este barrido la
-            # veía vencida y la volvía a cerrar en el acto. Parecía que el
-            # botón no funcionaba.
-            #
-            # Se usa una marca explícita (reopened_at) y no "cuándo se
-            # modificó por última vez", porque una tarea CREADA después de
-            # su hora límite también se habría modificado después, y nunca
-            # llegaría a expirar.
-            if task.reopened_at is not None:
-                limit = task.resolve_datetime()
-                if limit is not None:
-                    reopened = timezone.localtime(task.reopened_at).replace(tzinfo=None)
-                    if reopened > limit:
-                        continue
-
             if task.due_date is None:
                 # Solo hay hora, sin fecha: se compara hora contra hora.
                 # A las antitareas se les suma el margen aquí también,
@@ -493,11 +474,35 @@ class Task(models.Model):
                         + timedelta(hours=cls.AVOID_GRACE_HOURS)
                     ).time()
                 should_expire = limit_time < now_time
+
+                # Sin fecha no hay un "momento límite" absoluto contra el
+                # que comparar, así que la protección de reapertura se
+                # mide contra la hora límite de HOY. Sin esta rama, una
+                # tarea sin fecha se volvía a cerrar sola nada más
+                # recargar la lista y el botón de deshacer parecía roto.
+                if should_expire and task.reopened_at is not None:
+                    reopened = timezone.localtime(task.reopened_at).replace(tzinfo=None)
+                    limit_today = _dt.datetime.combine(now_local.date(), limit_time)
+                    if reopened > limit_today:
+                        continue
             else:
+                # Si devolviste la tarea a pendientes DESPUÉS de su hora
+                # límite, es que ya decidiste tú: no se auto-resuelve.
+                #
+                # Se usa una marca explícita (reopened_at) y no "cuándo se
+                # modificó por última vez", porque una tarea CREADA después
+                # de su hora límite también se habría modificado después, y
+                # nunca llegaría a expirar.
+                limit = task.resolve_datetime()
+                if task.reopened_at is not None and limit is not None:
+                    reopened = timezone.localtime(task.reopened_at).replace(tzinfo=None)
+                    if reopened > limit:
+                        continue
+
                 # resolve_datetime ya incluye el margen de las antitareas:
                 # a la hora límite salta el aviso, y solo pasado ese rato
                 # sin respuesta se resuelve sola.
-                should_expire = now_local > task.resolve_datetime()
+                should_expire = now_local > limit
 
             if should_expire:
                 if not dry_run:

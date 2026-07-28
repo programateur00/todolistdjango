@@ -344,6 +344,27 @@ class ReopenTests(TestCase):
         t.refresh_from_db()
         self.assertFalse(t.is_done)    # sigue pendiente, como pediste
 
+    def test_reopened_task_without_due_date_is_not_reexpired(self):
+        """
+        Regresión: una tarea con solo hora y sin fecha no tiene un
+        "momento límite" absoluto, así que resolve_datetime() devuelve
+        None y la protección de reapertura se saltaba por completo. El
+        botón de deshacer parecía roto justo en ese caso.
+        """
+        past = (timezone.localtime(timezone.now()) - timedelta(hours=5)).time().replace(microsecond=0)
+        t = Task.objects.create(
+            title="No fumar", category=Task.CATEGORY_AVOID,
+            due_date=None, due_time=past, user=get_current_user(),
+        )
+        Task.expire_overdue()
+        t.refresh_from_db()
+        self.assertTrue(t.is_done)      # se resolvió sola, correcto
+
+        t.reopen()
+        Task.expire_overdue()           # lo que pasa al recargar la lista
+        t.refresh_from_db()
+        self.assertFalse(t.is_done)     # y sigue arriba
+
     def test_marking_done_twice_does_not_duplicate_future_task(self):
         """Marcar, deshacer y volver a marcar dejaba DOS tareas idénticas
         en el futuro."""
