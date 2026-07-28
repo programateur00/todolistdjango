@@ -489,7 +489,7 @@ class AvoidLabelTests(TestCase):
         )
         r = self.client.get(f"/api/tasks/{t.uuid}/")
         data = r.json()["task"]
-        self.assertEqual(data["avoid_success_label"], "No he caído")
+        self.assertEqual(data["avoid_success_label"], "Sigo con la racha")
         self.assertEqual(data["avoid_question"], "¿Has caído hoy?")
 
     def test_custom_labels_round_trip(self):

@@ -107,11 +107,11 @@ class Task(models.Model):
     avoid_success_label = models.CharField(
         max_length=32, blank=True,
         help_text="Antitareas: texto del botón de la notificación para \"lo he evitado\". "
-                   "En blanco usa \"No he caído\".",
+                   "En blanco usa \"Sigo con la racha\".",
     )
     avoid_fail_label = models.CharField(
         max_length=32, blank=True,
-        help_text="Antitareas: texto del botón para \"he caído\". En blanco usa \"He caído\".",
+        help_text="Antitareas: texto del botón para \"he caído\". En blanco usa \"Romper racha\".",
     )
     avoid_question = models.CharField(
         max_length=120, blank=True,

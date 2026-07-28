@@ -79,6 +79,9 @@ def task_create(request):
                 interval=request.POST.get("interval") or 1,
                 custom_days=",".join(request.POST.getlist("custom_days")),
                 is_important=bool(request.POST.get("is_important")),
+                avoid_question=request.POST.get("avoid_question", "").strip()[:120],
+                avoid_success_label=request.POST.get("avoid_success_label", "").strip()[:32],
+                avoid_fail_label=request.POST.get("avoid_fail_label", "").strip()[:32],
                 user=get_current_user(),
             )
             messages.success(request, "Tarea creada.")
@@ -107,6 +110,9 @@ def task_edit(request, pk):
         task.interval = request.POST.get("interval") or 1
         task.custom_days = ",".join(request.POST.getlist("custom_days"))
         task.is_important = bool(request.POST.get("is_important"))
+        task.avoid_question = request.POST.get("avoid_question", "").strip()[:120]
+        task.avoid_success_label = request.POST.get("avoid_success_label", "").strip()[:32]
+        task.avoid_fail_label = request.POST.get("avoid_fail_label", "").strip()[:32]
         task.save()
         messages.success(request, "Tarea actualizada.")
         return redirect(reverse("tasks:task_list"))

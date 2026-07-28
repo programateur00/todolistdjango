@@ -214,7 +214,7 @@ button { font-family:var(--font-b); cursor:pointer; }
 .repeat-option input { accent-color:var(--coral); }
 .repeat-option:has(input:checked) { border-color:var(--coral); background:var(--coral-soft); }
 
-.custom-days-field, .interval-field, .subcategory-field { display:none; }
+.custom-days-field, .interval-field, .subcategory-field, .avoid-fields { display:none; }
 .interval-row  { display:flex; align-items:center; gap:8px; font-size:14px; }
 .interval-input{ width:60px; font-family:var(--font-b); font-size:15px; padding:8px 10px;
   border:1px solid var(--line); border-radius:8px; background:var(--cream); color:var(--ink); text-align:center; }

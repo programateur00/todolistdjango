@@ -98,8 +98,8 @@ def task_json(t):
         # que app y web usen exactamente el mismo criterio.
         "avoid_grace_hours": Task.AVOID_GRACE_HOURS if t.is_avoid else None,
         "avoid_question": t.avoid_question or "¿Has caído hoy?",
-        "avoid_success_label": t.avoid_success_label or "No he caído",
-        "avoid_fail_label": t.avoid_fail_label or "He caído",
+        "avoid_success_label": t.avoid_success_label or "Sigo con la racha",
+        "avoid_fail_label": t.avoid_fail_label or "Romper racha",
         "updated_at": t.updated_at.isoformat(),
     }
 

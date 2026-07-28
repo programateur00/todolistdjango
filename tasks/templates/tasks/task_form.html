@@ -91,6 +91,30 @@
         </span>
     </fieldset>
 
+    <fieldset class="field avoid-fields" id="avoid-fields">
+        <legend class="field__label">Textos de la notificación</legend>
+        <label class="field">
+            <span class="field__label">Pregunta</span>
+            <input type="text" name="avoid_question" maxlength="120"
+                   placeholder="¿Has caído hoy?" value="{{ task.avoid_question|default:'' }}">
+        </label>
+        <div class="field-row">
+            <label class="field">
+                <span class="field__label">Botón «lo evité»</span>
+                <input type="text" name="avoid_success_label" maxlength="32"
+                       placeholder="Sigo con la racha" value="{{ task.avoid_success_label|default:'' }}">
+            </label>
+            <label class="field">
+                <span class="field__label">Botón «caí»</span>
+                <input type="text" name="avoid_fail_label" maxlength="32"
+                       placeholder="Romper racha" value="{{ task.avoid_fail_label|default:'' }}">
+            </label>
+        </div>
+        <span class="field__hint">
+            Solo se usan en la notificación nocturna de la app. Déjalos en blanco para los de por defecto.
+        </span>
+    </fieldset>
+
     <fieldset class="field subcategory-field" id="subcategory-field">
         <legend class="field__label">¿Qué toca hoy?</legend>
         <div class="repeat-options">
@@ -138,9 +162,11 @@
     var subcategoryField = document.getElementById('subcategory-field');
     var categoryRadios = document.querySelectorAll('[data-category-toggle]');
 
+    var avoidFields = document.getElementById('avoid-fields');
     function updateSubcategory(){
         var v = (document.querySelector('[data-category-toggle]:checked') || {}).value || 'general';
         subcategoryField.style.display = v === 'sport' ? 'block' : 'none';
+        avoidFields.style.display = v === 'avoid' ? 'block' : 'none';
     }
     categoryRadios.forEach(function(r){ r.addEventListener('change', updateSubcategory); });
     updateSubcategory();
