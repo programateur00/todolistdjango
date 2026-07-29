@@ -191,6 +191,13 @@ def task_workout(request, pk):
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
     exercise_slug = request.GET.get("exercise")
 
+    # Si la tarea la generó un plan, no hay nada que elegir: el plan ya
+    # decidió qué ejercicios y con qué objetivo. Se va directo a la
+    # sesión, que es lo que hace que esto sea simple de usar.
+    plan = task.plan
+    if plan and not exercise_slug and plan.items.filter(exercise__isnull=False).exists():
+        return redirect(reverse("tasks:plan_session", args=[task.pk, plan.pk]))
+
     exercises_qs = Exercise.objects.filter(is_active=True).exclude(mode=Exercise.MODE_TIMED)
     routines_qs = Routine.objects.filter(user=get_current_user())
     if task.subcategory:
@@ -643,11 +650,25 @@ def plan_form(request, pk=None):
             except (TypeError, ValueError):
                 plan.weeks = 12
             plan.is_active = bool(request.POST.get("is_active"))
+            plan.repeat = request.POST.get("repeat", "custom")
+            plan.custom_days = ",".join(request.POST.getlist("custom_days")) or "0,2,4"
+            plan.due_time = request.POST.get("due_time") or None
+            try:
+                plan.interval = max(1, int(request.POST.get("interval", 1)))
+            except (TypeError, ValueError):
+                plan.interval = 1
             plan.save()
+            # El plan crea y mantiene su propia tarea: el usuario no tiene
+            # que crear nada a mano ni saber qué es un circuito.
+            plan.sync_task()
             messages.success(request, f"Plan «{plan.name}» guardado.")
             return redirect(reverse("tasks:plan_detail", args=[plan.pk]))
 
-    return render(request, "tasks/plan_form.html", {"plan": plan})
+    return render(request, "tasks/plan_form.html", {
+        "plan": plan,
+        "weekdays": Task.WEEKDAYS,
+        "selected_days": plan.custom_days_list() if plan else ["0", "2", "4"],
+    })
 
 
 @require_POST
@@ -655,6 +676,7 @@ def plan_delete(request, pk):
     plan = get_object_or_404(_plans_qs(), pk=pk)
     plan.deleted_at = timezone.now()
     plan.save(update_fields=["deleted_at", "updated_at"])
+    plan.sync_task()          # retira la tarea pendiente
     messages.success(request, "Plan eliminado.")
     return redirect(reverse("tasks:plan_list"))
 
@@ -718,6 +740,7 @@ def plan_item_form(request, plan_pk, pk=None):
         if item.is_headline:
             plan.items.exclude(pk=item.pk).update(is_headline=False)
 
+        plan.sync_task()
         messages.success(request, "Objetivo guardado.")
         return redirect(reverse("tasks:plan_detail", args=[plan.pk]))
 
@@ -735,3 +758,67 @@ def plan_item_delete(request, plan_pk, pk):
     get_object_or_404(PlanItem, pk=pk, plan=plan).delete()
     messages.success(request, "Objetivo eliminado.")
     return redirect(reverse("tasks:plan_detail", args=[plan.pk]))
+
+
+def plan_session(request, pk, plan_pk):
+    """
+    La sesión de hoy según el plan: sus ejercicios, en orden, cada uno
+    con el objetivo que toca. Sin elegir nada — el plan ya lo decidió.
+    """
+    task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    plan = get_object_or_404(_plans_qs(), pk=plan_pk)
+    items = plan.session_items()
+    if not items:
+        messages.error(request, "Este plan todavía no tiene ejercicios que entrenar.")
+        return redirect(reverse("tasks:plan_detail", args=[plan.pk]))
+    return render(request, "tasks/plan_session.html", {
+        "task": task, "plan": plan, "items": items,
+        "items_json": json.dumps(items),
+    })
+
+
+@require_POST
+def plan_session_save(request, pk, plan_pk):
+    """
+    Guarda la sesión del plan: una entrada por ejercicio, con el objetivo
+    que estaba vigente. Al terminar, la tarea queda hecha y el plan
+    avanza solo.
+    """
+    task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    plan = get_object_or_404(_plans_qs(), pk=plan_pk)
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({"ok": False, "error": "JSON inválido"}, status=400)
+
+    targets = {}
+    for it in plan.items.select_related("exercise"):
+        if it.exercise:
+            targets[it.exercise.slug] = it.current_target()
+
+    created = 0
+    for b in data.get("breakdown", []) or []:
+        if not isinstance(b, dict):
+            continue
+        slug = str(b.get("exercise", ""))[:32]
+        if not slug:
+            continue
+        t = targets.get(slug, {})
+        num = lambda k: int(b[k]) if isinstance(b.get(k), (int, float)) else 0
+        WorkoutSession.objects.create(
+            task=task, user=get_current_user(), plan=plan, series_id=task.series_id,
+            exercise=slug,
+            total_reps=num("reps"), total_sets=num("sets"),
+            session_duration_seconds=num("seconds"),
+            target_sets=t.get("sets"), target_reps=t.get("reps"),
+            target_seconds=t.get("seconds"),
+        )
+        created += 1
+
+    if not created:
+        return JsonResponse({"ok": False, "error": "Sin datos que guardar"}, status=400)
+
+    task.mark_done()
+    messages.success(request, f"Sesión de «{plan.name}» guardada.")
+    return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})

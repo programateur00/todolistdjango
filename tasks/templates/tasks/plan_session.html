@@ -1,0 +1,73 @@
+{% extends "tasks/base.html" %}
+{% load static %}
+{% load exercise_icons %}
+{% block title %}{{ plan.name }}{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">sesión de hoy</span>
+        <h1>{{ plan.name }}</h1>
+    </div>
+    <a href="{% url 'tasks:task_list' %}" class="stats-link">← Volver</a>
+</header>
+
+<div id="circuit-root" class="circuit"
+     data-save-url="{% url 'tasks:plan_session_save' task.pk plan.pk %}"
+     data-cancel-url="{% url 'tasks:task_list' %}"
+     data-items='{{ items_json }}'>
+    {% csrf_token %}
+
+    <div class="circuit__mode-select" id="circuit-mode-select">
+        <p class="circuit__mode-hint">{{ items|length }} ejercicio(s) · esto es lo que te toca hoy</p>
+
+        <ul class="run-preview">
+            {% for i in items %}
+            <li>
+                <span>{{ i.name }}{% if i.is_headline %} ★{% endif %}</span>
+                <span>
+                    {% if i.target_reps %}{{ i.target_sets }} × {{ i.target_reps }}{% else %}{{ i.target_sets }} × {{ i.work }}s{% endif %}
+                    {% if i.target_weight_kg %}· {{ i.target_weight_kg|floatformat:"-1" }} kg{% endif %}
+                </span>
+            </li>
+            {% endfor %}
+        </ul>
+
+        <div class="circuit__mode-buttons">
+            <button type="button" class="primary-btn" id="circuit-start-order">Empezar</button>
+            <button type="button" class="ghost-btn" id="circuit-start-random">Aleatorio</button>
+        </div>
+        <p class="field__hint">Los objetivos suben solos cuando los vas cumpliendo.</p>
+    </div>
+
+    <div class="circuit__player" id="circuit-player" hidden>
+        <p class="circuit__progress" id="circuit-progress"></p>
+        <div class="circuit__icon" id="circuit-icon"></div>
+        <h2 class="circuit__exercise-name" id="circuit-exercise-name">—</h2>
+        <p class="circuit__phase" id="circuit-phase">Trabajo</p>
+        <div class="circuit__timer" id="circuit-timer">--</div>
+        <p class="circuit__next" id="circuit-next"></p>
+        <div class="circuit__controls">
+            <button type="button" class="workout__btn workout__btn--ghost" id="circuit-pause">Pausar</button>
+            <button type="button" class="workout__btn workout__btn--ghost" id="circuit-skip">Saltar ▸</button>
+            <button type="button" class="workout__btn workout__btn--ghost" id="circuit-quit">Terminar antes</button>
+        </div>
+    </div>
+
+    <div class="circuit__done" id="circuit-done" hidden>
+        <p class="circuit__done-title">¡Sesión completada! 💪</p>
+        <p id="circuit-done-summary"></p>
+        <button type="button" class="primary-btn" id="circuit-finish">Guardar y volver</button>
+    </div>
+</div>
+
+<div id="circuit-icons" hidden>
+    {% for i in items %}
+    <div data-slug="{{ i.slug }}">{% exercise_icon i.slug %}</div>
+    {% endfor %}
+    <div data-slug="generic">{% exercise_icon "generic" %}</div>
+</div>
+
+<script src="{% static 'js/circuit.js' %}"></script>
+
+{% endblock %}

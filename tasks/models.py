@@ -158,6 +158,13 @@ class Task(models.Model):
         return self.CATEGORY_CAPABILITIES.get(self.category, [])
 
     @property
+    def plan(self):
+        """El plan que generó esta tarea, si viene de uno."""
+        return Plan.objects.filter(
+            task_series_id=self.series_id, deleted_at__isnull=True
+        ).first()
+
+    @property
     def workout_kind(self):
         """
         Qué clase de sesión abre esta tarea, para que el botón de la lista
@@ -800,6 +807,21 @@ class Plan(models.Model):
         default=12, help_text="Duración prevista. 12 semanas por defecto (12 Week Year).",
     )
     is_active = models.BooleanField(default=True)
+
+    # Cuándo toca entrenar. El plan crea y mantiene su propia tarea con
+    # estos datos, para que el usuario no tenga que crear una a mano ni
+    # entender qué es un "circuito": crea el plan y le sale la tarea.
+    repeat = models.CharField(max_length=10, default="custom")
+    interval = models.PositiveIntegerField(default=1)
+    custom_days = models.CharField(
+        max_length=20, blank=True, default="0,2,4",
+        help_text="Días de la semana, como en las tareas. Por defecto lunes, miércoles y viernes.",
+    )
+    due_time = models.TimeField(null=True, blank=True)
+
+    # La tarea que representa este plan en la lista del día.
+    task_series_id = models.UUIDField(null=True, blank=True, editable=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
     uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -820,6 +842,92 @@ class Plan(models.Model):
         """En qué semana del plan estamos (1 = la primera)."""
         days = (timezone.localtime(timezone.now()).date() - self.started_on).days
         return max(1, days // 7 + 1)
+
+    def custom_days_list(self):
+        if not self.custom_days:
+            return []
+        return [d.strip() for d in self.custom_days.split(",") if d.strip()]
+
+    def sync_task(self):
+        """
+        Crea o actualiza la tarea que representa este plan en la lista
+        del día.
+
+        Es lo que evita que el usuario tenga que aprender tres conceptos
+        (tarea, circuito y plan): crea el plan y le aparece la tarea, le
+        da al play y entrena. El plan ya decidió qué ejercicios y con qué
+        objetivo, que es para lo que existe.
+
+        Si el plan se pausa o se borra, su tarea pendiente desaparece —
+        pero el historial de lo ya hecho se conserva.
+        """
+        pending = Task.objects.filter(
+            series_id=self.task_series_id, is_done=False, expired=False,
+        ) if self.task_series_id else Task.objects.none()
+
+        if not self.is_active or self.deleted_at:
+            pending.delete()
+            return None
+
+        fields = dict(
+            title=self.name,
+            category=Task.CATEGORY_SPORT,
+            subcategory="",
+            repeat=self.repeat,
+            interval=self.interval,
+            custom_days=self.custom_days,
+            due_time=self.due_time,
+            user=self.user,
+        )
+
+        task = pending.first()
+        if task:
+            for k, v in fields.items():
+                setattr(task, k, v)
+            task.save()
+        else:
+            task = Task.objects.create(
+                due_date=max(self.started_on, timezone.localtime(timezone.now()).date()),
+                **fields,
+            )
+            self.task_series_id = task.series_id
+            Plan.objects.filter(pk=self.pk).update(task_series_id=task.series_id)
+        return task
+
+    @property
+    def task(self):
+        """La tarea pendiente de este plan, si la hay."""
+        if not self.task_series_id:
+            return None
+        return Task.objects.filter(
+            series_id=self.task_series_id, is_done=False, expired=False,
+        ).first()
+
+    def session_items(self):
+        """
+        Los ejercicios de la sesión de hoy, en el formato que espera el
+        reproductor. Sale del plan directamente: no hace falta circuito.
+        """
+        items = []
+        for it in self.items.select_related("exercise"):
+            if not it.exercise:
+                continue          # los objetivos de tarea no se "entrenan"
+            t = it.current_target()
+            items.append({
+                "slug": it.exercise.slug,
+                "name": it.display_name,
+                "mode": it.exercise.mode,
+                "counter_key": it.exercise.counter_key,
+                "target_sets": t["sets"],
+                "target_reps": t["reps"],
+                "target_weight_kg": t["weight_kg"],
+                "work": t["seconds"] or 40,
+                "rest": 30,
+                "target_source": "plan",
+                "plan_name": self.name,
+                "is_headline": it.is_headline,
+            })
+        return items
 
     @property
     def headline(self):

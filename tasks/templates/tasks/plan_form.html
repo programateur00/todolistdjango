@@ -38,6 +38,29 @@
         </label>
     </div>
 
+    <fieldset class="field">
+        <legend class="field__label">Qué días entrenas</legend>
+        <div class="repeat-options">
+            {% for value, label in weekdays %}
+            <label class="repeat-option">
+                <input type="checkbox" name="custom_days" value="{{ value }}"
+                    {% if value in selected_days %}checked{% endif %}>
+                <span>{{ label }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        <input type="hidden" name="repeat" value="custom">
+        <span class="field__hint">
+            El plan crea su propia tarea con estos días. Te saldrá en la lista
+            y solo tienes que darle al play.
+        </span>
+    </fieldset>
+
+    <label class="field">
+        <span class="field__label">Hora (opcional)</span>
+        <input type="time" name="due_time" value="{{ plan.due_time|time:'H:i'|default:'' }}">
+    </label>
+
     <label class="field field--inline">
         <input type="checkbox" name="is_active" {% if plan.is_active or not plan %}checked{% endif %}>
         <span class="field__label">Plan activo</span>

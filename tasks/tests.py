@@ -833,6 +833,88 @@ class PlanViewTests(TestCase):
         self.assertNotIn("Ponerme en forma", html)
 
 
+class PlanTaskFlowTests(TestCase):
+    """
+    Lo que hace la app entendible: creas un plan y te aparece la tarea.
+    Le das al play y entrenas. Sin elegir circuito ni ejercicio — el plan
+    ya lo decidió, que es para lo que existe.
+    """
+
+    def setUp(self):
+        self.wp = Exercise.objects.create(
+            slug="wp-f", name="Dominadas con peso", mode=Exercise.MODE_POSE,
+        )
+
+    def _plan_with_exercise(self):
+        self.client.post(reverse("tasks:plan_create"), {
+            "name": "Ponerme en forma", "weeks": 12, "is_active": "on",
+            "custom_days": ["0", "2", "4"],
+        })
+        plan = Plan.objects.get(name="Ponerme en forma")
+        self.client.post(reverse("tasks:plan_item_create", args=[plan.pk]), {
+            "exercise": self.wp.slug, "progression": "double", "is_headline": "on",
+            "start_sets": 4, "start_reps": 6, "start_weight_kg": 0,
+            "goal_sets": 4, "goal_reps": 12, "goal_weight_kg": 20,
+            "rep_range_low": 6, "weight_increment_kg": 5, "sessions_per_step": 2,
+        })
+        return plan
+
+    def test_creating_a_plan_creates_its_task(self):
+        plan = self._plan_with_exercise()
+        self.assertIsNotNone(plan.task)
+        self.assertEqual(plan.task.title, "Ponerme en forma")
+        self.assertEqual(plan.task.category, Task.CATEGORY_SPORT)
+
+    def test_task_appears_in_the_list(self):
+        self._plan_with_exercise()
+        html = self.client.get(reverse("tasks:task_list")).content.decode()
+        self.assertIn("Ponerme en forma", html)
+
+    def test_play_goes_straight_to_the_session(self):
+        """Sin selector de ejercicio: el plan ya decidió."""
+        plan = self._plan_with_exercise()
+        r = self.client.get(reverse("tasks:task_workout", args=[plan.task.pk]))
+        self.assertEqual(r.status_code, 302)
+        self.assertIn(f"/plan/{plan.pk}/", r.url)
+
+    def test_session_shows_todays_target(self):
+        plan = self._plan_with_exercise()
+        html = self.client.get(
+            reverse("tasks:plan_session", args=[plan.task.pk, plan.pk])
+        ).content.decode()
+        self.assertIn("Dominadas con peso", html)
+        self.assertIn("4 × 6", html)
+
+    def test_saving_completes_task_and_records_per_exercise(self):
+        plan = self._plan_with_exercise()
+        task = plan.task
+        r = self.client.post(
+            reverse("tasks:plan_session_save", args=[task.pk, plan.pk]),
+            data=json.dumps({"breakdown": [
+                {"exercise": self.wp.slug, "reps": 24, "sets": 4, "seconds": 200},
+            ]}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        task.refresh_from_db()
+        self.assertTrue(task.is_done)
+        self.assertEqual(WorkoutSession.objects.filter(plan=plan).count(), 1)
+
+    def test_pausing_the_plan_removes_its_pending_task(self):
+        plan = self._plan_with_exercise()
+        self.assertIsNotNone(plan.task)
+        plan.is_active = False
+        plan.save()
+        plan.sync_task()
+        self.assertIsNone(plan.task)
+
+    def test_deleting_the_plan_removes_its_task(self):
+        plan = self._plan_with_exercise()
+        self.client.post(reverse("tasks:plan_delete", args=[plan.pk]))
+        plan.refresh_from_db()
+        self.assertIsNone(plan.task)
+
+
 class PlanAndFreestyleTests(TestCase):
     """
     Plan y "a mi aire" conviviendo: si el ejercicio está en un plan
