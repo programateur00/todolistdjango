@@ -1,3 +1,4 @@
+import datetime as _dt
 import uuid
 from datetime import timedelta
 
@@ -719,6 +720,142 @@ class RoutineItem(models.Model):
         return self.rest_seconds if self.rest_seconds is not None else self.routine.default_rest_seconds
 
 
+class Plan(models.Model):
+    """
+    Un objetivo con progresión: "ponerme en forma", "preparar el DALF".
+
+    Cuelga del OBJETIVO, no de un circuito, porque es lo que la gente
+    quiere de verdad — nadie se propone "hacer 8 repeticiones", se
+    propone estar más en forma. Los circuitos y ejercicios son las
+    tácticas; el plan es hacia dónde van.
+
+    Puede abarcar varios ejercicios de varios circuitos a la vez.
+    """
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="plans",
+    )
+    name = models.CharField(max_length=80)
+    notes = models.TextField(blank=True)
+    started_on = models.DateField(default=_dt.date.today)
+    weeks = models.PositiveIntegerField(
+        default=12, help_text="Duración prevista. 12 semanas por defecto (12 Week Year).",
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-is_active", "-started_on"]
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def ends_on(self):
+        return self.started_on + timedelta(weeks=self.weeks)
+
+    @property
+    def week_number(self):
+        """En qué semana del plan estamos (1 = la primera)."""
+        days = (timezone.localtime(timezone.now()).date() - self.started_on).days
+        return max(1, days // 7 + 1)
+
+
+class PlanExercise(models.Model):
+    """
+    Cómo progresa UN ejercicio dentro de un plan.
+
+    En vez de una tabla con el objetivo de cada sesión (cientos de
+    casillas que nadie rellena), se guarda el punto de partida y la regla
+    de subida: "empiezo en 3x8 y subo 1 repetición cada 2 sesiones". Es
+    como se escriben los programas de entrenamiento de verdad, y la tabla
+    completa se calcula a partir de ahí.
+
+    La progresión avanza por SESIONES HECHAS, no por semanas de
+    calendario: si te pones enfermo una semana, no te has saltado un
+    escalón — sigues donde lo dejaste.
+    """
+    plan = models.ForeignKey(Plan, on_delete=models.CASCADE, related_name="exercises")
+    exercise = models.ForeignKey(Exercise, on_delete=models.CASCADE)
+
+    start_sets = models.PositiveIntegerField(default=3)
+    start_reps = models.PositiveIntegerField(default=8)
+    start_seconds = models.PositiveIntegerField(
+        default=40, help_text="Para ejercicios cronometrados, en vez de repeticiones.",
+    )
+
+    reps_increment = models.PositiveIntegerField(
+        default=1, help_text="Cuánto sube cada escalón.",
+    )
+    sessions_per_step = models.PositiveIntegerField(
+        default=2, help_text="Cada cuántas sesiones se sube un escalón.",
+    )
+    max_reps = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Tope opcional: al llegar aquí deja de subir.",
+    )
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["plan", "exercise"], name="unique_exercise_per_plan",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.plan.name}: {self.exercise.name}"
+
+    @property
+    def is_timed(self):
+        return self.exercise.mode == Exercise.MODE_TIMED
+
+    def sessions_done(self):
+        """Sesiones ya registradas de este ejercicio dentro del plan."""
+        return WorkoutSession.objects.filter(
+            plan=self.plan, exercise=self.exercise.slug, deleted_at__isnull=True
+        ).count()
+
+    def target_for(self, session_index):
+        """
+        Objetivo en la sesión número `session_index` (0 = la primera).
+
+        Devuelve un dict con lo que toque según el tipo de ejercicio:
+        series y repeticiones, o segundos.
+        """
+        step = session_index // max(1, self.sessions_per_step)
+        bump = step * self.reps_increment
+
+        if self.is_timed:
+            seconds = self.start_seconds + bump
+            if self.max_reps:
+                seconds = min(seconds, self.max_reps)
+            return {"sets": self.start_sets, "seconds": seconds, "reps": None}
+
+        reps = self.start_reps + bump
+        if self.max_reps:
+            reps = min(reps, self.max_reps)
+        return {"sets": self.start_sets, "reps": reps, "seconds": None}
+
+    def current_target(self):
+        """Lo que te toca hoy, según las sesiones que llevas hechas."""
+        return self.target_for(self.sessions_done())
+
+    def schedule(self, count=12):
+        """
+        La tabla de progresión, para poder verla antes de empezar.
+        Devuelve una entrada por sesión.
+        """
+        return [
+            dict(session=i + 1, **self.target_for(i))
+            for i in range(count)
+        ]
+
+
 class WorkoutSession(models.Model):
     """
     Estadísticas de una sesión de entreno. La mayoría se graban con la
@@ -736,6 +873,17 @@ class WorkoutSession(models.Model):
         Routine, on_delete=models.SET_NULL, null=True, blank=True, related_name="workout_sessions",
         help_text="Si esta sesión vino de un circuito (Routine), cuál. En blanco para ejercicios sueltos.",
     )
+    plan = models.ForeignKey(
+        Plan, on_delete=models.SET_NULL, null=True, blank=True, related_name="workout_sessions",
+        help_text="Plan al que contaba esta sesión, si había uno activo.",
+    )
+    # Objetivo que estaba vigente en ESE momento. Se guarda en la sesión
+    # en vez de recalcularlo después, porque el objetivo sube con las
+    # sesiones: si se recalculara, el historial de hace un mes se
+    # compararía con el objetivo de hoy y saldría un porcentaje falso.
+    target_reps = models.PositiveIntegerField(null=True, blank=True)
+    target_sets = models.PositiveIntegerField(null=True, blank=True)
+    target_seconds = models.PositiveIntegerField(null=True, blank=True)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
         related_name="workout_sessions",
@@ -769,6 +917,38 @@ class WorkoutSession(models.Model):
 
     class Meta:
         ordering = ["-recorded_at"]
+
+    @property
+    def achievement_pct(self):
+        """
+        Qué porcentaje del objetivo se cumplió, o None si no había.
+
+        Se compara el TOTAL hecho contra el TOTAL pedido (series ×
+        repeticiones), no serie por serie. Si el objetivo era 3×10 y
+        hiciste 4×8, eso son 32 de 30 — lo hiciste, aunque repartido
+        distinto. Contar serie a serie penalizaría una forma de entrenar
+        que es igual de válida.
+        """
+        if self.target_sets and self.target_reps:
+            objetivo = self.target_sets * self.target_reps
+            hecho = self.total_reps
+        elif self.target_sets and self.target_seconds:
+            objetivo = self.target_sets * self.target_seconds
+            hecho = self.session_duration_seconds
+        else:
+            return None
+        if not objetivo:
+            return None
+        return round(100 * hecho / objetivo)
+
+    @property
+    def target_label(self):
+        """El objetivo en texto, para enseñarlo junto al resultado."""
+        if self.target_sets and self.target_reps:
+            return f"{self.target_sets} × {self.target_reps}"
+        if self.target_sets and self.target_seconds:
+            return f"{self.target_sets} × {self.target_seconds}s"
+        return ""
 
     @property
     def exercise_name(self):

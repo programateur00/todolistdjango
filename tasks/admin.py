@@ -1,6 +1,8 @@
 from django.contrib import admin
 
-from .models import Exercise, Occurrence, Routine, RoutineItem, Task, WorkoutSession
+from .models import (
+    Exercise, Occurrence, Plan, PlanExercise, Routine, RoutineItem, Task, WorkoutSession,
+)
 
 
 @admin.register(Task)
@@ -52,3 +54,16 @@ class WorkoutSessionAdmin(admin.ModelAdmin):
     )
     list_filter = ("exercise",)
     list_per_page = 50
+
+
+class PlanExerciseInline(admin.TabularInline):
+    model = PlanExercise
+    extra = 1
+
+
+@admin.register(Plan)
+class PlanAdmin(admin.ModelAdmin):
+    list_display = ("name", "user", "started_on", "weeks", "ends_on", "is_active")
+    list_filter = ("is_active",)
+    search_fields = ("name",)
+    inlines = [PlanExerciseInline]
