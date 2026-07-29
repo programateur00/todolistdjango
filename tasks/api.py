@@ -24,7 +24,9 @@ from django.utils.dateparse import parse_date, parse_time
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
-from .models import Exercise, Occurrence, Routine, RoutineItem, Task, WorkoutSession
+from .models import (
+    Exercise, Occurrence, Plan, PlanExercise, Routine, RoutineItem, Task, WorkoutSession,
+)
 from .utils import get_current_user
 
 
@@ -117,6 +119,69 @@ def exercise_json(e):
     }
 
 
+def _plan_context(exercise_slug, sets=None, reps=None, seconds=None):
+    """
+    A qué plan cuenta esta sesión y qué objetivo tenía.
+
+    El objetivo se guarda EN la sesión y no se recalcula después, porque
+    sube con las sesiones: si se recalculara, un entreno de hace un mes
+    se compararía con el objetivo de hoy y el porcentaje saldría falso.
+
+    Si el cliente manda su propio objetivo (`sets`/`reps`), se respeta —
+    es el que tenía delante mientras entrenaba.
+    """
+    entry = (
+        PlanExercise.objects
+        .filter(
+            exercise__slug=exercise_slug,
+            plan__is_active=True,
+            plan__deleted_at__isnull=True,
+            plan__user=_user(),
+        )
+        .select_related("plan")
+        .order_by("-plan__started_on")
+        .first()
+    )
+    if not entry:
+        return {"plan": None, "target_sets": sets, "target_reps": reps,
+                "target_seconds": seconds}
+
+    t = entry.current_target()
+    return {
+        "plan": entry.plan,
+        "target_sets": sets if sets is not None else t["sets"],
+        "target_reps": reps if reps is not None else t["reps"],
+        "target_seconds": seconds if seconds is not None else t["seconds"],
+    }
+
+
+def _routine_item_json(i):
+    """
+    Un ejercicio del circuito con su objetivo YA resuelto.
+
+    Si el ejercicio está en un plan activo manda el plan (y el objetivo
+    sube solo con las sesiones); si no, mandan los números fijos del
+    circuito. Así conviven plan y entrenar a tu aire. Se manda también
+    `target_source` para poder decir en pantalla de dónde sale la cifra.
+    """
+    t = i.resolved_target()
+    return {
+        "slug": i.exercise.slug,
+        "name": i.exercise.name,
+        "mode": i.exercise.mode,
+        "counter_key": i.exercise.counter_key,
+        "order": i.order,
+        "work": t["seconds"],
+        "rest": i.effective_rest_seconds,
+        "target_sets": t["sets"],
+        "target_reps": t["reps"],
+        "target_source": t["source"],
+        "plan_name": t["plan_name"],
+        "plan_uuid": t["plan_uuid"],
+        "session_index": t["session_index"],
+    }
+
+
 def routine_json(r):
     return {
         "uuid": str(r.uuid),
@@ -125,20 +190,7 @@ def routine_json(r):
         "default_work_seconds": r.default_work_seconds,
         "default_rest_seconds": r.default_rest_seconds,
         "total_seconds": r.total_seconds,
-        "items": [
-            {
-                "slug": i.exercise.slug,
-                "name": i.exercise.name,
-                "mode": i.exercise.mode,
-                "counter_key": i.exercise.counter_key,
-                "order": i.order,
-                "work": i.effective_work_seconds,
-                "rest": i.effective_rest_seconds,
-                "target_sets": i.target_sets,
-                "target_reps": i.target_reps,
-            }
-            for i in r.items.select_related("exercise")
-        ],
+        "items": [_routine_item_json(i) for i in r.items.select_related("exercise")],
         "updated_at": r.updated_at.isoformat(),
     }
 
@@ -442,8 +494,15 @@ def workout_save(request, uuid):
                 })
     avg = round(sum(rep_durations) / len(rep_durations), 2) if rep_durations else None
 
+    ctx = _plan_context(
+        exercise_slug,
+        sets=data.get("target_sets"),
+        reps=data.get("target_reps"),
+    )
     ws = WorkoutSession.objects.create(
         task=t, user=_user(), series_id=t.series_id, exercise=exercise_slug,
+        plan=ctx["plan"], target_sets=ctx["target_sets"],
+        target_reps=ctx["target_reps"], target_seconds=ctx["target_seconds"],
         total_reps=int(data.get("total_reps", 0)),
         total_sets=int(data.get("total_sets", len(clean_sets))),
         sets=clean_sets,
@@ -496,28 +555,68 @@ def workout_save_manual(request, uuid):
 
 @api("POST")
 def routine_result(request, uuid, routine_uuid):
-    """Resultado de un circuito terminado (o cortado antes)."""
+    """
+    Resultado de un circuito terminado (o cortado antes).
+
+    Se guarda UNA SESIÓN POR EJERCICIO, no una sola con todo dentro. Dos
+    motivos: la progresión del plan cuenta sesiones por ejercicio, así que
+    metiéndolo todo junto los ejercicios del circuito nunca avanzarían; y
+    antes se perdían las repeticiones de los ejercicios de cámara, que
+    llegaban en el desglose y se tiraban.
+
+    Todas quedan enlazadas al mismo circuito (campo `routine`), así que se
+    puede reconstruir la sesión completa cuando haga falta.
+    """
     t = get_object_or_404(tasks_qs(), uuid=uuid)
     r = get_object_or_404(Routine.objects.filter(user=_user()), uuid=routine_uuid)
     data = body(request)
 
-    breakdown, total = [], 0
+    def _num(b, key):
+        return int(b[key]) if isinstance(b.get(key), (int, float)) else 0
+
+    entries = []
     for b in data.get("breakdown", []) or []:
         if not isinstance(b, dict):
             continue
-        seconds = int(b.get("seconds", 0)) if isinstance(b.get("seconds"), (int, float)) else 0
-        breakdown.append({"exercise": str(b.get("exercise", ""))[:32], "seconds": seconds})
-        total += seconds
-    if not breakdown:
+        slug = str(b.get("exercise", ""))[:32]
+        if slug:
+            entries.append({
+                "exercise": slug,
+                "seconds": _num(b, "seconds"),
+                "reps": _num(b, "reps"),
+                "sets": _num(b, "sets"),
+            })
+    if not entries:
         return JsonResponse({"ok": False, "error": "Sin datos que guardar"}, status=400)
 
-    ws = WorkoutSession.objects.create(
-        task=t, user=_user(), routine=r, series_id=t.series_id,
-        exercise="ab-circuit", session_duration_seconds=total,
-        sets=breakdown, total_sets=len(breakdown),
-    )
-    # finish=false permite guardar un ejercicio y seguir con otro en la
-    # misma sesion: la tarea solo se cierra cuando el usuario lo dice.
+    created, total_seconds = [], 0
+    for e in entries:
+        ctx = _plan_context(e["exercise"])
+        created.append(WorkoutSession.objects.create(
+            task=t, user=_user(), routine=r, series_id=t.series_id,
+            plan=ctx["plan"], target_sets=ctx["target_sets"],
+            target_reps=ctx["target_reps"], target_seconds=ctx["target_seconds"],
+            exercise=e["exercise"],
+            total_reps=e["reps"], total_sets=e["sets"],
+            session_duration_seconds=e["seconds"],
+        ))
+        total_seconds += e["seconds"]
+
+    # finish=false permite guardar y seguir en la misma sesion: la tarea
+    # solo se cierra cuando el usuario lo dice.
     if data.get("finish", True):
         t.mark_done()
-    return JsonResponse({"ok": True, "session_uuid": str(ws.uuid), "task": task_json(t)})
+
+    return JsonResponse({
+        "ok": True,
+        "sessions": [
+            {
+                "exercise": w.exercise, "name": w.exercise_name,
+                "reps": w.total_reps, "seconds": w.session_duration_seconds,
+                "target": w.target_label, "achievement_pct": w.achievement_pct,
+            }
+            for w in created
+        ],
+        "total_seconds": total_seconds,
+        "task": task_json(t),
+    })

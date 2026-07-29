@@ -719,6 +719,59 @@ class RoutineItem(models.Model):
     def effective_rest_seconds(self):
         return self.rest_seconds if self.rest_seconds is not None else self.routine.default_rest_seconds
 
+    def plan_entry(self, user=None):
+        """
+        El ejercicio dentro de un plan activo, si lo hay.
+
+        Es lo que permite convivir plan y "freestyle": si este ejercicio
+        forma parte de un plan en marcha, manda el plan; si no, mandan los
+        objetivos fijos del circuito y entrenas a tu aire.
+        """
+        owner = user or self.routine.user
+        return (
+            PlanExercise.objects
+            .filter(
+                exercise=self.exercise,
+                plan__is_active=True,
+                plan__deleted_at__isnull=True,
+                plan__user=owner,
+            )
+            .select_related("plan")
+            .order_by("-plan__started_on")
+            .first()
+        )
+
+    def resolved_target(self, user=None):
+        """
+        Lo que toca hacer hoy en este ejercicio, mire quien lo mire.
+
+        Devuelve también de dónde sale el número (`source`), porque en
+        pantalla no es lo mismo "3x8 porque lo pusiste en el circuito"
+        que "3x9 porque tu plan va por ahí" — y el usuario necesita
+        entender por qué le pide eso.
+        """
+        entry = self.plan_entry(user)
+        if entry:
+            target = entry.current_target()
+            return {
+                "sets": target["sets"],
+                "reps": target["reps"],
+                "seconds": target["seconds"] or self.effective_work_seconds,
+                "source": "plan",
+                "plan_name": entry.plan.name,
+                "plan_uuid": str(entry.plan.uuid),
+                "session_index": entry.sessions_done() + 1,
+            }
+        return {
+            "sets": self.target_sets,
+            "reps": self.target_reps,
+            "seconds": self.effective_work_seconds,
+            "source": "routine",
+            "plan_name": None,
+            "plan_uuid": None,
+            "session_index": None,
+        }
+
 
 class Plan(models.Model):
     """

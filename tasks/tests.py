@@ -6,7 +6,7 @@ from django.utils import timezone
 from django.urls import reverse
 
 from .models import (
-    Exercise, Occurrence, Plan, PlanExercise, Task, WorkoutSession,
+    Exercise, Occurrence, Plan, PlanExercise, Routine, RoutineItem, Task, WorkoutSession,
 )
 from .utils import get_current_user
 
@@ -671,6 +671,92 @@ class PlanProgressionTests(TestCase):
         sched = pe.schedule(4)
         self.assertEqual([s["seconds"] for s in sched], [30, 30, 35, 35])
         self.assertIsNone(sched[0]["reps"])
+
+
+class PlanAndFreestyleTests(TestCase):
+    """
+    Plan y "a mi aire" conviviendo: si el ejercicio está en un plan
+    activo manda el plan; si no, mandan los objetivos fijos del circuito.
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.pull = Exercise.objects.create(
+            slug="pull-x", name="Dominadas", mode=Exercise.MODE_POSE, counter_key="pullup",
+        )
+        self.routine = Routine.objects.create(name="Circuito", user=self.user)
+        self.item = RoutineItem.objects.create(
+            routine=self.routine, exercise=self.pull, target_sets=3, target_reps=8,
+        )
+        self.task = Task.objects.create(
+            title="Entrenar", category=Task.CATEGORY_SPORT, user=self.user,
+        )
+
+    def _plan(self, **kw):
+        plan = Plan.objects.create(name="En forma", user=self.user)
+        PlanExercise.objects.create(
+            plan=plan, exercise=self.pull,
+            **{"start_sets": 4, "start_reps": 6, "reps_increment": 1,
+               "sessions_per_step": 2, **kw},
+        )
+        return plan
+
+    def test_without_plan_uses_routine_target(self):
+        t = self.item.resolved_target(self.user)
+        self.assertEqual((t["sets"], t["reps"], t["source"]), (3, 8, "routine"))
+
+    def test_plan_overrides_routine_target(self):
+        self._plan()
+        t = self.item.resolved_target(self.user)
+        self.assertEqual((t["sets"], t["reps"], t["source"]), (4, 6, "plan"))
+
+    def test_inactive_plan_falls_back_to_routine(self):
+        plan = self._plan()
+        plan.is_active = False
+        plan.save()
+        self.assertEqual(self.item.resolved_target(self.user)["source"], "routine")
+
+    def test_circuit_saves_one_session_per_exercise(self):
+        """Con una sola sesión conjunta, la progresión del plan nunca
+        avanzaría (cuenta sesiones por ejercicio) y se perdían las reps."""
+        plank = Exercise.objects.create(slug="plank-x", name="Plancha", mode=Exercise.MODE_TIMED)
+        RoutineItem.objects.create(routine=self.routine, exercise=plank, order=1)
+        r = self.client.post(
+            f"/api/tasks/{self.task.uuid}/circuit/{self.routine.uuid}/",
+            data=json.dumps({"breakdown": [
+                {"exercise": "pull-x", "reps": 18, "sets": 3, "seconds": 120},
+                {"exercise": "plank-x", "seconds": 30},
+            ]}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.json()["sessions"]), 2)
+        self.assertEqual(WorkoutSession.objects.filter(task=self.task).count(), 2)
+        # y las repeticiones ya no se pierden
+        ws = WorkoutSession.objects.get(task=self.task, exercise="pull-x")
+        self.assertEqual(ws.total_reps, 18)
+
+    def test_session_records_plan_and_target(self):
+        plan = self._plan()
+        self.client.post(
+            f"/api/tasks/{self.task.uuid}/circuit/{self.routine.uuid}/",
+            data=json.dumps({"breakdown": [{"exercise": "pull-x", "reps": 18, "sets": 3}]}),
+            content_type="application/json",
+        )
+        ws = WorkoutSession.objects.get(task=self.task, exercise="pull-x")
+        self.assertEqual(ws.plan, plan)
+        self.assertEqual((ws.target_sets, ws.target_reps), (4, 6))
+        self.assertEqual(ws.achievement_pct, 75)   # 18 de 24
+
+    def test_plan_climbs_after_enough_sessions(self):
+        self._plan()
+        for _ in range(2):
+            self.client.post(
+                f"/api/tasks/{self.task.uuid}/circuit/{self.routine.uuid}/",
+                data=json.dumps({"breakdown": [{"exercise": "pull-x", "reps": 24, "sets": 4}]}),
+                content_type="application/json",
+            )
+        self.assertEqual(self.item.resolved_target(self.user)["reps"], 7)
 
 
 class ApiTests(TestCase):
