@@ -7,7 +7,13 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
-from .models import Exercise, Occurrence, Routine, RoutineItem, Task, WorkoutSession
+import datetime as _dt
+
+from django.utils import timezone
+
+from .models import (
+    Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, Task, WorkoutSession,
+)
 from .utils import get_current_user
 
 
@@ -556,3 +562,176 @@ def stats_detail(request, series_id):
         "current_streak": streaks["current_streak"],
         "max_streak": streaks["max_streak"],
     })
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Planes de progresión
+# ─────────────────────────────────────────────────────────────────────
+
+def _plans_qs():
+    return Plan.objects.filter(user=get_current_user(), deleted_at__isnull=True)
+
+
+def plan_list(request):
+    """Los planes, con su medida principal y cuánto llevas."""
+    plans = []
+    for p in _plans_qs():
+        head = p.headline
+        plans.append({
+            "plan": p,
+            "headline": head,
+            "target": head.current_target() if head else None,
+            "remaining": head.sessions_to_goal() if head else None,
+            "progress": p.progress_pct(),
+        })
+    return render(request, "tasks/plan_list.html", {"plans": plans})
+
+
+def plan_detail(request, pk):
+    """
+    La pantalla del plan: dónde estás, qué te toca hoy, el camino que
+    queda y lo que ya hiciste.
+    """
+    plan = get_object_or_404(_plans_qs(), pk=pk)
+
+    def _pack(item):
+        # La tabla tiene que llegar hasta el destino. Con un número fijo
+        # se cortaba antes de tiempo — un objetivo de 4x12 con 20 kg son
+        # 35 escalones — y no se veía el final, que es lo que da sentido
+        # a todo. El tope es solo una red de seguridad.
+        remaining = item.sessions_to_goal()
+        rows = 60
+        if remaining is not None:
+            rows = min(120, item.current_step() + remaining // max(1, item.sessions_per_step) + 2)
+        return {
+            "item": item,
+            "target": item.current_target(),
+            "step": item.current_step(),
+            "remaining": remaining,
+            "schedule": item.schedule(rows),
+            "history": item.history(12),
+            # Si el entrenador ha bajado un escalón conviene decirlo: si
+            # no, parece que la app se ha equivocado.
+            "deloaded": item.successes_and_streak()[1] >= item.deload_after_failures > 0,
+        }
+
+    head = plan.headline
+    return render(request, "tasks/plan_detail.html", {
+        "plan": plan,
+        "headline": _pack(head) if head else None,
+        "supports": [_pack(i) for i in plan.support_items],
+        "progress": plan.progress_pct(),
+    })
+
+
+def plan_form(request, pk=None):
+    """Crear o editar un plan. Los objetivos se editan uno a uno."""
+    plan = get_object_or_404(_plans_qs(), pk=pk) if pk else None
+
+    if request.method == "POST":
+        name = request.POST.get("name", "").strip()
+        if not name:
+            messages.error(request, "Ponle un nombre al plan.")
+        else:
+            if plan is None:
+                plan = Plan(user=get_current_user())
+            plan.name = name[:80]
+            plan.notes = request.POST.get("notes", "").strip()
+            plan.started_on = request.POST.get("started_on") or plan.started_on or _dt.date.today()
+            try:
+                plan.weeks = max(1, int(request.POST.get("weeks", 12)))
+            except (TypeError, ValueError):
+                plan.weeks = 12
+            plan.is_active = bool(request.POST.get("is_active"))
+            plan.save()
+            messages.success(request, f"Plan «{plan.name}» guardado.")
+            return redirect(reverse("tasks:plan_detail", args=[plan.pk]))
+
+    return render(request, "tasks/plan_form.html", {"plan": plan})
+
+
+@require_POST
+def plan_delete(request, pk):
+    plan = get_object_or_404(_plans_qs(), pk=pk)
+    plan.deleted_at = timezone.now()
+    plan.save(update_fields=["deleted_at", "updated_at"])
+    messages.success(request, "Plan eliminado.")
+    return redirect(reverse("tasks:plan_list"))
+
+
+def plan_item_form(request, plan_pk, pk=None):
+    """
+    Un objetivo dentro del plan.
+
+    El formulario enseña solo lo que aplica a cada tipo de progresión:
+    no tiene sentido pedir "rango de repeticiones" en algo de
+    cumplimiento, ni "peso" en una plancha.
+    """
+    plan = get_object_or_404(_plans_qs(), pk=plan_pk)
+    item = get_object_or_404(PlanItem, pk=pk, plan=plan) if pk else None
+
+    if request.method == "POST":
+        if item is None:
+            item = PlanItem(plan=plan)
+
+        slug = request.POST.get("exercise") or ""
+        item.exercise = Exercise.objects.filter(slug=slug).first() if slug else None
+        item.label = request.POST.get("label", "").strip()[:80]
+
+        valid = {k for k, _ in PlanItem.PROGRESSION_CHOICES}
+        prog = request.POST.get("progression", PlanItem.PROG_REPS)
+        item.progression = prog if prog in valid else PlanItem.PROG_REPS
+
+        def _int(name, default):
+            try:
+                return max(0, int(request.POST.get(name) or default))
+            except (TypeError, ValueError):
+                return default
+
+        def _float(name, default):
+            try:
+                return max(0.0, float((request.POST.get(name) or default)))
+            except (TypeError, ValueError):
+                return default
+
+        item.start_sets = _int("start_sets", 3) or 1
+        item.start_reps = _int("start_reps", 8)
+        item.start_seconds = _int("start_seconds", 40)
+        item.start_weight_kg = _float("start_weight_kg", 0)
+
+        item.goal_sets = _int("goal_sets", 0) or None
+        item.goal_reps = _int("goal_reps", 0) or None
+        item.goal_seconds = _int("goal_seconds", 0) or None
+        gw = request.POST.get("goal_weight_kg")
+        item.goal_weight_kg = _float("goal_weight_kg", 0) if gw else None
+
+        item.sessions_per_step = _int("sessions_per_step", 2) or 1
+        item.reps_increment = _int("reps_increment", 1) or 1
+        item.weight_increment_kg = _float("weight_increment_kg", 2.5) or 2.5
+        item.rep_range_low = _int("rep_range_low", 6) or 1
+        item.deload_after_failures = _int("deload_after_failures", 3)
+        item.is_headline = bool(request.POST.get("is_headline"))
+
+        item.save()
+
+        # Solo puede haber una medida principal.
+        if item.is_headline:
+            plan.items.exclude(pk=item.pk).update(is_headline=False)
+
+        messages.success(request, "Objetivo guardado.")
+        return redirect(reverse("tasks:plan_detail", args=[plan.pk]))
+
+    return render(request, "tasks/plan_item_form.html", {
+        "plan": plan,
+        "item": item,
+        "exercises": Exercise.objects.filter(is_active=True),
+        "progressions": PlanItem.PROGRESSION_CHOICES,
+    })
+
+
+@require_POST
+def plan_item_delete(request, plan_pk, pk):
+    plan = get_object_or_404(_plans_qs(), pk=plan_pk)
+    get_object_or_404(PlanItem, pk=pk, plan=plan).delete()
+    messages.success(request, "Objetivo eliminado.")
+    return redirect(reverse("tasks:plan_detail", args=[plan.pk]))

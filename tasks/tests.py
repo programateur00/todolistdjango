@@ -761,6 +761,78 @@ class PlanHeadlineTests(TestCase):
         self.assertEqual(self.plan.items.count(), 2)
 
 
+class PlanViewTests(TestCase):
+    """Las pantallas de plan en la web."""
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.wp = Exercise.objects.create(
+            slug="wp-v", name="Dominadas con peso", mode=Exercise.MODE_POSE,
+        )
+
+    def _create_plan(self):
+        self.client.post(reverse("tasks:plan_create"), {
+            "name": "Ponerme en forma", "weeks": 12, "is_active": "on",
+        })
+        return Plan.objects.get(name="Ponerme en forma")
+
+    def test_create_plan_from_web(self):
+        plan = self._create_plan()
+        self.assertTrue(plan.is_active)
+        self.assertEqual(plan.user, self.user)
+
+    def test_add_headline_item(self):
+        plan = self._create_plan()
+        r = self.client.post(reverse("tasks:plan_item_create", args=[plan.pk]), {
+            "exercise": self.wp.slug, "progression": "double", "is_headline": "on",
+            "start_sets": 4, "start_reps": 6, "start_weight_kg": 0,
+            "goal_sets": 4, "goal_reps": 12, "goal_weight_kg": 20,
+            "rep_range_low": 6, "weight_increment_kg": 5, "sessions_per_step": 2,
+        })
+        self.assertEqual(r.status_code, 302)
+        item = plan.items.get()
+        self.assertTrue(item.is_headline)
+        self.assertEqual(item.goal_weight_kg, 20)
+
+    def test_only_one_headline_allowed(self):
+        plan = self._create_plan()
+        other = Exercise.objects.create(slug="ot-v", name="Otro", mode=Exercise.MODE_POSE)
+        for slug in (self.wp.slug, other.slug):
+            self.client.post(reverse("tasks:plan_item_create", args=[plan.pk]), {
+                "exercise": slug, "progression": "reps", "is_headline": "on",
+                "start_sets": 3, "start_reps": 8, "goal_reps": 12,
+            })
+        self.assertEqual(plan.items.filter(is_headline=True).count(), 1)
+
+    def test_detail_shows_path_to_the_goal(self):
+        """La tabla tiene que llegar al destino: con un número fijo de
+        filas se cortaba antes y no se veía el final."""
+        plan = self._create_plan()
+        self.client.post(reverse("tasks:plan_item_create", args=[plan.pk]), {
+            "exercise": self.wp.slug, "progression": "double", "is_headline": "on",
+            "start_sets": 4, "start_reps": 6, "start_weight_kg": 0,
+            "goal_sets": 4, "goal_reps": 12, "goal_weight_kg": 20,
+            "rep_range_low": 6, "weight_increment_kg": 5, "sessions_per_step": 2,
+        })
+        html = self.client.get(reverse("tasks:plan_detail", args=[plan.pk])).content.decode()
+        self.assertIn("Medida del plan", html)
+        self.assertIn("con 20 kg", html)     # el destino aparece
+        self.assertIn("destino", html)
+
+    def test_plan_list_renders(self):
+        self._create_plan()
+        html = self.client.get(reverse("tasks:plan_list")).content.decode()
+        self.assertIn("Ponerme en forma", html)
+
+    def test_delete_plan_is_soft(self):
+        plan = self._create_plan()
+        self.client.post(reverse("tasks:plan_delete", args=[plan.pk]))
+        plan.refresh_from_db()
+        self.assertIsNotNone(plan.deleted_at)
+        html = self.client.get(reverse("tasks:plan_list")).content.decode()
+        self.assertNotIn("Ponerme en forma", html)
+
+
 class PlanAndFreestyleTests(TestCase):
     """
     Plan y "a mi aire" conviviendo: si el ejercicio está en un plan

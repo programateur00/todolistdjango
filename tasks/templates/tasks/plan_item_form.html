@@ -1,0 +1,187 @@
+{% extends "tasks/base.html" %}
+{% block title %}{% if item %}Editar objetivo{% else %}Nuevo objetivo{% endif %}{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">{{ plan.name }}</span>
+        <h1>{% if item %}Editar objetivo{% else %}Nuevo objetivo{% endif %}</h1>
+    </div>
+    <a href="{% url 'tasks:plan_detail' plan.pk %}" class="stats-link">← Volver</a>
+</header>
+
+<form class="task-form" method="post" id="item-form">
+    {% csrf_token %}
+
+    <label class="field">
+        <span class="field__label">Ejercicio</span>
+        <select name="exercise" id="exercise-select">
+            <option value="">— elegir —</option>
+            {% for e in exercises %}
+            <option value="{{ e.slug }}" data-mode="{{ e.mode }}"
+                {% if item.exercise.slug == e.slug %}selected{% endif %}>{{ e.name }}</option>
+            {% endfor %}
+        </select>
+    </label>
+
+    <label class="field">
+        <span class="field__label">Cómo llamarlo (opcional)</span>
+        <input type="text" name="label" maxlength="80" value="{{ item.label|default:'' }}">
+    </label>
+
+    <fieldset class="field">
+        <legend class="field__label">Cómo progresa</legend>
+        <div class="repeat-options">
+            {% for value, label in progressions %}
+            <label class="repeat-option">
+                <input type="radio" name="progression" value="{{ value }}" data-prog
+                    {% if item.progression == value %}checked{% elif not item and value == "reps" %}checked{% endif %}>
+                <span>{{ label }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        <span class="field__hint" id="prog-hint"></span>
+    </fieldset>
+
+    <label class="field field--inline">
+        <input type="checkbox" name="is_headline" {% if item.is_headline %}checked{% endif %}>
+        <span class="field__label">Es la medida del plan</span>
+    </label>
+    <span class="field__hint">
+        La prueba concreta de que vas hacia el objetivo. Solo puede haber una.
+    </span>
+
+    <h2 class="section-title">Punto de partida</h2>
+    <div class="field-row">
+        <label class="field">
+            <span class="field__label">Series</span>
+            <input type="number" name="start_sets" min="1" value="{{ item.start_sets|default:3 }}">
+        </label>
+        <label class="field" data-when="reps">
+            <span class="field__label">Repeticiones</span>
+            <input type="number" name="start_reps" min="1" value="{{ item.start_reps|default:8 }}">
+        </label>
+        <label class="field" data-when="seconds">
+            <span class="field__label">Segundos</span>
+            <input type="number" name="start_seconds" min="1" value="{{ item.start_seconds|default:40 }}">
+        </label>
+    </div>
+    <label class="field" data-when="weight">
+        <span class="field__label">Peso inicial (kg)</span>
+        <input type="number" name="start_weight_kg" min="0" step="0.5" value="{{ item.start_weight_kg|default:0 }}">
+    </label>
+
+    <h2 class="section-title" data-when="goal">Destino</h2>
+    <span class="field__hint" data-when="goal">
+        Hasta dónde quieres llegar. Sin destino el plan no sabría cuándo termina
+        y subiría para siempre.
+    </span>
+    <div class="field-row" data-when="goal">
+        <label class="field">
+            <span class="field__label">Series</span>
+            <input type="number" name="goal_sets" min="1" value="{{ item.goal_sets|default:'' }}">
+        </label>
+        <label class="field" data-when="reps">
+            <span class="field__label">Repeticiones</span>
+            <input type="number" name="goal_reps" min="1" value="{{ item.goal_reps|default:'' }}">
+        </label>
+        <label class="field" data-when="seconds">
+            <span class="field__label">Segundos</span>
+            <input type="number" name="goal_seconds" min="1" value="{{ item.goal_seconds|default:'' }}">
+        </label>
+    </div>
+    <label class="field" data-when="weight">
+        <span class="field__label">Peso objetivo (kg)</span>
+        <input type="number" name="goal_weight_kg" min="0" step="0.5" value="{{ item.goal_weight_kg|default:'' }}">
+    </label>
+
+    <h2 class="section-title" data-when="goal">Ritmo</h2>
+    <div class="field-row" data-when="goal">
+        <label class="field">
+            <span class="field__label">Sesiones por escalón</span>
+            <input type="number" name="sessions_per_step" min="1" value="{{ item.sessions_per_step|default:2 }}">
+        </label>
+        <label class="field" data-when="increment">
+            <span class="field__label">Sube de</span>
+            <input type="number" name="reps_increment" min="1" value="{{ item.reps_increment|default:1 }}">
+        </label>
+    </div>
+
+    <div class="field-row" data-when="weight">
+        <label class="field">
+            <span class="field__label">Vuelve a</span>
+            <input type="number" name="rep_range_low" min="1" value="{{ item.rep_range_low|default:6 }}">
+            <span class="field__hint">Repeticiones a las que se baja al añadir peso.</span>
+        </label>
+        <label class="field">
+            <span class="field__label">Añade (kg)</span>
+            <input type="number" name="weight_increment_kg" min="0.5" step="0.5" value="{{ item.weight_increment_kg|default:2.5 }}">
+        </label>
+    </div>
+
+    <label class="field" data-when="goal">
+        <span class="field__label">Bajar escalón tras</span>
+        <input type="number" name="deload_after_failures" min="0" value="{{ item.deload_after_failures|default:3 }}">
+        <span class="field__hint">
+            Sesiones seguidas sin llegar al objetivo antes de bajar un escalón.
+            Es lo que evita quedarse atascado. 0 lo desactiva.
+        </span>
+    </label>
+
+    <div class="task-form__actions">
+        <button type="submit" class="primary-btn">Guardar objetivo</button>
+        {% if item %}
+        <form action="{% url 'tasks:plan_item_delete' plan.pk item.pk %}" method="post" class="inline-delete">
+            {% csrf_token %}
+            <button type="submit" class="ghost-btn ghost-btn--danger">Quitar</button>
+        </form>
+        {% endif %}
+    </div>
+</form>
+
+<script>
+(function(){
+    // Cada tipo de progresion usa unos campos y no otros. Enseñar los 18
+    // a la vez es lo que hace ilegible el formulario del admin.
+    var HINTS = {
+        completion: 'Objetivo fijo, no sube nunca. Para estudiar, hábitos o antitareas.',
+        reps: 'Sube hasta un techo y ahí se queda. Para abdominales, plancha, resistencia.',
+        double: 'Sube repeticiones y al llegar arriba añade peso y vuelve abajo. Para fuerza.'
+    };
+
+    function prog(){
+        var el = document.querySelector('[data-prog]:checked');
+        return el ? el.value : 'reps';
+    }
+    function esCronometrado(){
+        var sel = document.getElementById('exercise-select');
+        var opt = sel.options[sel.selectedIndex];
+        return opt && opt.dataset.mode === 'timed';
+    }
+
+    function actualizar(){
+        var p = prog(), timed = esCronometrado();
+        document.getElementById('prog-hint').textContent = HINTS[p] || '';
+
+        var visible = {
+            reps: !timed,                    // repeticiones solo si no va a tiempo
+            seconds: timed,
+            weight: p === 'double',          // el peso solo en progresion doble
+            goal: p !== 'completion',        // cumplimiento no tiene destino
+            increment: p !== 'completion'
+        };
+        document.querySelectorAll('[data-when]').forEach(function(el){
+            var k = el.dataset.when;
+            el.style.display = visible[k] === false ? 'none' : '';
+        });
+    }
+
+    document.querySelectorAll('[data-prog]').forEach(function(r){
+        r.addEventListener('change', actualizar);
+    });
+    document.getElementById('exercise-select').addEventListener('change', actualizar);
+    actualizar();
+})();
+</script>
+
+{% endblock %}

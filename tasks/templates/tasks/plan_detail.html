@@ -1,0 +1,67 @@
+{% extends "tasks/base.html" %}
+{% block title %}{{ plan.name }}{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">plan · semana {{ plan.week_number }} de {{ plan.weeks }}</span>
+        <h1>{{ plan.name }}</h1>
+    </div>
+    <a href="{% url 'tasks:plan_list' %}" class="stats-link">← Planes</a>
+</header>
+
+{% if plan.notes %}<p class="plan-notes">{{ plan.notes }}</p>{% endif %}
+
+{% if headline %}
+{# La medida principal: la prueba concreta de que vas hacia el objetivo. #}
+<section class="plan-head">
+    <p class="plan-head__eyebrow">Medida del plan</p>
+    <h2 class="plan-head__name">{{ headline.item.display_name }}</h2>
+
+    <div class="plan-head__now">
+        <span class="plan-head__label">Hoy te toca</span>
+        <span class="plan-head__target">
+            {% if headline.target.reps %}{{ headline.target.sets }} × {{ headline.target.reps }}{% else %}{{ headline.target.sets }} × {{ headline.target.seconds }}s{% endif %}
+            {% if headline.target.weight_kg %}<em>con {{ headline.target.weight_kg|floatformat:"-1" }} kg</em>{% endif %}
+        </span>
+    </div>
+
+    {% if headline.deloaded %}
+    <p class="plan-deload">
+        Se ha bajado un escalón tras varias sesiones sin llegar. No es un error:
+        es lo que haría un entrenador para que no te quedes atascado.
+    </p>
+    {% endif %}
+
+    {% if progress is not None %}
+    <div class="plan-bar" role="img" aria-label="Progreso del plan: {{ progress }}%">
+        <div class="plan-bar__fill" style="width: {{ progress }}%"></div>
+    </div>
+    <p class="plan-head__meta">
+        {{ progress }}% del camino
+        {% if headline.remaining %}· faltan {{ headline.remaining }} sesiones cumplidas{% endif %}
+    </p>
+    {% endif %}
+</section>
+
+{% include "tasks/_plan_item.html" with pack=headline plan=plan %}
+{% endif %}
+
+{% if supports %}
+<h2 class="section-title">El camino</h2>
+<p class="field__hint">Ejercicios que te llevan hasta ahí. Progresan, pero no deciden el plan.</p>
+{% for pack in supports %}
+    {% include "tasks/_plan_item.html" with pack=pack plan=plan %}
+{% endfor %}
+{% endif %}
+
+{% if not headline %}
+<p class="empty-state">Este plan todavía no tiene objetivos.</p>
+{% endif %}
+
+<div class="task-form__actions">
+    <a class="primary-btn" href="{% url 'tasks:plan_item_create' plan.pk %}">+ Añadir objetivo</a>
+    <a class="ghost-btn" href="{% url 'tasks:plan_edit' plan.pk %}">Editar plan</a>
+</div>
+
+{% endblock %}

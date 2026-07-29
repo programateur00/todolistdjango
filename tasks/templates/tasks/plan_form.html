@@ -1,0 +1,61 @@
+{% extends "tasks/base.html" %}
+{% block title %}{% if plan %}Editar plan{% else %}Nuevo plan{% endif %}{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">plan</span>
+        <h1>{% if plan %}Editar «{{ plan.name }}»{% else %}Nuevo plan{% endif %}</h1>
+    </div>
+    <a href="{% url 'tasks:plan_list' %}" class="stats-link">← Volver</a>
+</header>
+
+<form class="task-form" method="post">
+    {% csrf_token %}
+    <label class="field">
+        <span class="field__label">Nombre del objetivo</span>
+        <input type="text" name="name" maxlength="80" required
+               value="{{ plan.name|default:'' }}" placeholder="Ponerme en forma">
+        <span class="field__hint">
+            El objetivo de verdad, aunque sea difuso. La medida concreta se añade después.
+        </span>
+    </label>
+
+    <label class="field">
+        <span class="field__label">Notas</span>
+        <textarea name="notes" rows="2">{{ plan.notes|default:'' }}</textarea>
+    </label>
+
+    <div class="field-row">
+        <label class="field">
+            <span class="field__label">Empieza el</span>
+            <input type="date" name="started_on" value="{{ plan.started_on|date:'Y-m-d' }}">
+        </label>
+        <label class="field">
+            <span class="field__label">Semanas</span>
+            <input type="number" name="weeks" min="1" value="{{ plan.weeks|default:12 }}">
+            <span class="field__hint">12 por defecto.</span>
+        </label>
+    </div>
+
+    <label class="field field--inline">
+        <input type="checkbox" name="is_active" {% if plan.is_active or not plan %}checked{% endif %}>
+        <span class="field__label">Plan activo</span>
+    </label>
+    <span class="field__hint">
+        Si está activo, sus objetivos mandan sobre los del circuito al entrenar.
+        Si lo pausas, vuelves a entrenar a tu aire.
+    </span>
+
+    <div class="task-form__actions">
+        <button type="submit" class="primary-btn">Guardar</button>
+        {% if plan %}
+        <form action="{% url 'tasks:plan_delete' plan.pk %}" method="post" class="inline-delete">
+            {% csrf_token %}
+            <button type="submit" class="ghost-btn ghost-btn--danger">Eliminar</button>
+        </form>
+        {% endif %}
+    </div>
+</form>
+
+{% endblock %}

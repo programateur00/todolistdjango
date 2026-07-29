@@ -1,0 +1,76 @@
+{% comment %}
+Un objetivo del plan: lo que toca hoy, el camino que queda y lo que ya
+hiciste. Se usa igual para la medida principal y para los ejercicios de
+apoyo, así que va como bloque aparte.
+{% endcomment %}
+
+<article class="plan-item">
+    <header class="plan-item__head">
+        <h3>{{ pack.item.display_name }}</h3>
+        <span class="plan-item__prog">{{ pack.item.get_progression_display }}</span>
+    </header>
+
+    <p class="plan-item__now">
+        Hoy:
+        <strong>
+            {% if pack.target.reps %}{{ pack.target.sets }} × {{ pack.target.reps }}{% else %}{{ pack.target.sets }} × {{ pack.target.seconds }}s{% endif %}
+            {% if pack.target.weight_kg %}con {{ pack.target.weight_kg|floatformat:"-1" }} kg{% endif %}
+        </strong>
+        {% if pack.remaining %}<span class="plan-item__left">faltan {{ pack.remaining }} sesiones</span>{% endif %}
+        {% if pack.target.done %}<span class="plan-item__done">✓ destino alcanzado</span>{% endif %}
+    </p>
+
+    {% if pack.history %}
+    <details class="plan-details">
+        <summary>Lo que has hecho ({{ pack.history|length }})</summary>
+        <table class="plan-table">
+            <thead><tr><th>Día</th><th>Pedía</th><th>Hiciste</th><th>Logro</th></tr></thead>
+            <tbody>
+            {% for h in pack.history %}
+                <tr>
+                    <td>{{ h.date|date:"d M" }}</td>
+                    <td>{{ h.target }}</td>
+                    <td>{{ h.done }}{% if h.auto %} <em>(sin marcar)</em>{% endif %}</td>
+                    <td>
+                        {% if h.pct is not None %}
+                        <span class="plan-pct {% if h.pct >= 100 %}plan-pct--full{% else %}plan-pct--partial{% endif %}">{{ h.pct }}%</span>
+                        {% else %}—{% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </details>
+    {% endif %}
+
+    <details class="plan-details">
+        <summary>El camino completo ({{ pack.schedule|length }} escalones)</summary>
+        <table class="plan-table">
+            <thead><tr><th>Escalón</th><th>Objetivo</th></tr></thead>
+            <tbody>
+            {% for row in pack.schedule %}
+                {# forloop.counter0 es el índice del escalón; así se marca dónde estás. #}
+                <tr class="{% if forloop.counter0 == pack.step %}plan-row--here{% endif %}">
+                    <td>
+                        {{ row.step }}
+                        {% if forloop.counter0 == pack.step %}<span class="plan-here">aquí</span>{% endif %}
+                    </td>
+                    <td>
+                        {% if row.reps %}{{ row.sets }} × {{ row.reps }}{% else %}{{ row.sets }} × {{ row.seconds }}s{% endif %}
+                        {% if row.weight_kg %}con {{ row.weight_kg|floatformat:"-1" }} kg{% endif %}
+                        {% if row.done %}<span class="plan-item__done">destino</span>{% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </details>
+
+    <div class="plan-item__actions">
+        <a class="ghost-btn" href="{% url 'tasks:plan_item_edit' plan.pk pack.item.pk %}">Editar</a>
+        <form action="{% url 'tasks:plan_item_delete' plan.pk pack.item.pk %}" method="post" class="inline-delete">
+            {% csrf_token %}
+            <button type="submit" class="ghost-btn ghost-btn--danger">Quitar</button>
+        </form>
+    </div>
+</article>

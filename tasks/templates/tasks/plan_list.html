@@ -1,0 +1,51 @@
+{% extends "tasks/base.html" %}
+{% block title %}Planes{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">progresión</span>
+        <h1>Planes</h1>
+    </div>
+    <a href="{% url 'tasks:task_list' %}" class="stats-link">← Tareas</a>
+</header>
+
+{% if plans %}
+<ul class="plan-list">
+    {% for p in plans %}
+    <li class="plan-card {% if not p.plan.is_active %}plan-card--off{% endif %}">
+        <a href="{% url 'tasks:plan_detail' p.plan.pk %}">
+            <p class="plan-card__name">{{ p.plan.name }}</p>
+            <p class="plan-card__meta">
+                Semana {{ p.plan.week_number }} de {{ p.plan.weeks }}
+                {% if not p.plan.is_active %}· pausado{% endif %}
+            </p>
+            {% if p.headline %}
+            <p class="plan-card__head">
+                {{ p.headline.display_name }}:
+                <strong>
+                    {% if p.target.reps %}{{ p.target.sets }} × {{ p.target.reps }}{% else %}{{ p.target.sets }} × {{ p.target.seconds }}s{% endif %}
+                    {% if p.target.weight_kg %}con {{ p.target.weight_kg|floatformat:"-1" }} kg{% endif %}
+                </strong>
+                {% if p.remaining %}<span class="plan-item__left">faltan {{ p.remaining }}</span>{% endif %}
+            </p>
+            {% endif %}
+            {% if p.progress is not None %}
+            <div class="plan-bar"><div class="plan-bar__fill" style="width: {{ p.progress }}%"></div></div>
+            {% endif %}
+        </a>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<p class="empty-state">
+    Todavía no tienes planes. Un plan es un objetivo con progresión:
+    «ponerme en forma», con una medida concreta que diga si vas llegando.
+</p>
+{% endif %}
+
+<div class="task-form__actions">
+    <a class="primary-btn" href="{% url 'tasks:plan_create' %}">+ Nuevo plan</a>
+</div>
+
+{% endblock %}

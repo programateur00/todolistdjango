@@ -1106,6 +1106,40 @@ class PlanItem(models.Model):
                 break      # llegado el destino, no hay más que enseñar
         return rows
 
+    def history(self, limit=20):
+        """
+        Lo que pasó de verdad: qué te pedía cada sesión, qué hiciste y el
+        porcentaje. El objetivo sale de la propia sesión (se guardó
+        entonces), no se recalcula — si se recalculara, un entreno de
+        hace un mes se compararía con el objetivo de hoy.
+        """
+        if self.progression == self.PROG_COMPLETION and self.series_id:
+            return [
+                {
+                    "date": o.due_date or o.recorded_at.date(),
+                    "target": "cumplir",
+                    "done": "sí" if o.result == Occurrence.RESULT_DONE else "no",
+                    "pct": 100 if o.result == Occurrence.RESULT_DONE else 0,
+                    "auto": o.auto_expired,
+                }
+                for o in self._occurrences().order_by("-recorded_at")[:limit]
+            ]
+
+        rows = []
+        for s in self._sessions().order_by("-recorded_at")[:limit]:
+            hecho = (
+                f"{s.total_reps} reps" if s.total_reps
+                else f"{s.session_duration_seconds}s"
+            )
+            rows.append({
+                "date": s.recorded_at.date(),
+                "target": s.target_label or "—",
+                "done": hecho,
+                "pct": s.achievement_pct,
+                "auto": False,
+            })
+        return rows
+
     def sessions_to_goal(self, limit=200):
         """Cuántas sesiones cumplidas faltan para el destino, o None si
         el objetivo no tiene final definido."""

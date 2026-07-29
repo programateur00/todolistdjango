@@ -428,3 +428,71 @@ button { font-family:var(--font-b); cursor:pointer; }
   .ex-fig img { animation: none; }
   .ex-fig img:nth-of-type(2) { opacity: 0; }
 }
+
+/* ── Planes de progresión ───────────────────────────────────────────── */
+.plan-notes { font-size:13px; color:var(--ink-faded); margin:0 0 14px; }
+
+.plan-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }
+.plan-card { background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
+  box-shadow:var(--shadow); }
+.plan-card a { display:block; padding:14px 16px; text-decoration:none; color:var(--ink); }
+.plan-card--off { opacity:.6; }
+.plan-card__name { font-family:var(--font-d); font-size:17px; margin:0 0 2px; }
+.plan-card__meta { font-size:11px; color:var(--ink-faded); text-transform:uppercase;
+  letter-spacing:.05em; margin:0 0 8px; }
+.plan-card__head { font-size:13px; margin:0 0 8px; }
+
+/* La medida principal: lo que define si el plan se ha conseguido. */
+.plan-head { background:var(--cream-soft); border-radius:var(--radius);
+  padding:18px 18px 14px; margin-bottom:20px; }
+.plan-head__eyebrow { font-size:10px; text-transform:uppercase; letter-spacing:.08em;
+  color:var(--ink-faded); margin:0; }
+.plan-head__name { font-family:var(--font-d); font-size:22px; margin:2px 0 12px; }
+.plan-head__now { display:flex; flex-direction:column; gap:2px; margin-bottom:12px; }
+.plan-head__label { font-size:11px; color:var(--ink-faded); text-transform:uppercase;
+  letter-spacing:.05em; }
+.plan-head__target { font-family:var(--font-d); font-size:26px; }
+.plan-head__target em { font-style:normal; font-size:18px; color:var(--coral); }
+.plan-head__meta { font-size:12px; color:var(--ink-faded); margin:6px 0 0; }
+
+.plan-bar { height:8px; background:var(--paper); border-radius:999px; overflow:hidden;
+  border:1px solid var(--line); }
+.plan-bar__fill { height:100%; background:var(--sage); border-radius:999px; }
+
+.plan-deload { font-size:12px; background:var(--mustard-soft); color:#7D5A00;
+  padding:8px 12px; border-radius:10px; margin:0 0 12px; }
+
+.plan-item { border:1px solid var(--line); border-radius:var(--radius);
+  background:var(--paper); padding:14px 16px; margin-bottom:12px; }
+.plan-item__head { display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
+.plan-item__head h3 { font-family:var(--font-d); font-size:16px; margin:0; }
+.plan-item__prog { font-size:10px; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--ink-faded); }
+.plan-item__now { font-size:14px; margin:6px 0 10px; }
+.plan-item__left { font-size:11px; color:var(--ink-faded); margin-left:8px; }
+.plan-item__done { font-size:11px; color:var(--sage); font-weight:600; margin-left:8px; }
+.plan-item__actions { display:flex; gap:8px; margin-top:10px; }
+
+.plan-details { margin-top:8px; }
+.plan-details > summary { cursor:pointer; font-size:12px; color:var(--ink-faded);
+  padding:4px 0; list-style:none; }
+.plan-details > summary::marker { content:""; }
+.plan-details > summary::-webkit-details-marker { display:none; }
+.plan-details > summary::before { content:"▸ "; }
+.plan-details[open] > summary::before { content:"▾ "; }
+
+.plan-table { width:100%; border-collapse:collapse; font-size:12px; margin-top:6px; }
+.plan-table th { text-align:left; font-weight:600; color:var(--ink-faded);
+  text-transform:uppercase; font-size:10px; letter-spacing:.05em;
+  padding:4px 6px; border-bottom:1px solid var(--line); }
+.plan-table td { padding:5px 6px; border-bottom:1px solid var(--cream-soft); }
+.plan-row--here { background:var(--sage-soft); font-weight:600; }
+.plan-here { font-size:10px; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--sage); margin-left:6px; }
+
+.plan-pct { display:inline-block; padding:1px 7px; border-radius:999px;
+  font-size:11px; font-weight:600; }
+.plan-pct--full { background:var(--sage-soft); color:var(--sage); }
+.plan-pct--partial { background:var(--mustard-soft); color:#7D5A00; }
+
+.header-links { display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
