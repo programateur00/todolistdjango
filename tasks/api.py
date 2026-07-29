@@ -25,7 +25,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from .models import (
-    Exercise, Occurrence, Plan, PlanExercise, Routine, RoutineItem, Task, WorkoutSession,
+    Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, Task, WorkoutSession,
 )
 from .utils import get_current_user
 
@@ -131,7 +131,7 @@ def _plan_context(exercise_slug, sets=None, reps=None, seconds=None):
     es el que tenía delante mientras entrenaba.
     """
     entry = (
-        PlanExercise.objects
+        PlanItem.objects
         .filter(
             exercise__slug=exercise_slug,
             plan__is_active=True,
@@ -176,9 +176,11 @@ def _routine_item_json(i):
         "target_sets": t["sets"],
         "target_reps": t["reps"],
         "target_source": t["source"],
+        "target_weight_kg": t.get("weight_kg") or 0,
         "plan_name": t["plan_name"],
         "plan_uuid": t["plan_uuid"],
         "session_index": t["session_index"],
+        "sessions_to_goal": t.get("sessions_to_goal"),
     }
 
 

@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from .models import (
-    Exercise, Occurrence, Plan, PlanExercise, Routine, RoutineItem, Task, WorkoutSession,
+    Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, Task, WorkoutSession,
 )
 
 
@@ -56,9 +56,16 @@ class WorkoutSessionAdmin(admin.ModelAdmin):
     list_per_page = 50
 
 
-class PlanExerciseInline(admin.TabularInline):
-    model = PlanExercise
+class PlanItemInline(admin.TabularInline):
+    model = PlanItem
     extra = 1
+    fields = (
+        "order", "exercise", "series_id", "label", "progression",
+        "start_sets", "start_reps", "start_seconds", "start_weight_kg",
+        "goal_sets", "goal_reps", "goal_seconds", "goal_weight_kg",
+        "rep_range_low", "weight_increment_kg", "reps_increment",
+        "sessions_per_step", "deload_after_failures",
+    )
 
 
 @admin.register(Plan)
@@ -66,4 +73,4 @@ class PlanAdmin(admin.ModelAdmin):
     list_display = ("name", "user", "started_on", "weeks", "ends_on", "is_active")
     list_filter = ("is_active",)
     search_fields = ("name",)
-    inlines = [PlanExerciseInline]
+    inlines = [PlanItemInline]

@@ -729,7 +729,7 @@ class RoutineItem(models.Model):
         """
         owner = user or self.routine.user
         return (
-            PlanExercise.objects
+            PlanItem.objects
             .filter(
                 exercise=self.exercise,
                 plan__is_active=True,
@@ -753,23 +753,28 @@ class RoutineItem(models.Model):
         entry = self.plan_entry(user)
         if entry:
             target = entry.current_target()
+            successes, _ = entry.successes_and_streak()
             return {
                 "sets": target["sets"],
                 "reps": target["reps"],
                 "seconds": target["seconds"] or self.effective_work_seconds,
+                "weight_kg": target.get("weight_kg") or 0,
                 "source": "plan",
                 "plan_name": entry.plan.name,
                 "plan_uuid": str(entry.plan.uuid),
-                "session_index": entry.sessions_done() + 1,
+                "session_index": successes + 1,
+                "sessions_to_goal": entry.sessions_to_goal(),
             }
         return {
             "sets": self.target_sets,
             "reps": self.target_reps,
             "seconds": self.effective_work_seconds,
+            "weight_kg": 0,
             "source": "routine",
             "plan_name": None,
             "plan_uuid": None,
             "session_index": None,
+            "sessions_to_goal": None,
         }
 
 
@@ -817,96 +822,247 @@ class Plan(models.Model):
         return max(1, days // 7 + 1)
 
 
-class PlanExercise(models.Model):
+class PlanItem(models.Model):
     """
-    Cómo progresa UN ejercicio dentro de un plan.
+    Una cosa que se persigue dentro de un plan.
 
-    En vez de una tabla con el objetivo de cada sesión (cientos de
-    casillas que nadie rellena), se guarda el punto de partida y la regla
-    de subida: "empiezo en 3x8 y subo 1 repetición cada 2 sesiones". Es
-    como se escriben los programas de entrenamiento de verdad, y la tabla
-    completa se calcula a partir de ahí.
+    Puede ser un EJERCICIO (dominadas, plancha) o una TAREA cualquiera
+    (estudiar francés, no fumar), porque un plan de verdad mezcla las dos
+    cosas: "ponerme en forma" y "aprender francés" caben en el mismo
+    trimestre.
 
-    La progresión avanza por SESIONES HECHAS, no por semanas de
-    calendario: si te pones enfermo una semana, no te has saltado un
-    escalón — sigues donde lo dejaste.
+    Y sobre todo: no todo progresa igual. Estudiar 2 horas no se
+    convierte en 2 horas y media hasta el infinito — lo que se mide es si
+    lo cumpliste. Por eso hay tres formas de avanzar:
+
+      - cumplimiento: objetivo fijo. Se mide cuántas veces lo cumpliste.
+        Para estudiar, antitareas, hábitos.
+      - repeticiones: sube hasta un techo y ahí se queda.
+        Para abdominales, plancha, resistencia.
+      - doble: sube repeticiones dentro de un rango y, al llegar arriba,
+        AÑADE PESO y vuelve abajo del rango.
+        Para fuerza: dominadas, fondos, sentadillas.
+
+    La progresión doble es la que evita el disparate. Una progresión
+    lineal siempre diverge: subiendo 1 repetición cada 2 sesiones, a los
+    seis meses el plan pediría 3x47 dominadas. Con la doble, las
+    repeticiones vuelven siempre al suelo del rango y lo que sube es la
+    carga — que es como se progresa de verdad.
     """
-    plan = models.ForeignKey(Plan, on_delete=models.CASCADE, related_name="exercises")
-    exercise = models.ForeignKey(Exercise, on_delete=models.CASCADE)
+    PROG_COMPLETION = "completion"
+    PROG_REPS = "reps"
+    PROG_DOUBLE = "double"
 
+    PROGRESSION_CHOICES = [
+        (PROG_COMPLETION, "Cumplimiento (objetivo fijo)"),
+        (PROG_REPS, "Repeticiones (sube hasta un techo)"),
+        (PROG_DOUBLE, "Doble (repeticiones y luego peso)"),
+    ]
+
+    plan = models.ForeignKey(Plan, on_delete=models.CASCADE, related_name="items")
+
+    # Una de las dos: a qué se refiere este objetivo.
+    exercise = models.ForeignKey(
+        Exercise, on_delete=models.CASCADE, null=True, blank=True,
+        help_text="Para objetivos de ejercicio.",
+    )
+    series_id = models.UUIDField(
+        null=True, blank=True,
+        help_text="Para objetivos de tarea (estudiar, no fumar). Es la serie de la tarea.",
+    )
+    label = models.CharField(
+        max_length=80, blank=True,
+        help_text="Cómo llamarlo. En blanco usa el nombre del ejercicio o la tarea.",
+    )
+
+    progression = models.CharField(
+        max_length=12, choices=PROGRESSION_CHOICES, default=PROG_REPS,
+    )
+
+    # Punto de partida
     start_sets = models.PositiveIntegerField(default=3)
     start_reps = models.PositiveIntegerField(default=8)
-    start_seconds = models.PositiveIntegerField(
-        default=40, help_text="Para ejercicios cronometrados, en vez de repeticiones.",
+    start_seconds = models.PositiveIntegerField(default=40)
+    start_weight_kg = models.FloatField(default=0)
+
+    # Destino: hasta dónde quieres llegar. Sin esto el plan no sabría
+    # cuándo ha terminado y subiría para siempre.
+    goal_sets = models.PositiveIntegerField(null=True, blank=True)
+    goal_reps = models.PositiveIntegerField(null=True, blank=True)
+    goal_seconds = models.PositiveIntegerField(null=True, blank=True)
+    goal_weight_kg = models.FloatField(null=True, blank=True)
+
+    # Cómo avanza
+    sessions_per_step = models.PositiveIntegerField(
+        default=2, help_text="Cada cuántas sesiones cumplidas se sube un escalón.",
+    )
+    reps_increment = models.PositiveIntegerField(default=1)
+    weight_increment_kg = models.FloatField(
+        default=2.5, help_text="Solo en progresión doble: cuánto peso se añade al completar el rango.",
+    )
+    rep_range_low = models.PositiveIntegerField(
+        default=6, help_text="Solo en progresión doble: a cuántas repeticiones se vuelve al subir peso.",
     )
 
-    reps_increment = models.PositiveIntegerField(
-        default=1, help_text="Cuánto sube cada escalón.",
+    # El toque de entrenador
+    deload_after_failures = models.PositiveIntegerField(
+        default=3,
+        help_text="Tras estas sesiones seguidas sin llegar al objetivo, se baja un escalón. "
+                   "0 lo desactiva.",
     )
-    sessions_per_step = models.PositiveIntegerField(
-        default=2, help_text="Cada cuántas sesiones se sube un escalón.",
-    )
-    max_reps = models.PositiveIntegerField(
-        null=True, blank=True,
-        help_text="Tope opcional: al llegar aquí deja de subir.",
-    )
+
     order = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ["order"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["plan", "exercise"], name="unique_exercise_per_plan",
-            ),
-        ]
 
     def __str__(self):
-        return f"{self.plan.name}: {self.exercise.name}"
+        return f"{self.plan.name}: {self.display_name}"
+
+    @property
+    def display_name(self):
+        if self.label:
+            return self.label
+        if self.exercise:
+            return self.exercise.name
+        occ = Occurrence.objects.filter(series_id=self.series_id).first()
+        return occ.title if occ else "Objetivo"
 
     @property
     def is_timed(self):
-        return self.exercise.mode == Exercise.MODE_TIMED
+        return bool(self.exercise and self.exercise.mode == Exercise.MODE_TIMED)
 
-    def sessions_done(self):
-        """Sesiones ya registradas de este ejercicio dentro del plan."""
+    # ------------------------------------------------------- historial
+
+    def _sessions(self):
+        """Sesiones de este objetivo dentro del plan, en orden."""
+        if not self.exercise:
+            return WorkoutSession.objects.none()
         return WorkoutSession.objects.filter(
             plan=self.plan, exercise=self.exercise.slug, deleted_at__isnull=True
-        ).count()
+        ).order_by("recorded_at")
 
-    def target_for(self, session_index):
+    def _occurrences(self):
+        """Para objetivos de tarea: los días registrados de esa serie."""
+        if not self.series_id:
+            return Occurrence.objects.none()
+        return Occurrence.objects.filter(
+            series_id=self.series_id, deleted_at__isnull=True,
+            recorded_at__date__gte=self.plan.started_on,
+        ).order_by("recorded_at")
+
+    def successes_and_streak(self):
         """
-        Objetivo en la sesión número `session_index` (0 = la primera).
-
-        Devuelve un dict con lo que toque según el tipo de ejercicio:
-        series y repeticiones, o segundos.
+        Cuántas veces se cumplió el objetivo, y cuántos fallos seguidos
+        van al final. Lo segundo es lo que dispara la bajada de escalón.
         """
-        step = session_index // max(1, self.sessions_per_step)
-        bump = step * self.reps_increment
+        if self.progression == self.PROG_COMPLETION:
+            results = [
+                o.result == Occurrence.RESULT_DONE for o in self._occurrences()
+            ] if self.series_id else [
+                (s.achievement_pct or 0) >= 100 for s in self._sessions()
+            ]
+        else:
+            results = [(s.achievement_pct or 0) >= 100 for s in self._sessions()]
 
+        successes = sum(1 for r in results if r)
+        streak = 0
+        for r in reversed(results):
+            if r:
+                break
+            streak += 1
+        return successes, streak
+
+    def current_step(self):
+        """
+        En qué escalón estás.
+
+        Avanza con las sesiones CUMPLIDAS, no con las hechas: si te
+        quedas corto, el objetivo no sube — que es justo lo que haría un
+        entrenador. Y si fallas varias veces seguidas, baja uno, para no
+        quedarte atascado para siempre en un número que hoy no puedes.
+        """
+        successes, failure_streak = self.successes_and_streak()
+        step = successes // max(1, self.sessions_per_step)
+        if self.deload_after_failures and failure_streak >= self.deload_after_failures:
+            step = max(0, step - 1)
+        return step
+
+    # -------------------------------------------------------- objetivo
+
+    def target_for_step(self, step):
+        """El objetivo en el escalón `step` (0 = el primero)."""
+        if self.progression == self.PROG_COMPLETION:
+            return {
+                "sets": self.start_sets, "reps": self.start_reps,
+                "seconds": self.start_seconds if self.is_timed else None,
+                "weight_kg": self.start_weight_kg, "done": False,
+            }
+
+        if self.progression == self.PROG_DOUBLE:
+            top = self.goal_reps or (self.rep_range_low + 6)
+            low = min(self.rep_range_low, top)
+            span = max(1, top - low + 1)
+            cycles, within = divmod(step, span)
+            reps = low + within
+            weight = self.start_weight_kg + cycles * self.weight_increment_kg
+            if self.goal_weight_kg is not None and weight >= self.goal_weight_kg:
+                # Llegado el peso objetivo, se deja de añadir carga y solo
+                # quedan las repeticiones que falten para cerrar el plan.
+                weight = self.goal_weight_kg
+                reps = min(low + within, top)
+            done = (
+                self.goal_weight_kg is not None
+                and weight >= self.goal_weight_kg
+                and reps >= top
+            )
+            return {
+                "sets": self.goal_sets or self.start_sets, "reps": reps,
+                "seconds": None, "weight_kg": round(weight, 1), "done": done,
+            }
+
+        # PROG_REPS: sube hasta el techo y ahí se queda.
         if self.is_timed:
-            seconds = self.start_seconds + bump
-            if self.max_reps:
-                seconds = min(seconds, self.max_reps)
-            return {"sets": self.start_sets, "seconds": seconds, "reps": None}
+            seconds = self.start_seconds + step * self.reps_increment
+            ceiling = self.goal_seconds
+            if ceiling:
+                seconds = min(seconds, ceiling)
+            return {
+                "sets": self.goal_sets or self.start_sets, "reps": None,
+                "seconds": seconds, "weight_kg": self.start_weight_kg,
+                "done": bool(ceiling and seconds >= ceiling),
+            }
 
-        reps = self.start_reps + bump
-        if self.max_reps:
-            reps = min(reps, self.max_reps)
-        return {"sets": self.start_sets, "reps": reps, "seconds": None}
+        reps = self.start_reps + step * self.reps_increment
+        ceiling = self.goal_reps
+        if ceiling:
+            reps = min(reps, ceiling)
+        return {
+            "sets": self.goal_sets or self.start_sets, "reps": reps,
+            "seconds": None, "weight_kg": self.start_weight_kg,
+            "done": bool(ceiling and reps >= ceiling),
+        }
 
     def current_target(self):
-        """Lo que te toca hoy, según las sesiones que llevas hechas."""
-        return self.target_for(self.sessions_done())
+        return self.target_for_step(self.current_step())
 
     def schedule(self, count=12):
-        """
-        La tabla de progresión, para poder verla antes de empezar.
-        Devuelve una entrada por sesión.
-        """
-        return [
-            dict(session=i + 1, **self.target_for(i))
-            for i in range(count)
-        ]
+        """La tabla de progresión, para ver el camino antes de empezar."""
+        rows = []
+        for i in range(count):
+            row = dict(step=i + 1, **self.target_for_step(i))
+            rows.append(row)
+            if row["done"]:
+                break      # llegado el destino, no hay más que enseñar
+        return rows
+
+    def sessions_to_goal(self, limit=200):
+        """Cuántas sesiones cumplidas faltan para el destino, o None si
+        el objetivo no tiene final definido."""
+        for i in range(self.current_step(), limit):
+            if self.target_for_step(i)["done"]:
+                return max(0, (i - self.current_step()) * self.sessions_per_step)
+        return None
 
 
 class WorkoutSession(models.Model):

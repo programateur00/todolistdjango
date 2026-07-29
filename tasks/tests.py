@@ -6,7 +6,7 @@ from django.utils import timezone
 from django.urls import reverse
 
 from .models import (
-    Exercise, Occurrence, Plan, PlanExercise, Routine, RoutineItem, Task, WorkoutSession,
+    Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, Task, WorkoutSession,
 )
 from .utils import get_current_user
 
@@ -594,83 +594,111 @@ class WorkoutKindTests(TestCase):
 
 class PlanProgressionTests(TestCase):
     """
-    Progresión por calendario, avanzando por SESIONES HECHAS y no por
-    semanas: si te pones enfermo una semana no te has saltado un escalón.
+    Tres formas de progresar, porque no todo progresa igual. Y ninguna
+    puede diverger: una progresión lineal pediría 3x47 dominadas a los
+    seis meses.
     """
 
     def setUp(self):
-        self.plan = Plan.objects.create(name="En forma", user=get_current_user())
-        self.pullup = Exercise.objects.create(
-            slug="pullup-t", name="Dominadas", mode=Exercise.MODE_POSE,
-        )
-        self.pe = PlanExercise.objects.create(
-            plan=self.plan, exercise=self.pullup,
-            start_sets=3, start_reps=8, reps_increment=1, sessions_per_step=2,
+        self.user = get_current_user()
+        self.plan = Plan.objects.create(name="En forma", user=self.user)
+        self.pull = Exercise.objects.create(
+            slug="pull-p", name="Dominadas", mode=Exercise.MODE_POSE,
         )
         self.task = Task.objects.create(
-            title="Entrenar", category=Task.CATEGORY_SPORT, user=get_current_user(),
+            title="Entrenar", category=Task.CATEGORY_SPORT, user=self.user,
         )
 
-    def _session(self, reps, target_reps=8):
+    def _session(self, reps, target_reps):
         return WorkoutSession.objects.create(
-            task=self.task, plan=self.plan, user=get_current_user(),
-            exercise=self.pullup.slug, total_reps=reps, total_sets=3,
-            target_sets=3, target_reps=target_reps,
+            task=self.task, plan=self.plan, user=self.user, exercise=self.pull.slug,
+            total_reps=reps, total_sets=3, target_sets=3, target_reps=target_reps,
         )
 
-    def test_target_climbs_every_n_sessions(self):
-        sched = self.pe.schedule(6)
-        self.assertEqual([s["reps"] for s in sched], [8, 8, 9, 9, 10, 10])
+    # ---------------------------------------------------- cumplimiento
 
-    def test_target_respects_ceiling(self):
-        self.pe.max_reps = 9
-        self.pe.save()
-        self.assertEqual([s["reps"] for s in self.pe.schedule(6)], [8, 8, 9, 9, 9, 9])
-
-    def test_progress_counts_sessions_not_weeks(self):
-        """Sin sesiones no avanza, por muchos días que pasen."""
-        self.assertEqual(self.pe.current_target()["reps"], 8)
-        self._session(24)
-        self._session(24)
-        self.assertEqual(self.pe.current_target()["reps"], 9)
-
-    def test_partial_session_gives_percentage(self):
-        """Quedarse corto no es un cero: es un porcentaje."""
-        ws = self._session(17)          # objetivo 3x8 = 24
-        self.assertEqual(ws.achievement_pct, 71)
-
-    def test_full_session_is_100(self):
-        self.assertEqual(self._session(24).achievement_pct, 100)
-
-    def test_extra_sets_still_count(self):
-        """4x8 cumple un objetivo de 3x10: 32 sobre 30. Se compara el
-        total, no serie a serie, porque repartirlo distinto es válido."""
-        ws = WorkoutSession.objects.create(
-            task=self.task, plan=self.plan, user=get_current_user(),
-            exercise=self.pullup.slug, total_reps=32, total_sets=4,
-            target_sets=3, target_reps=10,
+    def test_completion_never_climbs(self):
+        """Estudiar 2 horas no se convierte en 2 y media hasta reventar."""
+        item = PlanItem.objects.create(
+            plan=self.plan, series_id=self.task.series_id, label="Estudiar",
+            progression=PlanItem.PROG_COMPLETION, start_reps=1,
         )
-        self.assertGreaterEqual(ws.achievement_pct, 100)
+        reps = [r["reps"] for r in item.schedule(5)]
+        self.assertEqual(reps, [1, 1, 1, 1, 1])
 
-    def test_session_without_target_has_no_percentage(self):
-        """Un entreno suelto, fuera de plan, no inventa porcentajes."""
-        ws = WorkoutSession.objects.create(
-            task=self.task, user=get_current_user(),
-            exercise=self.pullup.slug, total_reps=10, total_sets=2,
+    # ----------------------------------------------------- repeticiones
+
+    def test_reps_stops_at_goal(self):
+        item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_REPS,
+            start_reps=8, goal_reps=11, reps_increment=1, sessions_per_step=1,
         )
-        self.assertIsNone(ws.achievement_pct)
+        rows = item.schedule(10)
+        self.assertEqual([r["reps"] for r in rows], [8, 9, 10, 11])
+        self.assertTrue(rows[-1]["done"])   # y el plan TERMINA
 
-    def test_timed_exercise_progresses_in_seconds(self):
+    # ------------------------------------------------------------ doble
+
+    def test_double_resets_reps_and_adds_weight(self):
+        """La clave para no diverger: al llegar arriba del rango, sube el
+        peso y las repeticiones vuelven al suelo."""
+        item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_DOUBLE,
+            start_sets=4, start_weight_kg=0, goal_sets=4, goal_reps=8,
+            goal_weight_kg=10, rep_range_low=6, weight_increment_kg=5,
+        )
+        rows = item.schedule(12)
+        self.assertEqual(rows[0]["reps"], 6)
+        self.assertEqual(rows[2]["reps"], 8)        # techo del rango
+        self.assertEqual(rows[3]["reps"], 6)        # vuelve abajo...
+        self.assertEqual(rows[3]["weight_kg"], 5)   # ...con más peso
+
+    def test_double_reaches_the_goal_and_stops(self):
+        item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_DOUBLE,
+            start_sets=4, start_weight_kg=0, goal_sets=4, goal_reps=12,
+            goal_weight_kg=20, rep_range_low=6, weight_increment_kg=5,
+        )
+        rows = item.schedule(60)
+        self.assertTrue(rows[-1]["done"])
+        self.assertEqual(rows[-1]["weight_kg"], 20)
+        self.assertEqual(rows[-1]["reps"], 12)
+        self.assertIsNotNone(item.sessions_to_goal())
+
+    # --------------------------------------------------- el entrenador
+
+    def test_does_not_climb_if_you_fall_short(self):
+        item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_REPS,
+            start_reps=8, goal_reps=15, sessions_per_step=2, deload_after_failures=3,
+        )
+        self._session(15, 8)      # 15 de 24 = no cumplida
+        self._session(15, 8)
+        self.assertEqual(item.current_target()["reps"], 8)
+
+    def test_deloads_after_repeated_failures(self):
+        """Un entrenador no te deja atascado para siempre en un número
+        que hoy no puedes: baja un escalón y reconstruyes."""
+        item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_REPS,
+            start_reps=8, goal_reps=15, sessions_per_step=2, deload_after_failures=3,
+        )
+        self._session(24, 8)
+        self._session(24, 8)
+        self.assertEqual(item.current_target()["reps"], 9)   # subió
+        for _ in range(3):
+            self._session(15, 9)                              # tres fallos
+        self.assertEqual(item.current_target()["reps"], 8)    # bajó
+
+    def test_timed_progression_uses_seconds(self):
         plank = Exercise.objects.create(
-            slug="plank-t2", name="Plancha", mode=Exercise.MODE_TIMED,
+            slug="plank-p", name="Plancha", mode=Exercise.MODE_TIMED,
         )
-        pe = PlanExercise.objects.create(
-            plan=self.plan, exercise=plank, start_sets=3, start_seconds=30,
-            reps_increment=5, sessions_per_step=2,
+        item = PlanItem.objects.create(
+            plan=self.plan, exercise=plank, progression=PlanItem.PROG_REPS,
+            start_seconds=30, goal_seconds=45, reps_increment=5, sessions_per_step=1,
         )
-        sched = pe.schedule(4)
-        self.assertEqual([s["seconds"] for s in sched], [30, 30, 35, 35])
-        self.assertIsNone(sched[0]["reps"])
+        self.assertEqual([r["seconds"] for r in item.schedule(6)], [30, 35, 40, 45])
 
 
 class PlanAndFreestyleTests(TestCase):
@@ -694,7 +722,7 @@ class PlanAndFreestyleTests(TestCase):
 
     def _plan(self, **kw):
         plan = Plan.objects.create(name="En forma", user=self.user)
-        PlanExercise.objects.create(
+        PlanItem.objects.create(
             plan=plan, exercise=self.pull,
             **{"start_sets": 4, "start_reps": 6, "reps_increment": 1,
                "sessions_per_step": 2, **kw},
