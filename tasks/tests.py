@@ -701,6 +701,66 @@ class PlanProgressionTests(TestCase):
         self.assertEqual([r["seconds"] for r in item.schedule(6)], [30, 35, 40, 45])
 
 
+class PlanHeadlineTests(TestCase):
+    """
+    El objetivo de verdad ("estar en forma") es difuso y no se mide. Lo
+    que se mide es una prueba concreta de que vas hacia él — 4x12 con 20
+    kg. Esa es la medida principal; el resto de ejercicios son el camino.
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.plan = Plan.objects.create(name="Ponerme en forma", user=self.user)
+        self.wp = Exercise.objects.create(
+            slug="wp-h", name="Dominadas con peso", mode=Exercise.MODE_POSE,
+        )
+        self.plank = Exercise.objects.create(
+            slug="pl-h", name="Plancha", mode=Exercise.MODE_TIMED,
+        )
+
+    def _headline(self):
+        return PlanItem.objects.create(
+            plan=self.plan, exercise=self.wp, is_headline=True,
+            progression=PlanItem.PROG_DOUBLE, start_sets=4, start_weight_kg=0,
+            goal_sets=4, goal_reps=12, goal_weight_kg=20,
+            rep_range_low=6, weight_increment_kg=5, order=0,
+        )
+
+    def _support(self):
+        return PlanItem.objects.create(
+            plan=self.plan, exercise=self.plank, progression=PlanItem.PROG_REPS,
+            start_seconds=30, goal_seconds=90, reps_increment=5, order=1,
+        )
+
+    def test_headline_is_the_marked_one(self):
+        self._support()
+        head = self._headline()
+        self.assertEqual(self.plan.headline, head)
+
+    def test_support_items_exclude_the_headline(self):
+        head = self._headline()
+        sup = self._support()
+        self.assertEqual(list(self.plan.support_items), [sup])
+        self.assertNotIn(head, self.plan.support_items)
+
+    def test_falls_back_to_first_when_none_marked(self):
+        """Sin marcar ninguna, la pantalla debe seguir teniendo algo que
+        destacar en vez de quedarse vacía."""
+        sup = self._support()
+        self.assertEqual(self.plan.headline, sup)
+
+    def test_progress_measured_on_headline_not_calendar(self):
+        """El plan avanza con lo que haces, no con lo que pasa el
+        calendario: recién creado va al 0% aunque el reloj corra."""
+        self._headline()
+        self.assertEqual(self.plan.progress_pct(), 0)
+
+    def test_a_plan_holds_several_exercises(self):
+        self._headline()
+        self._support()
+        self.assertEqual(self.plan.items.count(), 2)
+
+
 class PlanAndFreestyleTests(TestCase):
     """
     Plan y "a mi aire" conviviendo: si el ejercicio está en un plan

@@ -821,6 +821,48 @@ class Plan(models.Model):
         days = (timezone.localtime(timezone.now()).date() - self.started_on).days
         return max(1, days // 7 + 1)
 
+    @property
+    def headline(self):
+        """
+        La medida que define el plan.
+
+        El objetivo de verdad ("estar en forma") es difuso y no se puede
+        medir. Lo que sí se mide es una prueba concreta de que vas hacia
+        él: llegar a 4x12 con 20 kg. Esa es la medida principal; el resto
+        de ejercicios son el camino.
+
+        Si no se ha marcado ninguna, se toma la primera por orden, para
+        que la pantalla siempre tenga algo que destacar.
+        """
+        return self.items.filter(is_headline=True).first() or self.items.first()
+
+    @property
+    def support_items(self):
+        """Los ejercicios que te llevan al objetivo, sin ser la medida."""
+        head = self.headline
+        qs = self.items.all()
+        return qs.exclude(pk=head.pk) if head else qs
+
+    def progress_pct(self):
+        """
+        Cuánto llevas del plan, medido sobre la medida principal.
+
+        Se calcula sobre escalones conseguidos frente a escalones totales
+        hasta el destino, no sobre semanas transcurridas: el plan avanza
+        con lo que haces, no con lo que pasa el calendario.
+        """
+        head = self.headline
+        if not head:
+            return None
+        done = head.current_step()
+        remaining = head.sessions_to_goal()
+        if remaining is None:
+            return None
+        total_steps = done + (remaining // max(1, head.sessions_per_step))
+        if total_steps <= 0:
+            return 100
+        return min(100, round(100 * done / total_steps))
+
 
 class PlanItem(models.Model):
     """
@@ -911,13 +953,21 @@ class PlanItem(models.Model):
                    "0 lo desactiva.",
     )
 
+    is_headline = models.BooleanField(
+        default=False,
+        help_text="La medida que define si el plan se ha conseguido. "
+                   "\"Estar en forma\" no se puede medir; \"4x12 con 20 kg\" sí — "
+                   "esa es la prueba de que vas hacia el objetivo. El resto de "
+                   "ejercicios son el camino, progresan pero no deciden.",
+    )
     order = models.PositiveIntegerField(default=0)
 
     class Meta:
-        ordering = ["order"]
+        ordering = ["-is_headline", "order"]
 
     def __str__(self):
-        return f"{self.plan.name}: {self.display_name}"
+        marca = " ★" if self.is_headline else ""
+        return f"{self.plan.name}: {self.display_name}{marca}"
 
     @property
     def display_name(self):

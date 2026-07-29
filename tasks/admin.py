@@ -60,7 +60,7 @@ class PlanItemInline(admin.TabularInline):
     model = PlanItem
     extra = 1
     fields = (
-        "order", "exercise", "series_id", "label", "progression",
+        "is_headline", "order", "exercise", "series_id", "label", "progression",
         "start_sets", "start_reps", "start_seconds", "start_weight_kg",
         "goal_sets", "goal_reps", "goal_seconds", "goal_weight_kg",
         "rep_range_low", "weight_increment_kg", "reps_increment",
@@ -71,6 +71,7 @@ class PlanItemInline(admin.TabularInline):
 @admin.register(Plan)
 class PlanAdmin(admin.ModelAdmin):
     list_display = ("name", "user", "started_on", "weeks", "ends_on", "is_active")
+    readonly_fields = ()
     list_filter = ("is_active",)
     search_fields = ("name",)
     inlines = [PlanItemInline]
