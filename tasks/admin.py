@@ -70,8 +70,25 @@ class PlanItemInline(admin.TabularInline):
 
 @admin.register(Plan)
 class PlanAdmin(admin.ModelAdmin):
-    list_display = ("name", "user", "started_on", "weeks", "ends_on", "is_active")
-    readonly_fields = ()
+    list_display = ("name", "user", "started_on", "weeks", "ends_on", "is_active", "has_task")
     list_filter = ("is_active",)
     search_fields = ("name",)
     inlines = [PlanItemInline]
+
+    @admin.display(boolean=True, description="Tarea creada")
+    def has_task(self, obj):
+        return obj.task is not None
+
+    def save_related(self, request, form, formsets, change):
+        """
+        Crear o actualizar la tarea del plan también al guardar desde el
+        admin. Sin esto, un plan creado aquí existía pero nunca aparecía
+        en la lista de tareas — y desde fuera parecía que el plan no
+        funcionaba.
+
+        Va en save_related y no en save_model porque los objetivos
+        (PlanItem) se guardan después del propio Plan, y la tarea solo
+        tiene sentido cuando ya se sabe qué ejercicios lleva.
+        """
+        super().save_related(request, form, formsets, change)
+        form.instance.sync_task()

@@ -496,33 +496,3 @@ button { font-family:var(--font-b); cursor:pointer; }
 .plan-pct--partial { background:var(--mustard-soft); color:#7D5A00; }
 
 .header-links { display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
-
-
-/* Asegura que el body ocupe toda la pantalla */
-html, body {
-  margin: 0;
-  padding: 0;
-  min-height: 100vh;
-}
-
-/* Contenedor principal que empuja el footer abajo */
-.page-wrapper {
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-}
-
-/* El contenido principal ocupa todo el espacio disponible */
-.main-content {
-  flex: 1;
-}
-
-/* Tus créditos — abajo y centrados */
-.credits {
-  display: flex;
-  align-items: center;
-  justify-content: center;   /* <-- ESTO te falta para centrar horizontalmente */
-  gap: 10px;
-  padding: 20px;
-  width: 100%;
-}
