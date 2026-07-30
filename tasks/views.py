@@ -218,10 +218,10 @@ def task_workout(request, pk):
             "task": task, "exercise": exercise,
         })
 
-    # De momento el único contador que existe en workout.js es el de
-    # dominadas. Cuando se añada uno nuevo, esta comprobación es lo único
-    # que hay que ampliar (o quitar del todo si ya cubre todos los modos).
-    if exercise.mode != Exercise.MODE_POSE or exercise.counter_key != "pullup":
+    # Contadores implementados en workout.js. Un ejercicio con mode=pose
+    # pero sin contador (sentadillas, abdominales) está en el catálogo
+    # pero todavía no se puede contar con la cámara.
+    if exercise.mode != Exercise.MODE_POSE or exercise.counter_key not in COUNTERS:
         return render(request, "tasks/task_workout_select.html", {
             "task": task, "exercises": exercises_qs, "routines": routines_qs, "unsupported": exercise,
         })
@@ -576,6 +576,10 @@ def stats_detail(request, series_id):
 # ─────────────────────────────────────────────────────────────────────
 # Planes de progresión
 # ─────────────────────────────────────────────────────────────────────
+
+# Contadores que existen de verdad en workout.js.
+COUNTERS = {"pullup", "dip"}
+
 
 def _plans_qs():
     return Plan.objects.filter(user=get_current_user(), deleted_at__isnull=True)
