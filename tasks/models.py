@@ -500,6 +500,42 @@ class Task(models.Model):
         self._spawn_next()
 
     @classmethod
+    def for_today(cls, qs=None):
+        """
+        Las tareas pendientes que TOCAN HOY.
+
+        Al resolver una tarea repetida se genera ya la del día siguiente,
+        y sin este filtro aparecía en la lista al instante: podías
+        marcarla otra vez el mismo día y contaba doble en las
+        estadísticas. Una tarea con fecha futura no es de hoy.
+
+        Las vencidas (fecha pasada y sin resolver) sí se muestran, que
+        para eso están pendientes. Y las que no tienen fecha también,
+        porque son de "cuando pueda".
+        """
+        today = timezone.localtime(timezone.now()).date()
+        base = qs if qs is not None else cls.objects.all()
+        return base.filter(
+            models.Q(due_date__isnull=True) | models.Q(due_date__lte=today)
+        )
+
+    @classmethod
+    def completed_today(cls, qs=None):
+        """
+        Lo cerrado hoy.
+
+        La lista de hechas es "lo que he hecho hoy", no un registro
+        permanente: con una tarea diaria se iba acumulando una entrada
+        por día hasta llenarla de ruido. El historial completo está en
+        las estadísticas.
+        """
+        today = timezone.localtime(timezone.now()).date()
+        base = qs if qs is not None else cls.objects.all()
+        return base.filter(is_done=True).filter(
+            models.Q(completed_at__date=today) | models.Q(completed_at__isnull=True)
+        )
+
+    @classmethod
     def expire_overdue(cls, dry_run=False):
         """
         Cierra las tareas vencidas y registra su resultado.

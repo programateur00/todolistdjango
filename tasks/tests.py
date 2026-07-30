@@ -1001,6 +1001,66 @@ class PlanAndFreestyleTests(TestCase):
         self.assertEqual(self.item.resolved_target(self.user)["reps"], 7)
 
 
+class ListFilteringTests(TestCase):
+    """
+    Regresiones de dos molestias reales:
+
+    Al resolver una tarea repetida se genera ya la del día siguiente, y
+    aparecía en la lista al instante — podías marcarla otra vez el mismo
+    día y contaba dos veces en las estadísticas.
+
+    Y las hechas se acumulaban para siempre: a los treinta días tenías
+    treinta "No fumar" en la lista.
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+
+    def test_tomorrows_task_is_not_shown_today(self):
+        t = Task.objects.create(
+            title="No fumar", category=Task.CATEGORY_AVOID, due_date=date.today(),
+            due_time=time(22, 0), repeat=Task.REPEAT_DAILY, interval=1, user=self.user,
+        )
+        t.mark_done()
+        # existe, pero no se enseña hasta que le toque
+        tomorrow = Task.objects.get(series_id=t.series_id, is_done=False)
+        self.assertEqual(tomorrow.due_date, date.today() + timedelta(days=1))
+
+        html = self.client.get(reverse("tasks:task_list")).content.decode()
+        self.assertEqual(html.count("No fumar"), 1)   # solo en Hechas
+
+        api = self.client.get("/api/tasks/").json()
+        self.assertEqual(api["pending"], [])
+
+    def test_overdue_tasks_are_still_shown(self):
+        """Una tarea vencida sigue pendiente y debe verse: el filtro es
+        para el futuro, no para el pasado."""
+        Task.objects.create(
+            title="Atrasada", due_date=date.today() - timedelta(days=2), user=self.user,
+        )
+        api = self.client.get("/api/tasks/").json()
+        self.assertEqual([t["title"] for t in api["pending"]], ["Atrasada"])
+
+    def test_tasks_without_date_are_always_shown(self):
+        Task.objects.create(title="Cuando pueda", user=self.user)
+        api = self.client.get("/api/tasks/").json()
+        self.assertIn("Cuando pueda", [t["title"] for t in api["pending"]])
+
+    def test_completed_list_only_shows_today(self):
+        old = Task.objects.create(title="Vieja", user=self.user)
+        old.mark_done()
+        Task.objects.filter(pk=old.pk).update(
+            completed_at=timezone.now() - timedelta(days=5)
+        )
+        recent = Task.objects.create(title="De hoy", user=self.user)
+        recent.mark_done()
+
+        api = self.client.get("/api/tasks/").json()
+        titles = [t["title"] for t in api["completed"]]
+        self.assertIn("De hoy", titles)
+        self.assertNotIn("Vieja", titles)
+
+
 class ApiTests(TestCase):
     """API JSON que consume la app móvil."""
 

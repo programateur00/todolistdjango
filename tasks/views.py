@@ -48,8 +48,10 @@ def task_list(request):
     if active_category:
         base_qs = base_qs.filter(category=active_category)
 
-    pending_tasks = base_qs.filter(is_done=False)
-    completed_tasks = base_qs.filter(is_done=True)
+    # for_today evita que la tarea de mañana (generada al resolver la de
+    # hoy) aparezca ya en la lista y se pueda marcar dos veces.
+    pending_tasks = Task.for_today(base_qs.filter(is_done=False))
+    completed_tasks = Task.completed_today(base_qs)
 
     # Conteos por categoría para los chips de filtro
     counts = dict(

@@ -18,8 +18,10 @@ protección CSRF existe para ataques basados en cookies, y aquí no aplica.
 import json
 from functools import wraps
 
+from django.db.models import Q
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_time
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -89,6 +91,10 @@ def task_json(t):
         # La app elige el icono con esto, para no enseñar una cámara en
         # una tarea que no va a grabar nada.
         "workout_kind": t.workout_kind,
+        # Si la tarea la generó un plan, la app va directa a la sesión sin
+        # pasar por el selector de ejercicios: el plan ya decidió.
+        "plan_uuid": str(t.plan.uuid) if t.plan else None,
+        "plan_name": t.plan.name if t.plan else None,
         "due_date": t.due_date.isoformat() if t.due_date else None,
         "due_time": t.due_time.strftime("%H:%M") if t.due_time else None,
         "repeat": t.repeat,
@@ -215,13 +221,15 @@ def meta(request):
 @api("GET")
 def task_list(request):
     Task.expire_overdue()
+    hoy = timezone.localtime(timezone.now()).date()
     qs = tasks_qs()
     category = request.GET.get("category")
     if category:
         qs = qs.filter(category=category)
     return JsonResponse({
-        "pending": [task_json(t) for t in qs.filter(is_done=False)],
-        "completed": [task_json(t) for t in qs.filter(is_done=True)],
+        # Mismo criterio que la web: la tarea de mañana no es de hoy.
+        "pending": [task_json(t) for t in Task.for_today(qs.filter(is_done=False))],
+        "completed": [task_json(t) for t in Task.completed_today(qs)],
     })
 
 
@@ -621,4 +629,133 @@ def routine_result(request, uuid, routine_uuid):
         ],
         "total_seconds": total_seconds,
         "task": task_json(t),
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Planes
+# ─────────────────────────────────────────────────────────────────────
+
+def plan_json(p, detail=False):
+    head = p.headline
+
+    def _item(it):
+        t = it.current_target()
+        return {
+            "id": it.pk,
+            "name": it.display_name,
+            "slug": it.exercise.slug if it.exercise else None,
+            "progression": it.progression,
+            "is_headline": it.is_headline,
+            "target_sets": t["sets"],
+            "target_reps": t["reps"],
+            "target_seconds": t["seconds"],
+            "target_weight_kg": t["weight_kg"],
+            "step": it.current_step(),
+            "remaining": it.sessions_to_goal(),
+            "done": t["done"],
+        }
+
+    data = {
+        "uuid": str(p.uuid),
+        "id": p.pk,
+        "name": p.name,
+        "notes": p.notes,
+        "week": p.week_number,
+        "weeks": p.weeks,
+        "started_on": p.started_on.isoformat(),
+        "ends_on": p.ends_on.isoformat(),
+        "is_active": p.is_active,
+        "progress_pct": p.progress_pct(),
+        "custom_days": p.custom_days_list(),
+        "due_time": p.due_time.strftime("%H:%M") if p.due_time else None,
+        "headline": _item(head) if head else None,
+    }
+    if detail:
+        data["items"] = [_item(i) for i in p.items.select_related("exercise")]
+        data["schedule"] = head.schedule(60) if head else []
+        data["history"] = head.history(12) if head else []
+    return data
+
+
+def plans_qs():
+    return Plan.objects.filter(user=_user(), deleted_at__isnull=True)
+
+
+@api("GET")
+def plan_list(request):
+    return JsonResponse({"plans": [plan_json(p) for p in plans_qs()]})
+
+
+@api("GET")
+def plan_detail(request, uuid):
+    p = get_object_or_404(plans_qs(), uuid=uuid)
+    return JsonResponse({"plan": plan_json(p, detail=True)})
+
+
+@api("GET")
+def plan_session(request, uuid, plan_uuid):
+    """
+    La sesión de hoy según el plan: sus ejercicios con el objetivo que
+    toca. No hay nada que elegir — el plan ya lo decidió.
+    """
+    task = get_object_or_404(tasks_qs(), uuid=uuid)
+    plan = get_object_or_404(plans_qs(), uuid=plan_uuid)
+    return JsonResponse({
+        "plan": plan_json(plan),
+        "task": task_json(task),
+        "items": plan.session_items(),
+    })
+
+
+@api("POST")
+def plan_session_save(request, uuid, plan_uuid):
+    """Guarda la sesión del plan: una entrada por ejercicio, con el
+    objetivo vigente. Al terminar la tarea queda hecha y el plan avanza."""
+    task = get_object_or_404(tasks_qs(), uuid=uuid)
+    plan = get_object_or_404(plans_qs(), uuid=plan_uuid)
+    data = body(request)
+
+    targets = {
+        it.exercise.slug: it.current_target()
+        for it in plan.items.select_related("exercise") if it.exercise
+    }
+
+    def _num(b, key):
+        return int(b[key]) if isinstance(b.get(key), (int, float)) else 0
+
+    created = []
+    for b in data.get("breakdown", []) or []:
+        if not isinstance(b, dict):
+            continue
+        slug = str(b.get("exercise", ""))[:32]
+        if not slug:
+            continue
+        t = targets.get(slug, {})
+        created.append(WorkoutSession.objects.create(
+            task=task, user=_user(), plan=plan, series_id=task.series_id,
+            exercise=slug,
+            total_reps=_num(b, "reps"), total_sets=_num(b, "sets"),
+            session_duration_seconds=_num(b, "seconds"),
+            target_sets=t.get("sets"), target_reps=t.get("reps"),
+            target_seconds=t.get("seconds"),
+        ))
+
+    if not created:
+        return JsonResponse({"ok": False, "error": "Sin datos que guardar"}, status=400)
+
+    if data.get("finish", True):
+        task.mark_done()
+
+    return JsonResponse({
+        "ok": True,
+        "sessions": [
+            {
+                "exercise": w.exercise, "name": w.exercise_name,
+                "reps": w.total_reps, "seconds": w.session_duration_seconds,
+                "target": w.target_label, "achievement_pct": w.achievement_pct,
+            }
+            for w in created
+        ],
+        "task": task_json(task),
     })

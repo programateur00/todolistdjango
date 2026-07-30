@@ -26,5 +26,10 @@ urlpatterns = [
     path("tasks/<uuid:uuid>/workout-manual/", api.workout_save_manual, name="workout_save_manual"),
     path("tasks/<uuid:uuid>/circuit/<uuid:routine_uuid>/", api.routine_result, name="routine_result"),
 
+    path("plans/", api.plan_list, name="plan_list"),
+    path("plans/<uuid:uuid>/", api.plan_detail, name="plan_detail"),
+    path("tasks/<uuid:uuid>/plan/<uuid:plan_uuid>/", api.plan_session, name="plan_session"),
+    path("tasks/<uuid:uuid>/plan/<uuid:plan_uuid>/save/", api.plan_session_save, name="plan_session_save"),
+
     path("stats/", api.stats_list, name="stats_list"),
 ]
