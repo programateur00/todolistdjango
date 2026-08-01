@@ -358,6 +358,35 @@ def task_detail(request, uuid):
 
 
 @api("POST")
+def task_mark_by_series(request, series_id, action):
+    """
+    Como task_mark, pero resuelve la tarea PENDIENTE actual de la serie
+    en vez de una tarea concreta.
+
+    Hace falta porque cada repetición es una fila nueva con su propio
+    uuid. Una notificación local recurrente (Android la repite sola, sin
+    reabrir la app) se programa una sola vez y mantiene siempre el mismo
+    contenido — si apuntara al uuid de la tarea de HOY, dejaría de
+    servir en cuanto esa tarea se resolviera y naciera la de mañana.
+    Apuntando a la serie en su lugar, la misma notificación sigue
+    resolviendo el día que toque, indefinidamente, sin depender de que
+    se reabra la app para "refrescarla".
+    """
+    task = get_object_or_404(
+        tasks_qs().filter(is_done=False), series_id=series_id
+    )
+    if action == "done":
+        task.mark_done()
+    elif action == "not-done":
+        task.mark_not_done()
+    elif action == "failed":
+        task.mark_failed()
+    else:
+        return JsonResponse({"ok": False, "error": "Acción desconocida"}, status=400)
+    return JsonResponse({"ok": True, "task": task_json(task)})
+
+
+@api("POST")
 def task_mark(request, uuid, action):
     t = get_object_or_404(tasks_qs(), uuid=uuid)
     if action == "done":

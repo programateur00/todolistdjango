@@ -833,6 +833,64 @@ class PlanViewTests(TestCase):
         self.assertNotIn("Ponerme en forma", html)
 
 
+class NotificationSeriesTests(TestCase):
+    """
+    Una notificación local recurrente (Android la repite sola cada día, sin
+    reabrir la app) se programa una vez y mantiene siempre el mismo
+    contenido. Si apuntara al uuid de la tarea de un día concreto, dejaría
+    de servir en cuanto esa tarea se resolviera y naciera la del día
+    siguiente. Apuntando a la serie, la misma notificación sigue
+    resolviendo el día que toque, sin importar cuántos días hayan pasado
+    sin abrir la app.
+    """
+
+    def test_marks_current_pending_task_of_the_series(self):
+        t = Task.objects.create(
+            title="No fumar", category=Task.CATEGORY_AVOID, due_date=date.today(),
+            due_time=time(22, 0), repeat=Task.REPEAT_DAILY, interval=1,
+            user=get_current_user(),
+        )
+        r = self.client.post(f"/api/series/{t.series_id}/mark/done/")
+        self.assertTrue(r.json()["ok"])
+        # confirma la tarea que ACABA de resolver...
+        self.assertEqual(r.json()["task"]["uuid"], str(t.uuid))
+        # ...y ya existe una nueva pendiente para mañana en la misma serie.
+        tomorrow = Task.objects.get(series_id=t.series_id, is_done=False)
+        self.assertNotEqual(tomorrow.uuid, t.uuid)
+
+    def test_keeps_working_across_many_unopened_days(self):
+        """Simula varios toques seguidos sin reabrir la app entre medias:
+        cada uno debe encontrar y avanzar la tarea pendiente de ese
+        momento, aunque su uuid cambie cada vez."""
+        t = Task.objects.create(
+            title="No fumar", category=Task.CATEGORY_AVOID, due_date=date.today(),
+            due_time=time(22, 0), repeat=Task.REPEAT_DAILY, interval=1,
+            user=get_current_user(),
+        )
+        for _ in range(4):
+            pending = Task.objects.get(series_id=t.series_id, is_done=False)
+            r = self.client.post(f"/api/series/{t.series_id}/mark/done/")
+            self.assertEqual(r.json()["task"]["uuid"], str(pending.uuid))
+        self.assertEqual(Task.objects.filter(series_id=t.series_id).count(), 5)
+
+    def test_unknown_series_gives_clean_404(self):
+        r = self.client.post(
+            "/api/series/00000000-0000-0000-0000-000000000000/mark/done/"
+        )
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(r["Content-Type"], "application/json")
+
+    def test_failed_action_records_it_as_a_relapse(self):
+        t = Task.objects.create(
+            title="No fumar", category=Task.CATEGORY_AVOID, due_date=date.today(),
+            due_time=time(22, 0), repeat=Task.REPEAT_DAILY, interval=1,
+            user=get_current_user(),
+        )
+        self.client.post(f"/api/series/{t.series_id}/mark/failed/")
+        occ = Occurrence.objects.filter(series_id=t.series_id).latest("recorded_at")
+        self.assertEqual(occ.result, Occurrence.RESULT_NOT_DONE)
+
+
 class PlanTaskFlowTests(TestCase):
     """
     Lo que hace la app entendible: creas un plan y te aparece la tarea.

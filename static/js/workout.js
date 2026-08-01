@@ -20,7 +20,18 @@ const MIN_REP_SECONDS = 0.3; // por debajo de esto, se descarta como ruido
 const HANG_STABLE_MS = 500;   // cuanto tiempo seguido con los brazos en alto para empezar a calibrar
 const ARMS_DOWN_STABLE_MS = 400; // cuanto tiempo seguido con los brazos abajo para dar la serie por terminada (evita falsos positivos por un frame ruidoso)
 const CALIBRATION_MS = 1200;  // tiempo colgado quieto que se usa como referencia
-const REST_ALERT_SECONDS = 90; // segundos de descanso antes del pitido
+const REST_ALERT_SECONDS = 90;
+
+// Se mide la NARIZ frente a los CODOS, no el ángulo del brazo. Al bajar
+// en un fondo la cabeza cae por debajo de la línea de los codos, y eso
+// se ve igual de frente que de lado — el ángulo del codo, en cambio,
+// solo se mide bien de perfil.
+//
+// Los valores van en proporción al ancho de hombros, así que no dependen
+// de lo cerca que estés de la cámara.
+const DIP_DOWN_FACTOR = 0.05;  // nariz a la altura de los codos o por debajo -> abajo
+const DIP_UP_FACTOR = 0.45;    // nariz bien por encima -> arriba
+const DIP_MIN_VISIBILITY = 0.4; // segundos de descanso antes del pitido
 
 // Índices de landmarks de MediaPipe Pose que usamos
 const NOSE = 0, L_SHOULDER = 11, R_SHOULDER = 12, L_ELBOW = 13, R_ELBOW = 14, L_WRIST = 15, R_WRIST = 16;
@@ -68,6 +79,9 @@ class WorkoutSession {
   constructor(root) {
     this.root = root;
     this.saveUrl = root.dataset.saveUrl;
+    // Qué contador usar. Lo decide el ejercicio (counter_key en el
+    // catálogo), no la pantalla.
+    this.counterKey = root.dataset.counterKey || "pullup";
     this.video = el("workout-video");
     this.canvas = el("workout-canvas");
     this.ctx = this.canvas.getContext("2d");
@@ -195,10 +209,19 @@ class WorkoutSession {
     this.hangStableSince = null;
     this.armsDownSince = null;
     this.calibrationSamples = [];
-    this.state = "down";
     this.localBottomY = null;
     this.localTopY = null;
     this.barY = null;
+
+    // Los fondos no se calibran ni se cuelgan de ninguna barra: el
+    // estado arranca vacío y se fija solo cuando te pones arriba.
+    if (this.counterKey === "dip") {
+      this.prepping = false;
+      this.state = null;
+      this.setStatus("Ponte arriba con los brazos estirados para empezar.");
+    } else {
+      this.state = "down";
+    }
   }
 
   updateSetDisplay() {
@@ -279,12 +302,103 @@ class WorkoutSession {
     ctx.restore();
   }
 
+  /**
+   * Registra una repetición. Común a todos los ejercicios: lo único que
+   * cambia entre dominadas y fondos es CÓMO se detecta, no qué se
+   * apunta después.
+   */
+  countRep(duration, now, label) {
+    if (duration < MIN_REP_SECONDS) return false;   // ruido, no cuenta
+    const d = Math.round(duration * 100) / 100;
+    this.reps += 1;
+    this.repDurations.push(d);
+    this.currentSetReps += 1;
+    this.currentSetDurations.push(d);
+    this.lastRepTime = now;
+    this.restAlerted = false;
+    // Se muestran las reps de ESTA serie, no el total de la sesión (el
+    // total sigue guardándose bien en this.reps al terminar).
+    this.repsEl.textContent = String(this.currentSetReps);
+    this.setStatus(`¡${label} ${this.currentSetReps} de esta serie! (${duration.toFixed(1)}s)`);
+    return true;
+  }
+
+  /**
+   * Fondos: se cuentan por el ángulo del codo.
+   *
+   * Arriba el brazo está extendido; abajo el codo se dobla. Como un
+   * ángulo no cambia con la distancia a la cámara, esto no necesita
+   * calibración — a diferencia de las dominadas, que sí tienen que
+   * medir dónde está la barra.
+   *
+   * Se usa el brazo que mejor se vea: en un fondo de perfil, el brazo
+   * de atrás queda tapado por el cuerpo.
+   */
+  processDip(lm, now) {
+    const nose = lm[NOSE];
+    const lShoulder = lm[L_SHOULDER], rShoulder = lm[R_SHOULDER];
+    const lElbow = lm[L_ELBOW], rElbow = lm[R_ELBOW];
+
+    const elbowVis = ((lElbow.visibility ?? 1) + (rElbow.visibility ?? 1)) / 2;
+    const noseVis = nose.visibility ?? 1;
+    if (elbowVis < DIP_MIN_VISIBILITY || noseVis < DIP_MIN_VISIBILITY) {
+      this.setStatus("No se te ven bien la cara y los codos. Ajusta la cámara.");
+      if (this.debugEl) this.debugEl.textContent = "buscando nariz y codos…";
+      return;
+    }
+
+    const shoulderWidth = Math.hypot(
+      lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y
+    );
+    if (!shoulderWidth) return;
+
+    // Cuánto está la nariz POR ENCIMA de la línea de los codos, en
+    // proporción al ancho de hombros (y crece hacia abajo en pantalla).
+    // Arriba en un fondo la cabeza queda muy por encima; al bajar cae
+    // hasta el nivel de los codos o por debajo.
+    const elbowMidY = (lElbow.y + rElbow.y) / 2;
+    const above = (elbowMidY - nose.y) / shoulderWidth;
+
+    if (this.state === null) {
+      // Hay que empezar arriba, para no contar media repetición al entrar.
+      if (above >= DIP_UP_FACTOR) {
+        this.state = "top";
+        this.setStatus("¡Listo! Baja y sube.");
+      } else {
+        this.setStatus("Ponte arriba con los brazos estirados para empezar.");
+      }
+    } else if (this.state === "top") {
+      if (above <= DIP_DOWN_FACTOR) {
+        this.state = "bottom";
+        this.repStartTime = now;      // la repetición empieza al bajar
+      }
+    } else if (above >= DIP_UP_FACTOR) {
+      // Ha vuelto arriba: repetición completa.
+      this.countRep((now - this.repStartTime) / 1000, now, "Fondo");
+      this.state = "top";
+    }
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `nariz sobre codos: ${above.toFixed(2)} | estado: ${this.state ?? "esperando"} ` +
+        `(abajo ≤${DIP_DOWN_FACTOR}, arriba ≥${DIP_UP_FACTOR})`;
+    }
+  }
+
   processResult(result, now) {
     if (!result.landmarks || !result.landmarks.length) {
       if (this.debugEl) this.debugEl.textContent = "sin detección — ¿sales entero en el encuadre?";
       return;
     }
     const lm = result.landmarks[0];
+
+    // Cada ejercicio se detecta a su manera. Los fondos no necesitan
+    // calibrar ninguna barra, así que salen antes de todo eso.
+    if (this.counterKey === "dip") {
+      this.processDip(lm, now);
+      return;
+    }
+
     const nose = lm[NOSE];
     const lShoulder = lm[L_SHOULDER];
     const rShoulder = lm[R_SHOULDER];
@@ -455,19 +569,7 @@ class WorkoutSession {
       const fallenFromTop = y - this.localTopY;
       if (fallenFromTop > moveThresh) {
         // ha vuelto a bajar lo suficiente -> repetición completa
-        const duration = (now - this.repStartTime) / 1000;
-        if (duration >= MIN_REP_SECONDS) {
-          this.reps += 1;
-          this.repDurations.push(Math.round(duration * 100) / 100);
-          this.currentSetReps += 1;
-          this.currentSetDurations.push(Math.round(duration * 100) / 100);
-          this.lastRepTime = now;
-          this.restAlerted = false;
-          // Mostramos las reps de ESTA serie, no el total acumulado de toda
-          // la sesión (el total sigue guardándose bien en this.reps al terminar).
-          this.repsEl.textContent = String(this.currentSetReps);
-          this.setStatus(`¡Dominada ${this.currentSetReps} de esta serie! (${duration.toFixed(1)}s)`);
-        }
+        this.countRep((now - this.repStartTime) / 1000, now, "Dominada");
         this.state = "down";
         this.localBottomY = y;
       }

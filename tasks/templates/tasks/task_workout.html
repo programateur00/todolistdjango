@@ -15,6 +15,7 @@
      data-save-url="{% url 'tasks:task_workout_save' task.pk %}?exercise={{ exercise.slug }}"
      data-cancel-url="{% url 'tasks:task_list' %}"
      data-exercise-slug="{{ exercise.slug }}"
+     data-counter-key="{{ exercise.counter_key|default:'pullup' }}"
      class="workout">
     {% csrf_token %}
 
