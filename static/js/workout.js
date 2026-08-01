@@ -31,7 +31,20 @@ const REST_ALERT_SECONDS = 90;
 // de lo cerca que estés de la cámara.
 const DIP_DOWN_FACTOR = 0.05;  // nariz a la altura de los codos o por debajo -> abajo
 const DIP_UP_FACTOR = 0.45;    // nariz bien por encima -> arriba
-const DIP_MIN_VISIBILITY = 0.4; // segundos de descanso antes del pitido
+const DIP_MIN_VISIBILITY = 0.4;
+// FALLO CONOCIDO: nariz-vs-codos por sí solo no distingue estar agarrado a
+// las barras de estar simplemente de pie con los brazos colgando (la nariz
+// también queda muy por encima de los codos así), y levantar y bajar las
+// manos sin tocar las barras mueve los codos igual que un fondo real, así
+// que se contaba como repetición. Arreglo: usar las MANOS como referencia.
+// En un fondo real las manos están fijas en la barra durante todo el
+// movimiento (solo se mueve el cuerpo); si te sueltas, o si levantas las
+// manos sin estar agarrado, las manos se desplazan mucho más de lo que se
+// desplazan en un fondo real. DIP_HANDS_MAX_DRIFT_FACTOR es cuánto se
+// pueden mover (en proporción al ancho de hombros) respecto a donde
+// estaban cuando te pusiste arriba antes de asumir eso y descartar la
+// repetición en curso.
+const DIP_HANDS_MAX_DRIFT_FACTOR = 0.35;
 
 // Índices de landmarks de MediaPipe Pose que usamos
 const NOSE = 0, L_SHOULDER = 11, R_SHOULDER = 12, L_ELBOW = 13, R_ELBOW = 14, L_WRIST = 15, R_WRIST = 16;
@@ -119,6 +132,7 @@ class WorkoutSession {
     this.barY = null;          // y (0-1) de la barra, medida por la altura de tus muñecas
     this.repStartTime = null;
     this.liftoffTime = null;   // instante en que detectamos que empezaste a moverte de verdad
+    this.dipHandsY = null;     // y (0-1) de las manos cuando confirmamos "arriba" en un fondo — referencia para saber si sigues agarrado a las barras
 
     this.sessionStart = null;
     this.lastRepTime = null;
@@ -218,6 +232,7 @@ class WorkoutSession {
     if (this.counterKey === "dip") {
       this.prepping = false;
       this.state = null;
+      this.dipHandsY = null;
       this.setStatus("Ponte arriba con los brazos estirados para empezar.");
     } else {
       this.state = "down";
@@ -333,17 +348,31 @@ class WorkoutSession {
    *
    * Se usa el brazo que mejor se vea: en un fondo de perfil, el brazo
    * de atrás queda tapado por el cuerpo.
+   *
+   * Nariz-vs-codos por sí solo tiene un fallo: estar de pie con los
+   * brazos sueltos ya cumple la condición de "arriba" (la nariz también
+   * queda muy por encima de los codos así), y levantar y bajar las
+   * manos sin tocar las barras mueve los codos igual que un fondo real.
+   * Por eso, además, usamos las MANOS como referencia de que sigues
+   * agarrado: en un fondo real las manos están fijas en la barra durante
+   * todo el movimiento (solo se mueve el cuerpo), así que en cuanto se
+   * detecta arriba se guarda la altura de las manos, y si en algún
+   * momento se desplazan más de la cuenta (te soltaste, o nunca estabas
+   * agarrado y solo levantaste las manos) se descarta la repetición en
+   * curso y hay que volver a ponerse arriba para seguir contando.
    */
   processDip(lm, now) {
     const nose = lm[NOSE];
     const lShoulder = lm[L_SHOULDER], rShoulder = lm[R_SHOULDER];
     const lElbow = lm[L_ELBOW], rElbow = lm[R_ELBOW];
+    const lWrist = lm[L_WRIST], rWrist = lm[R_WRIST];
 
     const elbowVis = ((lElbow.visibility ?? 1) + (rElbow.visibility ?? 1)) / 2;
     const noseVis = nose.visibility ?? 1;
-    if (elbowVis < DIP_MIN_VISIBILITY || noseVis < DIP_MIN_VISIBILITY) {
-      this.setStatus("No se te ven bien la cara y los codos. Ajusta la cámara.");
-      if (this.debugEl) this.debugEl.textContent = "buscando nariz y codos…";
+    const wristVis = ((lWrist.visibility ?? 1) + (rWrist.visibility ?? 1)) / 2;
+    if (elbowVis < DIP_MIN_VISIBILITY || noseVis < DIP_MIN_VISIBILITY || wristVis < DIP_MIN_VISIBILITY) {
+      this.setStatus("No se te ven bien la cara, los codos y las manos. Ajusta la cámara.");
+      if (this.debugEl) this.debugEl.textContent = "buscando nariz, codos y manos…";
       return;
     }
 
@@ -358,11 +387,30 @@ class WorkoutSession {
     // hasta el nivel de los codos o por debajo.
     const elbowMidY = (lElbow.y + rElbow.y) / 2;
     const above = (elbowMidY - nose.y) / shoulderWidth;
+    const handsY = (lWrist.y + rWrist.y) / 2;
+
+    // Si ya teníamos guardada la altura de las manos al ponerte arriba y
+    // se han movido más de la cuenta, no estás en mitad de un fondo: te
+    // has soltado de las barras, o nunca estuviste agarrado y solo
+    // levantaste las manos. Se descarta la repetición en curso.
+    if (this.dipHandsY !== null) {
+      const handsDrift = Math.abs(handsY - this.dipHandsY) / shoulderWidth;
+      if (handsDrift > DIP_HANDS_MAX_DRIFT_FACTOR) {
+        this.state = null;
+        this.dipHandsY = null;
+        this.setStatus("Parece que te has soltado de las barras. Agárrate y ponte arriba otra vez.");
+        if (this.debugEl) {
+          this.debugEl.textContent = `manos desplazadas: ${handsDrift.toFixed(2)} (máximo ${DIP_HANDS_MAX_DRIFT_FACTOR}) — reiniciando`;
+        }
+        return;
+      }
+    }
 
     if (this.state === null) {
       // Hay que empezar arriba, para no contar media repetición al entrar.
       if (above >= DIP_UP_FACTOR) {
         this.state = "top";
+        this.dipHandsY = handsY; // ancla: aquí deben quedarse las manos mientras dure el fondo
         this.setStatus("¡Listo! Baja y sube.");
       } else {
         this.setStatus("Ponte arriba con los brazos estirados para empezar.");
@@ -376,6 +424,7 @@ class WorkoutSession {
       // Ha vuelto arriba: repetición completa.
       this.countRep((now - this.repStartTime) / 1000, now, "Fondo");
       this.state = "top";
+      this.dipHandsY = handsY; // actualiza el ancla por si te has movido un poco desde el fondo anterior
     }
 
     if (this.debugEl) {
