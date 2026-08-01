@@ -45,6 +45,19 @@ const DIP_MIN_VISIBILITY = 0.4;
 // estaban cuando te pusiste arriba antes de asumir eso y descartar la
 // repetición en curso.
 const DIP_HANDS_MAX_DRIFT_FACTOR = 0.35;
+// En un fondo real la nariz SIEMPRE queda por encima de la línea de los
+// hombros (ni agachando la cabeza del todo baja tanto). Si aparece por
+// debajo — normalmente porque se ha girado el ángulo de la cámara, o la
+// cabeza, para "engañar" a la relación nariz/codos — se descarta como
+// postura imposible. Margen pequeño porque en cualquier postura humana
+// normal la nariz queda MUY por encima, así que no hace falta más para
+// no afectar a fondos reales, ni siquiera con la cabeza muy agachada.
+const DIP_NOSE_ABOVE_SHOULDER_MARGIN = 0.05;
+// Cuánto tiempo seguido sin agarre válido (manos movidas, postura
+// imposible, o no se te ve bien) para dar la serie por terminada, en vez
+// de seguir sumando fondos a la misma serie pase lo que pase. Reutiliza
+// ARMS_DOWN_STABLE_MS: es el mismo concepto que "te has soltado de la
+// barra" en dominadas, solo que aplicado a las barras de los fondos.
 
 // Índices de landmarks de MediaPipe Pose que usamos
 const NOSE = 0, L_SHOULDER = 11, R_SHOULDER = 12, L_ELBOW = 13, R_ELBOW = 14, L_WRIST = 15, R_WRIST = 16;
@@ -133,6 +146,7 @@ class WorkoutSession {
     this.repStartTime = null;
     this.liftoffTime = null;   // instante en que detectamos que empezaste a moverte de verdad
     this.dipHandsY = null;     // y (0-1) de las manos cuando confirmamos "arriba" en un fondo — referencia para saber si sigues agarrado a las barras
+    this.dipReleaseSince = null; // desde cuándo llevas sin agarre válido seguido en un fondo (para no cerrar la serie por un frame ruidoso)
 
     this.sessionStart = null;
     this.lastRepTime = null;
@@ -233,6 +247,7 @@ class WorkoutSession {
       this.prepping = false;
       this.state = null;
       this.dipHandsY = null;
+      this.dipReleaseSince = null;
       this.setStatus("Ponte arriba con los brazos estirados para empezar.");
     } else {
       this.state = "down";
@@ -349,17 +364,31 @@ class WorkoutSession {
    * Se usa el brazo que mejor se vea: en un fondo de perfil, el brazo
    * de atrás queda tapado por el cuerpo.
    *
-   * Nariz-vs-codos por sí solo tiene un fallo: estar de pie con los
-   * brazos sueltos ya cumple la condición de "arriba" (la nariz también
-   * queda muy por encima de los codos así), y levantar y bajar las
-   * manos sin tocar las barras mueve los codos igual que un fondo real.
-   * Por eso, además, usamos las MANOS como referencia de que sigues
-   * agarrado: en un fondo real las manos están fijas en la barra durante
-   * todo el movimiento (solo se mueve el cuerpo), así que en cuanto se
-   * detecta arriba se guarda la altura de las manos, y si en algún
-   * momento se desplazan más de la cuenta (te soltaste, o nunca estabas
-   * agarrado y solo levantaste las manos) se descarta la repetición en
-   * curso y hay que volver a ponerse arriba para seguir contando.
+   * Nariz-vs-codos por sí solo tiene dos fallos, que es lo que arregla
+   * todo lo de abajo:
+   *
+   *  1. Estar de pie con los brazos sueltos ya cumple la condición de
+   *     "arriba" (la nariz también queda muy por encima de los codos
+   *     así), y levantar y bajar las manos sin tocar las barras mueve
+   *     los codos igual que un fondo real. Arreglo: usamos las MANOS
+   *     como referencia de que sigues agarrado. En un fondo real las
+   *     manos están fijas en la barra durante todo el movimiento (solo
+   *     se mueve el cuerpo), así que en cuanto se detecta "arriba" se
+   *     guarda la altura de las manos; si en algún momento se desplazan
+   *     más de la cuenta, cuenta como que te has soltado.
+   *
+   *  2. Girar el ángulo de la cámara (o agachar mucho la cabeza) puede
+   *     hacer que la nariz aparezca por debajo de los hombros en la
+   *     imagen, cosa imposible en un fondo real — y sin embargo
+   *     "engañaría" a la relación nariz/codos igual que una repetición
+   *     de verdad. Arreglo: comprobamos que la nariz esté SIEMPRE por
+   *     encima de la línea de los hombros; si no, se descarta.
+   *
+   * Y al igual que en dominadas: si se pierde el agarre válido (manos
+   * movidas, postura imposible, o no se te ve bien) durante un rato
+   * seguido — no un solo frame ruidoso —, se da la serie por terminada
+   * (ver registerDipRelease), en vez de sumar todos los fondos de la
+   * sesión a la misma serie pase lo que pase.
    */
   processDip(lm, now) {
     const nose = lm[NOSE];
@@ -367,12 +396,14 @@ class WorkoutSession {
     const lElbow = lm[L_ELBOW], rElbow = lm[R_ELBOW];
     const lWrist = lm[L_WRIST], rWrist = lm[R_WRIST];
 
+    const shoulderVis = ((lShoulder.visibility ?? 1) + (rShoulder.visibility ?? 1)) / 2;
     const elbowVis = ((lElbow.visibility ?? 1) + (rElbow.visibility ?? 1)) / 2;
     const noseVis = nose.visibility ?? 1;
     const wristVis = ((lWrist.visibility ?? 1) + (rWrist.visibility ?? 1)) / 2;
-    if (elbowVis < DIP_MIN_VISIBILITY || noseVis < DIP_MIN_VISIBILITY || wristVis < DIP_MIN_VISIBILITY) {
-      this.setStatus("No se te ven bien la cara, los codos y las manos. Ajusta la cámara.");
-      if (this.debugEl) this.debugEl.textContent = "buscando nariz, codos y manos…";
+    if (shoulderVis < DIP_MIN_VISIBILITY || elbowVis < DIP_MIN_VISIBILITY || noseVis < DIP_MIN_VISIBILITY || wristVis < DIP_MIN_VISIBILITY) {
+      this.setStatus("No se te ven bien la cara, los hombros, los codos y las manos. Ajusta la cámara.");
+      if (this.debugEl) this.debugEl.textContent = "buscando nariz, hombros, codos y manos…";
+      this.registerDipRelease(now);
       return;
     }
 
@@ -381,30 +412,43 @@ class WorkoutSession {
     );
     if (!shoulderWidth) return;
 
+    const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
+    const elbowMidY = (lElbow.y + rElbow.y) / 2;
+    const handsY = (lWrist.y + rWrist.y) / 2;
+
     // Cuánto está la nariz POR ENCIMA de la línea de los codos, en
     // proporción al ancho de hombros (y crece hacia abajo en pantalla).
     // Arriba en un fondo la cabeza queda muy por encima; al bajar cae
     // hasta el nivel de los codos o por debajo.
-    const elbowMidY = (lElbow.y + rElbow.y) / 2;
     const above = (elbowMidY - nose.y) / shoulderWidth;
-    const handsY = (lWrist.y + rWrist.y) / 2;
+
+    // Sentido común: en un fondo real la nariz siempre queda por encima
+    // de los hombros. Si no, es un ángulo de cámara o postura imposible.
+    const noseAboveShoulders = (shoulderMidY - nose.y) / shoulderWidth >= DIP_NOSE_ABOVE_SHOULDER_MARGIN;
+    if (!noseAboveShoulders) {
+      this.setStatus("No pareces estar en posición de fondo. Comprueba el ángulo de la cámara.");
+      if (this.debugEl) this.debugEl.textContent = "nariz no está por encima de los hombros — postura no válida";
+      this.registerDipRelease(now);
+      return;
+    }
 
     // Si ya teníamos guardada la altura de las manos al ponerte arriba y
     // se han movido más de la cuenta, no estás en mitad de un fondo: te
     // has soltado de las barras, o nunca estuviste agarrado y solo
-    // levantaste las manos. Se descarta la repetición en curso.
+    // levantaste las manos.
     if (this.dipHandsY !== null) {
       const handsDrift = Math.abs(handsY - this.dipHandsY) / shoulderWidth;
       if (handsDrift > DIP_HANDS_MAX_DRIFT_FACTOR) {
-        this.state = null;
-        this.dipHandsY = null;
-        this.setStatus("Parece que te has soltado de las barras. Agárrate y ponte arriba otra vez.");
         if (this.debugEl) {
-          this.debugEl.textContent = `manos desplazadas: ${handsDrift.toFixed(2)} (máximo ${DIP_HANDS_MAX_DRIFT_FACTOR}) — reiniciando`;
+          this.debugEl.textContent = `manos desplazadas: ${handsDrift.toFixed(2)} (máximo ${DIP_HANDS_MAX_DRIFT_FACTOR})`;
         }
+        this.registerDipRelease(now);
         return;
       }
     }
+
+    // Agarre válido este frame: reinicia el contador de "suelto".
+    this.dipReleaseSince = null;
 
     if (this.state === null) {
       // Hay que empezar arriba, para no contar media repetición al entrar.
@@ -431,6 +475,38 @@ class WorkoutSession {
       this.debugEl.textContent =
         `nariz sobre codos: ${above.toFixed(2)} | estado: ${this.state ?? "esperando"} ` +
         `(abajo ≤${DIP_DOWN_FACTOR}, arriba ≥${DIP_UP_FACTOR})`;
+    }
+  }
+
+  /**
+   * Se ha perdido el agarre válido a las barras este frame (no se ve
+   * bien, postura imposible, o las manos se han movido de donde
+   * estaban). Igual que soltarte de la barra en dominadas: si esto se
+   * mantiene un rato seguido — no un solo frame ruidoso, que podría ser
+   * solo una oclusión pasajera — se da la serie en curso por terminada
+   * (si tenía alguna repetición) y toca agarrarse otra vez para empezar
+   * la siguiente. Antes de esto todos los fondos de la sesión se
+   * apuntaban a la misma serie, sin importar cuántas veces te bajaras
+   * de las barras entre medias.
+   */
+  registerDipRelease(now) {
+    if (this.dipReleaseSince === null) this.dipReleaseSince = now;
+    if (now - this.dipReleaseSince < ARMS_DOWN_STABLE_MS) return;
+
+    this.dipReleaseSince = null;
+    this.state = null;
+    this.dipHandsY = null;
+
+    if (this.currentSetReps > 0) {
+      const closedReps = this.currentSetReps;
+      this.sets.push({ reps: this.currentSetReps, durations: [...this.currentSetDurations] });
+      this.currentSetReps = 0;
+      this.currentSetDurations = [];
+      this.updateSetDisplay();
+      if (this.repsEl) this.repsEl.textContent = "0";
+      this.setStatus(`Serie de ${closedReps} terminada. Agárrate a las barras para empezar la siguiente.`);
+    } else {
+      this.setStatus("Ponte arriba con los brazos estirados para empezar.");
     }
   }
 
