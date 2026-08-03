@@ -27,9 +27,9 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from .models import (
-    Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, Task, WorkoutSession,
+    Exercise, Occurrence, Plan, Routine, RoutineItem, Task, WorkoutSession,
 )
-from .utils import get_current_user
+from .utils import get_current_user, resolve_plan_target as _plan_context
 
 
 # ---------------------------------------------------------------- utils
@@ -125,42 +125,6 @@ def exercise_json(e):
     }
 
 
-def _plan_context(exercise_slug, sets=None, reps=None, seconds=None):
-    """
-    A qué plan cuenta esta sesión y qué objetivo tenía.
-
-    El objetivo se guarda EN la sesión y no se recalcula después, porque
-    sube con las sesiones: si se recalculara, un entreno de hace un mes
-    se compararía con el objetivo de hoy y el porcentaje saldría falso.
-
-    Si el cliente manda su propio objetivo (`sets`/`reps`), se respeta —
-    es el que tenía delante mientras entrenaba.
-    """
-    entry = (
-        PlanItem.objects
-        .filter(
-            exercise__slug=exercise_slug,
-            plan__is_active=True,
-            plan__deleted_at__isnull=True,
-            plan__user=_user(),
-        )
-        .select_related("plan")
-        .order_by("-plan__started_on")
-        .first()
-    )
-    if not entry:
-        return {"plan": None, "target_sets": sets, "target_reps": reps,
-                "target_seconds": seconds}
-
-    t = entry.current_target()
-    return {
-        "plan": entry.plan,
-        "target_sets": sets if sets is not None else t["sets"],
-        "target_reps": reps if reps is not None else t["reps"],
-        "target_seconds": seconds if seconds is not None else t["seconds"],
-    }
-
-
 def _routine_item_json(i):
     """
     Un ejercicio del circuito con su objetivo YA resuelto.
@@ -240,6 +204,26 @@ def exercise_list(request):
     if body_area:
         qs = qs.filter(body_area=body_area)
     return JsonResponse({"exercises": [exercise_json(e) for e in qs]})
+
+
+@api("GET")
+def exercise_target(request, slug):
+    """
+    El objetivo ACTUAL de un ejercicio, si algún plan activo lo sigue.
+
+    Hace falta como endpoint aparte porque, a diferencia de la web (que
+    resuelve esto al renderizar la página en el servidor), la app móvil
+    es una SPA que solo habla con la API — antes de esto no tenía forma
+    de saber el objetivo hasta guardar la sesión, cuando ya era tarde
+    para avisar en directo al llegar a él.
+    """
+    ctx = _plan_context(slug)
+    return JsonResponse({
+        "target_sets": ctx["target_sets"],
+        "target_reps": ctx["target_reps"],
+        "target_seconds": ctx["target_seconds"],
+        "plan_name": ctx["plan"].name if ctx["plan"] else None,
+    })
 
 
 @api("GET")
@@ -553,7 +537,11 @@ def workout_save(request, uuid):
     )
     # finish=false permite guardar un ejercicio y seguir con otro en la
     # misma sesion: la tarea solo se cierra cuando el usuario lo dice.
-    if data.get("finish", True):
+    # Y si el usuario SÍ dice que ha terminado, la tarea solo se
+    # completa si llegó al objetivo — si se quedó corta, se queda
+    # pendiente con el porcentaje ya guardado en la sesión, para poder
+    # volver e intentarlo otra vez el mismo día.
+    if data.get("finish", True) and ws.target_met:
         t.mark_done()
     return JsonResponse({"ok": True, "session_uuid": str(ws.uuid), "task": task_json(t)})
 

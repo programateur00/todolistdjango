@@ -19,6 +19,7 @@ urlpatterns = [
     path("series/<uuid:series_id>/mark/<str:action>/", api.task_mark_by_series, name="task_mark_by_series"),
 
     path("exercises/", api.exercise_list, name="exercise_list"),
+    path("exercises/<slug:slug>/target/", api.exercise_target, name="exercise_target"),
 
     path("routines/", api.routine_list, name="routine_list"),
     path("routines/<uuid:uuid>/", api.routine_detail, name="routine_detail"),

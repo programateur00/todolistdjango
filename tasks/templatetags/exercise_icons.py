@@ -37,6 +37,7 @@ ALIAS = {
     "chinup": "pullup",
     "weighted-pullup": "pullup",
     "jumping-pullup": "pullup",
+    "weighted-dips": "dips",
 }
 
 LABELS = {
@@ -44,7 +45,7 @@ LABELS = {
     "bicycle-crunch": "Bicicleta", "mountain-climber": "Mountain climbers",
     "superman": "Superman", "squat": "Sentadillas", "situp": "Abdominales",
     "pullup": "Dominadas", "push-up": "Flexiones", "side-plank": "Plancha lateral",
-    "dips": "Fondos", "lunge": "Zancadas",
+    "dips": "Fondos", "lunge": "Zancadas", "weighted-dips": "Fondos con peso",
 }
 
 

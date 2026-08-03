@@ -29,3 +29,47 @@ def get_current_user():
         defaults={"is_active": True},
     )
     return user
+
+
+def resolve_plan_target(exercise_slug, sets=None, reps=None, seconds=None):
+    """
+    A qué plan cuenta una sesión de este ejercicio, y qué objetivo tenía.
+
+    Compartido entre la web (views.py) y la API (api.py) a propósito: si
+    solo viviera en uno de los dos, entrenar desde el otro no contaría
+    para el plan (antes era justo lo que pasaba con la web). El
+    ejercicio puede venir de CUALQUIER tarea, no solo de la que generó
+    el plan — si hay un plan activo siguiéndolo, manda el plan.
+
+    El objetivo se guarda EN la sesión y no se recalcula después, porque
+    sube con las sesiones: si se recalculara, un entreno de hace un mes
+    se compararía con el objetivo de hoy y el porcentaje saldría falso.
+
+    Si quien llama ya trae su propio objetivo (`sets`/`reps`/`seconds` —
+    el que tenía delante mientras entrenaba), se respeta y solo se
+    completa lo que falte desde el plan.
+    """
+    from .models import PlanItem  # import local: evita el ciclo con models.py
+
+    entry = (
+        PlanItem.objects
+        .filter(
+            exercise__slug=exercise_slug,
+            plan__is_active=True,
+            plan__deleted_at__isnull=True,
+            plan__user=get_current_user(),
+        )
+        .select_related("plan")
+        .order_by("-plan__started_on")
+        .first()
+    )
+    if not entry:
+        return {"plan": None, "target_sets": sets, "target_reps": reps, "target_seconds": seconds}
+
+    t = entry.current_target()
+    return {
+        "plan": entry.plan,
+        "target_sets": sets if sets is not None else t["sets"],
+        "target_reps": reps if reps is not None else t["reps"],
+        "target_seconds": seconds if seconds is not None else t["seconds"],
+    }

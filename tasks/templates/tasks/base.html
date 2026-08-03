@@ -4,16 +4,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Libreta{% endblock %}</title>
+    <title>{% block title %}Strive{% endblock %}</title>
+    <meta name="theme-color" content="#171310">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Staatliches&family=Work+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'css/styles.css' %}">
 </head>
 <body>
+    <nav class="site-nav">
+        <div class="site-nav__inner">
+            <a href="{% url 'tasks:task_list' %}" class="site-nav__brand">STRIVE</a>
+            <div class="site-nav__links">
+                <a href="{% url 'tasks:task_list' %}" class="{% if request.resolver_match.url_name == 'task_list' %}is-active{% endif %}">Tareas</a>
+                <a href="{% url 'tasks:plan_list' %}" class="{% if '/planes' in request.path %}is-active{% endif %}">Planes</a>
+                <a href="{% url 'tasks:stats_list' %}" class="{% if '/estadisticas' in request.path %}is-active{% endif %}">Estadísticas</a>
+            </div>
+        </div>
+    </nav>
     <div class="page">{% block content %}{% endblock %}</div>
-  <p class="credits">
-    Ilustraciones de ejercicios: <strong>Everkinetic</strong> (CC BY-SA 3.0).
-  </p>
+    <p class="credits">
+        Ilustraciones de ejercicios: <strong>Everkinetic</strong> (CC BY-SA 3.0).
+    </p>
 </body>
 </html>

@@ -16,6 +16,8 @@
      data-cancel-url="{% url 'tasks:task_list' %}"
      data-exercise-slug="{{ exercise.slug }}"
      data-counter-key="{{ exercise.counter_key|default:'pullup' }}"
+     data-target-sets="{{ target.target_sets|default:'' }}"
+     data-target-reps="{{ target.target_reps|default:'' }}"
      class="workout">
     {% csrf_token %}
 
@@ -25,6 +27,7 @@
     </div>
 
     <p id="workout-status" class="workout__status">Iniciando…</p>
+    <p id="workout-goal-banner" class="workout__goal-banner" hidden></p>
     <p id="workout-debug" class="workout__debug"></p>
 
     <div class="workout__stats">
@@ -53,7 +56,7 @@
     </div>
 
     <p class="workout__note">
-        <span style="color:#C9A227;">━</span> línea amarilla = altura de la barra (medida por tus muñecas al calibrar).
+        <span style="color:var(--amber);">━</span> línea amarilla = altura de la barra (medida por tus muñecas al calibrar).
         Si no coincide con tu barra real, pulsa «Recalibrar» estando ya colgado.
     </p>
     <p class="workout__note">

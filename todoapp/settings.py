@@ -190,6 +190,15 @@ STATIC_URL = 'static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 STATIC_ROOT = BASE_DIR / 'staticfiles'  # aqui caen los archivos tras collectstatic
 
+# En desarrollo, que WhiteNoise sirva directamente desde STATICFILES_DIRS
+# en vez de desde el manifiesto compilado en STATIC_ROOT. Sin esto,
+# cualquier cambio en un .js o .css no se veía hasta ejecutar
+# `collectstatic` a mano — nada avisaba de que hiciera falta, así que un
+# arreglo podía darse por probado y en realidad seguir sirviendo la
+# versión vieja. En producción (DEBUG=False) sigue usando el manifiesto
+# comprimido, que es lo que conviene ahí.
+WHITENOISE_USE_FINDERS = DEBUG
+
 STORAGES = {
     "default": {
         "BACKEND": "django.core.files.storage.FileSystemStorage",

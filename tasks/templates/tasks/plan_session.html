@@ -40,25 +40,7 @@
         <p class="field__hint">Los objetivos suben solos cuando los vas cumpliendo.</p>
     </div>
 
-    <div class="circuit__player" id="circuit-player" hidden>
-        <p class="circuit__progress" id="circuit-progress"></p>
-        <div class="circuit__icon" id="circuit-icon"></div>
-        <h2 class="circuit__exercise-name" id="circuit-exercise-name">—</h2>
-        <p class="circuit__phase" id="circuit-phase">Trabajo</p>
-        <div class="circuit__timer" id="circuit-timer">--</div>
-        <p class="circuit__next" id="circuit-next"></p>
-        <div class="circuit__controls">
-            <button type="button" class="workout__btn workout__btn--ghost" id="circuit-pause">Pausar</button>
-            <button type="button" class="workout__btn workout__btn--ghost" id="circuit-skip">Saltar ▸</button>
-            <button type="button" class="workout__btn workout__btn--ghost" id="circuit-quit">Terminar antes</button>
-        </div>
-    </div>
-
-    <div class="circuit__done" id="circuit-done" hidden>
-        <p class="circuit__done-title">¡Sesión completada! 💪</p>
-        <p id="circuit-done-summary"></p>
-        <button type="button" class="primary-btn" id="circuit-finish">Guardar y volver</button>
-    </div>
+    <div class="circuit__player" id="session-player" hidden></div>
 </div>
 
 <div id="circuit-icons" hidden>
@@ -68,6 +50,6 @@
     <div data-slug="generic">{% exercise_icon "generic" %}</div>
 </div>
 
-<script src="{% static 'js/circuit.js' %}"></script>
+<script type="module" src="{% static 'js/plan-session.js' %}"></script>
 
 {% endblock %}

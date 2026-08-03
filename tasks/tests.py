@@ -665,6 +665,52 @@ class PlanProgressionTests(TestCase):
         self.assertEqual(rows[-1]["reps"], 12)
         self.assertIsNotNone(item.sessions_to_goal())
 
+    # ------------------------------------------------- series proporcionales
+
+    def test_sets_climb_proportionally_with_reps(self):
+        """Regresión: antes las series saltaban a la meta desde el
+        primer escalón (2x5 -> destino 4x12 enseñaba "4x5" nada más
+        empezar). Ahora suben poco a poco, en la misma proporción que
+        las repeticiones."""
+        item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_REPS,
+            start_sets=2, start_reps=5, goal_sets=4, goal_reps=12,
+            reps_increment=1, sessions_per_step=1,
+        )
+        rows = item.schedule(10)
+        self.assertEqual(rows[0]["sets"], 2)     # punto de partida, no la meta
+        self.assertEqual(rows[0]["reps"], 5)
+        self.assertEqual(rows[-1]["sets"], 4)    # llega a la meta justo cuando
+        self.assertEqual(rows[-1]["reps"], 12)   # las reps llegan a la suya
+        self.assertTrue(rows[-1]["done"])
+        # y sube de forma monótona, nunca de golpe ni hacia atrás
+        sets_seen = [r["sets"] for r in rows]
+        self.assertEqual(sets_seen, sorted(sets_seen))
+
+    def test_sets_stay_fixed_without_a_goal(self):
+        """Sin meta de series no hay con qué interpolar: se quedan en
+        las de partida durante todo el plan."""
+        item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_REPS,
+            start_sets=3, start_reps=8, goal_reps=20, sessions_per_step=1,
+        )
+        rows = item.schedule(15)
+        self.assertTrue(all(r["sets"] == 3 for r in rows))
+
+    def test_double_progression_climbs_sets_with_weight(self):
+        """En progresión doble el peso es lo que mide el progreso de
+        verdad (las reps solo oscilan dentro del rango), así que las
+        series interpolan contra el peso, no contra las reps."""
+        item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_DOUBLE,
+            start_sets=2, start_weight_kg=0, goal_sets=4, goal_reps=12,
+            goal_weight_kg=20, rep_range_low=6, weight_increment_kg=5,
+        )
+        rows = item.schedule(60)
+        self.assertEqual(rows[0]["sets"], 2)
+        self.assertTrue(rows[-1]["done"])
+        self.assertEqual(rows[-1]["sets"], 4)
+
     # --------------------------------------------------- el entrenador
 
     def test_does_not_climb_if_you_fall_short(self):
@@ -1057,6 +1103,209 @@ class PlanAndFreestyleTests(TestCase):
                 content_type="application/json",
             )
         self.assertEqual(self.item.resolved_target(self.user)["reps"], 7)
+
+
+class SingleExerciseCompletionTests(TestCase):
+    """
+    Regla: un ejercicio SUELTO con objetivo solo completa la tarea si lo
+    alcanza; si se queda corto, la tarea sigue pendiente y el porcentaje
+    queda guardado en la sesión. Sin objetivo (sin plan), se completa
+    como siempre. Cubre la API (móvil) y la web con el mismo criterio,
+    porque antes solo la API enlazaba la sesión con el plan.
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.pull = Exercise.objects.create(
+            slug="pull-c", name="Dominadas", mode=Exercise.MODE_POSE, counter_key="pullup",
+        )
+        self.task = Task.objects.create(
+            title="Dominadas sueltas", category=Task.CATEGORY_SPORT,
+            subcategory=Task.SUBCATEGORY_UPPER_BODY, user=self.user,
+        )
+        self.plan = Plan.objects.create(name="Fuerza", user=self.user)
+        PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_REPS,
+            start_sets=3, start_reps=8, reps_increment=1, sessions_per_step=2,
+        )
+
+    # ---------------------------------------------------------- API
+
+    def test_api_below_target_leaves_task_pending(self):
+        r = self.client.post(
+            f"/api/tasks/{self.task.uuid}/workout/",
+            data=json.dumps({"exercise": "pull-c", "total_reps": 10, "total_sets": 3}),  # objetivo 3x8=24
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.task.refresh_from_db()
+        self.assertFalse(self.task.is_done)
+        ws = WorkoutSession.objects.get(task=self.task)
+        self.assertEqual(ws.achievement_pct, 42)
+        self.assertFalse(ws.target_met)
+
+    def test_api_meeting_or_beating_target_completes_task(self):
+        r = self.client.post(
+            f"/api/tasks/{self.task.uuid}/workout/",
+            data=json.dumps({"exercise": "pull-c", "total_reps": 30, "total_sets": 3}),  # 125% del objetivo
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.task.refresh_from_db()
+        self.assertTrue(self.task.is_done)
+        ws = WorkoutSession.objects.get(task=self.task)
+        self.assertEqual(ws.achievement_pct, 125)
+
+    def test_api_without_plan_always_completes(self):
+        """Entreno libre (sin plan que lo siga): no hay objetivo, se
+        completa como antes de este cambio."""
+        Exercise.objects.create(slug="free-c", name="Sentadillas", mode=Exercise.MODE_POSE)
+        r = self.client.post(
+            f"/api/tasks/{self.task.uuid}/workout/",
+            data=json.dumps({"exercise": "free-c", "total_reps": 5, "total_sets": 1}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.task.refresh_from_db()
+        self.assertTrue(self.task.is_done)
+
+    # ---------------------------------------------------------- web
+
+    def test_web_below_target_leaves_task_pending(self):
+        """Regresión: antes la web ni siquiera enlazaba la sesión con el
+        plan, así que esto nunca podía funcionar."""
+        r = self.client.post(
+            reverse("tasks:task_workout_save", args=[self.task.pk]) + "?exercise=pull-c",
+            data=json.dumps({"total_reps": 10, "total_sets": 3}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.task.refresh_from_db()
+        self.assertFalse(self.task.is_done)
+        ws = WorkoutSession.objects.get(task=self.task)
+        self.assertEqual(ws.plan, self.plan)
+        self.assertEqual(ws.achievement_pct, 42)
+
+    def test_web_meeting_target_completes_task(self):
+        r = self.client.post(
+            reverse("tasks:task_workout_save", args=[self.task.pk]) + "?exercise=pull-c",
+            data=json.dumps({"total_reps": 24, "total_sets": 3}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.task.refresh_from_db()
+        self.assertTrue(self.task.is_done)
+
+
+class MultiExerciseCompletionTests(TestCase):
+    """
+    Regla contraria para sesiones con varios ejercicios (circuito o
+    plan): la tarea se completa siempre que entrenes, lleguen o no todos
+    los ejercicios a su objetivo. El % de cada uno se guarda igual.
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.plank = Exercise.objects.create(slug="plank-c", name="Plancha", mode=Exercise.MODE_TIMED)
+        self.routine = Routine.objects.create(name="Core", user=self.user)
+        RoutineItem.objects.create(routine=self.routine, exercise=self.plank, order=0)
+        self.task = Task.objects.create(
+            title="Circuito core", category=Task.CATEGORY_SPORT, user=self.user,
+        )
+
+    def test_web_routine_save_records_one_session_per_exercise(self):
+        """Regresión: antes se guardaba UNA sesión combinada
+        (exercise='ab-circuit'), y ningún plan por ejercicio la veía."""
+        plan = Plan.objects.create(name="Aguante", user=self.user)
+        PlanItem.objects.create(
+            plan=plan, exercise=self.plank, progression=PlanItem.PROG_REPS,
+            start_sets=3, start_seconds=30, reps_increment=5, sessions_per_step=2,
+        )
+        r = self.client.post(
+            reverse("tasks:routine_save", args=[self.task.pk, self.routine.pk]),
+            data=json.dumps({"breakdown": [{"exercise": "plank-c", "seconds": 15}]}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        ws = WorkoutSession.objects.get(task=self.task)
+        self.assertEqual(ws.exercise, "plank-c")   # no "ab-circuit"
+        self.assertEqual(ws.plan, plan)
+        self.assertFalse(ws.target_met)            # 15s de 90s (3x30) pedidos
+        # pero la tarea se completa igualmente: es una sesión con varios
+        # ejercicios en potencia, y aquí lo que cuenta es que entrenaste.
+        self.task.refresh_from_db()
+        self.assertTrue(self.task.is_done)
+
+    def test_web_routine_save_without_plan_still_completes(self):
+        r = self.client.post(
+            reverse("tasks:routine_save", args=[self.task.pk, self.routine.pk]),
+            data=json.dumps({"breakdown": [{"exercise": "plank-c", "seconds": 40}]}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.task.refresh_from_db()
+        self.assertTrue(self.task.is_done)
+        ws = WorkoutSession.objects.get(task=self.task)
+        self.assertIsNone(ws.plan)
+        self.assertEqual(ws.exercise, "plank-c")
+
+
+class PlanMissedDayTests(TestCase):
+    """
+    Sin hora límite, una tarea de plan no expiraba nunca sola — se
+    quedaba pendiente indefinidamente y se podía completar días después
+    como si tal cosa, sin que contara como fallo. Y aunque expirase, sin
+    ninguna WorkoutSession ese día quedaba invisible para el plan: no
+    contaba ni como fallo ni movía la racha de cara al deload.
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.pull = Exercise.objects.create(slug="pull-miss", name="Dominadas", mode=Exercise.MODE_POSE)
+        self.plan = Plan.objects.create(name="Constancia", user=self.user)
+        self.item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_REPS,
+            start_sets=2, start_reps=5, goal_sets=4, goal_reps=12,
+        )
+
+    def test_plan_task_defaults_to_end_of_day_deadline(self):
+        task = self.plan.sync_task()
+        self.assertEqual(task.due_time, time(23, 59))
+
+    def test_unplayed_day_resolves_as_failed_with_zero_percent(self):
+        task = self.plan.sync_task()
+        task.due_date = timezone.localtime(timezone.now()).date() - timedelta(days=1)
+        task.save()
+
+        expired = Task.expire_overdue()
+        self.assertIn(task.pk, [t.pk for t in expired])
+
+        task.refresh_from_db()
+        self.assertTrue(task.is_done)
+        self.assertTrue(task.expired)
+
+        ws = WorkoutSession.objects.get(task=task)
+        self.assertEqual(ws.achievement_pct, 0)
+        self.assertEqual(ws.plan, self.plan)
+
+        successes, streak = self.item.successes_and_streak()
+        self.assertEqual(successes, 0)
+        self.assertEqual(streak, 1)  # el día perdido ya cuenta
+
+    def test_does_not_double_record_if_something_was_actually_played(self):
+        """Si sí jugaste algo (aunque no llegaras a marcarla a tiempo),
+        no se inventa una sesión de 0% encima de la real."""
+        task = self.plan.sync_task()
+        WorkoutSession.objects.create(
+            task=task, user=self.user, plan=self.plan, exercise="pull-miss",
+            total_reps=6, total_sets=2, target_sets=2, target_reps=5,
+        )
+        task.due_date = timezone.localtime(timezone.now()).date() - timedelta(days=1)
+        task.save()
+
+        Task.expire_overdue()
+
+        self.assertEqual(WorkoutSession.objects.filter(task=task).count(), 1)
 
 
 class ListFilteringTests(TestCase):

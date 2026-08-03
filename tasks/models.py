@@ -480,6 +480,32 @@ class Task(models.Model):
         self._record_occurrence(Occurrence.RESULT_NOT_DONE)
         self._spawn_next()
 
+    def _record_plan_miss(self):
+        """
+        Si esta tarea es la sesión de un plan y expira sin haber jugado
+        nada, el día queda invisible para el plan: sin ninguna
+        WorkoutSession ese día, successes_and_streak() ni se entera de
+        que faltó — no cuenta como fallo, no mueve la racha, no dispara
+        el deload (bajar el objetivo tras varios fallos seguidos). Aquí
+        se deja constancia expresa: una sesión a 0% por cada ejercicio
+        del plan, con el objetivo que tocaba ese día. Si ya hay alguna
+        sesión de esta tarea (jugaste algo aunque no llegaras a marcarla
+        hecha a tiempo), no se toca nada — esto es solo para el silencio
+        total.
+        """
+        plan = self.plan
+        if not plan or WorkoutSession.objects.filter(task=self).exists():
+            return
+        for item in plan.items.select_related("exercise").filter(exercise__isnull=False):
+            t = item.current_target()
+            WorkoutSession.objects.create(
+                task=self, user=self.user, plan=plan, series_id=self.series_id,
+                exercise=item.exercise.slug,
+                total_reps=0, total_sets=0, session_duration_seconds=0,
+                target_sets=t.get("sets"), target_reps=t.get("reps"),
+                target_seconds=t.get("seconds"),
+            )
+
     def mark_expired(self):
         """
         Llamado cuando pasa la hora límite sin que se haya marcado nada.
@@ -497,6 +523,7 @@ class Task(models.Model):
         self.save()
         result = Occurrence.RESULT_DONE if self.is_avoid else Occurrence.RESULT_NOT_DONE
         self._record_occurrence(result, auto_expired=True)
+        self._record_plan_miss()
         self._spawn_next()
 
     @classmethod
@@ -912,7 +939,14 @@ class Plan(models.Model):
             repeat=self.repeat,
             interval=self.interval,
             custom_days=self.custom_days,
-            due_time=self.due_time,
+            # Sin hora límite, expire_overdue() nunca la toca — se
+            # quedaría pendiente indefinidamente si un día no la juegas
+            # y podrías completarla días después como si tal cosa, sin
+            # que cuente como fallo para el plan. Con las 23:59 de por
+            # defecto, si no la juegas ese día se resuelve sola por la
+            # noche (ver mark_expired). Si el plan sí tiene una hora
+            # propia puesta, esa manda.
+            due_time=self.due_time or _dt.time(23, 59),
             user=self.user,
         )
 
@@ -1184,6 +1218,34 @@ class PlanItem(models.Model):
 
     # -------------------------------------------------------- objetivo
 
+    def _sets_for_progress(self, frac):
+        """
+        Cuántas series tocan según lo avanzado que vas (`frac`: 0 = en
+        el punto de partida, 1 = ya en el destino), interpolando en
+        línea recta entre `start_sets` y `goal_sets`.
+
+        Antes esto no existía: `target_for_step` usaba directamente
+        `goal_sets or start_sets`, así que las series saltaban al
+        destino desde el primer día sin importar el escalón — un plan
+        de 2×5 a 4×12 enseñaba "4×5" nada más empezar. Sin meta de
+        series, se quedan fijas en las de partida (no hay destino con
+        el que interpolar).
+        """
+        if self.goal_sets is None:
+            return self.start_sets
+        return round(self.start_sets + frac * (self.goal_sets - self.start_sets))
+
+    @staticmethod
+    def _progress_fraction(value, start, ceiling):
+        """De 0 a 1: cuánto camino hay entre `start` y `ceiling` ya
+        recorrido en `value`. Sin techo definido no hay destino con el
+        que medir el progreso, así que se queda en 0 (series fijas)."""
+        if not ceiling:
+            return 0.0
+        if ceiling <= start:
+            return 1.0 if value >= ceiling else 0.0
+        return min(1.0, max(0.0, (value - start) / (ceiling - start)))
+
     def target_for_step(self, step):
         """El objetivo en el escalón `step` (0 = el primero)."""
         if self.progression == self.PROG_COMPLETION:
@@ -1210,8 +1272,13 @@ class PlanItem(models.Model):
                 and weight >= self.goal_weight_kg
                 and reps >= top
             )
+            # El peso es el eje que de verdad mide cuánto llevas en
+            # progresión doble (las reps solo suben y bajan dentro del
+            # rango una y otra vez). Sin meta de peso no hay con qué
+            # medir el progreso, así que las series se quedan fijas.
+            frac = self._progress_fraction(weight, self.start_weight_kg, self.goal_weight_kg)
             return {
-                "sets": self.goal_sets or self.start_sets, "reps": reps,
+                "sets": self._sets_for_progress(frac), "reps": reps,
                 "seconds": None, "weight_kg": round(weight, 1), "done": done,
             }
 
@@ -1221,8 +1288,9 @@ class PlanItem(models.Model):
             ceiling = self.goal_seconds
             if ceiling:
                 seconds = min(seconds, ceiling)
+            frac = self._progress_fraction(seconds, self.start_seconds, ceiling)
             return {
-                "sets": self.goal_sets or self.start_sets, "reps": None,
+                "sets": self._sets_for_progress(frac), "reps": None,
                 "seconds": seconds, "weight_kg": self.start_weight_kg,
                 "done": bool(ceiling and seconds >= ceiling),
             }
@@ -1231,8 +1299,9 @@ class PlanItem(models.Model):
         ceiling = self.goal_reps
         if ceiling:
             reps = min(reps, ceiling)
+        frac = self._progress_fraction(reps, self.start_reps, ceiling)
         return {
-            "sets": self.goal_sets or self.start_sets, "reps": reps,
+            "sets": self._sets_for_progress(frac), "reps": reps,
             "seconds": None, "weight_kg": self.start_weight_kg,
             "done": bool(ceiling and reps >= ceiling),
         }
@@ -1377,6 +1446,20 @@ class WorkoutSession(models.Model):
         if not objetivo:
             return None
         return round(100 * hecho / objetivo)
+
+    @property
+    def target_met(self):
+        """
+        Si esta sesión, ELLA SOLA, llegó a su objetivo.
+
+        True tanto si no había objetivo que exigir (entreno libre, sin
+        plan) como si lo hubo y se alcanzó o se superó. Solo es False
+        cuando había un número que cumplir y se quedó corto — que es el
+        único caso en el que una tarea de un solo ejercicio no debe
+        darse por completada sola.
+        """
+        pct = self.achievement_pct
+        return pct is None or pct >= 100
 
     @property
     def target_label(self):

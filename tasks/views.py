@@ -14,7 +14,7 @@ from django.utils import timezone
 from .models import (
     Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, Task, WorkoutSession,
 )
-from .utils import get_current_user
+from .utils import get_current_user, resolve_plan_target
 
 
 def _read_category(request, default=Task.CATEGORY_GENERAL):
@@ -226,7 +226,10 @@ def task_workout(request, pk):
             "task": task, "exercises": exercises_qs, "routines": routines_qs, "unsupported": exercise,
         })
 
-    return render(request, "tasks/task_workout.html", {"task": task, "exercise": exercise})
+    return render(request, "tasks/task_workout.html", {
+        "task": task, "exercise": exercise,
+        "target": resolve_plan_target(exercise.slug),
+    })
 
 
 @require_POST
@@ -266,11 +269,21 @@ def task_workout_save(request, pk):
 
     avg_rep_seconds = round(sum(rep_durations) / len(rep_durations), 2) if rep_durations else None
 
-    WorkoutSession.objects.create(
+    # Si hay un plan activo siguiendo este ejercicio, manda su objetivo
+    # (aunque esta tarea en concreto no la generara el plan). Antes esto
+    # solo pasaba en la app móvil — entrenar desde la web no contaba
+    # para el plan.
+    ctx = resolve_plan_target(exercise_value)
+
+    ws = WorkoutSession.objects.create(
         task=task,
         user=get_current_user(),
         series_id=task.series_id,
         exercise=exercise_value,
+        plan=ctx["plan"],
+        target_sets=ctx["target_sets"],
+        target_reps=ctx["target_reps"],
+        target_seconds=ctx["target_seconds"],
         total_reps=total_reps,
         total_sets=total_sets,
         sets=clean_sets,
@@ -280,13 +293,21 @@ def task_workout_save(request, pk):
         rep_durations=rep_durations,
     )
 
-    task.mark_done()
+    # Un solo ejercicio con objetivo: la tarea solo se da por completada
+    # si se llegó a él. Si se quedó corta, se queda pendiente con el
+    # porcentaje ya guardado en la sesión, para poder retomarla el mismo
+    # día. Sin objetivo (entreno libre), se completa como siempre.
+    if ws.target_met:
+        task.mark_done()
 
-    messages.success(
-        request,
-        f"Sesión guardada: {total_reps} {exercise_label} en {total_sets} serie(s)"
-        + (f", ritmo medio {avg_rep_seconds}s/rep." if avg_rep_seconds else "."),
-    )
+    resumen = f"Sesión guardada: {total_reps} {exercise_label} en {total_sets} serie(s)"
+    if avg_rep_seconds:
+        resumen += f", ritmo medio {avg_rep_seconds}s/rep."
+    else:
+        resumen += "."
+    if not ws.target_met:
+        resumen += f" Te has quedado en el {ws.achievement_pct}% del objetivo — la tarea sigue pendiente."
+    messages.success(request, resumen)
     return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
 
 
@@ -477,9 +498,23 @@ def routine_play(request, pk, routine_pk):
 
 @require_POST
 def routine_save(request, pk, routine_pk):
-    """Guarda el resultado del circuito al terminar (o al cortarlo antes
-    de tiempo). Un único WorkoutSession con el desglose por ejercicio en
-    `sets`, igual que ya se hace con las series de dominadas."""
+    """
+    Guarda el resultado del circuito al terminar (o al cortarlo antes de
+    tiempo): UNA WorkoutSession POR EJERCICIO, no una combinada.
+
+    Antes se guardaba una única sesión con exercise="ab-circuit" y el
+    desglose metido en `sets`. Eso perdía la trazabilidad por ejercicio:
+    si algún día sigues un plan sobre "plancha" (subir el tiempo cada
+    semana), esa sesión combinada nunca contaría, porque
+    PlanItem busca WorkoutSession.exercise="plank", no "ab-circuit".
+    Guardando una por ejercicio, cualquier plan que siga alguno de ellos
+    avanza solo — igual que ya hacía la app móvil.
+
+    La tarea del día se completa siempre que termines el circuito,
+    lleguen o no todos los ejercicios a su objetivo: aquí lo que importa
+    es que has entrenado, no que cada ejercicio individual esté a tope.
+    El % de cada uno se guarda igualmente, para las estadísticas.
+    """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
     routine = get_object_or_404(Routine, pk=routine_pk, user=get_current_user())
 
@@ -489,7 +524,7 @@ def routine_save(request, pk, routine_pk):
         return JsonResponse({"ok": False, "error": "JSON inválido"}, status=400)
 
     raw_breakdown = data.get("breakdown", [])
-    breakdown = []
+    entries = []
     total_seconds = 0
     if isinstance(raw_breakdown, list):
         for b in raw_breakdown:
@@ -497,27 +532,32 @@ def routine_save(request, pk, routine_pk):
                 continue
             slug = str(b.get("exercise", ""))[:32]
             seconds = int(b.get("seconds", 0)) if isinstance(b.get("seconds"), (int, float)) else 0
-            breakdown.append({"exercise": slug, "seconds": seconds})
+            if not slug:
+                continue
+            entries.append({"exercise": slug, "seconds": seconds})
             total_seconds += seconds
 
-    if not breakdown:
+    if not entries:
         return JsonResponse({"ok": False, "error": "Sin datos que guardar"}, status=400)
 
-    WorkoutSession.objects.create(
-        task=task,
-        user=get_current_user(),
-        routine=routine,
-        exercise="ab-circuit",
-        session_duration_seconds=total_seconds,
-        sets=breakdown,
-        total_sets=len(breakdown),
-    )
+    created = []
+    for e in entries:
+        ctx = resolve_plan_target(e["exercise"])
+        created.append(WorkoutSession.objects.create(
+            task=task, user=get_current_user(), routine=routine, series_id=task.series_id,
+            plan=ctx["plan"], target_sets=ctx["target_sets"],
+            target_reps=ctx["target_reps"], target_seconds=ctx["target_seconds"],
+            exercise=e["exercise"],
+            session_duration_seconds=e["seconds"],
+        ))
+
     task.mark_done()
 
-    messages.success(
-        request,
-        f"Circuito «{routine.name}» completado: {len(breakdown)} ejercicio(s), {total_seconds}s.",
-    )
+    cortas = [w for w in created if not w.target_met]
+    resumen = f"Circuito «{routine.name}» completado: {len(created)} ejercicio(s), {total_seconds}s."
+    if cortas:
+        resumen += " " + ", ".join(f"{w.exercise_name} al {w.achievement_pct}%" for w in cortas) + "."
+    messages.success(request, resumen)
     return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
 
 

@@ -105,6 +105,12 @@ class WorkoutSession {
   constructor(root) {
     this.root = root;
     this.saveUrl = root.dataset.saveUrl;
+    // Objetivo del ejercicio (si viene de un plan o de un circuito con
+    // meta fija) — solo para avisar al llegar, NO para parar el conteo.
+    // Sin esto (o si no viene ninguno) simplemente no hay aviso.
+    this.targetSets = root.dataset.targetSets ? parseInt(root.dataset.targetSets, 10) : null;
+    this.targetReps = root.dataset.targetReps ? parseInt(root.dataset.targetReps, 10) : null;
+    this.targetAnnounced = false;
     // Qué contador usar. Lo decide el ejercicio (counter_key en el
     // catálogo), no la pantalla.
     this.counterKey = root.dataset.counterKey || "pullup";
@@ -113,6 +119,7 @@ class WorkoutSession {
     this.ctx = this.canvas.getContext("2d");
 
     this.statusEl = el("workout-status");
+    this.goalBannerEl = el("workout-goal-banner");
     this.repsEl = el("workout-reps");
     this.setsEl = el("workout-sets");
     this.timerEl = el("workout-timer");
@@ -349,6 +356,42 @@ class WorkoutSession {
     // Se muestran las reps de ESTA serie, no el total de la sesión (el
     // total sigue guardándose bien en this.reps al terminar).
     this.repsEl.textContent = String(this.currentSetReps);
+
+    // Aviso al llegar al objetivo — una sola vez, y sin parar nada: se
+    // puede seguir contando por encima del 100% si te apetece (se
+    // guarda tal cual, el backend no lo recorta). Es solo un chivatazo,
+    // la decisión de seguir o terminar la tomas tú con el botón.
+    //
+    // Va en un aviso APARTE (workout-goal-banner), no solo en el texto
+    // de estado normal: ese cambia con cada repetición siguiente y el
+    // mensaje del objetivo podía pasar sin que te dieras ni cuenta si no
+    // estabas mirando esa línea justo en ese instante. El banner se
+    // queda puesto todo lo que quieras, hasta que termines o recalibres.
+    if (this.targetSets && this.targetReps && !this.targetAnnounced) {
+      const meta = this.targetSets * this.targetReps;
+      if (this.reps >= meta) {
+        this.targetAnnounced = true;
+        if (this.goalBannerEl) {
+          this.goalBannerEl.hidden = false;
+          this.goalBannerEl.textContent = `🎯 ¡Objetivo cumplido! (${meta}) Sigue si quieres, o termina cuando acabes.`;
+        }
+        this.setStatus(`🎯 ¡Objetivo cumplido (${meta})!`);
+        try {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          [0, 0.14].forEach((t, i) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.frequency.value = i === 0 ? 880 : 1175;
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            gain.gain.setValueAtTime(0.18, ctx.currentTime + t);
+            osc.start(ctx.currentTime + t);
+            osc.stop(ctx.currentTime + t + 0.13);
+          });
+        } catch (e) { /* si el navegador bloquea audio, no pasa nada */ }
+        return true;
+      }
+    }
     this.setStatus(`¡${label} ${this.currentSetReps} de esta serie! (${duration.toFixed(1)}s)`);
     return true;
   }
@@ -736,10 +779,24 @@ class WorkoutSession {
   }
 
   stopCamera() {
+    if (!this.running && !this.stream && !this.poseLandmarker) return; // ya estaba parada — nada que hacer
     this.running = false;
     if (this.restIntervalId) clearInterval(this.restIntervalId);
-    if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
-    if (this.poseLandmarker) this.poseLandmarker.close();
+    if (this.stream) {
+      this.stream.getTracks().forEach((t) => t.stop());
+      this.stream = null;
+    }
+    if (this.poseLandmarker) {
+      try {
+        this.poseLandmarker.close();
+      } catch (e) {
+        // Si ya estaba cerrado (llamar close() dos veces según la
+        // versión de MediaPipe puede tirar), no es un fallo real — solo
+        // asegúrate de no dejarlo a medias silenciosamente.
+        console.warn("poseLandmarker.close() en una cámara ya parada:", e);
+      }
+      this.poseLandmarker = null;
+    }
   }
 
   async finish() {
@@ -759,6 +816,33 @@ class WorkoutSession {
     const sessionDuration = this.sessionStart ? (performance.now() - this.sessionStart) / 1000 : 0;
     this.stopCamera();
 
+    const payload = {
+      total_reps: this.reps,
+      rep_durations: this.repDurations,
+      session_duration_seconds: Math.round(sessionDuration),
+      rest_alerts_triggered: this.restAlertsTriggered,
+      sets: this.sets,
+      total_sets: this.sets.length,
+    };
+
+    // Cuando esto se reproduce dentro de la sesión de un plan
+    // (plan-session.js), es esa pantalla la que decide qué hacer con el
+    // resultado — anotarlo y pasar al siguiente ejercicio, no guardar y
+    // salir. Suelto (task_workout.html), sigue el fetch de siempre.
+    if (typeof window.__workoutSubmit === "function") {
+      try {
+        await window.__workoutSubmit(payload);
+      } catch (err) {
+        // Sin este catch, un fallo aquí dejaba el botón en "Guardando…"
+        // para siempre sin ningún error visible — silencioso del todo.
+        console.error("Error en __workoutSubmit:", err);
+        alert("Algo ha fallado al pasar al siguiente ejercicio. Prueba a recargar la página (lo hecho hasta ahora no se ha guardado todavía).");
+        this.finishBtn.disabled = false;
+        this.finishBtn.textContent = "Terminar sesión";
+      }
+      return;
+    }
+
     try {
       const resp = await fetch(this.saveUrl, {
         method: "POST",
@@ -766,14 +850,7 @@ class WorkoutSession {
           "Content-Type": "application/json",
           "X-CSRFToken": getCookie("csrftoken"),
         },
-        body: JSON.stringify({
-          total_reps: this.reps,
-          rep_durations: this.repDurations,
-          session_duration_seconds: Math.round(sessionDuration),
-          rest_alerts_triggered: this.restAlertsTriggered,
-          sets: this.sets,
-          total_sets: this.sets.length,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await resp.json();
       if (data.ok) {
@@ -792,9 +869,30 @@ class WorkoutSession {
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+/**
+ * Arranca el contador sobre el #workout-root que haya en pantalla.
+ * Exportado para que plan-session.js pueda llamarlo por cada ejercicio
+ * de cámara de una sesión de plan, en vez de solo al cargar la página.
+ */
+export function startWorkout() {
   const root = el("workout-root");
-  if (!root) return;
+  if (!root) return null;
   const session = new WorkoutSession(root);
   session.start();
-});
+  return session;
+}
+
+// Uso suelto (task_workout.html): arranca solo al cargar la página.
+// Cuando lo importa plan-session.js, __LIBRETA_EMBEDDED__ está puesto y
+// esto no hace nada — el arranque lo decide esa pantalla, ejercicio a
+// ejercicio. Se comprueba document.readyState porque, al ser un script
+// de tipo módulo, se ejecuta DESPUÉS de parsear el HTML — a veces antes
+// de "DOMContentLoaded", a veces después. Esperar el evento a ciegas es
+// una carrera que a veces se pierde y deja la cámara sin encender.
+if (!window.__LIBRETA_EMBEDDED__) {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", startWorkout);
+  } else {
+    startWorkout();
+  }
+}
