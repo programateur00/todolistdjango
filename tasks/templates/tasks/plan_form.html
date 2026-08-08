@@ -70,14 +70,15 @@
         Si lo pausas, vuelves a entrenar a tu aire.
     </span>
 
+    <label class="field">
+        <span class="field__label">Recompensa al cerrar el ciclo (opcional)</span>
+        <input type="text" name="reward" maxlength="200" placeholder="Ej: unas zapatillas nuevas"
+               value="{{ plan.reward|default:'' }}">
+        <span class="field__hint">Se enseña en la pantalla de cierre, al terminar el plan. Déjalo en blanco si no quieres ninguna.</span>
+    </label>
+
     <div class="task-form__actions">
         <button type="submit" class="primary-btn">Guardar</button>
-        {% if plan %}
-        <form action="{% url 'tasks:plan_delete' plan.pk %}" method="post" class="inline-delete">
-            {% csrf_token %}
-            <button type="submit" class="ghost-btn ghost-btn--danger">Eliminar</button>
-        </form>
-        {% endif %}
     </div>
 </form>
 

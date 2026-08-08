@@ -8,11 +8,12 @@ from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 import datetime as _dt
+import uuid as _uuid
 
 from django.utils import timezone
 
 from .models import (
-    Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, Task, WorkoutSession,
+    Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, SavedVideo, Task, TimerSession, WorkoutSession,
 )
 from .utils import get_current_user, resolve_plan_target
 
@@ -25,10 +26,73 @@ def _read_category(request, default=Task.CATEGORY_GENERAL):
 
 
 def _read_subcategory(request, default=""):
-    """Lee la subcategoría (solo tiene sentido si category=sport)."""
+    """Lee la subcategoría (deporte o enfoque, según la categoría)."""
     raw = request.POST.get("subcategory", default) or default
     valid = {key for key, _ in Task.SUBCATEGORY_CHOICES}
     return raw if raw in valid else default
+
+
+def _read_target_minutes(request):
+    """Objetivo en minutos — Enfoque, Estudio, y General cuando tiene wants_timer."""
+    raw = request.POST.get("target_minutes", "").strip()
+    if not raw:
+        return None
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return None
+
+
+def _read_youtube_video_id(request):
+    """
+    Enlace de YouTube pegado tal cual — la normalización a un ID limpio
+    la hace Task.save(), no hace falta duplicarla aquí.
+    """
+    return request.POST.get("youtube_video_id", "").strip()[:255]
+
+
+def _read_youtube_playlist_id(request):
+    return request.POST.get("youtube_playlist_id", "").strip()[:255]
+
+
+def _read_target_video_count(request):
+    """Cuántos vídeos de la playlist hay que ver. Vacío = sin objetivo por cuenta."""
+    raw = request.POST.get("target_video_count", "").strip()
+    if not raw:
+        return None
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return None
+
+
+def _read_has_local_video(request):
+    """El formulario eligió 'archivo de mi dispositivo' en vez de YouTube."""
+    return bool(request.POST.get("has_local_video"))
+
+
+def _read_wants_timer(request):
+    """Solo aplica a category='general': ¿se activó el cronómetro/vídeo?"""
+    return bool(request.POST.get("wants_timer"))
+
+
+def _read_client_uuid(request):
+    """
+    UUID generado en el propio navegador (crypto.randomUUID()) ANTES de
+    guardar la tarea — solo así el selector de archivo local puede
+    guardar el archivo con la clave correcta desde el primer momento,
+    sin esperar a que el servidor invente un id que el JS no conocería
+    todavía. Si no llega uno válido (formularios viejos, o simplemente
+    porque no se eligió vídeo local), Task.save() genera el suyo como
+    siempre — esto es un añadido, no un requisito.
+    """
+    raw = request.POST.get("client_uuid", "").strip()
+    if not raw:
+        return None
+    try:
+        return _uuid.UUID(raw)
+    except ValueError:
+        return None
 
 
 def task_list(request):
@@ -38,6 +102,7 @@ def task_list(request):
     # ser una app de un solo usuario, comprobarlo al abrir la página
     # es suficiente.)
     Task.expire_overdue()
+    Plan.auto_close_expired(user=get_current_user())
 
     # Filtro opcional por categoría (?cat=sport, ?cat=study, …)
     cat = request.GET.get("cat") or ""
@@ -69,6 +134,8 @@ def task_list(request):
         "category_choices": Task.CATEGORY_CHOICES,
         "active_category": active_category,
         "category_counts": category_counts,
+        "total_task_count": sum(counts.values()),
+        "weekly": Occurrence.weekly_completion(get_current_user()),
     })
 
 
@@ -76,11 +143,18 @@ def task_create(request):
     if request.method == "POST":
         title = request.POST.get("title", "").strip()
         if title:
-            Task.objects.create(
+            client_uuid = _read_client_uuid(request)
+            task = Task(
                 title=title,
                 notes=request.POST.get("notes", "").strip(),
                 category=_read_category(request),
                 subcategory=_read_subcategory(request),
+                target_minutes=_read_target_minutes(request),
+                youtube_video_id=_read_youtube_video_id(request),
+                youtube_playlist_id=_read_youtube_playlist_id(request),
+                target_video_count=_read_target_video_count(request),
+                has_local_video=_read_has_local_video(request),
+                wants_timer=_read_wants_timer(request),
                 due_date=request.POST.get("due_date") or None,
                 due_time=request.POST.get("due_time") or None,
                 repeat=request.POST.get("repeat", Task.REPEAT_NONE),
@@ -92,6 +166,9 @@ def task_create(request):
                 avoid_fail_label=request.POST.get("avoid_fail_label", "").strip()[:32],
                 user=get_current_user(),
             )
+            if client_uuid:
+                task.uuid = client_uuid
+            task.save()
             messages.success(request, "Tarea creada.")
         return redirect(reverse("tasks:task_list"))
 
@@ -100,7 +177,8 @@ def task_create(request):
         "repeat_choices": Task.REPEAT_CHOICES,
         "weekdays": Task.WEEKDAYS,
         "category_choices": Task.CATEGORY_CHOICES,
-        "subcategory_choices": Task.SUBCATEGORY_CHOICES,
+        "sport_subcategory_choices": Task.SPORT_SUBCATEGORY_CHOICES,
+        "focus_subcategory_choices": Task.FOCUS_SUBCATEGORY_CHOICES,
         "initial_title": initial_title,
     })
 
@@ -112,6 +190,12 @@ def task_edit(request, pk):
         task.notes = request.POST.get("notes", "").strip()
         task.category = _read_category(request, default=task.category)
         task.subcategory = _read_subcategory(request, default=task.subcategory)
+        task.target_minutes = _read_target_minutes(request)
+        task.youtube_video_id = _read_youtube_video_id(request)
+        task.youtube_playlist_id = _read_youtube_playlist_id(request)
+        task.target_video_count = _read_target_video_count(request)
+        task.has_local_video = _read_has_local_video(request)
+        task.wants_timer = _read_wants_timer(request)
         task.due_date = request.POST.get("due_date") or None
         task.due_time = request.POST.get("due_time") or None
         task.repeat = request.POST.get("repeat", Task.REPEAT_NONE)
@@ -129,7 +213,8 @@ def task_edit(request, pk):
         "repeat_choices": Task.REPEAT_CHOICES,
         "weekdays": Task.WEEKDAYS,
         "category_choices": Task.CATEGORY_CHOICES,
-        "subcategory_choices": Task.SUBCATEGORY_CHOICES,
+        "sport_subcategory_choices": Task.SPORT_SUBCATEGORY_CHOICES,
+        "focus_subcategory_choices": Task.FOCUS_SUBCATEGORY_CHOICES,
     })
 
 
@@ -173,25 +258,27 @@ def task_reopen(request, pk):
 def task_workout(request, pk):
     """
     Página de entreno para una tarea. En dos pasos:
-    1. Sin ?exercise= en la URL: muestra el catálogo de ejercicios activos
-       para elegir cuál tocar hoy — filtrado por la subcategoría de la
-       tarea (tren superior / tren inferior / running) si la tiene. Las
-       tareas sin subcategoría (o antiguas, de antes de que existiera)
-       ven el catálogo entero, para no dejar a nadie sin opciones. Los
-       ejercicios mode="timed" (plancha, crunch…) NO salen aquí sueltos:
-       solo tienen sentido dentro de un circuito (Routine), así que se
-       ofrecen aparte, como circuitos completos.
-    2. Con ?exercise=<slug>:
-       - mode="pose" con contador ya construido (de momento solo
-         dominadas) -> cámara con MediaPipe.
-       - mode="distance" (running) -> formulario manual (cinta, reloj,
-         Samsung Health…), no hay cámara para esto.
-       - cualquier otro caso (ej. abdominales/sentadillas, que están en
-         el catálogo pero aún no tienen contador) -> vuelve al selector
-         con un aviso, en vez de romper.
+    1. Sin ?exercise= ni ?video= en la URL: muestra el catálogo de
+       ejercicios activos para elegir cuál tocar hoy — filtrado por la
+       subcategoría de la tarea (tren superior / tren inferior /
+       running) si la tiene. Para tren superior/inferior, además se
+       ofrece "seguir un vídeo" como alternativa: se elige AQUÍ, cada
+       vez, no queda fijado en la tarea — la misma tarea que se repite
+       puede ir un día con vídeo y otro con circuito.
+    2. Con ?exercise=<slug>: como antes (cámara / manual / sin contador).
+       Con ?video=<id>: va directo al vídeo, sin pasar por lo demás.
     """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
     exercise_slug = request.GET.get("exercise")
+    video_id = request.GET.get("video")
+
+    # Un vídeo elegido en el selector manda por encima de todo: ni plan,
+    # ni ejercicio, ni circuito — es una tarea que se resuelve viéndolo.
+    if video_id:
+        return render(request, "tasks/task_video.html", {
+            "task": task, "video_id": video_id,
+            "playlist_id": "", "target_minutes": None, "target_video_count": None, "has_local_video": False,
+        })
 
     # Si la tarea la generó un plan, no hay nada que elegir: el plan ya
     # decidió qué ejercicios y con qué objetivo. Se va directo a la
@@ -206,9 +293,15 @@ def task_workout(request, pk):
         exercises_qs = exercises_qs.filter(body_area=task.subcategory)
         routines_qs = routines_qs.filter(subcategory=task.subcategory)
 
+    videos_qs = SavedVideo.objects.none()
+    if task.subcategory in (Task.SUBCATEGORY_LOWER_BODY, Task.SUBCATEGORY_UPPER_BODY):
+        videos_qs = SavedVideo.objects.filter(
+            user=get_current_user(), scope=task.subcategory, deleted_at__isnull=True,
+        )
+
     if not exercise_slug:
         return render(request, "tasks/task_workout_select.html", {
-            "task": task, "exercises": exercises_qs, "routines": routines_qs,
+            "task": task, "exercises": exercises_qs, "routines": routines_qs, "videos": videos_qs,
         })
 
     exercise = get_object_or_404(Exercise, slug=exercise_slug, is_active=True)
@@ -223,7 +316,8 @@ def task_workout(request, pk):
     # pero todavía no se puede contar con la cámara.
     if exercise.mode != Exercise.MODE_POSE or exercise.counter_key not in COUNTERS:
         return render(request, "tasks/task_workout_select.html", {
-            "task": task, "exercises": exercises_qs, "routines": routines_qs, "unsupported": exercise,
+            "task": task, "exercises": exercises_qs, "routines": routines_qs, "videos": videos_qs,
+            "unsupported": exercise,
         })
 
     return render(request, "tasks/task_workout.html", {
@@ -374,6 +468,168 @@ def task_workout_save_manual(request, pk):
     return redirect(reverse("tasks:task_list"))
 
 
+# ------------------------------------------------------------- enfoque
+
+def task_focus(request, pk):
+    """
+    Pantalla del temporizador de una tarea de Enfoque, Estudio o General
+    (leer, estudiar, estirar, lo que sea). El cronómetro es JS puro en
+    la plantilla — aquí solo se enseña el objetivo, si lo hay.
+
+    Estudio puede tener un vídeo o playlist de YouTube fijo (puesto al
+    crear la tarea, como el resto de categorías) — si lo tiene, ni
+    siquiera pasa por aquí, va directo a task_video vía workout_kind.
+    Sin vídeo fijo, Estudio es sencillamente el temporizador de abajo,
+    igual que Enfoque.
+
+    General (con wants_timer) SÍ ofrece elegir entre un vídeo de la
+    biblioteca guardada o un temporizador — se elige aquí, cada vez, ya
+    que General no tiene campos propios de vídeo fijo en el formulario.
+    Con ?video=<id> se va directo al vídeo; sin él (y sin ?mode=timer)
+    se enseña primero el selector.
+    """
+    task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    video_id = request.GET.get("video")
+    if video_id:
+        # Mismo contexto completo que task_video: la plantilla necesita
+        # SIEMPRE estas claves, aunque sea None/"" — si falta alguna, el
+        # JS que arma con {{ target_minutes|default_if_none:"null" }}
+        # se queda con una asignación vacía y ni siquiera arranca.
+        return render(request, "tasks/task_video.html", {
+            "task": task, "video_id": video_id,
+            "playlist_id": "", "target_minutes": None, "target_video_count": None, "has_local_video": False,
+        })
+
+    offers_video_choice = task.category == Task.CATEGORY_GENERAL
+    if offers_video_choice and request.GET.get("mode") != "timer":
+        videos_qs = SavedVideo.objects.filter(
+            user=get_current_user(), scope=SavedVideo.SCOPE_STUDY, deleted_at__isnull=True,
+        )
+        return render(request, "tasks/task_focus_mode.html", {"task": task, "videos": videos_qs})
+
+    return render(request, "tasks/task_focus.html", {"task": task})
+
+
+@require_POST
+def task_focus_save(request, pk):
+    """
+    Recibe los minutos ya contados en el navegador (fetch/JSON) y
+    guarda la sesión. Mismo criterio que task_workout_save: si había
+    objetivo y no se llegó, la tarea se queda pendiente con el
+    porcentaje guardado, para poder retomarla el mismo día.
+    """
+    task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({"ok": False, "error": "JSON inválido"}, status=400)
+
+    minutes = max(0, int(data.get("minutes", 0)))
+
+    ts = TimerSession.objects.create(
+        task=task,
+        user=get_current_user(),
+        series_id=task.series_id,
+        subcategory=task.subcategory,
+        source=TimerSession.SOURCE_MANUAL,
+        minutes=minutes,
+        target_minutes=task.target_minutes,
+    )
+
+    if ts.target_met:
+        task.mark_done()
+
+    resumen = f"Sesión guardada: {minutes} min"
+    resumen += "." if ts.target_met else f" — {ts.achievement_pct}% del objetivo. La tarea sigue pendiente."
+    messages.success(request, resumen)
+    return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
+
+
+# --------------------------------------------------------------- vídeo
+
+# -------------------------------------------------------- vídeos guardados
+
+@require_POST
+def saved_video_create(request):
+    """
+    Guarda un vídeo nuevo desde el selector de tren superior/inferior o
+    de estudio, y va derecho a reproducirlo — un paso menos que guardar
+    y luego tener que ir a buscarlo en la lista.
+    """
+    scope = request.POST.get("scope", "")
+    valid_scopes = {key for key, _ in SavedVideo.SCOPE_CHOICES}
+    if scope not in valid_scopes:
+        messages.error(request, "Tipo de vídeo no válido.")
+        return redirect(reverse("tasks:task_list"))
+
+    raw = request.POST.get("youtube_video_id", "").strip()
+    if not raw:
+        messages.error(request, "Pega un enlace de YouTube.")
+        return redirect(request.POST.get("next") or reverse("tasks:task_list"))
+
+    sv = SavedVideo.objects.create(
+        user=get_current_user(), scope=scope,
+        title=request.POST.get("title", "").strip()[:120],
+        youtube_video_id=raw,
+    )
+
+    task_pk = request.POST.get("task_pk")
+    entry_url = request.POST.get("entry_url") or reverse("tasks:task_workout", args=[task_pk])
+    sep = "&" if "?" in entry_url else "?"
+    return redirect(f"{entry_url}{sep}video={sv.youtube_video_id}")
+
+
+@require_POST
+def saved_video_delete(request, uuid):
+    """Borrado suave, para poder limpiar la lista sin romper el historial."""
+    sv = get_object_or_404(SavedVideo, uuid=uuid, user=get_current_user())
+    sv.deleted_at = timezone.now()
+    sv.save(update_fields=["deleted_at"])
+    messages.success(request, "Vídeo quitado de la lista.")
+    return redirect(request.POST.get("next") or reverse("tasks:task_list"))
+
+
+def task_video(request, pk):
+    """
+    Pantalla del vídeo de una tarea. El vídeo puede venir fijado en la
+    propia tarea (task.youtube_video_id) o elegido al vuelo desde el
+    selector de tren superior/inferior/estudio (?video=) — task_workout
+    y task_focus redirigen aquí pasándolo. El embed y la detección de
+    "terminó" son JS puro (IFrame Player API de YouTube).
+
+    task.youtube_playlist_id / target_minutes / target_video_count solo
+    aplican al vídeo fijado en la tarea, no al elegido al vuelo (ese
+    siempre es un vídeo suelto, sin objetivo por cuenta ni por minutos).
+    """
+    task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    override_video_id = request.GET.get("video")
+    video_id = override_video_id or task.youtube_video_id
+    return render(request, "tasks/task_video.html", {
+        "task": task,
+        "video_id": video_id,
+        "playlist_id": "" if override_video_id else task.youtube_playlist_id,
+        "target_minutes": None if override_video_id else task.target_minutes,
+        "target_video_count": None if override_video_id else task.target_video_count,
+        # Un vídeo elegido al vuelo siempre es de YouTube, suelto — el
+        # "solo local, sin YouTube" solo puede venir de la propia tarea.
+        "has_local_video": False if override_video_id else task.has_local_video,
+    })
+
+
+@require_POST
+def task_video_save(request, pk):
+    """
+    El vídeo llegó al final (evento ENDED en el navegador) -> la tarea
+    se marca hecha directamente. No hay objetivo que comparar ni sesión
+    que guardar: la tarea ENTERA es "ver el vídeo", así que verlo entero
+    es todo lo que hace falta.
+    """
+    task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    task.mark_done()
+    messages.success(request, "Vídeo visto — tarea completada.")
+    return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
+
+
 def _save_routine(request, routine=None):
     """Crea o actualiza una Routine a partir del formulario del
     constructor de circuitos. Compartido por routine_create/routine_edit."""
@@ -439,7 +695,7 @@ def routine_create(request):
     ).exclude(slug="ab-circuit")
     return render(request, "tasks/routine_form.html", {
         "exercises": exercises,
-        "subcategory_choices": Task.SUBCATEGORY_CHOICES,
+        "subcategory_choices": Task.SPORT_SUBCATEGORY_CHOICES,
         "initial_subcategory": request.GET.get("subcategory", ""),
         "next_url": request.GET.get("next", ""),
     })
@@ -455,7 +711,7 @@ def routine_edit(request, pk):
     return render(request, "tasks/routine_form.html", {
         "routine": routine,
         "exercises": exercises,
-        "subcategory_choices": Task.SUBCATEGORY_CHOICES,
+        "subcategory_choices": Task.SPORT_SUBCATEGORY_CHOICES,
         "initial_subcategory": routine.subcategory,
         "next_url": request.GET.get("next", ""),
         "selected_items": list(routine.items.select_related("exercise")),
@@ -583,7 +839,10 @@ def stats_list(request):
         s["max_streak"] = streaks["max_streak"]
     series_list.sort(key=lambda s: s["total"], reverse=True)
 
-    return render(request, "tasks/stats_list.html", {"series_list": series_list})
+    return render(request, "tasks/stats_list.html", {
+        "series_list": series_list,
+        "weekly": Occurrence.weekly_completion(get_current_user()),
+    })
 
 
 def stats_detail(request, series_id):
@@ -628,7 +887,7 @@ def _plans_qs():
 def plan_list(request):
     """Los planes, con su medida principal y cuánto llevas."""
     plans = []
-    for p in _plans_qs():
+    for p in _plans_qs().filter(closed_at__isnull=True):
         head = p.headline
         plans.append({
             "plan": p,
@@ -637,7 +896,30 @@ def plan_list(request):
             "remaining": head.sessions_to_goal() if head else None,
             "progress": p.progress_pct(),
         })
-    return render(request, "tasks/plan_list.html", {"plans": plans})
+    closed_plans = [
+        {"plan": p, "progress": p.final_progress_pct}
+        for p in _plans_qs().filter(closed_at__isnull=False).order_by("-closed_at")
+    ]
+    return render(request, "tasks/plan_list.html", {"plans": plans, "closed_plans": closed_plans})
+
+
+def weekly_review(request):
+    """
+    La revisión semanal del 12 Week Year: cómo ha ido la semana en
+    conjunto y en cada objetivo activo, en una sola pantalla — en vez
+    de tener que entrar plan a plan para hacerse una idea de conjunto.
+    """
+    plans = []
+    for p in _plans_qs().filter(is_active=True):
+        plans.append({
+            "plan": p,
+            "weekly": p.weekly_completion(),
+            "progress": p.progress_pct(),
+        })
+    return render(request, "tasks/weekly_review.html", {
+        "weekly": Occurrence.weekly_completion(get_current_user()),
+        "plans": plans,
+    })
 
 
 def plan_detail(request, pk):
@@ -690,12 +972,20 @@ def plan_form(request, pk=None):
                 plan = Plan(user=get_current_user())
             plan.name = name[:80]
             plan.notes = request.POST.get("notes", "").strip()
-            plan.started_on = request.POST.get("started_on") or plan.started_on or _dt.date.today()
+            raw_started_on = request.POST.get("started_on", "").strip()
+            if raw_started_on:
+                try:
+                    plan.started_on = _dt.date.fromisoformat(raw_started_on)
+                except ValueError:
+                    plan.started_on = plan.started_on or _dt.date.today()
+            else:
+                plan.started_on = plan.started_on or _dt.date.today()
             try:
                 plan.weeks = max(1, int(request.POST.get("weeks", 12)))
             except (TypeError, ValueError):
                 plan.weeks = 12
             plan.is_active = bool(request.POST.get("is_active"))
+            plan.reward = request.POST.get("reward", "").strip()[:200]
             plan.repeat = request.POST.get("repeat", "custom")
             plan.custom_days = ",".join(request.POST.getlist("custom_days")) or "0,2,4"
             plan.due_time = request.POST.get("due_time") or None
@@ -724,7 +1014,50 @@ def plan_delete(request, pk):
     plan.save(update_fields=["deleted_at", "updated_at"])
     plan.sync_task()          # retira la tarea pendiente
     messages.success(request, "Plan eliminado.")
-    return redirect(reverse("tasks:plan_list"))
+    return redirect(reverse("tasks:task_list"))
+
+
+def _plan_summary_items(plan):
+    """Un resumen ligero por objetivo: cuántas veces se cumplió, en qué
+    escalón se quedó. Sin la tabla de progresión entera — esto es un
+    vistazo hacia atrás, no una pantalla de trabajo."""
+    items = []
+    for item in plan.items.select_related("exercise").all():
+        successes, _ = item.successes_and_streak()
+        items.append({
+            "item": item,
+            "successes": successes,
+            "step": item.current_step(),
+            "target": item.current_target(),
+        })
+    return items
+
+
+def plan_close(request, pk):
+    """
+    Cierre de ciclo: distinto de borrar. GET enseña el resumen (llevas
+    cumplidos tantos escalones, tal racha…) con un botón para
+    confirmar; POST cierra de verdad — dos pasos porque cerrar no se
+    deshace con un "deshacer" fácil como sí lo tiene marcar una tarea.
+
+    Una vez cerrado, el plan deja de generar tareas y sale de la lista
+    de activos, pero se queda en "Planes cerrados" para poder mirar
+    atrás — no es lo mismo que eliminar.
+    """
+    plan = get_object_or_404(_plans_qs(), pk=pk)
+
+    if request.method == "POST" and not plan.closed_at:
+        plan.final_progress_pct = plan.progress_pct()
+        plan.closed_at = timezone.now()
+        plan.is_active = False
+        plan.save(update_fields=["final_progress_pct", "closed_at", "is_active", "updated_at"])
+        plan.sync_task()  # retira la tarea pendiente, como al pausar
+
+    return render(request, "tasks/plan_close.html", {
+        "plan": plan,
+        "progress": plan.final_progress_pct if plan.closed_at else plan.progress_pct(),
+        "items": _plan_summary_items(plan),
+    })
 
 
 def plan_item_form(request, plan_pk, pk=None):

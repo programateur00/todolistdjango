@@ -27,9 +27,14 @@ urlpatterns = [
     path("tasks/<uuid:uuid>/workout/", api.workout_save, name="workout_save"),
     path("tasks/<uuid:uuid>/workout-manual/", api.workout_save_manual, name="workout_save_manual"),
     path("tasks/<uuid:uuid>/circuit/<uuid:routine_uuid>/", api.routine_result, name="routine_result"),
+    path("tasks/<uuid:uuid>/focus/", api.focus_save, name="focus_save"),
+    path("tasks/<uuid:uuid>/video/", api.video_save, name="video_save"),
+    path("videos/", api.saved_video_list, name="saved_video_list"),
+    path("videos/<uuid:uuid>/", api.saved_video_delete, name="saved_video_delete"),
 
     path("plans/", api.plan_list, name="plan_list"),
     path("plans/<uuid:uuid>/", api.plan_detail, name="plan_detail"),
+    path("review/weekly/", api.weekly_review, name="weekly_review"),
     path("tasks/<uuid:uuid>/plan/<uuid:plan_uuid>/", api.plan_session, name="plan_session"),
     path("tasks/<uuid:uuid>/plan/<uuid:plan_uuid>/save/", api.plan_session_save, name="plan_session_save"),
 

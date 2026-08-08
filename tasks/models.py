@@ -1,10 +1,25 @@
 import datetime as _dt
+import re
 import uuid
 from datetime import timedelta
 
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
+
+# Formatos aceptados al pegar un vídeo de YouTube (RoutineItem.youtube_video_id):
+# enlace completo (youtube.com/watch?v=, youtu.be/, youtube.com/shorts/,
+# youtube.com/embed/) o directamente el ID de 11 caracteres. Así no hay que
+# ir a buscar el ID a mano cada vez que se pega un enlace.
+_YOUTUBE_ID_RE = re.compile(
+    r"(?:youtu\.be/|youtube\.com/(?:watch\?v=|embed/|shorts/))([A-Za-z0-9_-]{11})"
+)
+
+# El ID de una playlist va en el parámetro ?list=... de cualquier URL de
+# YouTube (a veces junto a un vídeo concreto, a veces solo). Empieza casi
+# siempre por "PL", "UU", "LL" o "FL", pero no hace falta comprobarlo — con
+# que aparezca list=algo ya vale.
+_YOUTUBE_PLAYLIST_ID_RE = re.compile(r"[?&]list=([A-Za-z0-9_-]+)")
 
 
 class Task(models.Model):
@@ -41,7 +56,7 @@ class Task(models.Model):
         (CATEGORY_GENERAL, "General"),
         (CATEGORY_STUDY, "Estudio"),
         (CATEGORY_SPORT, "Deporte"),
-        (CATEGORY_WORK, "Trabajo"),
+        (CATEGORY_WORK, "Enfoque"),
         (CATEGORY_PERSONAL, "Personal"),
         (CATEGORY_OTHER, "Otro"),
         (CATEGORY_AVOID, "Antitarea"),
@@ -49,29 +64,55 @@ class Task(models.Model):
 
     # Metadatos que describen qué "extras" admite cada categoría.
     # Útil para que la UI sepa si mostrar el botón de iniciar timer,
-    # el panel de cámara de MediaPipe, etc. Sin construir esos extras hoy.
+    # el panel de cámara de MediaPipe, etc.
+    #
+    # CATEGORY_WORK ("Enfoque") era antes "Trabajo" sin ningún extra
+    # construido — se reutiliza el mismo hueco (misma clave "work" en la
+    # base de datos, así las tareas que ya tuvieras no se mueven de
+    # categoría) para el temporizador manual: leer, estudiar, estirar…
+    # cualquier cosa que quieras cronometrar sin que sea deporte.
     CATEGORY_CAPABILITIES = {
-        CATEGORY_GENERAL: [],
-        CATEGORY_STUDY: ["timer", "pomodoro"],
+        CATEGORY_GENERAL: ["timer"],
+        CATEGORY_STUDY: ["timer"],
         CATEGORY_SPORT: ["timer", "pose_tracking"],
-        CATEGORY_WORK: ["timer", "pomodoro"],
+        CATEGORY_WORK: ["timer", "app_usage"],
         CATEGORY_PERSONAL: [],
         CATEGORY_OTHER: [],
         CATEGORY_AVOID: [],
     }
 
-    # Subcategorías de "Deporte". Solo tienen sentido cuando category=sport;
-    # filtran qué ejercicios del catálogo (Exercise.body_area) aparecen en
-    # el selector al entrenar, para no mezclar dominadas con sentadillas.
+    # Subcategorías de "Deporte": filtran qué ejercicios del catálogo
+    # (Exercise.body_area) aparecen al entrenar.
     SUBCATEGORY_UPPER_BODY = "upper_body"
     SUBCATEGORY_LOWER_BODY = "lower_body"
     SUBCATEGORY_RUNNING = "running"
-
-    SUBCATEGORY_CHOICES = [
+    SPORT_SUBCATEGORY_CHOICES = [
         (SUBCATEGORY_UPPER_BODY, "Tren superior"),
         (SUBCATEGORY_LOWER_BODY, "Tren inferior"),
         (SUBCATEGORY_RUNNING, "Running"),
     ]
+
+    # Subcategorías de "Enfoque": qué se está cronometrando. Todas
+    # comparten el mismo temporizador manual (ver TimerSession); solo
+    # "Lectura" puede además usar el tiempo real en una app externa
+    # (Adobe, Kindle…) cuando hay plugin nativo instalado — ver
+    # TimerSession.SOURCE_APP_USAGE.
+    #
+    # "Estudio" YA NO es una subcategoría de aquí — se ha movido a ser
+    # la categoría "Estudio" de arriba del todo (ver CATEGORY_STUDY),
+    # que ahora tiene su propio elegir-vídeo-o-temporizador cada vez
+    # (ver task_focus en views.py). Tenerlo en los dos sitios era
+    # justo el lío que había antes.
+    SUBCATEGORY_READING = "reading"
+    SUBCATEGORY_STRETCH = "stretch"
+    SUBCATEGORY_FOCUS_OTHER = "focus_other"
+    FOCUS_SUBCATEGORY_CHOICES = [
+        (SUBCATEGORY_READING, "Lectura"),
+        (SUBCATEGORY_STRETCH, "Estiramientos"),
+        (SUBCATEGORY_FOCUS_OTHER, "Otro"),
+    ]
+
+    SUBCATEGORY_CHOICES = SPORT_SUBCATEGORY_CHOICES + FOCUS_SUBCATEGORY_CHOICES
 
     WEEKDAYS = [
         ("0", "Lunes"),
@@ -96,7 +137,51 @@ class Task(models.Model):
         max_length=16,
         choices=SUBCATEGORY_CHOICES,
         blank=True,
-        help_text="Solo aplica si category='sport'. Filtra qué ejercicios se ofrecen al entrenar.",
+        help_text="Deporte → qué entrenar. Enfoque → qué cronometrar. En el resto no se usa.",
+    )
+    target_minutes = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Objetivo en minutos para tareas de Enfoque o Estudio "
+                   "(category='work'/'study'). Ej. 60 para 'leer una hora'. "
+                   "En blanco = sesión libre, sin objetivo que cumplir.",
+    )
+    youtube_video_id = models.CharField(
+        max_length=255, blank=True,
+        help_text="ID o URL de un vídeo de YouTube (ej. 'dQw4w9WgXcQ' o el enlace completo — "
+                   "se limpia solo al guardar). Si está puesto, esta tarea NO pasa por el "
+                   "selector de ejercicios ni por el temporizador: al darle a play se va "
+                   "directa al vídeo embebido, y al terminar se marca como hecha ella sola. "
+                   "Streaming en directo: no se descarga ni se guarda nada.",
+    )
+    youtube_playlist_id = models.CharField(
+        max_length=255, blank=True,
+        help_text="Alternativa a youtube_video_id: ID o URL de una playlist de YouTube "
+                   "(el trozo list=... del enlace). Junto con target_minutes o "
+                   "target_video_count decide cuándo se da por vista.",
+    )
+    target_video_count = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Solo con youtube_playlist_id: cuántos vídeos de la lista hay que ver "
+                   "para dar la tarea por hecha (ej. 5). Si no se pone y tampoco hay "
+                   "target_minutes, se da por hecha al terminar 1 vídeo de la lista.",
+    )
+    has_local_video = models.BooleanField(
+        default=False,
+        help_text="Alternativa a youtube_video_id: el vídeo es un archivo del propio "
+                   "dispositivo (elegido con el selector nativo), no de YouTube. El "
+                   "archivo en sí NO vive aquí — cada aparato guarda el suyo por su "
+                   "cuenta (IndexedDB en la web, el plugin nativo en la app), este campo "
+                   "solo le dice al servidor 'esta tarea se resuelve con un vídeo local' "
+                   "para que workout_kind la trate como 'video' igual que si tuviera uno "
+                   "de YouTube. Solo para category='sport'/'work' — Estudio no lo usa.",
+    )
+    wants_timer = models.BooleanField(
+        default=False,
+        help_text="Solo para category='general': activa el botón de cronómetro/vídeo "
+                   "en la lista, en vez de ser una tarea normal de marcar y ya. "
+                   "General/Estudio/Enfoque comparten el mismo temporizador "
+                   "(TimerSession) — esto solo decide si General lo ofrece o no; "
+                   "Estudio y Enfoque ya lo ofrecen siempre, por categoría.",
     )
     due_date = models.DateField(null=True, blank=True)
     due_time = models.TimeField(null=True, blank=True,
@@ -158,6 +243,19 @@ class Task(models.Model):
         return self.CATEGORY_CAPABILITIES.get(self.category, [])
 
     @property
+    def current_streak(self):
+        """
+        Racha actual de esta serie — el mismo cálculo que ya se usa en
+        Rachas, pero puesto aquí para que la tarjeta de la tarea lo
+        pueda enseñar sin que haya que ir a buscarlo a otra pantalla.
+        Solo tiene sentido para tareas que se repiten: una suelta no
+        tiene "racha".
+        """
+        if self.repeat == self.REPEAT_NONE:
+            return 0
+        return Occurrence.streak_stats(self.series_id)["current_streak"]
+
+    @property
     def plan(self):
         """El plan que generó esta tarea, si viene de uno."""
         return Plan.objects.filter(
@@ -170,11 +268,24 @@ class Task(models.Model):
         Qué clase de sesión abre esta tarea, para que el botón de la lista
         no prometa algo que no va a pasar.
 
-        Antes cualquier tarea de Deporte enseñaba el icono de cámara,
-        aunque fuera un circuito de abdominales a cronómetro o una salida
-        a correr que se rellena a mano. Enseñar una cámara ahí es
-        incongruente.
+        Un vídeo de YouTube manda por encima de todo lo demás: si está
+        puesto, la tarea se resuelve entera viéndolo, sin pasar por el
+        selector de ejercicios ni por el temporizador — es una decisión
+        que se toma una vez, al crear la tarea, no cada vez que se abre.
+
+        Enfoque y Estudio comparten el mismo "focus": Estudio, al entrar,
+        además deja elegir entre un vídeo de la biblioteca guardada o un
+        temporizador simple (ver task_focus en views.py) — Enfoque no,
+        va directo al temporizador. General es tarea normal SIEMPRE que
+        no se haya activado wants_timer a mano; así la app sigue
+        funcionando como una lista de tareas corriente por defecto.
         """
+        if self.youtube_video_id or self.youtube_playlist_id or self.has_local_video:
+            return "video"
+        if self.category in (self.CATEGORY_WORK, self.CATEGORY_STUDY):
+            return "focus"          # temporizador (Estudio además ofrece vídeo)
+        if self.category == self.CATEGORY_GENERAL:
+            return "focus" if self.wants_timer else None
         if self.category != self.CATEGORY_SPORT:
             return None
         if self.subcategory == self.SUBCATEGORY_RUNNING:
@@ -330,6 +441,14 @@ class Task(models.Model):
     def save(self, *args, **kwargs):
         if self.series_start_date is None and self.due_date is not None:
             self.series_start_date = self.due_date
+        raw = (self.youtube_video_id or "").strip()
+        if raw:
+            m = _YOUTUBE_ID_RE.search(raw)
+            self.youtube_video_id = m.group(1) if m else raw
+        raw_pl = (self.youtube_playlist_id or "").strip()
+        if raw_pl:
+            m = _YOUTUBE_PLAYLIST_ID_RE.search(raw_pl)
+            self.youtube_playlist_id = m.group(1) if m else raw_pl
         super().save(*args, **kwargs)
 
     def _spawn_next(self):
@@ -674,7 +793,7 @@ class Exercise(models.Model):
     mode = models.CharField(max_length=16, choices=MODE_CHOICES, default=MODE_MANUAL)
     body_area = models.CharField(
         max_length=16,
-        choices=Task.SUBCATEGORY_CHOICES,
+        choices=Task.SPORT_SUBCATEGORY_CHOICES,
         blank=True,
         db_index=True,
         help_text="A qué subcategoría de Deporte pertenece (tren superior/inferior/running). "
@@ -687,6 +806,14 @@ class Exercise(models.Model):
     config = models.JSONField(
         default=dict, blank=True,
         help_text="Umbrales/ajustes propios de este ejercicio para el contador (opcional).",
+    )
+    video_filename = models.CharField(
+        max_length=255, blank=True,
+        help_text="Solo para mode='timed'. Nombre del archivo de vídeo (ej. 'abdominales.mp4') "
+                   "que debe existir en el móvil, en la carpeta privada de la app "
+                   "(Android/data/com.libreta.tareas/files/circuitos-videos/ — se sube por ADB, "
+                   "no hay descarga desde la app). Si está puesto, el circuito reproduce el "
+                   "vídeo en vez de una cuenta atrás en blanco, y el paso dura lo que dure el vídeo.",
     )
     is_active = models.BooleanField(default=True)
     order = models.PositiveIntegerField(default=0)
@@ -713,7 +840,7 @@ class Routine(models.Model):
     )
     name = models.CharField(max_length=64)
     subcategory = models.CharField(
-        max_length=16, choices=Task.SUBCATEGORY_CHOICES, blank=True,
+        max_length=16, choices=Task.SPORT_SUBCATEGORY_CHOICES, blank=True,
         help_text="Para poder ofrecer esta rutina desde el selector de esa subcategoría de Deporte.",
     )
     default_work_seconds = models.PositiveIntegerField(default=40)
@@ -890,6 +1017,30 @@ class Plan(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
+    # Cierre del ciclo: distinto de borrar. Un plan cerrado deja de
+    # generar tareas y sale de la lista de activos, pero se queda para
+    # poder mirar atrás — borrar (deleted_at) es para "esto no debería
+    # haber existido"; cerrar (closed_at) es para "esto terminó bien".
+    closed_at = models.DateTimeField(null=True, blank=True)
+    reward = models.CharField(
+        max_length=200, blank=True,
+        help_text="La recompensa que te prometes al empezar el ciclo (opcional). "
+                   "Se enseña en la pantalla de cierre si la has puesto — y solo si "
+                   "el plan llega al umbral de completado.",
+    )
+    # Foto del progreso en el momento de cerrar (manual o automático). No
+    # se recalcula después: una vez cerrado, el plan ya no acumula más
+    # sesiones, así que sería el mismo número — pero guardarlo evita
+    # tener que volver a calcularlo cada vez que se enseña la lista de
+    # cerrados, y dEja constancia de con qué dato se decidió.
+    final_progress_pct = models.PositiveIntegerField(null=True, blank=True)
+
+    # A partir de qué porcentaje un cierre cuenta como "completado" en
+    # vez de "terminado incompleto". Un ciclo que no lo alcanza se
+    # cierra igual (o se auto-cierra al pasar las semanas), pero no
+    # desbloquea la recompensa ni se celebra igual.
+    COMPLETION_THRESHOLD_PCT = 70
+
     class Meta:
         ordering = ["-is_active", "-started_on"]
 
@@ -905,6 +1056,41 @@ class Plan(models.Model):
         """En qué semana del plan estamos (1 = la primera)."""
         days = (timezone.localtime(timezone.now()).date() - self.started_on).days
         return max(1, days // 7 + 1)
+
+    @property
+    def is_completed(self):
+        """
+        Si el cierre cuenta como éxito o como "terminado incompleto".
+
+        Usa la foto guardada al cerrar si ya está cerrado; si todavía
+        está abierto, calcula con el progreso de ahora mismo — así la
+        pantalla de cierre puede avisar de antemano de en qué lado vas
+        a caer antes de que confirmes.
+        """
+        pct = self.final_progress_pct if self.closed_at else self.progress_pct()
+        return pct is not None and pct >= self.COMPLETION_THRESHOLD_PCT
+
+    @classmethod
+    def auto_close_expired(cls, user=None):
+        """
+        Cierra solos los planes cuyas semanas ya se cumplieron.
+
+        Sin scheduler en este hosting, así que se comprueba de gorra
+        cada vez que se abre la lista de tareas — mismo criterio que
+        Task.expire_overdue(): barato, y no hace falta que nadie entre
+        a "planes" para que un ciclo vencido deje de generar tareas.
+        """
+        today = timezone.localtime(timezone.now()).date()
+        qs = cls.objects.filter(deleted_at__isnull=True, closed_at__isnull=True, is_active=True)
+        if user is not None:
+            qs = qs.filter(user=user)
+        for plan in qs:
+            if today >= plan.ends_on:
+                plan.final_progress_pct = plan.progress_pct()
+                plan.closed_at = timezone.now()
+                plan.is_active = False
+                plan.save(update_fields=["final_progress_pct", "closed_at", "is_active", "updated_at"])
+                plan.sync_task()
 
     def custom_days_list(self):
         if not self.custom_days:
@@ -1040,6 +1226,21 @@ class Plan(models.Model):
         if total_steps <= 0:
             return 100
         return min(100, round(100 * done / total_steps))
+
+    def weekly_completion(self):
+        """
+        Ejecución de ESTA semana para el plan: de las sesiones que le
+        tocaban de lunes a domingo, cuántas se han resuelto y cuántas
+        de esas se cumplieron.
+
+        No es un cálculo aparte: se apoya en las mismas Occurrence que
+        genera la tarea del plan (ver sync_task / task_series_id), así
+        que un plan sin tarea todavía (nunca activado) no tiene nada
+        que enseñar aquí.
+        """
+        if not self.task_series_id:
+            return None
+        return Occurrence.weekly_completion(self.user, series_id=self.task_series_id)
 
 
 class PlanItem(models.Model):
@@ -1485,6 +1686,136 @@ class WorkoutSession(models.Model):
         return f"{self.exercise_name} — {self.total_reps} reps ({self.recorded_at:%Y-%m-%d %H:%M})"
 
 
+class TimerSession(models.Model):
+    """
+    Una sesión cronometrada de una tarea de Enfoque (category='work'):
+    leer, estudiar, estirar… lo que sea que se apoye en un temporizador
+    en vez de en la cámara o en repeticiones.
+
+    Mismo patrón que WorkoutSession: el objetivo se guarda en la sesión
+    en el momento de guardarla (target_minutes), no se recalcula después,
+    para que el historial no cambie de significado si algún día editas
+    el objetivo de la tarea.
+
+    source distingue si los minutos vinieron de un cronómetro que
+    controlaste a mano o del tiempo real que estuvo abierta una app
+    externa (solo tiene sentido para subcategory='reading', y solo si
+    hay plugin nativo instalado en la app — ver /mnt del proyecto móvil).
+    """
+    SOURCE_MANUAL = "manual"
+    SOURCE_APP_USAGE = "app_usage"
+    SOURCE_CHOICES = [
+        (SOURCE_MANUAL, "Cronómetro manual"),
+        (SOURCE_APP_USAGE, "Tiempo en la app"),
+    ]
+
+    task = models.ForeignKey(
+        Task, on_delete=models.SET_NULL, null=True, blank=True, related_name="timer_sessions"
+    )
+    plan = models.ForeignKey(
+        Plan, on_delete=models.SET_NULL, null=True, blank=True, related_name="timer_sessions",
+        help_text="Para cuando esta tarea cuente para un objetivo del 12 Week Year. Sin usar todavía.",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="timer_sessions",
+    )
+    series_id = models.UUIDField(null=True, blank=True)
+
+    # Copia de task.subcategory en el momento de guardar — igual que el
+    # objetivo, no se recalcula después contra la tarea actual.
+    subcategory = models.CharField(max_length=16, blank=True)
+
+    source = models.CharField(max_length=16, choices=SOURCE_CHOICES, default=SOURCE_MANUAL)
+    app_package = models.CharField(
+        max_length=120, blank=True,
+        help_text="Paquete Android de la app leída (ej. com.adobe.reader). Solo si source=app_usage.",
+    )
+
+    minutes = models.PositiveIntegerField(default=0)
+    target_minutes = models.PositiveIntegerField(null=True, blank=True)
+
+    recorded_at = models.DateTimeField(auto_now_add=True)
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-recorded_at"]
+
+    @property
+    def achievement_pct(self):
+        """Porcentaje del objetivo cumplido, o None si la tarea no tenía uno (sesión libre)."""
+        if not self.target_minutes:
+            return None
+        return round(100 * self.minutes / self.target_minutes)
+
+    @property
+    def target_met(self):
+        """
+        Igual que WorkoutSession.target_met: True si no había objetivo
+        que exigir, o si lo hubo y se alcanzó. Solo False si había un
+        número que cumplir y se quedó corto.
+        """
+        pct = self.achievement_pct
+        return pct is None or pct >= 100
+
+    @property
+    def subcategory_label(self):
+        return dict(Task.FOCUS_SUBCATEGORY_CHOICES).get(self.subcategory, "Enfoque")
+
+    def __str__(self):
+        return f"{self.subcategory_label} — {self.minutes} min ({self.recorded_at:%Y-%m-%d %H:%M})"
+
+
+class SavedVideo(models.Model):
+    """
+    Vídeos de YouTube guardados para reutilizar sin tener que pegar el
+    enlace cada vez que se entrena o se estudia.
+
+    Se eligen en el momento de hacerlo, como alternativa al modo de
+    siempre (circuito, cámara, temporizador) — no van atados a una
+    tarea concreta, así una tarea que se repite puede usar un vídeo
+    distinto cada día, o ninguno. `scope` es solo para filtrar la lista
+    y no enseñar vídeos de estudio al entrenar tren inferior.
+    """
+    SCOPE_LOWER_BODY = "lower_body"
+    SCOPE_UPPER_BODY = "upper_body"
+    SCOPE_STUDY = "study_session"
+    SCOPE_CHOICES = [
+        (SCOPE_LOWER_BODY, "Tren inferior"),
+        (SCOPE_UPPER_BODY, "Tren superior"),
+        (SCOPE_STUDY, "Estudio"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="saved_videos",
+    )
+    scope = models.CharField(max_length=16, choices=SCOPE_CHOICES)
+    title = models.CharField(
+        max_length=120, blank=True,
+        help_text="Para reconocerlo en la lista. En blanco, se enseña el ID del vídeo.",
+    )
+    youtube_video_id = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def save(self, *args, **kwargs):
+        raw = (self.youtube_video_id or "").strip()
+        if raw:
+            m = _YOUTUBE_ID_RE.search(raw)
+            self.youtube_video_id = m.group(1) if m else raw
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.title or self.youtube_video_id
+
+
 class Occurrence(models.Model):
     RESULT_DONE = "done"
     RESULT_NOT_DONE = "not_done"
@@ -1555,3 +1886,49 @@ class Occurrence(models.Model):
                 running = 0
 
         return {"current_streak": current, "max_streak": max_s}
+
+    @classmethod
+    def weekly_completion(cls, user, reference_date=None, series_id=None):
+        """
+        Porcentaje de ejecución de la semana actual (lunes a domingo).
+
+        Primera pieza del 12 Week Year: una división simple sobre las
+        ocurrencias que ya se guardan — sin modelo nuevo, sin campo
+        nuevo. "Empieza por aquí" porque es barato y da una lectura
+        inmediata de cómo va la semana cada vez que se abre la lista.
+
+        Cada ocurrencia se cuenta en la semana de su due_date (el día al
+        que pertenecía la tarea) si lo tiene, y si no en la semana en
+        que se registró — mismo criterio que PlanItem.history() usa
+        para las tareas sin due_date.
+
+        Con `series_id` se filtra a una sola serie (ej. la tarea de un
+        plan concreto) en vez del global — es lo que usa Plan.weekly_completion
+        para la revisión semanal por objetivo, reutilizando exactamente
+        el mismo cálculo.
+        """
+        today = reference_date or timezone.localtime(timezone.now()).date()
+        week_start = today - timedelta(days=today.weekday())  # lunes
+        week_end = week_start + timedelta(days=6)             # domingo
+
+        occs = cls.objects.filter(user=user, deleted_at__isnull=True)
+        if series_id:
+            occs = occs.filter(series_id=series_id)
+        occs = occs.filter(
+            models.Q(due_date__gte=week_start, due_date__lte=week_end)
+            | models.Q(
+                due_date__isnull=True,
+                recorded_at__date__gte=week_start,
+                recorded_at__date__lte=week_end,
+            )
+        )
+        total = occs.count()
+        done = occs.filter(result=cls.RESULT_DONE).count()
+        return {
+            "week_start": week_start,
+            "week_end": week_end,
+            "done": done,
+            "not_done": total - done,
+            "total": total,
+            "pct": round(100 * done / total) if total else None,
+        }

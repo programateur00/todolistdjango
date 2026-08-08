@@ -84,11 +84,14 @@
             {% endfor %}
         </div>
         <span class="field__hint">
-            Define qué extras tendrá la tarea. <em>Estudio / Trabajo</em> → temporizador y pomodoro.
-            <em>Deporte</em> → temporizador + seguimiento con cámara (MediaPipe).
+            Define qué extras tendrá la tarea. <em>Deporte</em> → temporizador + seguimiento con cámara (MediaPipe).
+            <em>Enfoque</em> → temporizador manual para leer, estirar… lo que sea que quieras cronometrar.
+            <em>Estudio</em> → al empezarla, eliges entre un vídeo de tu biblioteca de estudio o un
+            temporizador simple. <em>General</em> → tarea normal de toda la vida; si quieres, puedes
+            activarle también el cronómetro/vídeo, como Estudio.
             <em>Antitarea</em> → algo que NO quieres hacer (ej. "no fumar"): ponle hora límite
             por la noche y, si no tocas nada antes de esa hora, cuenta como éxito — solo hace
-            falta marcar algo si caes. <em>General / Personal / Otro</em> → sin extras.
+            falta marcar algo si caes. <em>Personal / Otro</em> → sin extras.
         </span>
     </fieldset>
 
@@ -119,7 +122,7 @@
     <fieldset class="field subcategory-field" id="subcategory-field">
         <legend class="field__label">¿Qué toca hoy?</legend>
         <div class="repeat-options">
-            {% for value, label in subcategory_choices %}
+            {% for value, label in sport_subcategory_choices %}
             <label class="repeat-option">
                 <input type="radio" name="subcategory" value="{{ value }}"
                     {% if task and task.subcategory == value %}checked{% endif %}>
@@ -131,6 +134,93 @@
             Filtra qué ejercicios se ofrecen al entrenar (dominadas para tren superior, etc). Solo aplica a tareas de Deporte.
         </span>
     </fieldset>
+
+    <fieldset class="field subcategory-field" id="focus-subcategory-field">
+        <legend class="field__label">¿Qué vas a cronometrar?</legend>
+        <div class="repeat-options">
+            {% for value, label in focus_subcategory_choices %}
+            <label class="repeat-option">
+                <input type="radio" name="subcategory" value="{{ value }}"
+                    {% if task and task.subcategory == value %}checked{% endif %}>
+                <span>{{ label }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        <span class="field__hint" id="focus-subcategory-hint">
+            "Lectura" además podrá usar el tiempo real en tu app de lectura, si lo configuras en Ajustes de la app móvil.
+        </span>
+    </fieldset>
+
+    <label class="field field--inline" id="general-timer-field">
+        <input type="checkbox" name="wants_timer" id="wants-timer-checkbox" {% if task.wants_timer %}checked{% endif %}>
+        <span class="field__label">Cronometrar esta tarea (vídeo de estudio o temporizador)</span>
+    </label>
+
+    <label class="field focus-target-field" id="focus-target-field">
+        <span class="field__label">Objetivo (minutos)</span>
+        <input type="number" name="target_minutes" min="1" max="600"
+               placeholder="60" value="{{ task.target_minutes|default:'' }}">
+        <span class="field__hint">Déjalo en blanco para una sesión libre, sin objetivo que cumplir.</span>
+    </label>
+
+    <fieldset class="field" id="video-source-field">
+        <legend class="field__label">Vídeo</legend>
+        <div class="repeat-options">
+            <label class="repeat-option">
+                <input type="radio" name="video_source" value="youtube"
+                    {% if not task.has_local_video %}checked{% endif %}>
+                <span>YouTube</span>
+            </label>
+            <label class="repeat-option">
+                <input type="radio" name="video_source" value="local"
+                    {% if task.has_local_video %}checked{% endif %}>
+                <span>Archivo de mi ordenador</span>
+            </label>
+        </div>
+        <span class="field__hint">Una de las dos — no hace falta rellenar ambas.</span>
+    </fieldset>
+
+    <label class="field" id="video-field">
+        <span class="field__label">Vídeo de YouTube (opcional)</span>
+        <input type="text" name="youtube_video_id" placeholder="https://youtube.com/watch?v=…"
+               value="{{ task.youtube_video_id|default:'' }}">
+        <span class="field__hint">
+            Si pones un vídeo, esta tarea deja de lado el selector de ejercicios (o el
+            temporizador, si es de Enfoque o Estudio): al darle a play se va directa al vídeo, y al
+            terminarlo se marca hecha ella sola. Déjalo en blanco para que la tarea funcione
+            como siempre.
+        </span>
+    </label>
+
+    <div class="field" id="local-video-field">
+        <span class="field__label">Vídeo de tu ordenador</span>
+        <div class="local-video-picker">
+            <button type="button" class="ghost-btn" id="pick-local-file-btn">Elegir archivo…</button>
+        </div>
+        <p class="field__hint" id="local-file-status">
+            {% if task.has_local_video %}✓ Ya tienes uno elegido en este navegador.{% endif %}
+        </p>
+        <p class="field__hint" id="local-file-unsupported" hidden>
+            Tu navegador no soporta elegir archivos así — usa Chrome o Edge, o pon un vídeo de YouTube en su lugar.
+        </p>
+        <input type="hidden" name="has_local_video" id="has-local-video-input" value="{% if task.has_local_video %}1{% endif %}">
+        <input type="hidden" name="client_uuid" id="client-uuid-input" value="{{ task.uuid|default:'' }}">
+    </div>
+
+    <label class="field" id="playlist-field">
+        <span class="field__label">…o playlist de YouTube (alternativa al vídeo suelto)</span>
+        <input type="text" name="youtube_playlist_id" placeholder="https://youtube.com/playlist?list=…"
+               value="{{ task.youtube_playlist_id|default:'' }}">
+        <span class="field__hint">Si pones esto, se ignora el campo de vídeo de arriba.</span>
+    </label>
+
+    <label class="field" id="video-target-count-field">
+        <span class="field__label">…o número de vídeos de la playlist (opcional)</span>
+        <input type="number" name="target_video_count" min="1" max="500"
+               placeholder="Ej: 5"
+               value="{{ task.target_video_count|default:'' }}">
+        <span class="field__hint">Solo con playlist. Si rellenas esto, gana sobre el objetivo en minutos.</span>
+    </label>
 
     <div class="task-form__actions">
         <button type="submit" class="primary-btn">{% if task %}Guardar cambios{% else %}Crear tarea{% endif %}</button>
@@ -161,12 +251,46 @@
     update();
 
     var subcategoryField = document.getElementById('subcategory-field');
+    var focusSubcategoryField = document.getElementById('focus-subcategory-field');
+    var focusTargetField = document.getElementById('focus-target-field');
+    var generalTimerField = document.getElementById('general-timer-field');
+    var wantsTimerCheckbox = document.getElementById('wants-timer-checkbox');
+    var videoSourceField = document.getElementById('video-source-field');
+    var videoField = document.getElementById('video-field');
+    var localVideoField = document.getElementById('local-video-field');
+    var playlistField = document.getElementById('playlist-field');
+    var videoTargetCountField = document.getElementById('video-target-count-field');
     var categoryRadios = document.querySelectorAll('[data-category-toggle]');
 
     var avoidFields = document.getElementById('avoid-fields');
     function updateSubcategory(){
         var v = (document.querySelector('[data-category-toggle]:checked') || {}).value || 'general';
         subcategoryField.style.display = v === 'sport' ? 'block' : 'none';
+        focusSubcategoryField.style.display = v === 'work' ? 'block' : 'none';
+        generalTimerField.style.display = v === 'general' ? 'block' : 'none';
+
+        // Objetivo en minutos: Enfoque y Estudio siempre lo ofrecen (para
+        // Estudio vale tanto si hay vídeo/playlist como si no — sin vídeo
+        // es sencillamente el temporizador); General solo si se ha
+        // activado el cronómetro con la casilla de arriba.
+        var wantsTimer = !!(wantsTimerCheckbox && wantsTimerCheckbox.checked);
+        focusTargetField.style.display =
+            (v === 'work' || v === 'study' || (v === 'general' && wantsTimer)) ? 'block' : 'none';
+
+        // Deporte/Enfoque eligen entre vídeo de YouTube o archivo local
+        // (una de las dos, nunca las dos a la vez). Estudio no tiene esa
+        // elección — ahí siempre es YouTube (vídeo suelto o playlist), y
+        // es OPCIONAL: sin nada puesto, la tarea es sencillamente el
+        // temporizador de arriba.
+        var esDeporteOEnfoque = v === 'sport' || v === 'work';
+        var esEstudio = v === 'study';
+        videoSourceField.style.display = esDeporteOEnfoque ? 'block' : 'none';
+        var fuente = (document.querySelector('[name="video_source"]:checked') || {}).value || 'youtube';
+        videoField.style.display =
+            esEstudio || (esDeporteOEnfoque && fuente === 'youtube') ? 'block' : 'none';
+        localVideoField.style.display = (esDeporteOEnfoque && fuente === 'local') ? 'block' : 'none';
+        playlistField.style.display = esEstudio ? 'block' : 'none';
+        videoTargetCountField.style.display = esEstudio ? 'block' : 'none';
         avoidFields.style.display = v === 'avoid' ? 'block' : 'none';
 
         // Una antitarea no "vence": se te pregunta. Y como se repite a
@@ -184,7 +308,87 @@
             : 'Si pasa sin marcarla → auto no hecha';
     }
     categoryRadios.forEach(function(r){ r.addEventListener('change', updateSubcategory); });
+    if (wantsTimerCheckbox) wantsTimerCheckbox.addEventListener('change', updateSubcategory);
+    document.querySelectorAll('[name="video_source"]').forEach(function(r){
+        r.addEventListener('change', updateSubcategory);
+    });
+    // Delegado en el contenedor, por si el cambio en algún radio concreto
+    // no llega a disparar su propio 'change' (pasa en algunos navegadores
+    // cuando el clic aterriza en el <span> en vez de en el <input>).
+    // click+change a la vez es redundante pero inofensivo: la función
+    // solo lee el estado actual, no importa cuántas veces se llame.
+    var categoryOptions = document.getElementById('category-options');
+    if (categoryOptions) {
+        categoryOptions.addEventListener('click', function(){ setTimeout(updateSubcategory, 0); });
+    }
+    videoSourceField.addEventListener('click', function(){ setTimeout(updateSubcategory, 0); });
     updateSubcategory();
+
+    // ------------------------------------------------- vídeo local
+    // Mismo IndexedDB que usa la pantalla de reproducción (misma base,
+    // misma clave por tarea) — así lo que se elige aquí ya está listo
+    // cuando se abra el vídeo por primera vez, sin tener que volver a
+    // elegirlo. File System Access API: solo Chrome/Edge.
+    var clientUuidInput = document.getElementById('client-uuid-input');
+    var hasLocalVideoInput = document.getElementById('has-local-video-input');
+    var pickBtn = document.getElementById('pick-local-file-btn');
+    var localStatus = document.getElementById('local-file-status');
+    var localUnsupported = document.getElementById('local-file-unsupported');
+
+    if (!clientUuidInput.value && window.crypto && crypto.randomUUID) {
+        // Tarea nueva: hace falta un identificador YA, antes de guardar,
+        // para que el archivo se guarde con la clave correcta. Al
+        // enviar el formulario, el servidor usa este mismo uuid en vez
+        // de inventarse uno.
+        clientUuidInput.value = crypto.randomUUID();
+    }
+
+    function openHandleDb() {
+        return new Promise(function (resolve, reject) {
+            var req = indexedDB.open('libreta-local-videos', 1);
+            req.onupgradeneeded = function () { req.result.createObjectStore('handles'); };
+            req.onsuccess = function () { resolve(req.result); };
+            req.onerror = function () { reject(req.error); };
+        });
+    }
+    function storeHandle(key, handle) {
+        return openHandleDb().then(function (db) {
+            return new Promise(function (resolve, reject) {
+                var tx = db.transaction('handles', 'readwrite');
+                tx.objectStore('handles').put(handle, key);
+                tx.oncomplete = function () { resolve(); };
+                tx.onerror = function () { reject(tx.error); };
+            });
+        });
+    }
+
+    if (!('showOpenFilePicker' in window)) {
+        pickBtn.disabled = true;
+        localUnsupported.hidden = false;
+    }
+    // Mete el nombre real del error del navegador en el mensaje (p.ej.
+    // "SecurityError") en vez de un "no se pudo" genérico — así, si
+    // falla, se ve en la propia pantalla qué es exactamente, sin tener
+    // que abrir la consola del navegador.
+    function describeError(err) {
+        return err && err.name ? ' (' + err.name + (err.message ? ': ' + err.message : '') + ')' : '';
+    }
+    pickBtn.addEventListener('click', function () {
+        window.showOpenFilePicker({
+            types: [{ description: 'Vídeos', accept: { 'video/*': ['.mp4', '.mov', '.webm', '.mkv'] } }],
+            multiple: false,
+        }).then(function (handles) {
+            var handle = handles[0];
+            return storeHandle(clientUuidInput.value, handle).then(function () {
+                hasLocalVideoInput.value = '1';
+                localStatus.textContent = '✓ ' + handle.name;
+            });
+        }).catch(function (err) {
+            if (err && err.name !== 'AbortError') {
+                localStatus.textContent = 'No se pudo usar ese archivo' + describeError(err) + '.';
+            }
+        });
+    });
 })();
 </script>
 {% endblock %}

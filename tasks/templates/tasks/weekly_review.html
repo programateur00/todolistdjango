@@ -1,0 +1,60 @@
+{% extends "tasks/base.html" %}
+{% block title %}Revisión semanal — Libreta{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">domingo, o cuando toque</span>
+        <h1>Revisión semanal</h1>
+    </div>
+    <a href="{% url 'tasks:plan_list' %}" class="stats-link">← Planes</a>
+</header>
+
+<section class="week-summary" aria-label="Progreso global de la semana">
+    <div class="week-summary__top">
+        <span class="week-summary__label">Global — todo lo que llevas</span>
+        <span class="week-summary__pct">{% if weekly.pct is not None %}{{ weekly.pct }}%{% else %}—{% endif %}</span>
+    </div>
+    {% if weekly.pct is not None %}
+    <div class="stats-bar"><div class="stats-bar__done" style="width:{{ weekly.pct }}%"></div></div>
+    {% endif %}
+    <p class="week-summary__meta">
+        {% if weekly.total %}{{ weekly.done }} de {{ weekly.total }} ocurrencias · {{ weekly.week_start|date:"d M" }}–{{ weekly.week_end|date:"d M" }}
+        {% else %}Todavía no hay ocurrencias esta semana{% endif %}
+    </p>
+</section>
+
+<h2 class="section-title">Tus objetivos esta semana</h2>
+
+{% if plans %}
+<ul class="plan-list">
+    {% for p in plans %}
+    <li class="plan-card">
+        <a href="{% url 'tasks:plan_detail' p.plan.pk %}">
+            <p class="plan-card__name">{{ p.plan.name }}</p>
+            <p class="plan-card__meta">Semana {{ p.plan.week_number }} de {{ p.plan.weeks }}</p>
+
+            <p class="review-label">Ejecución de esta semana</p>
+            {% if p.weekly and p.weekly.total %}
+            <div class="stats-bar"><div class="stats-bar__done" style="width:{{ p.weekly.pct }}%"></div></div>
+            <p class="plan-card__head">{{ p.weekly.pct }}% · {{ p.weekly.done }} de {{ p.weekly.total }} sesiones</p>
+            {% else %}
+            <p class="plan-card__head">Todavía no ha tocado esta semana.</p>
+            {% endif %}
+
+            {% if p.progress is not None %}
+            <p class="review-label">Camino hacia el objetivo</p>
+            <div class="plan-bar"><div class="plan-bar__fill" style="width: {{ p.progress }}%"></div></div>
+            <p class="plan-card__meta">{{ p.progress }}% recorrido</p>
+            {% endif %}
+        </a>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<p class="empty-state">
+    No tienes objetivos activos ahora mismo. Crea un plan para que aparezca aquí cada semana.
+</p>
+{% endif %}
+
+{% endblock %}

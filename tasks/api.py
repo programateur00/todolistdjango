@@ -16,6 +16,7 @@ van con @csrf_exempt porque la API no usa cookies de sesión — la
 protección CSRF existe para ataques basados en cookies, y aquí no aplica.
 """
 import json
+import uuid
 from functools import wraps
 
 from django.db.models import Q
@@ -27,7 +28,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from .models import (
-    Exercise, Occurrence, Plan, Routine, RoutineItem, Task, WorkoutSession,
+    Exercise, Occurrence, Plan, Routine, RoutineItem, SavedVideo, Task, TimerSession, WorkoutSession,
 )
 from .utils import get_current_user, resolve_plan_target as _plan_context
 
@@ -87,10 +88,20 @@ def task_json(t):
         "subcategory": t.subcategory,
         "is_avoid": t.is_avoid,
         "capabilities": t.category_capabilities,
-        # Qué tipo de sesión abre: "camera", "timer", "distance" o null.
-        # La app elige el icono con esto, para no enseñar una cámara en
-        # una tarea que no va a grabar nada.
+        # Qué tipo de sesión abre: "camera", "timer", "distance", "focus" o
+        # null. La app elige el icono con esto, para no enseñar una cámara
+        # en una tarea que no va a grabar nada.
         "workout_kind": t.workout_kind,
+        # Solo relevante si category="work" (Enfoque): objetivo en minutos
+        # del temporizador. None = sesión libre, sin objetivo.
+        "target_minutes": t.target_minutes,
+        "youtube_video_id": t.youtube_video_id,
+        "youtube_playlist_id": t.youtube_playlist_id,
+        "target_video_count": t.target_video_count,
+        "has_local_video": t.has_local_video,
+        # Racha actual de esta serie — mismo cálculo que Rachas, para
+        # poder enseñarla en la tarjeta sin ir a buscarla.
+        "current_streak": t.current_streak,
         # Si la tarea la generó un plan, la app va directa a la sesión sin
         # pasar por el selector de ejercicios: el plan ya decidió.
         "plan_uuid": str(t.plan.uuid) if t.plan else None,
@@ -175,7 +186,12 @@ def meta(request):
     no tenga que repetirlos hardcodeados y desincronizarse del servidor."""
     return JsonResponse({
         "categories": [{"value": v, "label": l} for v, l in Task.CATEGORY_CHOICES],
-        "subcategories": [{"value": v, "label": l} for v, l in Task.SUBCATEGORY_CHOICES],
+        # Separadas porque significan cosas distintas según la categoría:
+        # en Deporte filtran qué ejercicios se ofrecen; en Enfoque, qué se
+        # está cronometrando. Mezclarlas en una sola lista confundiría el
+        # selector (verías "Lectura" al elegir un ejercicio de deporte).
+        "sport_subcategories": [{"value": v, "label": l} for v, l in Task.SPORT_SUBCATEGORY_CHOICES],
+        "focus_subcategories": [{"value": v, "label": l} for v, l in Task.FOCUS_SUBCATEGORY_CHOICES],
         "repeats": [{"value": v, "label": l} for v, l in Task.REPEAT_CHOICES],
         "weekdays": [{"value": v, "label": l} for v, l in Task.WEEKDAYS],
         "capabilities": Task.CATEGORY_CAPABILITIES,
@@ -185,6 +201,7 @@ def meta(request):
 @api("GET")
 def task_list(request):
     Task.expire_overdue()
+    Plan.auto_close_expired(user=_user())
     hoy = timezone.localtime(timezone.now()).date()
     qs = tasks_qs()
     category = request.GET.get("category")
@@ -194,6 +211,7 @@ def task_list(request):
         # Mismo criterio que la web: la tarea de mañana no es de hoy.
         "pending": [task_json(t) for t in Task.for_today(qs.filter(is_done=False))],
         "completed": [task_json(t) for t in Task.completed_today(qs)],
+        "weekly": Occurrence.weekly_completion(_user()),
     })
 
 
@@ -245,7 +263,10 @@ def stats_list(request):
         total = s["done"] + s["not_done"]
         s["total"] = total
         s["rate"] = round(100 * s["done"] / total) if total else 0
-    return JsonResponse({"stats": list(summary.values())})
+    return JsonResponse({
+        "stats": list(summary.values()),
+        "weekly": Occurrence.weekly_completion(_user()),
+    })
 
 
 # ------------------------------------------------------- escritura
@@ -266,6 +287,32 @@ def _apply_task_fields(t, data):
     if "subcategory" in data:
         valid = {k for k, _ in Task.SUBCATEGORY_CHOICES}
         t.subcategory = data["subcategory"] if data["subcategory"] in valid else ""
+    if "target_minutes" in data:
+        raw = data["target_minutes"]
+        if raw in (None, "", 0):
+            t.target_minutes = None
+        else:
+            try:
+                t.target_minutes = max(1, int(raw))
+            except (TypeError, ValueError):
+                t.target_minutes = None
+    if "youtube_video_id" in data:
+        # La normalización a un ID limpio la hace Task.save(), no hace
+        # falta duplicarla aquí.
+        t.youtube_video_id = (data.get("youtube_video_id") or "").strip()[:255]
+    if "youtube_playlist_id" in data:
+        t.youtube_playlist_id = (data.get("youtube_playlist_id") or "").strip()[:255]
+    if "target_video_count" in data:
+        raw = data["target_video_count"]
+        if raw in (None, "", 0):
+            t.target_video_count = None
+        else:
+            try:
+                t.target_video_count = max(1, int(raw))
+            except (TypeError, ValueError):
+                t.target_video_count = None
+    if "has_local_video" in data:
+        t.has_local_video = bool(data.get("has_local_video"))
     if "due_date" in data:
         raw = data["due_date"]
         if not raw:
@@ -314,6 +361,15 @@ def task_create(request):
         return JsonResponse({"ok": False, "error": error}, status=400)
     if not t.title:
         return JsonResponse({"ok": False, "error": "Falta el título."}, status=400)
+    # Si el cliente ya trae un uuid (offline-first, o porque generó uno
+    # de antemano para poder guardar un vídeo local con esa clave antes
+    # de crear la tarea), se respeta en vez de generar uno nuevo.
+    raw_uuid = (data.get("uuid") or data.get("client_uuid") or "").strip()
+    if raw_uuid:
+        try:
+            t.uuid = uuid.UUID(raw_uuid)
+        except ValueError:
+            pass
     t.save()
     return JsonResponse({"ok": True, "task": task_json(t)}, status=201)
 
@@ -494,6 +550,96 @@ def routine_detail(request, uuid):
     r.deleted_at = timezone.now()
     r.save(update_fields=["deleted_at", "updated_at"])
     return JsonResponse({"ok": True})
+
+
+@api("POST")
+def video_save(request, uuid):
+    """
+    El vídeo llegó al final en el móvil -> la tarea se marca hecha
+    directamente. Sin sesión que guardar: la tarea ENTERA es "ver el
+    vídeo", verlo entero es todo lo que hace falta.
+    """
+    t = get_object_or_404(tasks_qs(), uuid=uuid)
+    t.mark_done()
+    return JsonResponse({"ok": True, "task": task_json(t)})
+
+
+# ---------------------------------------------------- vídeos guardados
+
+def saved_video_json(v):
+    return {
+        "uuid": str(v.uuid), "scope": v.scope,
+        "title": v.title, "youtube_video_id": v.youtube_video_id,
+    }
+
+
+@api("GET", "POST")
+def saved_video_list(request):
+    """
+    GET ?scope=lower_body -> tus vídeos guardados de ese tipo, para el
+    selector de tren superior/inferior/estudio.
+    POST -> guarda uno nuevo (se elige justo después de crearlo, un
+    paso menos que guardar y luego ir a buscarlo en la lista).
+    """
+    if request.method == "GET":
+        qs = SavedVideo.objects.filter(user=_user(), deleted_at__isnull=True)
+        scope = request.GET.get("scope")
+        if scope:
+            qs = qs.filter(scope=scope)
+        return JsonResponse({"videos": [saved_video_json(v) for v in qs]})
+
+    data = body(request)
+    valid_scopes = {k for k, _ in SavedVideo.SCOPE_CHOICES}
+    scope = data.get("scope")
+    raw = (data.get("youtube_video_id") or "").strip()
+    if scope not in valid_scopes:
+        return JsonResponse({"ok": False, "error": "scope no válido"}, status=400)
+    if not raw:
+        return JsonResponse({"ok": False, "error": "Falta el enlace de YouTube"}, status=400)
+
+    v = SavedVideo.objects.create(
+        user=_user(), scope=scope, youtube_video_id=raw,
+        title=(data.get("title") or "").strip()[:120],
+    )
+    return JsonResponse({"ok": True, "video": saved_video_json(v)}, status=201)
+
+
+@api("DELETE")
+def saved_video_delete(request, uuid):
+    """Borrado suave, para poder limpiar la lista sin romper el historial."""
+    v = get_object_or_404(SavedVideo, uuid=uuid, user=_user())
+    from django.utils import timezone
+    v.deleted_at = timezone.now()
+    v.save(update_fields=["deleted_at"])
+    return JsonResponse({"ok": True})
+
+
+# ------------------------------------------------------------- enfoque
+
+@api("POST")
+def focus_save(request, uuid):
+    """
+    Sesión de temporizador (leer, estudiar, estirar…). El móvil manda los
+    minutos ya contados y, si el subtipo es "reading" y vino del plugin
+    nativo, la fuente y el paquete de la app. Mismo criterio de
+    completado que workout_save: si hay objetivo y no se llega, la tarea
+    se queda pendiente con el porcentaje guardado.
+    """
+    t = get_object_or_404(tasks_qs(), uuid=uuid)
+    data = body(request)
+
+    minutes = max(0, int(data.get("minutes", 0)))
+    source = data.get("source") if data.get("source") in dict(TimerSession.SOURCE_CHOICES) else TimerSession.SOURCE_MANUAL
+    app_package = (data.get("app_package") or "")[:120] if source == TimerSession.SOURCE_APP_USAGE else ""
+
+    ts = TimerSession.objects.create(
+        task=t, user=_user(), series_id=t.series_id,
+        subcategory=t.subcategory, source=source, app_package=app_package,
+        minutes=minutes, target_minutes=t.target_minutes,
+    )
+    if ts.target_met:
+        t.mark_done()
+    return JsonResponse({"ok": True, "session_uuid": str(ts.uuid), "task": task_json(t)})
 
 
 # ------------------------------------------------------ entrenamientos
@@ -702,6 +848,30 @@ def plans_qs():
 @api("GET")
 def plan_list(request):
     return JsonResponse({"plans": [plan_json(p) for p in plans_qs()]})
+
+
+@api("GET")
+def weekly_review(request):
+    """
+    Mismo contenido que la revisión semanal de la web: el global y,
+    para cada objetivo activo, su ejecución de esta semana y cuánto
+    lleva recorrido.
+    """
+    plans = []
+    for p in plans_qs().filter(is_active=True):
+        plans.append({
+            "uuid": str(p.uuid),
+            "id": p.pk,
+            "name": p.name,
+            "week": p.week_number,
+            "weeks": p.weeks,
+            "progress_pct": p.progress_pct(),
+            "weekly": p.weekly_completion(),
+        })
+    return JsonResponse({
+        "weekly": Occurrence.weekly_completion(_user()),
+        "plans": plans,
+    })
 
 
 @api("GET")

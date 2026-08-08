@@ -23,7 +23,6 @@ class CategoryModelTests(TestCase):
     def test_category_capabilities_study_has_timer(self):
         t = Task(category=Task.CATEGORY_STUDY)
         self.assertTrue(t.has_capability("timer"))
-        self.assertTrue(t.has_capability("pomodoro"))
         self.assertFalse(t.has_capability("pose_tracking"))
 
     def test_category_capabilities_sport_has_pose(self):
@@ -31,9 +30,14 @@ class CategoryModelTests(TestCase):
         self.assertTrue(t.has_capability("pose_tracking"))
         self.assertTrue(t.has_capability("timer"))
 
-    def test_category_capabilities_general_empty(self):
+    def test_category_capabilities_general_has_timer(self):
+        """
+        General ofrece el cronómetro como capacidad de categoría (aparece
+        en category_capabilities), pero solo se ACTIVA por tarea con
+        wants_timer — eso lo comprueba WorkoutKindTests, no este test.
+        """
         t = Task(category=Task.CATEGORY_GENERAL)
-        self.assertEqual(t.category_capabilities, [])
+        self.assertTrue(t.has_capability("timer"))
 
     def test_recurrence_inherits_category(self):
         """Al marcar como hecha, la siguiente ocurrencia hereda la categoría."""
@@ -579,9 +583,22 @@ class WorkoutKindTests(TestCase):
     def test_running_is_manual(self):
         self.assertEqual(self._kind(Task.SUBCATEGORY_RUNNING), "distance")
 
-    def test_non_sport_has_no_workout_button(self):
-        self.assertIsNone(self._kind("", category=Task.CATEGORY_STUDY))
+    def test_avoid_has_no_workout_button(self):
         self.assertIsNone(self._kind("", category=Task.CATEGORY_AVOID))
+
+    def test_study_opens_focus_flow(self):
+        """Estudio siempre ofrece el flujo de vídeo-o-temporizador, sin más."""
+        self.assertEqual(self._kind("", category=Task.CATEGORY_STUDY), "focus")
+
+    def test_general_has_no_workout_button_by_default(self):
+        """Una tarea General normal sigue siendo un todo de toda la vida."""
+        t = Task(category=Task.CATEGORY_GENERAL)
+        self.assertIsNone(t.workout_kind)
+
+    def test_general_opens_focus_flow_when_wants_timer(self):
+        """Con wants_timer activado, General ofrece el mismo flujo que Estudio."""
+        t = Task(category=Task.CATEGORY_GENERAL, wants_timer=True)
+        self.assertEqual(t.workout_kind, "focus")
 
     def test_api_exposes_workout_kind(self):
         t = Task.objects.create(

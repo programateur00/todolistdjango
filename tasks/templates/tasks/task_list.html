@@ -9,6 +9,22 @@
     </div>
 </header>
 
+{% if weekly %}
+<section class="week-summary" aria-label="Progreso de la semana">
+    <div class="week-summary__top">
+        <span class="week-summary__label">Esta semana</span>
+        <span class="week-summary__pct">{% if weekly.pct is not None %}{{ weekly.pct }}%{% else %}—{% endif %}</span>
+    </div>
+    {% if weekly.pct is not None %}
+    <div class="stats-bar"><div class="stats-bar__done" style="width:{{ weekly.pct }}%"></div></div>
+    {% endif %}
+    <p class="week-summary__meta">
+        {% if weekly.total %}{{ weekly.done }} de {{ weekly.total }} ocurrencias · {{ weekly.week_start|date:"d M" }}–{{ weekly.week_end|date:"d M" }}
+        {% else %}Todavía no hay ocurrencias esta semana{% endif %}
+    </p>
+</section>
+{% endif %}
+
 {% if messages %}
 <ul class="flash-list">{% for m in messages %}<li class="flash">{{ m }}</li>{% endfor %}</ul>
 {% endif %}
@@ -25,7 +41,7 @@
 <nav class="category-filter" aria-label="Filtrar por tipo">
     <a class="category-chip {% if not active_category %}category-chip--active{% endif %}"
        href="{% url 'tasks:task_list' %}">
-        Todas <span class="category-chip__count">{{ category_counts|length }}</span>
+        Todas <span class="category-chip__count">{{ total_task_count }}</span>
     </a>
     {% for c in category_counts %}
     <a class="category-chip category-chip--{{ c.key }} {% if active_category == c.key %}category-chip--active{% endif %}"
@@ -56,8 +72,8 @@
         <li class="task-card{% if task.is_important %} task-card--important{% endif %}{% if overdue %} task-card--overdue{% endif %}">
             <div class="task-card__actions">
                 {% if task.workout_kind %}
-                <a href="{% url 'tasks:task_workout' task.pk %}" class="workout-btn"
-                   title="{% if task.workout_kind == 'camera' %}Contar repeticiones con la cámara{% elif task.workout_kind == 'timer' %}Empezar circuito cronometrado{% else %}Anotar la sesión{% endif %}">
+                <a href="{% if task.workout_kind == 'focus' %}{% url 'tasks:task_focus' task.pk %}{% elif task.workout_kind == 'video' %}{% url 'tasks:task_video' task.pk %}{% else %}{% url 'tasks:task_workout' task.pk %}{% endif %}" class="workout-btn"
+                   title="{% if task.workout_kind == 'camera' %}Contar repeticiones con la cámara{% elif task.workout_kind == 'timer' %}Empezar circuito cronometrado{% elif task.workout_kind == 'focus' %}Empezar temporizador{% elif task.workout_kind == 'video' %}Ver el vídeo{% else %}Anotar la sesión{% endif %}">
                     <svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4.5l12 7.5-12 7.5v-15z"/></svg>
                 </a>
                 {% else %}
@@ -79,7 +95,12 @@
             </div>
 
             <a class="task-card__body" href="{% url 'tasks:task_edit' task.pk %}">
-                <p class="task-card__title">{{ task.title }}</p>
+                <div class="task-card__title-row">
+                    <p class="task-card__title">{{ task.title }}</p>
+                    {% if task.current_streak > 0 %}
+                    <span class="task-card__streak" title="Racha actual">🔥 {{ task.current_streak }}</span>
+                    {% endif %}
+                </div>
                 <div class="task-card__meta">
                     <span class="meta-pill meta-pill--category meta-pill--{{ task.category }}">{{ task.get_category_display }}</span>
                     {% if task.due_date %}

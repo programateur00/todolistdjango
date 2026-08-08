@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from .models import (
-    Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, Task, WorkoutSession,
+    Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, SavedVideo, Task, WorkoutSession,
 )
 
 
@@ -31,6 +31,13 @@ class ExerciseAdmin(admin.ModelAdmin):
     search_fields = ("name", "slug")
     prepopulated_fields = {"slug": ("name",)}
     list_per_page = 50
+
+
+@admin.register(SavedVideo)
+class SavedVideoAdmin(admin.ModelAdmin):
+    list_display = ("title", "scope", "youtube_video_id", "user", "created_at")
+    list_filter = ("scope",)
+    search_fields = ("title", "youtube_video_id")
 
 
 class RoutineItemInline(admin.TabularInline):

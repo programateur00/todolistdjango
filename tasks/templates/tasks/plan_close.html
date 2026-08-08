@@ -1,0 +1,86 @@
+{% extends "tasks/base.html" %}
+{% block title %}Cerrar {{ plan.name }} — Libreta{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">{% if plan.closed_at %}cerrado{% else %}cierre de ciclo{% endif %}</span>
+        <h1>{{ plan.name }}</h1>
+    </div>
+    <a href="{% url 'tasks:plan_list' %}" class="stats-link">← Planes</a>
+</header>
+
+<section class="celebration">
+    <p class="celebration__emoji">{% if plan.closed_at %}{% if plan.is_completed %}🎉{% else %}🏳️{% endif %}{% else %}🏁{% endif %}</p>
+    {% if plan.closed_at %}
+        {% if plan.is_completed %}
+        <h2 class="celebration__title">¡Enhorabuena!</h2>
+        <p class="celebration__text">Has completado «{{ plan.name }}» — {{ plan.week_number }} semanas.</p>
+        {% if plan.reward %}
+        <p class="celebration__reward">Y te has ganado tu recompensa: <strong>{{ plan.reward }}</strong></p>
+        {% endif %}
+        {% else %}
+        <h2 class="celebration__title">Ciclo terminado</h2>
+        <p class="celebration__text">
+            «{{ plan.name }}» se cerró sin llegar al {{ plan.COMPLETION_THRESHOLD_PCT }}%
+            {% if progress is not None %}(te quedaste en el {{ progress }}%){% endif %}.
+            No pasa nada — es un dato, no un fracaso. La próxima vez sabes desde dónde partes.
+        </p>
+        {% if plan.reward %}
+        <p class="field__hint">
+            La recompensa que te pusiste ({{ plan.reward }}) se queda para el próximo ciclo que sí llegue.
+        </p>
+        {% endif %}
+        {% endif %}
+    {% else %}
+    <h2 class="celebration__title">Resumen de «{{ plan.name }}»</h2>
+    <p class="celebration__text">
+        Antes de cerrarlo, así ha quedado
+        {% if progress is not None %}— vas al {{ progress }}%
+            {% if plan.is_completed %}, ya llegas al mínimo del {{ plan.COMPLETION_THRESHOLD_PCT }}%{% else %}, hacen falta {{ plan.COMPLETION_THRESHOLD_PCT }}% para que cuente como completado{% endif %}
+        {% endif %}.
+    </p>
+    {% endif %}
+</section>
+
+{% if progress is not None %}
+<div class="plan-bar" role="img" aria-label="Progreso final: {{ progress }}%">
+    <div class="plan-bar__fill" style="width: {{ progress }}%"></div>
+</div>
+<p class="plan-head__meta">{{ progress }}% del objetivo principal</p>
+{% endif %}
+
+{% if items %}
+<h2 class="section-title">Por objetivo</h2>
+<ul class="plan-list">
+    {% for row in items %}
+    <li class="plan-card">
+        <p class="plan-card__name">{{ row.item.display_name }}</p>
+        <p class="plan-card__meta">
+            {{ row.successes }} sesiones cumplidas
+            {% if row.target %}· llegaste a
+                {% if row.target.reps %}{{ row.target.sets }} × {{ row.target.reps }}{% else %}{{ row.target.sets }} × {{ row.target.seconds }}s{% endif %}
+                {% if row.target.weight_kg %} con {{ row.target.weight_kg|floatformat:"-1" }} kg{% endif %}
+            {% endif %}
+        </p>
+    </li>
+    {% endfor %}
+</ul>
+{% endif %}
+
+{% if not plan.closed_at %}
+<form action="{% url 'tasks:plan_close' plan.pk %}" method="post"
+      onsubmit="return confirm('¿Cerrar «{{ plan.name|escapejs }}»? Dejará de generarte tareas, pero se queda en Planes cerrados para poder mirarlo luego.');">
+    {% csrf_token %}
+    <div class="task-form__actions">
+        <button type="submit" class="primary-btn">Confirmar cierre</button>
+        <a class="ghost-btn" href="{% url 'tasks:plan_detail' plan.pk %}">Seguir con el plan</a>
+    </div>
+</form>
+{% else %}
+<div class="task-form__actions">
+    <a class="primary-btn" href="{% url 'tasks:task_list' %}">Volver a Tareas</a>
+</div>
+{% endif %}
+
+{% endblock %}

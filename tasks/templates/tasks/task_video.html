@@ -1,0 +1,423 @@
+{% extends "tasks/base.html" %}
+{% block title %}{{ task.title }} — Libreta{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">vídeo</span>
+        <h1>{{ task.title }}</h1>
+    </div>
+    <a href="{% url 'tasks:task_list' %}" class="stats-link">← Volver</a>
+</header>
+
+<div class="video-embed">
+    <div id="video-player" class="video-embed__player"></div>
+    <video id="local-video-player" class="video-embed__player" playsinline controls hidden></video>
+    {% if target_minutes or target_video_count %}
+    <div class="stats-bar"><div class="stats-bar__done" id="video-progress" style="width:0%"></div></div>
+    {% endif %}
+    <p class="field__hint" id="video-hint">Cargando…</p>
+    <div class="task-form__actions" id="video-permission-prompt" hidden>
+        <button type="button" class="primary-btn" id="video-permission-btn">Elegir vídeo y reproducir</button>
+    </div>
+    {% if task.category == 'work' or task.category == 'sport' %}
+    <p class="field__hint" id="local-video-actions"></p>
+    {% endif %}
+</div>
+
+<script src="https://www.youtube.com/iframe_api"></script>
+<script>
+(function () {
+    var hint = document.getElementById('video-hint');
+    var progressBar = document.getElementById('video-progress');
+    var ytContainer = document.getElementById('video-player');
+    var localVideoEl = document.getElementById('local-video-player');
+    var localActions = document.getElementById('local-video-actions');
+    var permissionPrompt = document.getElementById('video-permission-prompt');
+    var permissionBtn = document.getElementById('video-permission-btn');
+
+    var videoId = "{{ video_id }}";
+    var playlistId = "{{ playlist_id }}";
+    var targetMinutes = {{ target_minutes|default_if_none:"null" }};
+    var targetVideoCount = {{ target_video_count|default_if_none:"null" }} || (playlistId && !targetMinutes ? 1 : null);
+    var saveUrl = "{% url 'tasks:task_video_save' task.pk %}";
+    var csrfToken = "{{ csrf_token }}";
+    // Un vídeo local guardado en ESTE navegador para esta tarea, además
+    // del de YouTube — solo tiene sentido en Deporte/Enfoque (vídeos
+    // cortos); Estudio ya usa playlists/vídeos largos de YouTube.
+    var allowLocal = {% if task.category == 'work' or task.category == 'sport' %}true{% else %}false{% endif %};
+    // Si la tarea en sí es "solo vídeo local" (se eligió así al crearla,
+    // sin ningún vídeo de YouTube de respaldo) — no hay a qué volver si
+    // el archivo no aparece, así que el mensaje de error es distinto.
+    var localOnly = {{ has_local_video|yesno:"true,false" }};
+    var taskKey = "{{ task.uuid }}";
+
+    var saved = false;
+    var elapsedSeconds = 0;
+    var videosWatched = 0;
+    var pollId = null;
+    var player = null;      // reproductor de YouTube
+    var usingLocal = false;
+
+    function fmtMin(s) {
+        return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+    }
+
+    function updateProgressLabel() {
+        if (targetVideoCount) {
+            hint.textContent = videosWatched + ' de ' + targetVideoCount + ' vídeos vistos.';
+            if (progressBar) progressBar.style.width = Math.min(100, Math.round(100 * videosWatched / targetVideoCount)) + '%';
+        } else if (targetMinutes) {
+            hint.textContent = fmtMin(elapsedSeconds) + ' de ' + targetMinutes + ' min.';
+            if (progressBar) progressBar.style.width = Math.min(100, Math.round(100 * elapsedSeconds / (targetMinutes * 60))) + '%';
+        }
+    }
+
+    function saveDone() {
+        if (saved) return;
+        saved = true;
+        clearInterval(pollId);
+        hint.textContent = 'Guardando…';
+        fetch(saveUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            body: '{}',
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                window.location.href = data.redirect_url || "{% url 'tasks:task_list' %}";
+            })
+            .catch(function () {
+                saved = false;
+                hint.textContent = 'No se pudo guardar — inténtalo otra vez.';
+            });
+    }
+
+    /** Si el vídeo/playlist se acaba antes de llegar al objetivo, no hay
+     *  más que dar — se cuenta como hecho igual. */
+    function isLastInPlaylist() {
+        if (!playlistId || !player || typeof player.getPlaylist !== 'function') return true;
+        var list = player.getPlaylist() || [];
+        var idx = player.getPlaylistIndex();
+        return !list.length || idx < 0 || idx + 1 >= list.length;
+    }
+
+    function startYouTube() {
+        window.onYouTubeIframeAPIReady = function () {
+            updateProgressLabel();
+            if (!targetMinutes && !targetVideoCount) {
+                hint.textContent = 'Al terminar el vídeo, la tarea se marca hecha sola.';
+            }
+
+            var playerVars = { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1 };
+            var config = { playerVars: playerVars };
+            if (playlistId) {
+                playerVars.listType = 'playlist';
+                playerVars.list = playlistId;
+            } else {
+                config.videoId = videoId;
+            }
+
+            config.events = {
+                onReady: function () {
+                    pollId = setInterval(function () {
+                        if (!player || typeof player.getPlayerState !== 'function') return;
+                        if (player.getPlayerState() === YT.PlayerState.PLAYING) {
+                            elapsedSeconds += 1;
+                            if (targetMinutes) {
+                                updateProgressLabel();
+                                if (elapsedSeconds >= targetMinutes * 60) saveDone();
+                            }
+                        }
+                    }, 1000);
+                },
+                onStateChange: function (e) {
+                    if (e.data === YT.PlayerState.ENDED) {
+                        videosWatched += 1;
+                        updateProgressLabel();
+                        if (targetVideoCount && videosWatched >= targetVideoCount) {
+                            saveDone();
+                        } else if (!targetVideoCount && !targetMinutes) {
+                            saveDone(); // vídeo suelto sin objetivo: verlo entero basta
+                        } else if (isLastInPlaylist()) {
+                            saveDone(); // se acabó la lista antes de llegar al objetivo
+                        }
+                    }
+                },
+                onError: function () {
+                    clearInterval(pollId);
+                    hint.textContent = 'Este vídeo no se pudo cargar.';
+                },
+            };
+
+            player = new YT.Player('video-player', config);
+        };
+        // Si el script de la IFrame API ya estaba cargado de una visita
+        // anterior a esta misma pestaña, el callback no se vuelve a
+        // disparar solo — se llama a mano.
+        if (window.YT && window.YT.Player) window.onYouTubeIframeAPIReady();
+    }
+
+    // Si sales de la app a media sesión, se pausa solo — el rato en
+    // segundo plano no cuenta como "visto" (el contador de arriba solo
+    // suma mientras se está reproduciendo de verdad).
+    document.addEventListener('visibilitychange', function () {
+        if (!document.hidden) return;
+        if (player && player.pauseVideo) player.pauseVideo();
+        if (usingLocal && !localVideoEl.paused) localVideoEl.pause();
+    });
+
+    // ---------------------------------------------------- vídeo local
+    // Guardado en ESTE navegador (IndexedDB), no en el servidor: es un
+    // archivo de este dispositivo, no tiene sentido compartirlo entre
+    // aparatos. File System Access API — solo Chrome/Edge; en otros
+    // navegadores esta parte simplemente no se ofrece.
+    var supportsLocal = allowLocal && 'showOpenFilePicker' in window;
+
+    function openHandleDb() {
+        return new Promise(function (resolve, reject) {
+            var req = indexedDB.open('libreta-local-videos', 1);
+            req.onupgradeneeded = function () {
+                req.result.createObjectStore('handles');
+            };
+            req.onsuccess = function () { resolve(req.result); };
+            req.onerror = function () { reject(req.error); };
+        });
+    }
+    function getStoredHandle() {
+        return openHandleDb().then(function (db) {
+            return new Promise(function (resolve) {
+                var tx = db.transaction('handles', 'readonly');
+                var req = tx.objectStore('handles').get(taskKey);
+                req.onsuccess = function () { resolve(req.result || null); };
+                req.onerror = function () { resolve(null); };
+            });
+        });
+    }
+    function storeHandle(handle) {
+        return openHandleDb().then(function (db) {
+            return new Promise(function (resolve, reject) {
+                var tx = db.transaction('handles', 'readwrite');
+                tx.objectStore('handles').put(handle, taskKey);
+                tx.oncomplete = function () { resolve(); };
+                tx.onerror = function () { reject(tx.error); };
+            });
+        });
+    }
+    function clearHandle() {
+        return openHandleDb().then(function (db) {
+            var tx = db.transaction('handles', 'readwrite');
+            tx.objectStore('handles').delete(taskKey);
+        });
+    }
+
+    function playLocalFile(file) {
+        usingLocal = true;
+        ytContainer.hidden = true;
+        localVideoEl.hidden = false;
+        localVideoEl.src = URL.createObjectURL(file);
+        updateProgressLabel();
+        if (!targetMinutes) hint.textContent = 'Al terminar el vídeo, la tarea se marca hecha sola.';
+
+        pollId = setInterval(function () {
+            if (!localVideoEl.paused && !localVideoEl.ended) {
+                elapsedSeconds += 1;
+                if (targetMinutes) {
+                    updateProgressLabel();
+                    if (elapsedSeconds >= targetMinutes * 60) saveDone();
+                }
+            }
+        }, 1000);
+
+        localVideoEl.addEventListener('ended', function () {
+            saveDone(); // verlo entero (con o sin objetivo de minutos) siempre basta
+        });
+        localVideoEl.play().catch(function () {
+            hint.textContent = 'Toca play en el vídeo para empezar.';
+        });
+
+        // "Solo local" no tiene a qué volver ni sentido tiene "olvidar"
+        // aquí mismo (la tarea se quedaría sin vídeo) — eso se gestiona
+        // editando la tarea, no desde esta pantalla.
+        if (!localOnly) renderLocalActions(true);
+    }
+
+    function renderLocalActions(hasLocal) {
+        if (!localActions) return;
+        if (!supportsLocal) { localActions.innerHTML = ''; return; }
+        if (hasLocal) {
+            localActions.innerHTML =
+                '<button type="button" class="ghost-btn" id="use-youtube-instead">Ver el de YouTube en su lugar</button> ' +
+                '<button type="button" class="ghost-btn ghost-btn--danger" id="forget-local">Olvidar este vídeo local</button>';
+            var yt = document.getElementById('use-youtube-instead');
+            if (yt) yt.addEventListener('click', function () {
+                usingLocal = false;
+                clearInterval(pollId);
+                localVideoEl.pause();
+                localVideoEl.hidden = true;
+                ytContainer.hidden = false;
+                elapsedSeconds = 0;
+                startYouTube();
+                renderLocalActions(false);
+            });
+            var forget = document.getElementById('forget-local');
+            if (forget) forget.addEventListener('click', function () {
+                clearHandle();
+                window.location.reload();
+            });
+        } else {
+            localActions.innerHTML =
+                '<button type="button" class="ghost-btn" id="pick-local-video">+ Usar un vídeo de mi móvil en su lugar</button>';
+            var pick = document.getElementById('pick-local-video');
+            if (pick) pick.addEventListener('click', pickLocalVideo);
+        }
+    }
+
+    // Mete el nombre real del error del navegador en el mensaje (p.ej.
+    // "SecurityError") en vez de un "no se pudo" genérico — así, si
+    // vuelve a fallar, se ve en la propia pantalla qué es exactamente,
+    // sin tener que abrir la consola del navegador.
+    function describeError(err) {
+        return err && err.name ? ' (' + err.name + (err.message ? ': ' + err.message : '') + ')' : '';
+    }
+
+    function pickLocalVideo() {
+        window.showOpenFilePicker({
+            types: [{ description: 'Vídeos', accept: { 'video/*': ['.mp4', '.mov', '.webm', '.mkv'] } }],
+            multiple: false,
+        }).then(function (handles) {
+            var handle = handles[0];
+            // Coger el archivo YA, antes de guardar el handle en
+            // IndexedDB — guardarlo primero y leerlo después es lo que
+            // provocaba el NotAllowedError: el viaje por IndexedDB deja
+            // inservible esa misma referencia para getFile() en este
+            // Chrome. Guardar es solo para la próxima visita, así que
+            // no hace falta esperarlo ni que salga bien para reproducir
+            // ahora.
+            return handle.getFile().then(function (file) {
+                storeHandle(handle).catch(function () {});
+                return file;
+            });
+        }).then(function (file) {
+            clearInterval(pollId);
+            player = null;
+            playLocalFile(file);
+        }).catch(function (err) {
+            if (err && err.name !== 'AbortError') {
+                hint.textContent = 'No se pudo usar ese archivo' + describeError(err) + '.';
+            }
+        });
+    }
+
+    /**
+     * El permiso para reabrir un archivo local guardado en visitas
+     * anteriores NO se puede pedir de forma fiable con
+     * handle.requestPermission(): en Chrome, para un handle recuperado
+     * de IndexedDB en una pestaña nueva, esa llamada muchas veces
+     * resuelve directamente en "denied" sin llegar a mostrar ningún
+     * aviso al usuario — no es un fallo de esta app, es un
+     * comportamiento conocido del propio Chrome con este mecanismo
+     * (ver github.com/WICG/file-system-access/issues/289). Como pedir
+     * ese permiso "recordado" no es fiable, directamente no se pide:
+     * se va derecho al selector nativo de archivos, que es el único
+     * paso que SIEMPRE funciona, porque el permiso se concede en el
+     * momento en que el usuario elige el archivo (igual que la
+     * primera vez, en el formulario de la tarea).
+     */
+    function promptReselectAndPlay(onCancel) {
+        hint.textContent = 'Elige otra vez el archivo de vídeo para reproducirlo.';
+        permissionPrompt.hidden = false;
+        permissionBtn.hidden = false;
+        permissionBtn.disabled = false;
+        permissionBtn.textContent = 'Elegir vídeo y reproducir';
+        permissionBtn.onclick = function () {
+            permissionBtn.disabled = true;
+            window.showOpenFilePicker({
+                types: [{ description: 'Vídeos', accept: { 'video/*': ['.mp4', '.mov', '.webm', '.mkv'] } }],
+                multiple: false,
+            }).then(function (handles) {
+                var picked = handles[0];
+                // Mismo orden que en pickLocalVideo, por el mismo motivo:
+                // leer el archivo ANTES de guardar el handle.
+                return picked.getFile().then(function (file) {
+                    storeHandle(picked).catch(function () {});
+                    return file;
+                });
+            }).then(function (file) {
+                permissionPrompt.hidden = true;
+                permissionBtn.disabled = false;
+                playLocalFile(file);
+            }).catch(function (err) {
+                permissionBtn.disabled = false;
+                if (err && err.name !== 'AbortError') {
+                    hint.textContent = 'No se pudo usar ese archivo' + describeError(err) + '.';
+                } else if (onCancel) {
+                    onCancel();
+                }
+            });
+        };
+    }
+
+    function boot() {
+        if (localOnly) {
+            // La tarea se resuelve ENTERA con un archivo local — no hay
+            // YouTube al que caer si algo falla, así que los mensajes de
+            // error son más concretos que en el camino normal.
+            if (!supportsLocal) {
+                hint.textContent = 'Este vídeo es un archivo de tu ordenador, pero este navegador no lo soporta — usa Chrome o Edge.';
+                return;
+            }
+            getStoredHandle().then(function (handle) {
+                if (!handle) {
+                    hint.textContent = 'No se encuentra el archivo en este navegador — edita la tarea para volver a elegirlo.';
+                    return;
+                }
+                handle.queryPermission({ mode: 'read' }).then(function (perm) {
+                    if (perm === 'granted') {
+                        handle.getFile().then(playLocalFile).catch(function () {
+                            hint.textContent = 'No se pudo abrir el archivo — puede que se haya movido o borrado.';
+                        });
+                    } else {
+                        promptReselectAndPlay(function () {});
+                    }
+                });
+            });
+            return;
+        }
+
+        if (!videoId && !playlistId) {
+            hint.textContent = 'Esta tarea no tiene vídeo asignado.';
+            return;
+        }
+        if (!supportsLocal) {
+            startYouTube();
+            return;
+        }
+        getStoredHandle().then(function (handle) {
+            if (!handle) {
+                startYouTube();
+                renderLocalActions(false);
+                return;
+            }
+            handle.queryPermission({ mode: 'read' }).then(function (perm) {
+                if (perm === 'granted') {
+                    handle.getFile().then(playLocalFile).catch(function () {
+                        startYouTube();
+                        renderLocalActions(false);
+                    });
+                } else {
+                    // Aquí sí hay a qué volver si cancela: YouTube.
+                    promptReselectAndPlay(function () {
+                        startYouTube();
+                        renderLocalActions(false);
+                    });
+                }
+            });
+        });
+    }
+
+    boot();
+})();
+</script>
+
+{% endblock %}
