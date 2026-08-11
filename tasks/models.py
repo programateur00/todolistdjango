@@ -1,10 +1,25 @@
 import datetime as _dt
+import re
 import uuid
 from datetime import timedelta
 
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
+
+# Formatos aceptados al pegar un vídeo de YouTube (RoutineItem.youtube_video_id):
+# enlace completo (youtube.com/watch?v=, youtu.be/, youtube.com/shorts/,
+# youtube.com/embed/) o directamente el ID de 11 caracteres. Así no hay que
+# ir a buscar el ID a mano cada vez que se pega un enlace.
+_YOUTUBE_ID_RE = re.compile(
+    r"(?:youtu\.be/|youtube\.com/(?:watch\?v=|embed/|shorts/))([A-Za-z0-9_-]{11})"
+)
+
+# El ID de una playlist va en el parámetro ?list=... de cualquier URL de
+# YouTube (a veces junto a un vídeo concreto, a veces solo). Empieza casi
+# siempre por "PL", "UU", "LL" o "FL", pero no hace falta comprobarlo — con
+# que aparezca list=algo ya vale.
+_YOUTUBE_PLAYLIST_ID_RE = re.compile(r"[?&]list=([A-Za-z0-9_-]+)")
 
 
 class Task(models.Model):
@@ -41,7 +56,7 @@ class Task(models.Model):
         (CATEGORY_GENERAL, "General"),
         (CATEGORY_STUDY, "Estudio"),
         (CATEGORY_SPORT, "Deporte"),
-        (CATEGORY_WORK, "Trabajo"),
+        (CATEGORY_WORK, "Enfoque"),
         (CATEGORY_PERSONAL, "Personal"),
         (CATEGORY_OTHER, "Otro"),
         (CATEGORY_AVOID, "Antitarea"),
@@ -49,29 +64,51 @@ class Task(models.Model):
 
     # Metadatos que describen qué "extras" admite cada categoría.
     # Útil para que la UI sepa si mostrar el botón de iniciar timer,
-    # el panel de cámara de MediaPipe, etc. Sin construir esos extras hoy.
+    # el panel de cámara de MediaPipe, etc.
+    #
+    # CATEGORY_WORK ("Enfoque") era antes "Trabajo" sin ningún extra
+    # construido — se reutiliza el mismo hueco (misma clave "work" en la
+    # base de datos, así las tareas que ya tuvieras no se mueven de
+    # categoría) para el temporizador manual: leer, estudiar, estirar…
+    # cualquier cosa que quieras cronometrar sin que sea deporte.
     CATEGORY_CAPABILITIES = {
         CATEGORY_GENERAL: [],
-        CATEGORY_STUDY: ["timer", "pomodoro"],
+        CATEGORY_STUDY: [],
         CATEGORY_SPORT: ["timer", "pose_tracking"],
-        CATEGORY_WORK: ["timer", "pomodoro"],
+        CATEGORY_WORK: ["timer", "app_usage"],
         CATEGORY_PERSONAL: [],
         CATEGORY_OTHER: [],
         CATEGORY_AVOID: [],
     }
 
-    # Subcategorías de "Deporte". Solo tienen sentido cuando category=sport;
-    # filtran qué ejercicios del catálogo (Exercise.body_area) aparecen en
-    # el selector al entrenar, para no mezclar dominadas con sentadillas.
+    # Subcategorías de "Deporte": filtran qué ejercicios del catálogo
+    # (Exercise.body_area) aparecen al entrenar.
     SUBCATEGORY_UPPER_BODY = "upper_body"
     SUBCATEGORY_LOWER_BODY = "lower_body"
     SUBCATEGORY_RUNNING = "running"
-
-    SUBCATEGORY_CHOICES = [
+    SPORT_SUBCATEGORY_CHOICES = [
         (SUBCATEGORY_UPPER_BODY, "Tren superior"),
         (SUBCATEGORY_LOWER_BODY, "Tren inferior"),
         (SUBCATEGORY_RUNNING, "Running"),
     ]
+
+    # Subcategorías de "Enfoque": qué se está cronometrando. Todas
+    # comparten el mismo temporizador manual (ver TimerSession); solo
+    # "Lectura" puede además usar el tiempo real en una app externa
+    # (Adobe, Kindle…) cuando hay plugin nativo instalado — ver
+    # TimerSession.SOURCE_APP_USAGE.
+    SUBCATEGORY_READING = "reading"
+    SUBCATEGORY_STUDY_SESSION = "study_session"
+    SUBCATEGORY_STRETCH = "stretch"
+    SUBCATEGORY_FOCUS_OTHER = "focus_other"
+    FOCUS_SUBCATEGORY_CHOICES = [
+        (SUBCATEGORY_READING, "Lectura"),
+        (SUBCATEGORY_STUDY_SESSION, "Estudio"),
+        (SUBCATEGORY_STRETCH, "Estiramientos"),
+        (SUBCATEGORY_FOCUS_OTHER, "Otro"),
+    ]
+
+    SUBCATEGORY_CHOICES = SPORT_SUBCATEGORY_CHOICES + FOCUS_SUBCATEGORY_CHOICES
 
     WEEKDAYS = [
         ("0", "Lunes"),
@@ -84,6 +121,14 @@ class Task(models.Model):
     ]
 
     title = models.CharField(max_length=255)
+    # Columna heredada de una fase muy anterior del proyecto — ya no se
+    # usa para nada, pero sigue existiendo como NOT NULL en bases de
+    # datos ya desplegadas (la tuya incluida), y por eso hace falta que
+    # el modelo la conozca: si Django no la incluye al crear una tarea,
+    # SQLite la rechaza por violar esa restricción. default=False para
+    # que cualquier creación (incluida la de Plan.sync_task()) la
+    # rellene sola sin que nadie tenga que acordarse de ella.
+    wants_timer = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
     category = models.CharField(
         max_length=16,
@@ -96,8 +141,100 @@ class Task(models.Model):
         max_length=16,
         choices=SUBCATEGORY_CHOICES,
         blank=True,
-        help_text="Solo aplica si category='sport'. Filtra qué ejercicios se ofrecen al entrenar.",
+        help_text="Deporte → qué entrenar. Enfoque → qué cronometrar. En el resto no se usa.",
     )
+    target_minutes = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Objetivo en minutos para tareas de Enfoque (category='work'). Ej. 60 para 'leer una hora'.",
+    )
+    youtube_video_id = models.CharField(
+        max_length=255, blank=True,
+        help_text="ID o URL de un vídeo de YouTube (ej. 'dQw4w9WgXcQ' o el enlace completo — "
+                   "se limpia solo al guardar). Si está puesto, esta tarea NO pasa por el "
+                   "selector de ejercicios ni por el temporizador: al darle a play se va "
+                   "directa al vídeo embebido, y al terminar se marca como hecha ella sola. "
+                   "Streaming en directo: no se descarga ni se guarda nada.",
+    )
+    youtube_playlist_id = models.CharField(
+        max_length=255, blank=True,
+        help_text="Alternativa a youtube_video_id: ID o URL de una playlist de YouTube "
+                   "(el trozo list=... del enlace). Junto con target_minutes o "
+                   "target_video_count decide cuándo se da por vista.",
+    )
+    target_video_count = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Solo con youtube_playlist_id: cuántos vídeos de la lista hay que ver "
+                   "para dar la tarea por hecha (ej. 5). Si no se pone y tampoco hay "
+                   "target_minutes, se da por hecha al terminar 1 vídeo de la lista.",
+    )
+    # Cómo se completa una tarea de Deporte. Se elige al crearla, no cada
+    # vez que se entrena: es una decisión de "qué es esta tarea", no de
+    # "qué me apetece hoy". Qué modos valen depende del subtipo — el
+    # conteo con cámara no tiene sentido en tren inferior, y correr no
+    # se hace con circuitos.
+    SPORT_MODE_CAMERA = "camera"
+    SPORT_MODE_CIRCUIT = "circuit"
+    SPORT_MODE_VIDEO = "video"
+    SPORT_MODE_CHOICES = [
+        (SPORT_MODE_CAMERA, "Conteo con la cámara"),
+        (SPORT_MODE_CIRCUIT, "Circuito"),
+        (SPORT_MODE_VIDEO, "Vídeo"),
+    ]
+    # Qué modos se ofrecen en cada subtipo. Running no aparece: se
+    # resuelve siempre importando la actividad (Health Connect) o a mano.
+    SPORT_MODES_BY_SUBCATEGORY = {
+        "upper_body": [SPORT_MODE_CAMERA, SPORT_MODE_CIRCUIT, SPORT_MODE_VIDEO],
+        "lower_body": [SPORT_MODE_CIRCUIT, SPORT_MODE_VIDEO],
+    }
+    sport_mode = models.CharField(
+        max_length=20, choices=SPORT_MODE_CHOICES, blank=True, default="",
+        help_text="Solo Deporte (tren superior/inferior): cómo se completa la tarea.",
+    )
+
+    has_local_video = models.BooleanField(
+        default=False,
+        help_text="Alternativa a youtube_video_id: el vídeo es un archivo del propio "
+                   "dispositivo (elegido con el selector nativo), no de YouTube. El "
+                   "archivo en sí NO vive aquí — cada aparato guarda el suyo por su "
+                   "cuenta (IndexedDB en la web, el plugin nativo en la app), este campo "
+                   "solo le dice al servidor 'esta tarea se resuelve con un vídeo local' "
+                   "para que workout_kind la trate como 'video' igual que si tuviera uno "
+                   "de YouTube. Solo para category='sport'/'work' — Estudio no lo usa.",
+    )
+
+    # Objetivos que permiten que la tarea se marque sola al importar de
+    # Health Connect. Sin ninguno puesto, cualquier actividad importada
+    # la da por hecha; con ellos, solo cuenta si de verdad se cumplió.
+    target_steps = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Solo andar: pasos que hay que dar para darla por hecha (ej. 10000).",
+    )
+    target_distance_km = models.FloatField(
+        null=True, blank=True,
+        help_text="Solo running/andar: km que hay que recorrer para darla por hecha.",
+    )
+    max_pace_seconds_per_km = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Solo running: ritmo máximo permitido en segundos por km (ej. 360 = "
+                   "6:00/km). Correr más lento que esto no cuenta como hecha. Se guarda "
+                   "en segundos y no en minutos decimales porque 5,5 min/km se lee mal "
+                   "(¿5:30 o 5:50?), mientras que 330 s/km es exacto.",
+    )
+
+    # Presets de ritmo en lenguaje llano — para quien no corre, "6:30/km"
+    # no dice nada. El número entre paréntesis es solo para quien SÍ lo
+    # sabe leer; la etiqueta lleva el peso para todos los demás.
+    PACE_PRESETS = [
+        (900, "Paseo tranquilo (15:00/km)"),
+        (720, "Paseo normal (12:00/km)"),
+        (600, "Andar a paso ligero (10:00/km)"),
+        (480, "Trote suave (8:00/km)"),
+        (390, "Correr (6:30/km)"),
+        (330, "Correr a buen ritmo (5:30/km)"),
+        (270, "Correr rápido (4:30/km)"),
+        (210, "Correr muy rápido (3:30/km)"),
+    ]
+    PACE_PRESET_SECONDS = {seconds for seconds, _ in PACE_PRESETS}
     due_date = models.DateField(null=True, blank=True)
     due_time = models.TimeField(null=True, blank=True,
         help_text="Hora límite. Si pasa sin marcarla, se auto-marca como no hecha.")
@@ -158,6 +295,19 @@ class Task(models.Model):
         return self.CATEGORY_CAPABILITIES.get(self.category, [])
 
     @property
+    def current_streak(self):
+        """
+        Racha actual de esta serie — el mismo cálculo que ya se usa en
+        Rachas, pero puesto aquí para que la tarjeta de la tarea lo
+        pueda enseñar sin que haya que ir a buscarlo a otra pantalla.
+        Solo tiene sentido para tareas que se repiten: una suelta no
+        tiene "racha".
+        """
+        if self.repeat == self.REPEAT_NONE:
+            return 0
+        return Occurrence.streak_stats(self.series_id)["current_streak"]
+
+    @property
     def plan(self):
         """El plan que generó esta tarea, si viene de uno."""
         return Plan.objects.filter(
@@ -170,18 +320,33 @@ class Task(models.Model):
         Qué clase de sesión abre esta tarea, para que el botón de la lista
         no prometa algo que no va a pasar.
 
-        Antes cualquier tarea de Deporte enseñaba el icono de cámara,
-        aunque fuera un circuito de abdominales a cronómetro o una salida
-        a correr que se rellena a mano. Enseñar una cámara ahí es
-        incongruente.
+        En Deporte manda `sport_mode`, elegido al crear la tarea: cámara,
+        circuito o vídeo. Antes esto se deducía del subtipo (y un vídeo
+        puesto anulaba todo lo demás), lo que dejaba sin usar la cámara y
+        los circuitos en cuanto había un vídeo — ahora es una elección
+        explícita y no se pisan entre sí.
         """
-        if self.category != self.CATEGORY_SPORT:
-            return None
-        if self.subcategory == self.SUBCATEGORY_RUNNING:
-            return "distance"      # se anota a mano
-        if self.subcategory == self.SUBCATEGORY_LOWER_BODY:
-            return "timer"         # circuitos cronometrados
-        return "camera"            # tren superior: conteo con cámara
+        if self.category == self.CATEGORY_SPORT:
+            if self.subcategory == self.SUBCATEGORY_RUNNING:
+                return "distance"   # se importa de Health Connect, o a mano
+            if self.sport_mode == self.SPORT_MODE_VIDEO:
+                return "video"
+            if self.sport_mode == self.SPORT_MODE_CIRCUIT:
+                return "timer"
+            if self.sport_mode == self.SPORT_MODE_CAMERA:
+                return "camera"
+            # Sin modo elegido (tareas de antes de este campo): se
+            # mantiene el comportamiento que tenían, para no romperlas.
+            if self.subcategory == self.SUBCATEGORY_LOWER_BODY:
+                return "timer"
+            return "camera"
+
+        # Fuera de Deporte, un vídeo puesto define la tarea entera.
+        if self.youtube_video_id or self.youtube_playlist_id or self.has_local_video:
+            return "video"
+        if self.category == self.CATEGORY_WORK:
+            return "focus"          # temporizador de Enfoque: leer, estudiar, estirar…
+        return None
 
     @property
     def is_avoid(self):
@@ -330,6 +495,14 @@ class Task(models.Model):
     def save(self, *args, **kwargs):
         if self.series_start_date is None and self.due_date is not None:
             self.series_start_date = self.due_date
+        raw = (self.youtube_video_id or "").strip()
+        if raw:
+            m = _YOUTUBE_ID_RE.search(raw)
+            self.youtube_video_id = m.group(1) if m else raw
+        raw_pl = (self.youtube_playlist_id or "").strip()
+        if raw_pl:
+            m = _YOUTUBE_PLAYLIST_ID_RE.search(raw_pl)
+            self.youtube_playlist_id = m.group(1) if m else raw_pl
         super().save(*args, **kwargs)
 
     def _spawn_next(self):
@@ -353,6 +526,21 @@ class Task(models.Model):
             avoid_question=self.avoid_question,
             series_id=self.series_id, series_start_date=self.series_start_date,
             user=self.user,
+            # Estos se añadieron después de escribir esta función, y se
+            # quedaban fuera — una tarea repetida con vídeo fijo, o de
+            # running con objetivo, perdía todo eso en su siguiente
+            # instancia. Los planes se recomponen solos en cada carga
+            # (ver Plan.sync_all_tasks), pero una tarea suelta con estos
+            # campos puestos a mano solo tiene este sitio para no perderlos.
+            sport_mode=self.sport_mode,
+            youtube_video_id=self.youtube_video_id,
+            youtube_playlist_id=self.youtube_playlist_id,
+            has_local_video=self.has_local_video,
+            target_minutes=self.target_minutes,
+            target_video_count=self.target_video_count,
+            target_steps=self.target_steps,
+            target_distance_km=self.target_distance_km,
+            max_pace_seconds_per_km=self.max_pace_seconds_per_km,
         )
 
     def _record_occurrence(self, result, auto_expired=False):
@@ -674,7 +862,7 @@ class Exercise(models.Model):
     mode = models.CharField(max_length=16, choices=MODE_CHOICES, default=MODE_MANUAL)
     body_area = models.CharField(
         max_length=16,
-        choices=Task.SUBCATEGORY_CHOICES,
+        choices=Task.SPORT_SUBCATEGORY_CHOICES,
         blank=True,
         db_index=True,
         help_text="A qué subcategoría de Deporte pertenece (tren superior/inferior/running). "
@@ -713,7 +901,7 @@ class Routine(models.Model):
     )
     name = models.CharField(max_length=64)
     subcategory = models.CharField(
-        max_length=16, choices=Task.SUBCATEGORY_CHOICES, blank=True,
+        max_length=16, choices=Task.SPORT_SUBCATEGORY_CHOICES, blank=True,
         help_text="Para poder ofrecer esta rutina desde el selector de esa subcategoría de Deporte.",
     )
     default_work_seconds = models.PositiveIntegerField(default=40)
@@ -871,6 +1059,23 @@ class Plan(models.Model):
     )
     is_active = models.BooleanField(default=True)
 
+    # Qué clase de plan es, y por tanto cómo se resuelve su tarea diaria.
+    # Deporte: como siempre, objetivos de ejercicio (con cámara/circuito,
+    # y ahora también running — ver PlanItem). Estudio: sin "objetivo"
+    # aparte que añadir — el propio vídeo/playlist/temporizador de la
+    # tarea diaria ES el objetivo, y el progreso se mide en si la
+    # completaste cada día. General: igual que Estudio pero sin vídeo,
+    # solo cumplimiento simple (un hábito cualquiera).
+    PLAN_TYPE_SPORT = "sport"
+    PLAN_TYPE_STUDY = "study"
+    PLAN_TYPE_GENERAL = "general"
+    PLAN_TYPE_CHOICES = [
+        (PLAN_TYPE_SPORT, "Deporte"),
+        (PLAN_TYPE_STUDY, "Estudio"),
+        (PLAN_TYPE_GENERAL, "General"),
+    ]
+    plan_type = models.CharField(max_length=10, choices=PLAN_TYPE_CHOICES, default=PLAN_TYPE_SPORT)
+
     # Cuándo toca entrenar. El plan crea y mantiene su propia tarea con
     # estos datos, para que el usuario no tenga que crear una a mano ni
     # entender qué es un "circuito": crea el plan y le sale la tarea.
@@ -890,6 +1095,30 @@ class Plan(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
+    # Cierre del ciclo: distinto de borrar. Un plan cerrado deja de
+    # generar tareas y sale de la lista de activos, pero se queda para
+    # poder mirar atrás — borrar (deleted_at) es para "esto no debería
+    # haber existido"; cerrar (closed_at) es para "esto terminó bien".
+    closed_at = models.DateTimeField(null=True, blank=True)
+    reward = models.CharField(
+        max_length=200, blank=True,
+        help_text="La recompensa que te prometes al empezar el ciclo (opcional). "
+                   "Se enseña en la pantalla de cierre si la has puesto — y solo si "
+                   "el plan llega al umbral de completado.",
+    )
+    # Foto del progreso en el momento de cerrar (manual o automático). No
+    # se recalcula después: una vez cerrado, el plan ya no acumula más
+    # sesiones, así que sería el mismo número — pero guardarlo evita
+    # tener que volver a calcularlo cada vez que se enseña la lista de
+    # cerrados, y dEja constancia de con qué dato se decidió.
+    final_progress_pct = models.PositiveIntegerField(null=True, blank=True)
+
+    # A partir de qué porcentaje un cierre cuenta como "completado" en
+    # vez de "terminado incompleto". Un ciclo que no lo alcanza se
+    # cierra igual (o se auto-cierra al pasar las semanas), pero no
+    # desbloquea la recompensa ni se celebra igual.
+    COMPLETION_THRESHOLD_PCT = 70
+
     class Meta:
         ordering = ["-is_active", "-started_on"]
 
@@ -906,10 +1135,105 @@ class Plan(models.Model):
         days = (timezone.localtime(timezone.now()).date() - self.started_on).days
         return max(1, days // 7 + 1)
 
+    @property
+    def is_completed(self):
+        """
+        Si el cierre cuenta como éxito o como "terminado incompleto".
+
+        Usa la foto guardada al cerrar si ya está cerrado; si todavía
+        está abierto, calcula con el progreso de ahora mismo — así la
+        pantalla de cierre puede avisar de antemano de en qué lado vas
+        a caer antes de que confirmes.
+        """
+        pct = self.final_progress_pct if self.closed_at else self.progress_pct()
+        return pct is not None and pct >= self.COMPLETION_THRESHOLD_PCT
+
+    @classmethod
+    def auto_close_expired(cls, user=None):
+        """
+        Cierra solos los planes cuyas semanas ya se cumplieron.
+
+        Sin scheduler en este hosting, así que se comprueba de gorra
+        cada vez que se abre la lista de tareas — mismo criterio que
+        Task.expire_overdue(): barato, y no hace falta que nadie entre
+        a "planes" para que un ciclo vencido deje de generar tareas.
+        """
+        today = timezone.localtime(timezone.now()).date()
+        qs = cls.objects.filter(deleted_at__isnull=True, closed_at__isnull=True, is_active=True)
+        if user is not None:
+            qs = qs.filter(user=user)
+        for plan in qs:
+            if today >= plan.ends_on:
+                plan.final_progress_pct = plan.progress_pct()
+                plan.closed_at = timezone.now()
+                plan.is_active = False
+                plan.save(update_fields=["final_progress_pct", "closed_at", "is_active", "updated_at"])
+                plan.sync_task()
+
     def custom_days_list(self):
         if not self.custom_days:
             return []
         return [d.strip() for d in self.custom_days.split(",") if d.strip()]
+
+    def _running_target_fields(self):
+        """
+        Si el objetivo principal de este plan es running, los campos que
+        hay que copiar a la tarea diaria (distancia/ritmo del escalón
+        actual) — o un dict vacío si no aplica. Se recalcula siempre
+        desde cero en vez de guardarse aparte: el escalón sube solo con
+        las sesiones cumplidas, así que "el objetivo de hoy" cambia sin
+        que nadie tenga que tocar nada.
+        """
+        head = self.headline
+        if not head or not head.exercise or head.exercise.mode != Exercise.MODE_DISTANCE:
+            return {}
+        t = head.current_target()
+        return {
+            "subcategory": Task.SUBCATEGORY_RUNNING,
+            "target_distance_km": t.get("distance_km"),
+            "max_pace_seconds_per_km": t.get("pace_seconds_per_km"),
+        }
+
+    def _sport_mode_fields(self):
+        """
+        Si el objetivo principal tiene un modo elegido (cámara, circuito,
+        vídeo), lo copia a la tarea diaria — es lo que hace que
+        workout_kind() sepa a qué pantalla mandar al pulsar play, en vez
+        de asumir siempre circuito como pasaba antes de que esto
+        existiera. Sin modo elegido (objetivos de antes de este campo),
+        no se toca nada — se quedan tal como estaban, yendo al circuito.
+        """
+        head = self.headline
+        if not head or not head.sport_mode:
+            return {}
+        fields = {"sport_mode": head.sport_mode}
+        if head.sport_mode == PlanItem.SPORT_MODE_VIDEO:
+            fields.update(
+                youtube_video_id=head.youtube_video_id,
+                youtube_playlist_id=head.youtube_playlist_id,
+                target_minutes=head.target_minutes,
+                target_video_count=head.target_video_count,
+            )
+        return fields
+
+    def _study_target_fields(self):
+        """
+        Si el plan es de Estudio, los campos de vídeo/playlist/temporizador
+        que hay que copiar a la tarea diaria — viven en el objetivo
+        (PlanItem), no en el plan, igual que el peso o las repeticiones
+        viven en el objetivo de un plan de Deporte. Sin objetivo puesto
+        todavía, la tarea diaria sale como Estudio simple, sin vídeo —
+        no como un error, solo como "todavía no configurado".
+        """
+        head = self.headline
+        if not head:
+            return {}
+        return {
+            "youtube_video_id": head.youtube_video_id,
+            "youtube_playlist_id": head.youtube_playlist_id,
+            "target_minutes": head.target_minutes,
+            "target_video_count": head.target_video_count,
+        }
 
     def sync_task(self):
         """
@@ -920,6 +1244,9 @@ class Plan(models.Model):
         (tarea, circuito y plan): crea el plan y le aparece la tarea, le
         da al play y entrena. El plan ya decidió qué ejercicios y con qué
         objetivo, que es para lo que existe.
+
+        Qué categoría lleva la tarea, y qué campos extra se copian,
+        depende de plan_type — ver el comentario junto al campo.
 
         Si el plan se pausa o se borra, su tarea pendiente desaparece —
         pero el historial de lo ya hecho se conserva.
@@ -932,9 +1259,15 @@ class Plan(models.Model):
             pending.delete()
             return None
 
+        category = {
+            self.PLAN_TYPE_SPORT: Task.CATEGORY_SPORT,
+            self.PLAN_TYPE_STUDY: Task.CATEGORY_STUDY,
+            self.PLAN_TYPE_GENERAL: Task.CATEGORY_GENERAL,
+        }[self.plan_type]
+
         fields = dict(
             title=self.name,
-            category=Task.CATEGORY_SPORT,
+            category=category,
             subcategory="",
             repeat=self.repeat,
             interval=self.interval,
@@ -948,7 +1281,26 @@ class Plan(models.Model):
             # propia puesta, esa manda.
             due_time=self.due_time or _dt.time(23, 59),
             user=self.user,
+            # Puestos aquí, en la base, para que cambiar de objetivo (de
+            # uno con vídeo a uno sin modo elegido, o de running a
+            # fuerza) LIMPIE lo que ya no aplica en vez de dejarlo
+            # pegado de una sincronización anterior — _study_target_fields
+            # y _sport_mode_fields solo escriben lo que SÍ aplica, así
+            # que sin este reseteo de base lo viejo se quedaría ahí.
+            sport_mode="",
+            youtube_video_id="",
+            youtube_playlist_id="",
+            target_minutes=None,
+            target_video_count=None,
+            target_distance_km=None,
+            max_pace_seconds_per_km=None,
         )
+
+        if self.plan_type == self.PLAN_TYPE_STUDY:
+            fields.update(self._study_target_fields())
+        elif self.plan_type == self.PLAN_TYPE_SPORT:
+            fields.update(self._running_target_fields())
+            fields.update(self._sport_mode_fields())
 
         task = pending.first()
         if task:
@@ -962,7 +1314,39 @@ class Plan(models.Model):
             )
             self.task_series_id = task.series_id
             Plan.objects.filter(pk=self.pk).update(task_series_id=task.series_id)
+
+        # General no tiene un paso aparte de "añadir objetivo": la propia
+        # tarea diaria (completarla o no cada día) ES el objetivo, y no
+        # hay nada más que configurar — así que se crea aquí, una vez,
+        # un PlanItem de cumplimiento apuntando a esta misma serie.
+        # Estudio SÍ necesita ese paso (el objetivo lleva el
+        # vídeo/playlist/temporizador, hay que rellenarlo), así que ahí
+        # no se crea nada solo — se añade desde el formulario de
+        # objetivo, igual que en Deporte.
+        if self.plan_type == self.PLAN_TYPE_GENERAL:
+            PlanItem.objects.get_or_create(
+                plan=self, series_id=self.task_series_id, exercise=None,
+                defaults=dict(progression=PlanItem.PROG_COMPLETION, is_headline=True),
+            )
+
         return task
+
+    @classmethod
+    def sync_all_tasks(cls, user=None):
+        """
+        Refresca la tarea de todos los planes activos.
+
+        Hace falta más allá de crear/editar el plan: un plan de running
+        sube de escalón con las sesiones cumplidas, y sin esto la tarea
+        del día siguiente se generaría con el objetivo de ayer en vez
+        del que toca hoy. Barato de llamar en cada carga de la lista,
+        igual que Task.expire_overdue().
+        """
+        qs = cls.objects.filter(deleted_at__isnull=True, is_active=True)
+        if user is not None:
+            qs = qs.filter(user=user)
+        for plan in qs:
+            plan.sync_task()
 
     @property
     def task(self):
@@ -982,6 +1366,8 @@ class Plan(models.Model):
         for it in self.items.select_related("exercise"):
             if not it.exercise:
                 continue          # los objetivos de tarea no se "entrenan"
+            if it.exercise.mode == Exercise.MODE_DISTANCE:
+                continue          # running no se "juega" en el circuito — se importa
             t = it.current_target()
             items.append({
                 "slug": it.exercise.slug,
@@ -1028,10 +1414,21 @@ class Plan(models.Model):
         Se calcula sobre escalones conseguidos frente a escalones totales
         hasta el destino, no sobre semanas transcurridas: el plan avanza
         con lo que haces, no con lo que pasa el calendario.
+
+        Salvo en cumplimiento (Estudio/General): ahí no hay techo
+        numérico al que subir — es un hábito, no una meta con destino —
+        así que el progreso se mide en cuántas veces de las que tocaba
+        la cumpliste desde que empezó el plan.
         """
         head = self.headline
         if not head:
             return None
+        if head.progression == PlanItem.PROG_COMPLETION:
+            total = head._occurrences().count()
+            if not total:
+                return 0
+            successes = sum(1 for o in head._occurrences() if o.result == Occurrence.RESULT_DONE)
+            return min(100, round(100 * successes / total))
         done = head.current_step()
         remaining = head.sessions_to_goal()
         if remaining is None:
@@ -1040,6 +1437,21 @@ class Plan(models.Model):
         if total_steps <= 0:
             return 100
         return min(100, round(100 * done / total_steps))
+
+    def weekly_completion(self):
+        """
+        Ejecución de ESTA semana para el plan: de las sesiones que le
+        tocaban de lunes a domingo, cuántas se han resuelto y cuántas
+        de esas se cumplieron.
+
+        No es un cálculo aparte: se apoya en las mismas Occurrence que
+        genera la tarea del plan (ver sync_task / task_series_id), así
+        que un plan sin tarea todavía (nunca activado) no tiene nada
+        que enseñar aquí.
+        """
+        if not self.task_series_id:
+            return None
+        return Occurrence.weekly_completion(self.user, series_id=self.task_series_id)
 
 
 class PlanItem(models.Model):
@@ -1072,11 +1484,13 @@ class PlanItem(models.Model):
     PROG_COMPLETION = "completion"
     PROG_REPS = "reps"
     PROG_DOUBLE = "double"
+    PROG_DISTANCE = "distance"
 
     PROGRESSION_CHOICES = [
         (PROG_COMPLETION, "Cumplimiento (objetivo fijo)"),
         (PROG_REPS, "Repeticiones (sube hasta un techo)"),
         (PROG_DOUBLE, "Doble (repeticiones y luego peso)"),
+        (PROG_DISTANCE, "Distancia (running: sube km y baja ritmo)"),
     ]
 
     plan = models.ForeignKey(Plan, on_delete=models.CASCADE, related_name="items")
@@ -1112,6 +1526,50 @@ class PlanItem(models.Model):
     goal_seconds = models.PositiveIntegerField(null=True, blank=True)
     goal_weight_kg = models.FloatField(null=True, blank=True)
 
+    # Solo progresión "distance" (running): partida y destino, en km y
+    # en segundos por km — mismo formato que Task.max_pace_seconds_per_km,
+    # para poder copiarlo tal cual a la tarea diaria sin traducir nada.
+    start_distance_km = models.FloatField(default=1.0)
+    start_pace_seconds_per_km = models.PositiveIntegerField(
+        default=420, help_text="Ritmo de partida, en segundos por km (420 = 7:00/km).",
+    )
+    goal_distance_km = models.FloatField(null=True, blank=True)
+    goal_pace_seconds_per_km = models.PositiveIntegerField(
+        null=True, blank=True, help_text="Ritmo de destino — más bajo es más rápido.",
+    )
+    distance_increment_km = models.FloatField(
+        default=0.5, help_text="Cuánto sube la distancia en cada escalón.",
+    )
+    pace_decrement_seconds = models.PositiveIntegerField(
+        default=10, help_text="Cuántos segundos por km se acelera el ritmo en cada escalón.",
+    )
+
+    # Solo objetivos de Deporte: cómo se hace el ejercicio — cámara,
+    # circuito, o vídeo (reutiliza los mismos campos de youtube que
+    # Estudio, justo abajo). Sin esto, el ejercicio caía siempre en
+    # cámara/circuito, sin poder elegir vídeo como ya podían las
+    # tareas sueltas.
+    SPORT_MODE_CAMERA = "camera"
+    SPORT_MODE_CIRCUIT = "circuit"
+    SPORT_MODE_VIDEO = "video"
+    SPORT_MODE_CHOICES = [
+        (SPORT_MODE_CAMERA, "Conteo con la cámara"),
+        (SPORT_MODE_CIRCUIT, "Circuito"),
+        (SPORT_MODE_VIDEO, "Vídeo"),
+    ]
+    sport_mode = models.CharField(max_length=20, choices=SPORT_MODE_CHOICES, blank=True, default="")
+
+    # El vídeo/playlist/temporizador propiamente dicho — para un
+    # objetivo de Estudio (siempre) o de Deporte con sport_mode='video'
+    # (opcional). Solo YouTube, no archivo local: el vídeo local se
+    # guarda por UUID de tarea, y la tarea de un plan se regenera cada
+    # día con un UUID distinto — perdería el archivo a la mañana
+    # siguiente, así que no tiene sentido ofrecerlo aquí.
+    youtube_video_id = models.CharField(max_length=255, blank=True)
+    youtube_playlist_id = models.CharField(max_length=255, blank=True)
+    target_minutes = models.PositiveIntegerField(null=True, blank=True)
+    target_video_count = models.PositiveIntegerField(null=True, blank=True)
+
     # Cómo avanza
     sessions_per_step = models.PositiveIntegerField(
         default=2, help_text="Cada cuántas sesiones cumplidas se sube un escalón.",
@@ -1142,6 +1600,22 @@ class PlanItem(models.Model):
 
     class Meta:
         ordering = ["-is_headline", "order"]
+
+    def save(self, *args, **kwargs):
+        # Mismo trato que Task: si pegas la URL entera, se limpia sola a
+        # la hora de guardar. Sin esto, un objetivo de Estudio guardaría
+        # la URL completa en vez del id, aunque la tarea que genera el
+        # plan sí saliera bien (Task.save() ya lo limpia por su lado) —
+        # inconsistente y confuso si algún día se enseña este dato aquí.
+        raw = (self.youtube_video_id or "").strip()
+        if raw:
+            m = _YOUTUBE_ID_RE.search(raw)
+            self.youtube_video_id = m.group(1) if m else raw
+        raw_pl = (self.youtube_playlist_id or "").strip()
+        if raw_pl:
+            m = _YOUTUBE_PLAYLIST_ID_RE.search(raw_pl)
+            self.youtube_playlist_id = m.group(1) if m else raw_pl
+        super().save(*args, **kwargs)
 
     def __str__(self):
         marca = " ★" if self.is_headline else ""
@@ -1253,6 +1727,24 @@ class PlanItem(models.Model):
                 "sets": self.start_sets, "reps": self.start_reps,
                 "seconds": self.start_seconds if self.is_timed else None,
                 "weight_kg": self.start_weight_kg, "done": False,
+                "distance_km": None, "pace_seconds_per_km": None,
+            }
+
+        if self.progression == self.PROG_DISTANCE:
+            distance = self.start_distance_km + step * self.distance_increment_km
+            if self.goal_distance_km:
+                distance = min(distance, self.goal_distance_km)
+            pace = self.start_pace_seconds_per_km - step * self.pace_decrement_seconds
+            if self.goal_pace_seconds_per_km:
+                # Un ritmo MENOR es más rápido — "llegar" es no bajar de ahí.
+                pace = max(pace, self.goal_pace_seconds_per_km)
+            done = bool(
+                self.goal_distance_km and distance >= self.goal_distance_km
+                and self.goal_pace_seconds_per_km and pace <= self.goal_pace_seconds_per_km
+            )
+            return {
+                "sets": None, "reps": None, "seconds": None, "weight_kg": None,
+                "distance_km": round(distance, 2), "pace_seconds_per_km": pace, "done": done,
             }
 
         if self.progression == self.PROG_DOUBLE:
@@ -1280,6 +1772,7 @@ class PlanItem(models.Model):
             return {
                 "sets": self._sets_for_progress(frac), "reps": reps,
                 "seconds": None, "weight_kg": round(weight, 1), "done": done,
+                "distance_km": None, "pace_seconds_per_km": None,
             }
 
         # PROG_REPS: sube hasta el techo y ahí se queda.
@@ -1293,6 +1786,7 @@ class PlanItem(models.Model):
                 "sets": self._sets_for_progress(frac), "reps": None,
                 "seconds": seconds, "weight_kg": self.start_weight_kg,
                 "done": bool(ceiling and seconds >= ceiling),
+                "distance_km": None, "pace_seconds_per_km": None,
             }
 
         reps = self.start_reps + step * self.reps_increment
@@ -1304,6 +1798,7 @@ class PlanItem(models.Model):
             "sets": self._sets_for_progress(frac), "reps": reps,
             "seconds": None, "weight_kg": self.start_weight_kg,
             "done": bool(ceiling and reps >= ceiling),
+            "distance_km": None, "pace_seconds_per_km": None,
         }
 
     def current_target(self):
@@ -1390,6 +1885,8 @@ class WorkoutSession(models.Model):
     target_reps = models.PositiveIntegerField(null=True, blank=True)
     target_sets = models.PositiveIntegerField(null=True, blank=True)
     target_seconds = models.PositiveIntegerField(null=True, blank=True)
+    target_distance_km = models.FloatField(null=True, blank=True)
+    target_pace_seconds_per_km = models.PositiveIntegerField(null=True, blank=True)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
         related_name="workout_sessions",
@@ -1416,6 +1913,26 @@ class WorkoutSession(models.Model):
     )
     distance_km = models.FloatField(null=True, blank=True, help_text="Solo running: km recorridos.")
     steps = models.PositiveIntegerField(null=True, blank=True, help_text="Solo running: pasos, si los tienes (cinta, reloj…).")
+
+    # De dónde salió el dato. Importa para dos cosas: saber si el
+    # número es de fiar (un reloj mide mejor que un dedo escribiendo), y
+    # poder reimportar sin duplicar.
+    SOURCE_MANUAL = "manual"
+    SOURCE_HEALTH_CONNECT = "health_connect"
+    SOURCE_OCR = "ocr"
+    SOURCE_CHOICES = [
+        (SOURCE_MANUAL, "A mano"),
+        (SOURCE_HEALTH_CONNECT, "Health Connect"),
+        (SOURCE_OCR, "Foto de la cinta"),
+    ]
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default=SOURCE_MANUAL)
+    # Id que le da la fuente original a esa sesión (Health Connect da uno
+    # por cada carrera). Con unique=True, reimportar el mismo periodo no
+    # duplica nada — simplemente choca y se ignora.
+    external_id = models.CharField(
+        max_length=120, blank=True, default="",
+        help_text="Id de la sesión en la app de origen, para no importarla dos veces.",
+    )
     recorded_at = models.DateTimeField(auto_now_add=True)
     uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1423,6 +1940,28 @@ class WorkoutSession(models.Model):
 
     class Meta:
         ordering = ["-recorded_at"]
+
+    @property
+    def pace_seconds_per_km(self):
+        """
+        Ritmo en segundos por kilómetro, o None si no aplica.
+
+        En segundos y no en "minutos decimales" a propósito: 5,5 min/km
+        se lee mal (¿5:30 o 5:50?), mientras que 330 s/km es exacto y se
+        formatea a 5:30 sin ambigüedad al enseñarlo.
+        """
+        if not self.distance_km or not self.session_duration_seconds:
+            return None
+        return self.session_duration_seconds / self.distance_km
+
+    @property
+    def pace_display(self):
+        """El ritmo tal y como se dice en voz alta: 5:30/km."""
+        pace = self.pace_seconds_per_km
+        if pace is None:
+            return ""
+        minutes, seconds = divmod(int(round(pace)), 60)
+        return f"{minutes}:{seconds:02d}/km"
 
     @property
     def achievement_pct(self):
@@ -1441,6 +1980,18 @@ class WorkoutSession(models.Model):
         elif self.target_sets and self.target_seconds:
             objetivo = self.target_sets * self.target_seconds
             hecho = self.session_duration_seconds
+        elif self.target_distance_km and self.target_pace_seconds_per_km:
+            # Aquí no vale un simple "hecho/pedido": hay dos condiciones
+            # a la vez (distancia Y ritmo), igual que en la importación
+            # de Health Connect — andar 5 km muy despacio no completa un
+            # objetivo de "5 km a 6:00/km". Si no se cumplió el ritmo, 0
+            # sin más, por mucha distancia que hubiera; si se cumplió,
+            # el porcentaje es cuánta distancia sacaste de la pedida (con
+            # bonus si fue más).
+            pace = self.pace_seconds_per_km
+            if self.distance_km is None or pace is None or pace > self.target_pace_seconds_per_km:
+                return 0
+            return min(200, round(100 * self.distance_km / self.target_distance_km))
         else:
             return None
         if not objetivo:
@@ -1483,6 +2034,136 @@ class WorkoutSession(models.Model):
         if self.distance_km is not None:
             return f"{self.exercise_name} — {self.distance_km}km ({self.recorded_at:%Y-%m-%d %H:%M})"
         return f"{self.exercise_name} — {self.total_reps} reps ({self.recorded_at:%Y-%m-%d %H:%M})"
+
+
+class TimerSession(models.Model):
+    """
+    Una sesión cronometrada de una tarea de Enfoque (category='work'):
+    leer, estudiar, estirar… lo que sea que se apoye en un temporizador
+    en vez de en la cámara o en repeticiones.
+
+    Mismo patrón que WorkoutSession: el objetivo se guarda en la sesión
+    en el momento de guardarla (target_minutes), no se recalcula después,
+    para que el historial no cambie de significado si algún día editas
+    el objetivo de la tarea.
+
+    source distingue si los minutos vinieron de un cronómetro que
+    controlaste a mano o del tiempo real que estuvo abierta una app
+    externa (solo tiene sentido para subcategory='reading', y solo si
+    hay plugin nativo instalado en la app — ver /mnt del proyecto móvil).
+    """
+    SOURCE_MANUAL = "manual"
+    SOURCE_APP_USAGE = "app_usage"
+    SOURCE_CHOICES = [
+        (SOURCE_MANUAL, "Cronómetro manual"),
+        (SOURCE_APP_USAGE, "Tiempo en la app"),
+    ]
+
+    task = models.ForeignKey(
+        Task, on_delete=models.SET_NULL, null=True, blank=True, related_name="timer_sessions"
+    )
+    plan = models.ForeignKey(
+        Plan, on_delete=models.SET_NULL, null=True, blank=True, related_name="timer_sessions",
+        help_text="Para cuando esta tarea cuente para un objetivo del 12 Week Year. Sin usar todavía.",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="timer_sessions",
+    )
+    series_id = models.UUIDField(null=True, blank=True)
+
+    # Copia de task.subcategory en el momento de guardar — igual que el
+    # objetivo, no se recalcula después contra la tarea actual.
+    subcategory = models.CharField(max_length=16, blank=True)
+
+    source = models.CharField(max_length=16, choices=SOURCE_CHOICES, default=SOURCE_MANUAL)
+    app_package = models.CharField(
+        max_length=120, blank=True,
+        help_text="Paquete Android de la app leída (ej. com.adobe.reader). Solo si source=app_usage.",
+    )
+
+    minutes = models.PositiveIntegerField(default=0)
+    target_minutes = models.PositiveIntegerField(null=True, blank=True)
+
+    recorded_at = models.DateTimeField(auto_now_add=True)
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-recorded_at"]
+
+    @property
+    def achievement_pct(self):
+        """Porcentaje del objetivo cumplido, o None si la tarea no tenía uno (sesión libre)."""
+        if not self.target_minutes:
+            return None
+        return round(100 * self.minutes / self.target_minutes)
+
+    @property
+    def target_met(self):
+        """
+        Igual que WorkoutSession.target_met: True si no había objetivo
+        que exigir, o si lo hubo y se alcanzó. Solo False si había un
+        número que cumplir y se quedó corto.
+        """
+        pct = self.achievement_pct
+        return pct is None or pct >= 100
+
+    @property
+    def subcategory_label(self):
+        return dict(Task.FOCUS_SUBCATEGORY_CHOICES).get(self.subcategory, "Enfoque")
+
+    def __str__(self):
+        return f"{self.subcategory_label} — {self.minutes} min ({self.recorded_at:%Y-%m-%d %H:%M})"
+
+
+class SavedVideo(models.Model):
+    """
+    Vídeos de YouTube guardados para reutilizar sin tener que pegar el
+    enlace cada vez que se entrena o se estudia.
+
+    Se eligen en el momento de hacerlo, como alternativa al modo de
+    siempre (circuito, cámara, temporizador) — no van atados a una
+    tarea concreta, así una tarea que se repite puede usar un vídeo
+    distinto cada día, o ninguno. `scope` es solo para filtrar la lista
+    y no enseñar vídeos de estudio al entrenar tren inferior.
+    """
+    SCOPE_LOWER_BODY = "lower_body"
+    SCOPE_UPPER_BODY = "upper_body"
+    SCOPE_STUDY = "study_session"
+    SCOPE_CHOICES = [
+        (SCOPE_LOWER_BODY, "Tren inferior"),
+        (SCOPE_UPPER_BODY, "Tren superior"),
+        (SCOPE_STUDY, "Estudio"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="saved_videos",
+    )
+    scope = models.CharField(max_length=16, choices=SCOPE_CHOICES)
+    title = models.CharField(
+        max_length=120, blank=True,
+        help_text="Para reconocerlo en la lista. En blanco, se enseña el ID del vídeo.",
+    )
+    youtube_video_id = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def save(self, *args, **kwargs):
+        raw = (self.youtube_video_id or "").strip()
+        if raw:
+            m = _YOUTUBE_ID_RE.search(raw)
+            self.youtube_video_id = m.group(1) if m else raw
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.title or self.youtube_video_id
 
 
 class Occurrence(models.Model):
@@ -1555,3 +2236,49 @@ class Occurrence(models.Model):
                 running = 0
 
         return {"current_streak": current, "max_streak": max_s}
+
+    @classmethod
+    def weekly_completion(cls, user, reference_date=None, series_id=None):
+        """
+        Porcentaje de ejecución de la semana actual (lunes a domingo).
+
+        Primera pieza del 12 Week Year: una división simple sobre las
+        ocurrencias que ya se guardan — sin modelo nuevo, sin campo
+        nuevo. "Empieza por aquí" porque es barato y da una lectura
+        inmediata de cómo va la semana cada vez que se abre la lista.
+
+        Cada ocurrencia se cuenta en la semana de su due_date (el día al
+        que pertenecía la tarea) si lo tiene, y si no en la semana en
+        que se registró — mismo criterio que PlanItem.history() usa
+        para las tareas sin due_date.
+
+        Con `series_id` se filtra a una sola serie (ej. la tarea de un
+        plan concreto) en vez del global — es lo que usa Plan.weekly_completion
+        para la revisión semanal por objetivo, reutilizando exactamente
+        el mismo cálculo.
+        """
+        today = reference_date or timezone.localtime(timezone.now()).date()
+        week_start = today - timedelta(days=today.weekday())  # lunes
+        week_end = week_start + timedelta(days=6)             # domingo
+
+        occs = cls.objects.filter(user=user, deleted_at__isnull=True)
+        if series_id:
+            occs = occs.filter(series_id=series_id)
+        occs = occs.filter(
+            models.Q(due_date__gte=week_start, due_date__lte=week_end)
+            | models.Q(
+                due_date__isnull=True,
+                recorded_at__date__gte=week_start,
+                recorded_at__date__lte=week_end,
+            )
+        )
+        total = occs.count()
+        done = occs.filter(result=cls.RESULT_DONE).count()
+        return {
+            "week_start": week_start,
+            "week_end": week_end,
+            "done": done,
+            "not_done": total - done,
+            "total": total,
+            "pct": round(100 * done / total) if total else None,
+        }

@@ -10,6 +10,10 @@
     <a href="{% url 'tasks:task_list' %}" class="stats-link">← Tareas</a>
 </header>
 
+<div class="task-form__actions">
+    <a class="ghost-btn" href="{% url 'tasks:weekly_review' %}">Revisión semanal →</a>
+</div>
+
 {% if plans %}
 <ul class="plan-list">
     {% for p in plans %}
@@ -47,5 +51,29 @@
 <div class="task-form__actions">
     <a class="primary-btn" href="{% url 'tasks:plan_create' %}">+ Nuevo plan</a>
 </div>
+
+{% if closed_plans %}
+<details class="done-details">
+    <summary class="done-summary">Planes cerrados <span class="task-section__count">{{ closed_plans|length }}</span></summary>
+    <ul class="plan-list">
+        {% for p in closed_plans %}
+        <li class="plan-card plan-card--off">
+            <a href="{% url 'tasks:plan_close' p.plan.pk %}">
+                <p class="plan-card__name">
+                    {{ p.plan.name }}
+                    <span class="count-pill {% if p.plan.is_completed %}count-pill--done{% else %}count-pill--not-done{% endif %}">
+                        {% if p.plan.is_completed %}completado{% else %}incompleto{% endif %}
+                    </span>
+                </p>
+                <p class="plan-card__meta">Cerrado el {{ p.plan.closed_at|date:"d M Y" }}</p>
+                {% if p.progress is not None %}
+                <div class="plan-bar"><div class="plan-bar__fill" style="width: {{ p.progress }}%"></div></div>
+                {% endif %}
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+</details>
+{% endif %}
 
 {% endblock %}

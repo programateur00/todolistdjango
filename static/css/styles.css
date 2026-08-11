@@ -1,5 +1,6 @@
 /* ── Tokens: Strive — ceniza, brasa y hueso ──────────────────────────── */
 :root {
+  color-scheme: dark;
   --ash:         #171310;   /* fondo — ceniza fría, casi negro pero cálido */
   --ash-soft:    #221B15;   /* superficie elevada — tarjetas, inputs */
   --bone:        #EFE3D2;   /* texto principal — hueso, no blanco puro */
@@ -21,6 +22,34 @@
   --radius:      14px;
   --shadow:      0 1px 0 rgba(0,0,0,.3), 0 10px 24px -12px rgba(255,106,31,.18);
 }
+
+/* Modo claro — no es "el oscuro pero blanco de oficina": es la misma
+   cueva a la luz del día. Arenisca y ocre en vez de blanco liso, para
+   que siga sintiéndose ceniza/brasa/hueso y no un tema genérico. Se
+   activa con [data-theme="light"] en <html>, puesto por un script en
+   el <head> ANTES de pintar nada (para no ver un parpadeo del tema
+   equivocado al cargar), y guardado en localStorage — es una
+   preferencia del aparato, no algo que viva en el servidor. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --ash:         #F1E0BE;   /* arenisca al sol — el "blanco" de este tema */
+  --ash-soft:    #E7CE9E;   /* arenisca más honda — tarjetas, superficie elevada */
+  --bone:        #2E2013;   /* tinta/carbón sobre piedra clara — texto principal */
+  --bone-faded:  #7C6244;   /* texto secundario, ocre apagado */
+  --ember:       #E2540D;   /* misma brasa, ahora vista de día */
+  --ember-deep:  #A83C0C;
+  --ember-soft:  #F4C79A;   /* brasa tenue sobre arenisca, no rosa-pastel */
+  --gold:        #96650D;
+  --gold-soft:   #EBD49B;
+  --amber:       #A85913;
+  --amber-soft:  #EBD09B;
+  --danger:      #AD2C1B;
+  --danger-soft: #EFC7B8;
+  --line:        #D2B685;   /* veta más oscura en la piedra */
+  --paper:       #FAF0DC;   /* pergamino — donde se escribe/toca, no blanco puro */
+  --shadow:      0 1px 0 rgba(60,30,0,.06), 0 10px 24px -12px rgba(226,84,13,.22);
+}
+
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin:0; padding:0; background:var(--ash); color:var(--bone);
   font-family:var(--font-b); -webkit-font-smoothing:antialiased; }
@@ -46,19 +75,29 @@ button { font-family:var(--font-b); cursor:pointer; }
 .site-nav__brand {
   font-family:var(--font-d); font-weight:400; font-size:22px; letter-spacing:.08em;
   color:var(--ember); text-decoration:none; text-shadow:0 0 14px rgba(255,106,31,.35);
+  line-height:1;
 }
-.site-nav__links { display:flex; gap:18px; }
+.site-nav__links { display:flex; align-items:center; gap:18px; }
 .site-nav__links a {
+  display:flex; align-items:center; height:30px;
   font-family:var(--font-b); font-size:14px; color:var(--bone-faded);
-  text-decoration:none; padding-bottom:2px; border-bottom:2px solid transparent;
+  text-decoration:none; padding:0 2px; border-bottom:2px solid transparent;
   transition: color .15s ease, border-color .15s ease;
 }
 .site-nav__links a:hover { color:var(--ember); }
 .site-nav__links a.is-active { color:var(--ember); border-bottom-color:var(--ember); }
+.theme-toggle {
+  background:transparent; border:none; border-left:1px solid var(--line);
+  height:22px; font-size:15px; line-height:1; display:flex; flex:none;
+  align-items:center; justify-content:center; padding:0 0 0 16px; margin-left:2px;
+  color:var(--bone-faded); transition:color .15s ease;
+}
+.theme-toggle:hover { color:var(--ember); }
 @media (max-width:480px) {
   .site-nav__inner { padding:12px 16px; gap:10px; }
   .site-nav__links { gap:12px; }
   .site-nav__links a { font-size:13px; }
+  .theme-toggle { padding-left:10px; margin-left:0; }
 }
 
 .credits { text-align:center; font-size:12px; color:var(--bone-faded); padding:0 20px 24px; margin:0; }
@@ -199,6 +238,12 @@ button { font-family:var(--font-b); cursor:pointer; }
 .task-card__body  { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; padding:4px 0; }
 .task-card__title { margin:0; font-size:15px; font-weight:500; word-break:break-word; }
 .task-card__title--struck { color:var(--bone-faded); }
+.task-card__title-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.task-card__streak {
+  flex:none; font-family:var(--font-mono); font-size:12px; font-weight:700;
+  background:var(--amber-soft); color:var(--amber); border-radius:999px; padding:2px 8px;
+  white-space:nowrap;
+}
 
 .strike-wrap { position:relative; display:inline-block; }
 .strike-wrap::after { content:""; position:absolute; left:-2%; right:-2%; top:52%;
@@ -237,6 +282,21 @@ button { font-family:var(--font-b); cursor:pointer; }
 .count-pill--streak   { background:var(--amber-soft); color:var(--amber); }
 .count-pill--max      { background:var(--amber-soft); color:var(--amber); }
 
+/* ── Week summary (12 Week Year: porcentaje semanal de ejecución) ─────── */
+.week-summary {
+  background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
+  box-shadow:var(--shadow); padding:14px 16px; margin-bottom:18px;
+}
+.week-summary__top   { display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:8px; }
+.week-summary__label { font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--bone-faded); }
+.week-summary__pct   { font-family:var(--font-mono); font-weight:700; font-size:20px; color:var(--gold); }
+.week-summary__meta  { margin:8px 0 0; font-size:12px; color:var(--bone-faded); }
+.review-label {
+  font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--bone-faded); margin:12px 0 4px;
+}
+.plan-card .review-label:first-of-type { margin-top:10px; }
+
 /* ── History ────────────────────────────────────────────────────────── */
 .history-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; }
 .history-row  { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px; font-size:13px; }
@@ -261,11 +321,38 @@ button { font-family:var(--font-b); cursor:pointer; }
 .field input[type="text"],
 .field input[type="date"],
 .field input[type="time"],
+.field input[type="number"],
+.field input[type="password"],
+.field input[type="url"],
+.field input[type="email"],
 .field textarea {
   font-family:var(--font-b); font-size:15px; padding:10px 12px;
   border:1px solid var(--line); border-radius:10px; background:var(--ash); color:var(--bone); }
 .field input:focus, .field textarea:focus { outline:none; border-color:var(--ember); background:var(--paper); }
 .field textarea { resize:vertical; }
+.field select {
+  font-family:var(--font-b); font-size:15px; padding:10px 12px;
+  border:1px solid var(--line); border-radius:10px; background:var(--ash); color:var(--bone);
+}
+.field select:focus { outline:none; border-color:var(--ember); background:var(--paper); }
+
+/* El navegador/WebView mete su propio fondo y color de texto al
+   autocompletar usuario/contraseña guardados — y si el sistema además
+   fuerza modo oscuro sobre eso, puede acabar en fondo y letra los dos
+   negros, ilegible. Se fuerza aquí a que respete el tema en vez de
+   dejarle poner el suyo. El truco del box-shadow enorme es necesario
+   porque background-color no se puede pisar directamente en Chrome
+   para inputs con autofill. */
+.field input:-webkit-autofill,
+.field input:-webkit-autofill:hover,
+.field input:-webkit-autofill:focus,
+.field input:-webkit-autofill:active {
+  -webkit-text-fill-color: var(--bone) !important;
+  caret-color: var(--bone);
+  -webkit-box-shadow: 0 0 0 1000px var(--ash) inset !important;
+  box-shadow: 0 0 0 1000px var(--ash) inset !important;
+  transition: background-color 9999s ease-in-out 0s;
+}
 
 .field-row { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
 
@@ -290,6 +377,7 @@ button { font-family:var(--font-b); cursor:pointer; }
 .weekday-chip:has(input:checked) { background:var(--amber); border-color:var(--amber); color:var(--paper); }
 
 .task-form__actions { display:flex; justify-content:space-between; align-items:center; margin-top:8px; }
+.local-video-picker { display:flex; margin-top:2px; }
 .primary-btn { background:var(--ember); color:var(--paper); border:none;
   border-radius:10px; padding:11px 20px; font-size:14px; font-weight:600;
   transition: transform .15s ease, box-shadow .15s ease, background .15s ease; }
@@ -323,6 +411,18 @@ button { font-family:var(--font-b); cursor:pointer; }
   --personal-soft: #332C14;
   --other:      #8A7B68;
   --other-soft: #2A241C;
+}
+:root[data-theme="light"] {
+  --study:      #2E6DA4;
+  --study-soft: #D9E4EC;
+  --sport:      #E2540D;
+  --sport-soft: #F4C79A;
+  --work:       #7A5FA0;
+  --work-soft:  #E7DCE9;
+  --personal:   #96650D;
+  --personal-soft: #EBD49B;
+  --other:      #6B5D4C;
+  --other-soft: #E7DBC4;
 }
 
 .category-options { display:flex; flex-wrap:wrap; gap:8px; }
@@ -397,6 +497,9 @@ button { font-family:var(--font-b); cursor:pointer; }
 
 .exercise-picker__hint { font-family:var(--font-d); font-size:19px; margin:4px 0 2px; }
 .exercise-picker { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }
+.exercise-picker li { display:flex; align-items:center; gap:8px; }
+.exercise-picker li .exercise-picker__item { flex:1; }
+.exercise-picker li .inline-delete { flex:none; }
 .exercise-picker__item { display:flex; align-items:center; justify-content:space-between; gap:12px;
   background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
   padding:16px 18px; box-shadow:var(--shadow); text-decoration:none; color:var(--bone);
@@ -406,6 +509,11 @@ button { font-family:var(--font-b); cursor:pointer; }
 .exercise-picker__name { font-weight:600; font-size:16px; }
 .exercise-picker__mode { font-size:12px; color:var(--bone-faded); text-transform:uppercase; letter-spacing:.04em; }
 .exercise-picker__empty { color:var(--bone-faded); font-size:14px; }
+
+.video-add-form { display:flex; flex-wrap:wrap; gap:8px; margin:4px 0 20px; }
+.video-add-form input[type="text"] { flex:1; min-width:140px; border:1px solid var(--line);
+  border-radius:10px; background:var(--paper); padding:10px 12px; font-size:14px; color:var(--bone); }
+.video-add-form button { flex:none; }
 
 .workout-btn { display:inline-flex; align-items:center; justify-content:center; width:40px; height:40px;
   border-radius:999px; background:var(--sport-soft, var(--gold-soft)); color:var(--sport, var(--gold));
@@ -444,6 +552,7 @@ button { font-family:var(--font-b); cursor:pointer; }
 .circuit__player { display:flex; flex-direction:column; align-items:center; gap:6px; width:100%; }
 .circuit__progress { font-size:12px; color:var(--bone-faded); text-transform:uppercase; letter-spacing:.06em; margin:0; }
 .circuit__icon { width:180px; height:135px; margin:6px 0; }
+.circuit__video { width:100%; max-width:360px; aspect-ratio:16/9; border-radius:var(--radius); background:#000; margin:6px 0; }
 .circuit__exercise-name { font-family:var(--font-d); font-size:26px; margin:0; }
 .circuit__phase { font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:.06em;
   margin:0; padding:3px 12px; border-radius:999px; }
@@ -452,6 +561,24 @@ button { font-family:var(--font-b); cursor:pointer; }
 .circuit__timer { font-family:var(--font-mono); font-size:64px; font-weight:600; line-height:1; margin:6px 0; }
 .circuit__next { font-size:13px; color:var(--bone-faded); min-height:18px; margin:0; }
 .circuit__controls { display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; justify-content:center; }
+
+/* ── Enfoque: temporizador de leer/estudiar/estirar ───────────────────── */
+.focus-timer {
+  text-align:center; background:var(--paper); border:1px solid var(--line);
+  border-radius:var(--radius); box-shadow:var(--shadow); padding:36px 20px;
+}
+.focus-timer__display { font-family:var(--font-mono); font-size:56px; font-weight:700; margin:0 0 6px; }
+.focus-timer__target  { font-size:13px; color:var(--bone-faded); margin:0 0 14px; }
+.focus-timer .stats-bar { max-width:280px; margin:0 auto 14px; }
+.focus-timer__actions { display:flex; gap:10px; justify-content:center; margin-top:20px; }
+.focus-timer #focus-hint { margin-top:14px; }
+.focus-timer__alt { display:block; width:100%; margin-top:14px; }
+
+/* ── Vídeo embebido de YouTube en una tarea ────────────────────────── */
+.video-embed { text-align:center; }
+.video-embed__player { width:100%; aspect-ratio:16/9; border-radius:var(--radius);
+  background:#000; box-shadow:var(--shadow); }
+.video-embed .field__hint { margin-top:12px; }
 
 .circuit__done { display:flex; flex-direction:column; align-items:center; gap:12px; padding:32px 0; }
 .circuit__done-title { font-family:var(--font-d); font-size:24px; margin:0; }
@@ -563,6 +690,14 @@ button { font-family:var(--font-b); cursor:pointer; }
 .plan-head__target { font-family:var(--font-mono); font-size:26px; }
 .plan-head__target em { font-style:normal; font-size:18px; color:var(--ember); }
 .plan-head__meta { font-size:12px; color:var(--bone-faded); margin:6px 0 0; }
+
+/* ── Cierre de ciclo: la pantalla de "lo has conseguido" ──────────────── */
+.celebration { text-align:center; padding:28px 16px 8px; }
+.celebration__emoji { font-size:44px; margin:0 0 8px; line-height:1; }
+.celebration__title { font-family:var(--font-d); font-size:24px; margin:0 0 6px; }
+.celebration__text { font-size:14px; color:var(--bone-faded); margin:0; }
+.celebration__reward { margin:14px auto 0; max-width:320px; font-size:14px;
+  background:var(--gold-soft); color:var(--gold); border-radius:var(--radius); padding:10px 14px; }
 
 .plan-bar { height:8px; background:var(--paper); border-radius:999px; overflow:hidden;
   border:1px solid var(--line); }

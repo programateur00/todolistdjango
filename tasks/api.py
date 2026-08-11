@@ -16,9 +16,10 @@ van con @csrf_exempt porque la API no usa cookies de sesión — la
 protección CSRF existe para ataques basados en cookies, y aquí no aplica.
 """
 import json
+import uuid
 from functools import wraps
 
-from django.db.models import Q
+from django.db.models import Q, Sum
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -27,7 +28,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from .models import (
-    Exercise, Occurrence, Plan, Routine, RoutineItem, Task, WorkoutSession,
+    Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, SavedVideo, Task, TimerSession, WorkoutSession,
 )
 from .utils import get_current_user, resolve_plan_target as _plan_context
 
@@ -87,10 +88,24 @@ def task_json(t):
         "subcategory": t.subcategory,
         "is_avoid": t.is_avoid,
         "capabilities": t.category_capabilities,
-        # Qué tipo de sesión abre: "camera", "timer", "distance" o null.
-        # La app elige el icono con esto, para no enseñar una cámara en
-        # una tarea que no va a grabar nada.
+        # Qué tipo de sesión abre: "camera", "timer", "distance", "focus" o
+        # null. La app elige el icono con esto, para no enseñar una cámara
+        # en una tarea que no va a grabar nada.
         "workout_kind": t.workout_kind,
+        # Solo relevante si category="work" (Enfoque): objetivo en minutos
+        # del temporizador. None = sesión libre, sin objetivo.
+        "target_minutes": t.target_minutes,
+        "youtube_video_id": t.youtube_video_id,
+        "youtube_playlist_id": t.youtube_playlist_id,
+        "target_video_count": t.target_video_count,
+        "has_local_video": t.has_local_video,
+        "sport_mode": t.sport_mode,
+        "target_steps": t.target_steps,
+        "target_distance_km": t.target_distance_km,
+        "max_pace_seconds_per_km": t.max_pace_seconds_per_km,
+        # Racha actual de esta serie — mismo cálculo que Rachas, para
+        # poder enseñarla en la tarjeta sin ir a buscarla.
+        "current_streak": t.current_streak,
         # Si la tarea la generó un plan, la app va directa a la sesión sin
         # pasar por el selector de ejercicios: el plan ya decidió.
         "plan_uuid": str(t.plan.uuid) if t.plan else None,
@@ -175,7 +190,12 @@ def meta(request):
     no tenga que repetirlos hardcodeados y desincronizarse del servidor."""
     return JsonResponse({
         "categories": [{"value": v, "label": l} for v, l in Task.CATEGORY_CHOICES],
-        "subcategories": [{"value": v, "label": l} for v, l in Task.SUBCATEGORY_CHOICES],
+        # Separadas porque significan cosas distintas según la categoría:
+        # en Deporte filtran qué ejercicios se ofrecen; en Enfoque, qué se
+        # está cronometrando. Mezclarlas en una sola lista confundiría el
+        # selector (verías "Lectura" al elegir un ejercicio de deporte).
+        "sport_subcategories": [{"value": v, "label": l} for v, l in Task.SPORT_SUBCATEGORY_CHOICES],
+        "focus_subcategories": [{"value": v, "label": l} for v, l in Task.FOCUS_SUBCATEGORY_CHOICES],
         "repeats": [{"value": v, "label": l} for v, l in Task.REPEAT_CHOICES],
         "weekdays": [{"value": v, "label": l} for v, l in Task.WEEKDAYS],
         "capabilities": Task.CATEGORY_CAPABILITIES,
@@ -185,6 +205,8 @@ def meta(request):
 @api("GET")
 def task_list(request):
     Task.expire_overdue()
+    Plan.auto_close_expired(user=_user())
+    Plan.sync_all_tasks(user=_user())
     hoy = timezone.localtime(timezone.now()).date()
     qs = tasks_qs()
     category = request.GET.get("category")
@@ -194,6 +216,7 @@ def task_list(request):
         # Mismo criterio que la web: la tarea de mañana no es de hoy.
         "pending": [task_json(t) for t in Task.for_today(qs.filter(is_done=False))],
         "completed": [task_json(t) for t in Task.completed_today(qs)],
+        "weekly": Occurrence.weekly_completion(_user()),
     })
 
 
@@ -245,7 +268,10 @@ def stats_list(request):
         total = s["done"] + s["not_done"]
         s["total"] = total
         s["rate"] = round(100 * s["done"] / total) if total else 0
-    return JsonResponse({"stats": list(summary.values())})
+    return JsonResponse({
+        "stats": list(summary.values()),
+        "weekly": Occurrence.weekly_completion(_user()),
+    })
 
 
 # ------------------------------------------------------- escritura
@@ -266,6 +292,52 @@ def _apply_task_fields(t, data):
     if "subcategory" in data:
         valid = {k for k, _ in Task.SUBCATEGORY_CHOICES}
         t.subcategory = data["subcategory"] if data["subcategory"] in valid else ""
+    if "target_minutes" in data:
+        raw = data["target_minutes"]
+        if raw in (None, "", 0):
+            t.target_minutes = None
+        else:
+            try:
+                t.target_minutes = max(1, int(raw))
+            except (TypeError, ValueError):
+                t.target_minutes = None
+    if "youtube_video_id" in data:
+        # La normalización a un ID limpio la hace Task.save(), no hace
+        # falta duplicarla aquí.
+        t.youtube_video_id = (data.get("youtube_video_id") or "").strip()[:255]
+    if "youtube_playlist_id" in data:
+        t.youtube_playlist_id = (data.get("youtube_playlist_id") or "").strip()[:255]
+    if "target_video_count" in data:
+        raw = data["target_video_count"]
+        if raw in (None, "", 0):
+            t.target_video_count = None
+        else:
+            try:
+                t.target_video_count = max(1, int(raw))
+            except (TypeError, ValueError):
+                t.target_video_count = None
+    if "has_local_video" in data:
+        t.has_local_video = bool(data.get("has_local_video"))
+    if "sport_mode" in data:
+        valid = {k for k, _ in Task.SPORT_MODE_CHOICES}
+        t.sport_mode = data["sport_mode"] if data.get("sport_mode") in valid else ""
+    for campo, minimo in (("target_steps", 1), ("target_distance_km", 0.1), ("max_pace_seconds_per_km", 1)):
+        if campo in data:
+            raw = data[campo]
+            if raw in (None, "", 0):
+                setattr(t, campo, None)
+            else:
+                try:
+                    valor = float(raw) if campo == "target_distance_km" else int(raw)
+                    if campo == "max_pace_seconds_per_km" and valor not in Task.PACE_PRESET_SECONDS:
+                        # Solo se aceptan los presets del desplegable — un
+                        # número suelto no dice nada de si es rápido o
+                        # lento sin el contexto que da la etiqueta.
+                        setattr(t, campo, None)
+                    else:
+                        setattr(t, campo, max(minimo, valor))
+                except (TypeError, ValueError):
+                    setattr(t, campo, None)
     if "due_date" in data:
         raw = data["due_date"]
         if not raw:
@@ -314,6 +386,15 @@ def task_create(request):
         return JsonResponse({"ok": False, "error": error}, status=400)
     if not t.title:
         return JsonResponse({"ok": False, "error": "Falta el título."}, status=400)
+    # Si el cliente ya trae un uuid (offline-first, o porque generó uno
+    # de antemano para poder guardar un vídeo local con esa clave antes
+    # de crear la tarea), se respeta en vez de generar uno nuevo.
+    raw_uuid = (data.get("uuid") or data.get("client_uuid") or "").strip()
+    if raw_uuid:
+        try:
+            t.uuid = uuid.UUID(raw_uuid)
+        except ValueError:
+            pass
     t.save()
     return JsonResponse({"ok": True, "task": task_json(t)}, status=201)
 
@@ -496,6 +577,96 @@ def routine_detail(request, uuid):
     return JsonResponse({"ok": True})
 
 
+@api("POST")
+def video_save(request, uuid):
+    """
+    El vídeo llegó al final en el móvil -> la tarea se marca hecha
+    directamente. Sin sesión que guardar: la tarea ENTERA es "ver el
+    vídeo", verlo entero es todo lo que hace falta.
+    """
+    t = get_object_or_404(tasks_qs(), uuid=uuid)
+    t.mark_done()
+    return JsonResponse({"ok": True, "task": task_json(t)})
+
+
+# ---------------------------------------------------- vídeos guardados
+
+def saved_video_json(v):
+    return {
+        "uuid": str(v.uuid), "scope": v.scope,
+        "title": v.title, "youtube_video_id": v.youtube_video_id,
+    }
+
+
+@api("GET", "POST")
+def saved_video_list(request):
+    """
+    GET ?scope=lower_body -> tus vídeos guardados de ese tipo, para el
+    selector de tren superior/inferior/estudio.
+    POST -> guarda uno nuevo (se elige justo después de crearlo, un
+    paso menos que guardar y luego ir a buscarlo en la lista).
+    """
+    if request.method == "GET":
+        qs = SavedVideo.objects.filter(user=_user(), deleted_at__isnull=True)
+        scope = request.GET.get("scope")
+        if scope:
+            qs = qs.filter(scope=scope)
+        return JsonResponse({"videos": [saved_video_json(v) for v in qs]})
+
+    data = body(request)
+    valid_scopes = {k for k, _ in SavedVideo.SCOPE_CHOICES}
+    scope = data.get("scope")
+    raw = (data.get("youtube_video_id") or "").strip()
+    if scope not in valid_scopes:
+        return JsonResponse({"ok": False, "error": "scope no válido"}, status=400)
+    if not raw:
+        return JsonResponse({"ok": False, "error": "Falta el enlace de YouTube"}, status=400)
+
+    v = SavedVideo.objects.create(
+        user=_user(), scope=scope, youtube_video_id=raw,
+        title=(data.get("title") or "").strip()[:120],
+    )
+    return JsonResponse({"ok": True, "video": saved_video_json(v)}, status=201)
+
+
+@api("DELETE")
+def saved_video_delete(request, uuid):
+    """Borrado suave, para poder limpiar la lista sin romper el historial."""
+    v = get_object_or_404(SavedVideo, uuid=uuid, user=_user())
+    from django.utils import timezone
+    v.deleted_at = timezone.now()
+    v.save(update_fields=["deleted_at"])
+    return JsonResponse({"ok": True})
+
+
+# ------------------------------------------------------------- enfoque
+
+@api("POST")
+def focus_save(request, uuid):
+    """
+    Sesión de temporizador (leer, estudiar, estirar…). El móvil manda los
+    minutos ya contados y, si el subtipo es "reading" y vino del plugin
+    nativo, la fuente y el paquete de la app. Mismo criterio de
+    completado que workout_save: si hay objetivo y no se llega, la tarea
+    se queda pendiente con el porcentaje guardado.
+    """
+    t = get_object_or_404(tasks_qs(), uuid=uuid)
+    data = body(request)
+
+    minutes = max(0, int(data.get("minutes", 0)))
+    source = data.get("source") if data.get("source") in dict(TimerSession.SOURCE_CHOICES) else TimerSession.SOURCE_MANUAL
+    app_package = (data.get("app_package") or "")[:120] if source == TimerSession.SOURCE_APP_USAGE else ""
+
+    ts = TimerSession.objects.create(
+        task=t, user=_user(), series_id=t.series_id,
+        subcategory=t.subcategory, source=source, app_package=app_package,
+        minutes=minutes, target_minutes=t.target_minutes,
+    )
+    if ts.target_met:
+        t.mark_done()
+    return JsonResponse({"ok": True, "session_uuid": str(ts.uuid), "task": task_json(t)})
+
+
 # ------------------------------------------------------ entrenamientos
 
 @api("POST")
@@ -581,6 +752,142 @@ def workout_save_manual(request, uuid):
 
 
 @api("POST")
+def running_import(request, uuid):
+    """
+    Importa carreras venidas de fuera (Health Connect, y en su día OCR
+    de la cinta) para una tarea de running.
+
+    Recibe una lista, no una sola, porque al sincronizar lo natural es
+    traer "todo lo de los últimos N días" de golpe: puede haber varias
+    carreras, o ninguna. Las que ya se importaron antes se saltan por
+    su external_id, así que sincronizar dos veces seguidas no duplica
+    nada — importante, porque el móvil puede reintentar sin saber si la
+    primera llamada llegó.
+
+    Solo marca la tarea como hecha si alguna carrera cumple el ritmo
+    mínimo pedido (si lo hay): correr 20 minutos andando no cuenta como
+    haber hecho la tarea de correr.
+    """
+    t = get_object_or_404(tasks_qs(), uuid=uuid)
+    data = body(request)
+    runs = data.get("runs")
+    if not isinstance(runs, list):
+        return JsonResponse({"ok": False, "error": "Falta la lista 'runs'."}, status=400)
+
+    source = data.get("source") or WorkoutSession.SOURCE_HEALTH_CONNECT
+    valid_sources = {k for k, _ in WorkoutSession.SOURCE_CHOICES}
+    if source not in valid_sources:
+        source = WorkoutSession.SOURCE_HEALTH_CONNECT
+
+    def _f(v):
+        try:
+            return float(str(v).replace(",", "."))
+        except (TypeError, ValueError):
+            return None
+
+    # Los objetivos viven en la tarea, no en la petición: así el móvil
+    # solo manda "esto es lo que hice" y el servidor decide si cuenta —
+    # un solo sitio donde está la regla, y cambiarla en la tarea aplica
+    # sin tener que actualizar la app.
+    max_pace = t.max_pace_seconds_per_km
+    min_steps = t.target_steps
+    min_distance = t.target_distance_km
+
+    imported, skipped, qualifying = [], 0, 0
+    total_steps, total_distance = 0, 0.0
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        external_id = str(run.get("external_id") or "").strip()[:120]
+        if external_id and WorkoutSession.objects.filter(
+            user=_user(), external_id=external_id, deleted_at__isnull=True
+        ).exists():
+            skipped += 1
+            continue
+
+        distance_km = _f(run.get("distance_km"))
+        duration_seconds = _f(run.get("duration_seconds"))
+        steps_raw = run.get("steps")
+        try:
+            steps = int(steps_raw) if steps_raw else None
+        except (TypeError, ValueError):
+            steps = None
+        if not distance_km and not duration_seconds and not steps:
+            continue
+
+        pace = round(duration_seconds / distance_km, 2) if (distance_km and duration_seconds) else None
+        ws = WorkoutSession.objects.create(
+            task=t, plan=t.plan, user=_user(), series_id=t.series_id,
+            exercise=run.get("exercise") or t.subcategory or "running",
+            session_duration_seconds=int(round(duration_seconds)) if duration_seconds else 0,
+            avg_rep_seconds=pace,
+            distance_km=distance_km,
+            steps=steps,
+            source=source,
+            external_id=external_id,
+            # Objetivo vigente en ESE momento — si viene de un plan que
+            # progresa semana a semana, esto deja constancia de qué se
+            # pedía entonces, no de lo que se pide ahora.
+            target_distance_km=min_distance,
+            target_pace_seconds_per_km=max_pace,
+        )
+        imported.append(str(ws.uuid))
+        total_steps += steps or 0
+        # La distancia solo cuenta si la carrera se hizo al ritmo pedido:
+        # el objetivo es "5 km a 6:30/km", no "5 km O 6:30/km". Andar 5 km
+        # muy despacio no completa una tarea de correr.
+        cumple_ritmo = max_pace is None or (pace is not None and pace <= max_pace)
+        if cumple_ritmo:
+            total_distance += distance_km or 0
+            # Con ritmo pedido pero sin distancia, basta con una carrera
+            # que dé ese ritmo.
+            if max_pace is not None and min_distance is None and pace is not None:
+                qualifying += 1
+
+    # Pasos y distancia se acumulan a lo largo del día: 10.000 pasos en
+    # tres paseos cuentan igual que en uno. Y hay que contar TODO lo de
+    # hoy, no solo lo de esta tanda — si sincronizas a mediodía y otra
+    # vez por la tarde, la segunda solo trae lo nuevo.
+    if min_steps is not None:
+        hoy = timezone.localtime(timezone.now()).date()
+        de_hoy = WorkoutSession.objects.filter(
+            user=_user(), series_id=t.series_id,
+            recorded_at__date=hoy, deleted_at__isnull=True,
+        )
+        total_steps = de_hoy.aggregate(pasos=Sum("steps"))["pasos"] or 0
+
+    if min_steps is not None and total_steps >= min_steps:
+        qualifying += 1
+    if min_distance is not None and total_distance >= min_distance:
+        qualifying += 1
+    # Sin ningún objetivo puesto, basta con haber hecho algo.
+    if max_pace is None and min_steps is None and min_distance is None and imported:
+        qualifying += 1
+
+    # Solo se da por hecha si de verdad se cumplió algún objetivo.
+    if qualifying:
+        t.mark_done()
+        # Si venía de un plan, el escalón puede haber subido con esta
+        # sesión — se refresca ya, no hay que esperar a la próxima
+        # carga de la lista para que la tarea de mañana traiga el
+        # objetivo correcto.
+        plan = t.plan
+        if plan:
+            plan.sync_task()
+
+    return JsonResponse({
+        "ok": True,
+        "imported": len(imported),
+        "skipped": skipped,
+        "qualifying": qualifying,
+        "total_steps": total_steps,
+        "total_distance_km": round(total_distance, 2),
+        "session_uuids": imported,
+        "task": task_json(t),
+    })
+
+
+@api("POST")
 def routine_result(request, uuid, routine_uuid):
     """
     Resultado de un circuito terminado (o cortado antes).
@@ -661,6 +968,7 @@ def plan_json(p, detail=False):
         return {
             "id": it.pk,
             "name": it.display_name,
+            "label": it.label,
             "slug": it.exercise.slug if it.exercise else None,
             "progression": it.progression,
             "is_headline": it.is_headline,
@@ -668,9 +976,34 @@ def plan_json(p, detail=False):
             "target_reps": t["reps"],
             "target_seconds": t["seconds"],
             "target_weight_kg": t["weight_kg"],
+            "target_distance_km": t.get("distance_km"),
+            "target_pace_seconds_per_km": t.get("pace_seconds_per_km"),
             "step": it.current_step(),
             "remaining": it.sessions_to_goal(),
             "done": t["done"],
+            # Para poder rellenar el formulario de edición sin tener que
+            # deshacer la progresión — estos son los valores tal cual se
+            # guardaron, no el escalón actual.
+            "start_sets": it.start_sets, "start_reps": it.start_reps,
+            "start_seconds": it.start_seconds, "start_weight_kg": it.start_weight_kg,
+            "goal_sets": it.goal_sets, "goal_reps": it.goal_reps,
+            "goal_seconds": it.goal_seconds, "goal_weight_kg": it.goal_weight_kg,
+            "start_distance_km": it.start_distance_km,
+            "start_pace_seconds_per_km": it.start_pace_seconds_per_km,
+            "goal_distance_km": it.goal_distance_km,
+            "goal_pace_seconds_per_km": it.goal_pace_seconds_per_km,
+            "distance_increment_km": it.distance_increment_km,
+            "pace_decrement_seconds": it.pace_decrement_seconds,
+            "sessions_per_step": it.sessions_per_step,
+            "reps_increment": it.reps_increment,
+            "weight_increment_kg": it.weight_increment_kg,
+            "rep_range_low": it.rep_range_low,
+            "deload_after_failures": it.deload_after_failures,
+            "sport_mode": it.sport_mode,
+            "youtube_video_id": it.youtube_video_id,
+            "youtube_playlist_id": it.youtube_playlist_id,
+            "target_minutes": it.target_minutes,
+            "target_video_count": it.target_video_count,
         }
 
     data = {
@@ -678,11 +1011,15 @@ def plan_json(p, detail=False):
         "id": p.pk,
         "name": p.name,
         "notes": p.notes,
+        "plan_type": p.plan_type,
         "week": p.week_number,
         "weeks": p.weeks,
         "started_on": p.started_on.isoformat(),
         "ends_on": p.ends_on.isoformat(),
         "is_active": p.is_active,
+        "closed_at": p.closed_at.isoformat() if p.closed_at else None,
+        "is_completed": p.is_completed if p.closed_at else None,
+        "reward": p.reward,
         "progress_pct": p.progress_pct(),
         "custom_days": p.custom_days_list(),
         "due_time": p.due_time.strftime("%H:%M") if p.due_time else None,
@@ -705,9 +1042,273 @@ def plan_list(request):
 
 
 @api("GET")
+def weekly_review(request):
+    """
+    Mismo contenido que la revisión semanal de la web: el global y,
+    para cada objetivo activo, su ejecución de esta semana y cuánto
+    lleva recorrido.
+    """
+    plans = []
+    for p in plans_qs().filter(is_active=True):
+        plans.append({
+            "uuid": str(p.uuid),
+            "id": p.pk,
+            "name": p.name,
+            "week": p.week_number,
+            "weeks": p.weeks,
+            "progress_pct": p.progress_pct(),
+            "weekly": p.weekly_completion(),
+        })
+    return JsonResponse({
+        "weekly": Occurrence.weekly_completion(_user()),
+        "plans": plans,
+    })
+
+
+@api("GET", "PATCH", "DELETE")
 def plan_detail(request, uuid):
     p = get_object_or_404(plans_qs(), uuid=uuid)
-    return JsonResponse({"plan": plan_json(p, detail=True)})
+
+    if request.method == "GET":
+        return JsonResponse({"plan": plan_json(p, detail=True)})
+
+    if request.method == "PATCH":
+        error = _apply_plan_fields(p, body(request))
+        if error:
+            return JsonResponse({"ok": False, "error": error}, status=400)
+        p.save()
+        p.sync_task()
+        return JsonResponse({"ok": True, "plan": plan_json(p, detail=True)})
+
+    # DELETE — borrado suave, igual que en la web.
+    p.deleted_at = timezone.now()
+    p.save(update_fields=["deleted_at", "updated_at"])
+    p.sync_task()
+    return JsonResponse({"ok": True})
+
+
+def _apply_plan_fields(p, data):
+    """Comparte lógica entre crear y editar — mismo patrón que _apply_task_fields."""
+    if "name" in data:
+        name = (data.get("name") or "").strip()[:80]
+        if not name:
+            return "Falta el nombre."
+        p.name = name
+    if "notes" in data:
+        p.notes = (data.get("notes") or "").strip()
+    if "started_on" in data:
+        raw = data["started_on"]
+        parsed = parse_date(raw) if isinstance(raw, str) else raw
+        p.started_on = parsed or p.started_on or timezone.localtime(timezone.now()).date()
+    elif not p.pk:
+        p.started_on = timezone.localtime(timezone.now()).date()
+    if "weeks" in data:
+        try:
+            p.weeks = max(1, int(data["weeks"]))
+        except (TypeError, ValueError):
+            p.weeks = 12
+    if "is_active" in data:
+        p.is_active = bool(data["is_active"])
+    if "reward" in data:
+        p.reward = (data.get("reward") or "").strip()[:200]
+    p.repeat = "custom"
+    if "custom_days" in data:
+        days = data["custom_days"] or []
+        if isinstance(days, list):
+            valid = {k for k, _ in Task.WEEKDAYS}
+            p.custom_days = ",".join(str(d) for d in days if str(d) in valid) or "0,2,4"
+    if "due_time" in data:
+        raw = data["due_time"]
+        parsed = parse_time(raw) if isinstance(raw, str) else raw
+        p.due_time = parsed
+    return None
+
+
+@api("POST")
+def plan_create(request):
+    data = body(request)
+    p = Plan(user=_user())
+    # El tipo solo se decide al crear — igual que en la web, cambiarlo
+    # después dejaría objetivos huérfanos que ya no encajan.
+    valid_types = {k for k, _ in Plan.PLAN_TYPE_CHOICES}
+    raw_type = data.get("plan_type")
+    p.plan_type = raw_type if raw_type in valid_types else Plan.PLAN_TYPE_SPORT
+
+    error = _apply_plan_fields(p, data)
+    if error:
+        return JsonResponse({"ok": False, "error": error}, status=400)
+    if not p.name:
+        return JsonResponse({"ok": False, "error": "Falta el nombre."}, status=400)
+
+    p.save()
+    p.sync_task()
+    return JsonResponse({"ok": True, "plan": plan_json(p, detail=True)}, status=201)
+
+
+@api("POST")
+def plan_close(request, uuid):
+    """
+    Cierre de ciclo — mismo mecanismo que la web: guarda el progreso
+    final y desactiva el plan, pero no lo borra (se queda para poder
+    mirar atrás).
+    """
+    p = get_object_or_404(plans_qs(), uuid=uuid)
+    if not p.closed_at:
+        p.final_progress_pct = p.progress_pct()
+        p.closed_at = timezone.now()
+        p.is_active = False
+        p.save(update_fields=["final_progress_pct", "closed_at", "is_active", "updated_at"])
+        p.sync_task()
+    return JsonResponse({"ok": True, "plan": plan_json(p, detail=True)})
+
+
+def _apply_video_fields(item, data):
+    """Vídeo/playlist/temporizador — compartido entre un objetivo de
+    Estudio (siempre) y uno de Deporte con sport_mode='video'."""
+    if "youtube_video_id" in data:
+        item.youtube_video_id = (data.get("youtube_video_id") or "").strip()[:255]
+    if "youtube_playlist_id" in data:
+        item.youtube_playlist_id = (data.get("youtube_playlist_id") or "").strip()[:255]
+    for field, minimo in (("target_minutes", 1), ("target_video_count", 1)):
+        if field in data:
+            raw = data[field]
+            if raw in (None, "", 0):
+                setattr(item, field, None)
+            else:
+                try:
+                    setattr(item, field, max(minimo, int(raw)))
+                except (TypeError, ValueError):
+                    setattr(item, field, None)
+
+
+def _apply_plan_item_fields(item, plan, data):
+    """
+    Qué campos aplican depende de plan.plan_type — mismo reparto que el
+    formulario web: Estudio lleva vídeo/playlist/temporizador y se
+    enlaza solo a la tarea diaria del plan; Deporte lleva ejercicio y
+    progresión (incluida distancia/ritmo para running, y cámara/
+    circuito/vídeo para el resto).
+    """
+    if plan.plan_type == Plan.PLAN_TYPE_STUDY:
+        item.exercise = None
+        item.series_id = plan.task_series_id
+        item.progression = PlanItem.PROG_COMPLETION
+        item.is_headline = True
+        if "label" in data:
+            item.label = (data.get("label") or "").strip()[:80]
+        _apply_video_fields(item, data)
+        return None
+
+    # Deporte, a partir de aquí.
+    if "exercise" in data:
+        slug = data.get("exercise") or ""
+        item.exercise = Exercise.objects.filter(slug=slug).first() if slug else None
+    if "label" in data:
+        item.label = (data.get("label") or "").strip()[:80]
+
+    # Cómo se hace el ejercicio — no aplica a running, que siempre se
+    # resuelve por Health Connect / a mano, nunca con cámara ni vídeo.
+    es_running = item.exercise and item.exercise.mode == Exercise.MODE_DISTANCE
+    if es_running:
+        item.sport_mode = ""
+    elif "sport_mode" in data:
+        valid_modes = {k for k, _ in PlanItem.SPORT_MODE_CHOICES}
+        raw_mode = data.get("sport_mode") or ""
+        item.sport_mode = raw_mode if raw_mode in valid_modes else ""
+    if item.sport_mode == PlanItem.SPORT_MODE_VIDEO:
+        _apply_video_fields(item, data)
+
+    default_prog = (
+        PlanItem.PROG_DISTANCE if item.exercise and item.exercise.mode == Exercise.MODE_DISTANCE
+        else PlanItem.PROG_REPS
+    )
+    valid = {k for k, _ in PlanItem.PROGRESSION_CHOICES}
+    prog = data.get("progression", default_prog)
+    item.progression = prog if prog in valid else default_prog
+
+    def _int(name, default):
+        try:
+            return max(0, int(data.get(name) if data.get(name) not in (None, "") else default))
+        except (TypeError, ValueError):
+            return default
+
+    def _float(name, default):
+        try:
+            return max(0.0, float(data.get(name) if data.get(name) not in (None, "") else default))
+        except (TypeError, ValueError):
+            return default
+
+    item.start_sets = _int("start_sets", 3) or 1
+    item.start_reps = _int("start_reps", 8)
+    item.start_seconds = _int("start_seconds", 40)
+    item.start_weight_kg = _float("start_weight_kg", 0)
+    item.goal_sets = _int("goal_sets", 0) or None
+    item.goal_reps = _int("goal_reps", 0) or None
+    item.goal_seconds = _int("goal_seconds", 0) or None
+    item.goal_weight_kg = _float("goal_weight_kg", 0) if data.get("goal_weight_kg") else None
+
+    item.start_distance_km = _float("start_distance_km", 1.0) or 1.0
+    item.start_pace_seconds_per_km = _int("start_pace_seconds_per_km", 420) or 420
+    item.goal_distance_km = _float("goal_distance_km", 0) if data.get("goal_distance_km") else None
+    item.goal_pace_seconds_per_km = _int("goal_pace_seconds_per_km", 0) if data.get("goal_pace_seconds_per_km") else None
+    item.distance_increment_km = _float("distance_increment_km", 0.5) or 0.5
+    item.pace_decrement_seconds = _int("pace_decrement_seconds", 10) or 10
+
+    item.sessions_per_step = _int("sessions_per_step", 2) or 1
+    item.reps_increment = _int("reps_increment", 1) or 1
+    item.weight_increment_kg = _float("weight_increment_kg", 2.5) or 2.5
+    item.rep_range_low = _int("rep_range_low", 6) or 1
+    item.deload_after_failures = _int("deload_after_failures", 3)
+    if "is_headline" in data:
+        item.is_headline = bool(data["is_headline"])
+
+    # Obligatorio de verdad: sin esto, un objetivo se podía guardar
+    # "vacío" y al pulsar play la app no sabía qué pantalla enseñar.
+    if not item.exercise:
+        return "Elige un ejercicio."
+    if es_running and not item.goal_distance_km:
+        return "Pon una distancia de destino — sin eso el plan no sabría cuándo has llegado."
+    if not es_running and not item.sport_mode:
+        return "Elige cómo la vas a completar: cámara, circuito o vídeo."
+    if item.sport_mode == PlanItem.SPORT_MODE_VIDEO and not (item.youtube_video_id or item.youtube_playlist_id):
+        return "Pon un vídeo o una playlist de YouTube."
+    return None
+
+
+@api("POST")
+def plan_item_create(request, uuid):
+    plan = get_object_or_404(plans_qs(), uuid=uuid)
+    if plan.plan_type == Plan.PLAN_TYPE_GENERAL:
+        return JsonResponse({"ok": False, "error": "Un plan General no necesita objetivos."}, status=400)
+    item = PlanItem(plan=plan)
+    error = _apply_plan_item_fields(item, plan, body(request))
+    if error:
+        return JsonResponse({"ok": False, "error": error}, status=400)
+    item.save()
+    if item.is_headline:
+        plan.items.exclude(pk=item.pk).update(is_headline=False)
+    plan.sync_task()
+    return JsonResponse({"ok": True, "plan": plan_json(plan, detail=True)}, status=201)
+
+
+@api("PATCH", "DELETE")
+def plan_item_detail(request, uuid, item_id):
+    plan = get_object_or_404(plans_qs(), uuid=uuid)
+    item = get_object_or_404(PlanItem, pk=item_id, plan=plan)
+
+    if request.method == "DELETE":
+        item.delete()
+        plan.sync_task()
+        return JsonResponse({"ok": True, "plan": plan_json(plan, detail=True)})
+
+    error = _apply_plan_item_fields(item, plan, body(request))
+    if error:
+        return JsonResponse({"ok": False, "error": error}, status=400)
+    item.save()
+    if item.is_headline:
+        plan.items.exclude(pk=item.pk).update(is_headline=False)
+    plan.sync_task()
+    return JsonResponse({"ok": True, "plan": plan_json(plan, detail=True)})
 
 
 @api("GET")

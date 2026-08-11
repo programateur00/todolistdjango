@@ -16,6 +16,38 @@
 </p>
 {% endif %}
 
+{% if task.subcategory == 'lower_body' or task.subcategory == 'upper_body' %}
+<p class="exercise-picker__hint">O sigue un vídeo</p>
+
+<ul class="exercise-picker">
+    {% for video in videos %}
+    <li>
+        <a href="?video={{ video.youtube_video_id }}" class="exercise-picker__item">
+            <span class="exercise-picker__name">{{ video.title|default:video.youtube_video_id }}</span>
+            <span class="exercise-picker__mode">YouTube</span>
+        </a>
+        <form action="{% url 'tasks:saved_video_delete' video.uuid %}" method="post" class="inline-delete">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{% url 'tasks:task_workout' task.pk %}">
+            <button type="submit" class="ghost-btn ghost-btn--danger" title="Quitar de la lista">✕</button>
+        </form>
+    </li>
+    {% empty %}
+    <li class="exercise-picker__empty">Todavía no tienes vídeos guardados aquí.</li>
+    {% endfor %}
+</ul>
+
+<form action="{% url 'tasks:saved_video_create' %}" method="post" class="video-add-form">
+    {% csrf_token %}
+    <input type="hidden" name="scope" value="{{ task.subcategory }}">
+    <input type="hidden" name="task_pk" value="{{ task.pk }}">
+    <input type="hidden" name="entry_url" value="{% url 'tasks:task_workout' task.pk %}">
+    <input type="text" name="youtube_video_id" placeholder="Pega un enlace de YouTube…" required>
+    <input type="text" name="title" placeholder="Título (opcional)" maxlength="120">
+    <button type="submit" class="ghost-btn">+ Añadir y reproducir</button>
+</form>
+{% endif %}
+
 <p class="exercise-picker__hint">
     {% if task.subcategory %}¿Qué toca hoy de {{ task.get_subcategory_display|lower }}?{% else %}¿Qué toca hoy?{% endif %}
 </p>

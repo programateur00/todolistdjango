@@ -26,6 +26,36 @@
         <textarea name="notes" rows="2">{{ plan.notes|default:'' }}</textarea>
     </label>
 
+    <fieldset class="field" id="plan-type-field">
+        <legend class="field__label">Tipo de plan</legend>
+        <div class="repeat-options">
+            {% for value, label in plan_type_choices %}
+            <label class="repeat-option">
+                <input type="radio" name="plan_type" value="{{ value }}"
+                    {% if plan.plan_type == value or not plan and value == 'sport' %}checked{% endif %}
+                    {% if plan %}disabled{% endif %}>
+                <span>{{ label }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        {% if plan %}
+        <input type="hidden" name="plan_type" value="{{ plan.plan_type }}">
+        <span class="field__hint">El tipo no se puede cambiar una vez creado el plan — crea uno nuevo si necesitas otro.</span>
+        {% else %}
+        <span class="field__hint">
+            Deporte: objetivos con progresión (ejercicios, running). Estudio: un
+            vídeo, playlist o temporizador que se completa cada día. General: un
+            hábito cualquiera, sin más.
+        </span>
+        {% endif %}
+    </fieldset>
+
+    <p class="field__hint">
+        Los objetivos (ejercicio y progresión en Deporte; vídeo o playlist en
+        Estudio) se añaden en el siguiente paso, después de crear el plan. General
+        no necesita ninguno — es solo un hábito que cumples o no cada día.
+    </p>
+
     <div class="field-row">
         <label class="field">
             <span class="field__label">Empieza el</span>
@@ -70,14 +100,15 @@
         Si lo pausas, vuelves a entrenar a tu aire.
     </span>
 
+    <label class="field">
+        <span class="field__label">Recompensa al cerrar el ciclo (opcional)</span>
+        <input type="text" name="reward" maxlength="200" placeholder="Ej: unas zapatillas nuevas"
+               value="{{ plan.reward|default:'' }}">
+        <span class="field__hint">Se enseña en la pantalla de cierre, al terminar el plan. Déjalo en blanco si no quieres ninguna.</span>
+    </label>
+
     <div class="task-form__actions">
         <button type="submit" class="primary-btn">Guardar</button>
-        {% if plan %}
-        <form action="{% url 'tasks:plan_delete' plan.pk %}" method="post" class="inline-delete">
-            {% csrf_token %}
-            <button type="submit" class="ghost-btn ghost-btn--danger">Eliminar</button>
-        </form>
-        {% endif %}
     </div>
 </form>
 

@@ -1,0 +1,48 @@
+{% extends "tasks/base.html" %}
+{% block title %}{{ task.title }} — Libreta{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">enfoque</span>
+        <h1>{{ task.title }}</h1>
+    </div>
+    <a href="{% url 'tasks:task_list' %}" class="stats-link">← Volver</a>
+</header>
+
+<p class="exercise-picker__hint">O sigue un vídeo</p>
+
+<ul class="exercise-picker">
+    {% for video in videos %}
+    <li>
+        <a href="?video={{ video.youtube_video_id }}" class="exercise-picker__item">
+            <span class="exercise-picker__name">{{ video.title|default:video.youtube_video_id }}</span>
+            <span class="exercise-picker__mode">YouTube</span>
+        </a>
+        <form action="{% url 'tasks:saved_video_delete' video.uuid %}" method="post" class="inline-delete">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{% url 'tasks:task_focus' task.pk %}">
+            <button type="submit" class="ghost-btn ghost-btn--danger" title="Quitar de la lista">✕</button>
+        </form>
+    </li>
+    {% empty %}
+    <li class="exercise-picker__empty">Todavía no tienes vídeos guardados aquí.</li>
+    {% endfor %}
+</ul>
+
+<form action="{% url 'tasks:saved_video_create' %}" method="post" class="video-add-form">
+    {% csrf_token %}
+    <input type="hidden" name="scope" value="study_session">
+    <input type="hidden" name="task_pk" value="{{ task.pk }}">
+    <input type="hidden" name="entry_url" value="{% url 'tasks:task_focus' task.pk %}">
+    <input type="text" name="youtube_video_id" placeholder="Pega un enlace de YouTube…" required>
+    <input type="text" name="title" placeholder="Título (opcional)" maxlength="120">
+    <button type="submit" class="ghost-btn">+ Añadir y reproducir</button>
+</form>
+
+<p class="exercise-picker__hint exercise-picker__hint--routines">O usa el temporizador de siempre</p>
+<a href="?mode=timer" class="exercise-picker__item exercise-picker__item--ghost">
+    <span class="exercise-picker__name">Empezar temporizador manual</span>
+</a>
+
+{% endblock %}

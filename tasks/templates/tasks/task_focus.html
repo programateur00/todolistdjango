@@ -1,0 +1,90 @@
+{% extends "tasks/base.html" %}
+{% block title %}{{ task.title }} — Libreta{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">enfoque</span>
+        <h1>{{ task.title }}</h1>
+    </div>
+    <a href="{% url 'tasks:task_list' %}" class="stats-link">← Volver</a>
+</header>
+
+<div class="focus-timer" id="focus-timer" data-target-minutes="{{ task.target_minutes|default_if_none:'' }}">
+    <p class="focus-timer__display" id="focus-display">00:00</p>
+    {% if task.target_minutes %}
+    <p class="focus-timer__target">Objetivo: {{ task.target_minutes }} min</p>
+    <div class="stats-bar"><div class="stats-bar__done" id="focus-progress" style="width:0%"></div></div>
+    {% else %}
+    <p class="focus-timer__target">Sesión libre, sin objetivo</p>
+    {% endif %}
+
+    <div class="focus-timer__actions">
+        <button type="button" class="primary-btn" id="focus-toggle">Empezar</button>
+        <button type="button" class="ghost-btn" id="focus-save" hidden>Guardar sesión</button>
+    </div>
+    <p class="field__hint" id="focus-hint">Dale a «Empezar» cuando abras el libro (o lo que toque hoy).</p>
+</div>
+
+<script>
+(function () {
+    var root = document.getElementById('focus-timer');
+    var display = document.getElementById('focus-display');
+    var progress = document.getElementById('focus-progress');
+    var toggleBtn = document.getElementById('focus-toggle');
+    var saveBtn = document.getElementById('focus-save');
+    var hint = document.getElementById('focus-hint');
+    var targetMinutes = parseInt(root.dataset.targetMinutes, 10) || null;
+
+    var seconds = 0, running = false, interval = null;
+
+    function fmt(s) {
+        var m = Math.floor(s / 60), r = s % 60;
+        return String(m).padStart(2, '0') + ':' + String(r).padStart(2, '0');
+    }
+    function tick() {
+        seconds += 1;
+        display.textContent = fmt(seconds);
+        if (targetMinutes && progress) {
+            progress.style.width = Math.min(100, Math.round(100 * seconds / (targetMinutes * 60))) + '%';
+        }
+    }
+    toggleBtn.addEventListener('click', function () {
+        running = !running;
+        if (running) {
+            interval = setInterval(tick, 1000);
+            toggleBtn.textContent = 'Pausar';
+            hint.textContent = 'En marcha — puedes pausar si te interrumpen.';
+            saveBtn.hidden = false;
+        } else {
+            clearInterval(interval);
+            toggleBtn.textContent = 'Reanudar';
+            hint.textContent = 'En pausa. Reanuda cuando sigas, o guarda si has terminado.';
+        }
+    });
+    saveBtn.addEventListener('click', function () {
+        clearInterval(interval);
+        toggleBtn.disabled = true;
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Guardando…';
+        var minutes = Math.max(1, Math.round(seconds / 60));
+        fetch("{% url 'tasks:task_focus_save' task.pk %}", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+            body: JSON.stringify({ minutes: minutes }),
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                window.location.href = data.redirect_url || "{% url 'tasks:task_list' %}";
+            })
+            .catch(function () {
+                saveBtn.disabled = false;
+                toggleBtn.disabled = false;
+                saveBtn.textContent = 'Guardar sesión';
+                hint.textContent = 'No se pudo guardar — inténtalo otra vez.';
+            });
+    });
+})();
+</script>
+
+{% endblock %}

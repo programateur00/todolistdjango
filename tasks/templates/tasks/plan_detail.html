@@ -62,6 +62,14 @@
 <div class="task-form__actions">
     <a class="primary-btn" href="{% url 'tasks:plan_item_create' plan.pk %}">+ Añadir objetivo</a>
     <a class="ghost-btn" href="{% url 'tasks:plan_edit' plan.pk %}">Editar plan</a>
+    {% if not plan.closed_at %}
+    <a class="ghost-btn" href="{% url 'tasks:plan_close' plan.pk %}">Cerrar plan</a>
+    {% endif %}
+    <form action="{% url 'tasks:plan_delete' plan.pk %}" method="post" class="inline-delete"
+          onsubmit="return confirm('¿Eliminar «{{ plan.name|escapejs }}»? Esto no se puede deshacer.');">
+        {% csrf_token %}
+        <button type="submit" class="ghost-btn ghost-btn--danger">Eliminar plan</button>
+    </form>
 </div>
 
 {% endblock %}
