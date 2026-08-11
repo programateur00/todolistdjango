@@ -62,6 +62,35 @@ const DIP_NOSE_ABOVE_SHOULDER_MARGIN = 0.05;
 // Índices de landmarks de MediaPipe Pose que usamos
 const NOSE = 0, L_SHOULDER = 11, R_SHOULDER = 12, L_ELBOW = 13, R_ELBOW = 14, L_WRIST = 15, R_WRIST = 16;
 
+// Números en palabras para la voz (1–99). No basta con pasarle el
+// dígito tal cual a SpeechSynthesisUtterance: según el motor de TTS
+// del navegador, un número compuesto como "23" a veces se lee dígito a
+// dígito ("dos, tres") en vez de "veintitrés". Escribiéndolo en
+// palabras se elimina esa ambigüedad. Cubre de sobra hasta el 50 (lo
+// pedido), y no hay techo duro: si algún día alguien encadena más de
+// 99 reps en una sola serie, se lee el número tal cual como último
+// recurso, pero eso ya no es un caso realista.
+const UNIDADES_ES = ["", "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve"];
+const ESPECIALES_ES = {
+  10: "diez", 11: "once", 12: "doce", 13: "trece", 14: "catorce", 15: "quince",
+  16: "dieciséis", 17: "diecisiete", 18: "dieciocho", 19: "diecinueve",
+  20: "veinte", 21: "veintiuno", 22: "veintidós", 23: "veintitrés",
+  24: "veinticuatro", 25: "veinticinco", 26: "veintiséis", 27: "veintisiete",
+  28: "veintiocho", 29: "veintinueve",
+};
+const DECENAS_ES = { 30: "treinta", 40: "cuarenta", 50: "cincuenta", 60: "sesenta", 70: "setenta", 80: "ochenta", 90: "noventa" };
+
+function numeroEnPalabras(n) {
+  if (n < 10) return UNIDADES_ES[n];
+  if (n < 30) return ESPECIALES_ES[n];
+  if (n < 100) {
+    const decena = Math.floor(n / 10) * 10;
+    const resto = n % 10;
+    return resto === 0 ? DECENAS_ES[decena] : `${DECENAS_ES[decena]} y ${UNIDADES_ES[resto]}`;
+  }
+  return String(n);
+}
+
 function el(id) { return document.getElementById(id); }
 
 function beep() {
@@ -111,6 +140,12 @@ class WorkoutSession {
     this.targetSets = root.dataset.targetSets ? parseInt(root.dataset.targetSets, 10) : null;
     this.targetReps = root.dataset.targetReps ? parseInt(root.dataset.targetReps, 10) : null;
     this.targetAnnounced = false;
+    // Voz que cuenta las reps en alto ("¡uno! ¡dos! ¡tres!") — Web Speech
+    // API, la trae el propio navegador. Activada por defecto; se puede
+    // desactivar poniendo localStorage["libreta.voiceReps"] = "0" (misma
+    // clave que usa la app móvil, por si algún día hay un ajuste aquí
+    // también). Ver speakRep() más abajo.
+    this.voiceEnabled = localStorage.getItem("libreta.voiceReps") !== "0";
     // Qué contador usar. Lo decide el ejercicio (counter_key en el
     // catálogo), no la pantalla.
     this.counterKey = root.dataset.counterKey || "pullup";
@@ -344,6 +379,32 @@ class WorkoutSession {
    * cambia entre dominadas y fondos es CÓMO se detecta, no qué se
    * apunta después.
    */
+  /**
+   * Dice la repetición en voz alta — para poder contar sin mirar la
+   * pantalla, que es justo cuando hace falta (a media dominada).
+   *
+   * cancel() antes de hablar, no encolar: si las reps vienen más rápido
+   * de lo que da tiempo a decir el número, mejor saltarse los
+   * intermedios y decir siempre el último de verdad — como haría un
+   * entrenador contando en directo, no una cola de mensajes atascada.
+   */
+  speakRep(n) {
+    if (!this.voiceEnabled || typeof speechSynthesis === "undefined") return;
+    try {
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(numeroEnPalabras(n));
+      u.lang = "es-ES";
+      u.volume = 1;
+      u.rate = 1.1; // un poco más rápido que el habla normal, para no quedarse atrás
+      u.pitch = 1;
+      speechSynthesis.speak(u);
+    } catch (e) {
+      // Si el motor de voz falla por lo que sea, el conteo en pantalla
+      // sigue funcionando igual — esto es un extra, no algo crítico.
+      console.error("speechSynthesis", e);
+    }
+  }
+
   countRep(duration, now, label) {
     if (duration < MIN_REP_SECONDS) return false;   // ruido, no cuenta
     const d = Math.round(duration * 100) / 100;
@@ -354,8 +415,11 @@ class WorkoutSession {
     this.lastRepTime = now;
     this.restAlerted = false;
     // Se muestran las reps de ESTA serie, no el total de la sesión (el
-    // total sigue guardándose bien en this.reps al terminar).
+    // total sigue guardándose bien en this.reps al terminar). currentSetReps
+    // se reinicia a 0 al cerrar cada serie (más abajo), así que la voz
+    // vuelve a empezar en "uno" en la siguiente serie automáticamente.
     this.repsEl.textContent = String(this.currentSetReps);
+    this.speakRep(this.currentSetReps);
 
     // Aviso al llegar al objetivo — una sola vez, y sin parar nada: se
     // puede seguir contando por encima del 100% si te apetece (se
@@ -371,6 +435,17 @@ class WorkoutSession {
       const meta = this.targetSets * this.targetReps;
       if (this.reps >= meta) {
         this.targetAnnounced = true;
+        // Al número ya dicho justo antes le sigue el aviso de meta, sin
+        // cancelarlo — cancel() en speakRep() ya se encargó de que no se
+        // pisen entre sí.
+        if (this.voiceEnabled && typeof speechSynthesis !== "undefined") {
+          try {
+            const u2 = new SpeechSynthesisUtterance("¡Objetivo cumplido!");
+            u2.lang = "es-ES";
+            u2.volume = 1;
+            speechSynthesis.speak(u2);
+          } catch (e) { /* extra, no crítico */ }
+        }
         if (this.goalBannerEl) {
           this.goalBannerEl.hidden = false;
           this.goalBannerEl.textContent = `🎯 ¡Objetivo cumplido! (${meta}) Sigue si quieres, o termina cuando acabes.`;
