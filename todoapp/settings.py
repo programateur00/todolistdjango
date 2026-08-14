@@ -99,7 +99,10 @@ BASIC_AUTH_PASSWORD = os.environ.get("BASIC_AUTH_PASSWORD", "")
 # reventar — el resto de la app funciona igual.
 # --------------------------------------------------------------
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+# "gemini-2.5-flash" dejó de estar disponible para claves nuevas (Google
+# empuja hacia la generación 3) — si en el futuro cambian otra vez el
+# nombre del modelo gratis, se arregla aquí sin tocar código.
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
 
 # Tope diario de generaciones (ver AIGenerationLog en models.py) — protege
 # la cuota gratis de GEMINI_API_KEY, que hoy es una sola clave compartida

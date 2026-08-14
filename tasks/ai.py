@@ -198,7 +198,7 @@ def _call_gemini(prompt_text, schema):
             "Falta configurar la IA en el servidor: define la variable de entorno "
             "GEMINI_API_KEY (clave gratis en aistudio.google.com/apikey)."
         )
-    model = getattr(settings, "GEMINI_MODEL", "") or "gemini-2.5-flash"
+    model = getattr(settings, "GEMINI_MODEL", "") or "gemini-3-flash-preview"
 
     payload = {
         "contents": [{"parts": [{"text": prompt_text}]}],
@@ -223,6 +223,12 @@ def _call_gemini(prompt_text, schema):
             raise PlanAIError("La clave de IA del servidor no es válida. Revisa GEMINI_API_KEY.") from e
         if e.code == 429:
             raise PlanAIError("Se ha agotado la cuota gratis de la IA por ahora. Prueba de nuevo en un rato.") from e
+        if e.code == 404 and "no longer available" in detail.lower():
+            raise PlanAIError(
+                f"El modelo de IA configurado ({model}) ya no está disponible — Google cambia estos "
+                "nombres de vez en cuando. Actualiza GEMINI_MODEL en el servidor a un modelo vigente "
+                "(mira la lista de modelos gratis en ai.google.dev/gemini-api/docs/pricing)."
+            ) from e
         raise PlanAIError(f"El servicio de IA respondió con un error ({e.code}): {detail}") from e
     except urllib.error.URLError as e:
         raise PlanAIError("No se pudo contactar con el servicio de IA. Comprueba la conexión e inténtalo de nuevo.") from e
