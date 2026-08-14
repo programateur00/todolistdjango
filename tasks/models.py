@@ -184,7 +184,7 @@ class Task(models.Model):
     # resuelve siempre importando la actividad (Health Connect) o a mano.
     SPORT_MODES_BY_SUBCATEGORY = {
         "upper_body": [SPORT_MODE_CAMERA, SPORT_MODE_CIRCUIT, SPORT_MODE_VIDEO],
-        "lower_body": [SPORT_MODE_CIRCUIT, SPORT_MODE_VIDEO],
+        "lower_body": [SPORT_MODE_CAMERA, SPORT_MODE_CIRCUIT, SPORT_MODE_VIDEO],
     }
     sport_mode = models.CharField(
         max_length=20, choices=SPORT_MODE_CHOICES, blank=True, default="",

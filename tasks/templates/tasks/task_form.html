@@ -326,14 +326,15 @@
         focusTargetField.style.display = v === 'work' ? 'block' : 'none';
 
         // Deporte: el método se elige aquí, al crear la tarea. Qué
-        // métodos valen depende del subtipo — contar con la cámara no
-        // tiene sentido en tren inferior, y correr no se hace con
-        // circuitos (se importa de Health Connect o se anota).
+        // métodos valen depende del subtipo — correr no se hace con
+        // circuitos (se importa de Health Connect o se anota). La
+        // cámara ya vale también en tren inferior (sentadillas, por
+        // ángulo de rodilla con MediaPipe), igual que en tren superior.
         var esDeporte = v === 'sport';
         var subSel = document.querySelector('[name="subcategory"]:checked');
         var sub = esDeporte && subSel ? subSel.value : '';
         var esCarrera = sub === 'running';
-        var modosPorSub = { upper_body: ['camera', 'circuit', 'video'], lower_body: ['circuit', 'video'] };
+        var modosPorSub = { upper_body: ['camera', 'circuit', 'video'], lower_body: ['camera', 'circuit', 'video'] };
         var modosValidos = modosPorSub[sub] || [];
 
         sportModeField.style.display = modosValidos.length ? 'block' : 'none';
