@@ -1,0 +1,83 @@
+{% extends "tasks/base.html" %}
+{% block title %}Generar plan con IA{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">plan · IA</span>
+        <h1>Generar plan con IA</h1>
+    </div>
+    <a href="{% url 'tasks:plan_list' %}" class="stats-link">← Volver</a>
+</header>
+
+<p class="field__hint">
+    Describe qué quieres conseguir y la IA propone un plan con objetivos medibles
+    y su progresión semana a semana. Tú decides el tipo de plan, cuántas semanas
+    dura y qué días entrenas — eso no lo toca la IA. Antes de guardarse nada,
+    verás el borrador completo para revisarlo o pedir otro.
+</p>
+
+<form class="task-form" method="post" id="ai-form">
+    {% csrf_token %}
+    <input type="hidden" name="step" value="generar">
+
+    <fieldset class="field" id="plan-type-field">
+        <legend class="field__label">Tipo de plan</legend>
+        <div class="repeat-options">
+            {% for value, label in plan_type_choices %}
+            <label class="repeat-option">
+                <input type="radio" name="plan_type" value="{{ value }}"
+                    {% if plan_type == value %}checked{% endif %}>
+                <span>{{ label }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        <span class="field__hint">
+            Deporte: objetivos de ejercicio del catálogo, con progresión. Estudio: un
+            hábito diario (estudiar francés, leer...). General: un hábito simple de
+            cumplir o no, sin más.
+        </span>
+    </fieldset>
+
+    <label class="field">
+        <span class="field__label">¿Qué quieres conseguir?</span>
+        <textarea name="prompt" rows="4" maxlength="800" required
+            placeholder="Ej: quiero ponerme fuerte de tren superior, ahora mismo hago 2 dominadas. También quiero aguantar más la plancha.">{{ prompt }}</textarea>
+        <span class="field__hint">Cuanto más concreto, mejor plan sale — di de dónde partes si lo sabes.</span>
+    </label>
+
+    <div class="field-row">
+        <label class="field">
+            <span class="field__label">Semanas</span>
+            <input type="number" name="weeks" min="1" value="{{ weeks }}">
+        </label>
+    </div>
+
+    <fieldset class="field">
+        <legend class="field__label">Qué días entrenas</legend>
+        <div class="repeat-options">
+            {% for value, label in weekdays %}
+            <label class="repeat-option">
+                <input type="checkbox" name="custom_days" value="{{ value }}"
+                    {% if value in selected_days %}checked{% endif %}>
+                <span>{{ label }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        <span class="field__hint">Con esto calcula cuánto subir en cada escalón.</span>
+    </fieldset>
+
+    <div class="task-form__actions">
+        <button type="submit" class="primary-btn" id="ai-submit-btn">✨ Generar plan</button>
+    </div>
+</form>
+
+<script>
+document.getElementById("ai-form").addEventListener("submit", function () {
+    var btn = document.getElementById("ai-submit-btn");
+    btn.disabled = true;
+    btn.textContent = "Generando… (puede tardar unos segundos)";
+});
+</script>
+
+{% endblock %}

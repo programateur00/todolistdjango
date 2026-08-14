@@ -1814,6 +1814,31 @@ class PlanItem(models.Model):
                 break      # llegado el destino, no hay más que enseñar
         return rows
 
+    def weekly_schedule(self, weeks, sessions_per_week):
+        """
+        Lo mismo que `schedule()` pero por SEMANA en vez de por escalón —
+        "semana 1: tanto, semana 2: tanto más" en vez de "escalón 3".
+
+        No toca la base de datos (como `schedule()`): sirve igual para un
+        objetivo ya guardado que para uno todavía sin guardar, que es
+        justo lo que hace falta para enseñar la vista previa de un plan
+        generado por IA antes de confirmarlo.
+
+        La conversión semana → escalón es la misma cuenta que ya hace la
+        calculadora de "¿en cuántas semanas quieres llegar?" del
+        formulario (sessions_per_step sesiones por escalón, tantas
+        sesiones a la semana como días tenga el plan).
+        """
+        rows = []
+        for week in range(1, weeks + 1):
+            total_sessions = week * max(1, sessions_per_week)
+            step = max(0, round(total_sessions / max(1, self.sessions_per_step)) - 1)
+            row = dict(week=week, **self.target_for_step(step))
+            rows.append(row)
+            if row["done"]:
+                break
+        return rows
+
     def history(self, limit=20):
         """
         Lo que pasó de verdad: qué te pedía cada sesión, qué hiciste y el

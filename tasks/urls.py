@@ -28,6 +28,7 @@ urlpatterns = [
     path("<int:pk>/plan/<int:plan_pk>/", views.plan_session, name="plan_session"),
     path("<int:pk>/plan/<int:plan_pk>/guardar/", views.plan_session_save, name="plan_session_save"),
     path("planes/nuevo/", views.plan_form, name="plan_create"),
+    path("planes/nuevo-ia/", views.plan_ai_form, name="plan_ai_create"),
     path("planes/<int:pk>/", views.plan_detail, name="plan_detail"),
     path("planes/<int:pk>/editar/", views.plan_form, name="plan_edit"),
     path("planes/<int:pk>/eliminar/", views.plan_delete, name="plan_delete"),

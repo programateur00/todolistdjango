@@ -27,6 +27,7 @@ from django.utils.dateparse import parse_date, parse_time
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
+from . import ai
 from .models import (
     Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, SavedVideo, Task, TimerSession, WorkoutSession,
 )
@@ -1309,6 +1310,124 @@ def plan_item_detail(request, uuid, item_id):
         plan.items.exclude(pk=item.pk).update(is_headline=False)
     plan.sync_task()
     return JsonResponse({"ok": True, "plan": plan_json(plan, detail=True)})
+
+
+def build_plan_draft(*, user, plan_type, weeks, custom_days, prompt):
+    """
+    El núcleo de "generar plan con IA", compartido por el endpoint JSON
+    (`plan_generate`, para la app móvil) y la vista web (`views.plan_ai_form`)
+    — así un plan de IA se construye y se valida exactamente igual venga
+    de donde venga, en vez de mantener la lógica duplicada en dos sitios.
+
+    No guarda nada: construye Plan/PlanItem SIN GUARDAR y les aplica
+    `_apply_plan_fields` / `_apply_plan_item_fields` — las mismas que usa
+    la creación manual — así que el borrador ya viene validado y saneado.
+
+    Devuelve `(draft_dict, None)` o `(None, mensaje_de_error)`.
+    """
+    valid_types = {k for k, _ in Plan.PLAN_TYPE_CHOICES}
+    plan_type = plan_type if plan_type in valid_types else Plan.PLAN_TYPE_SPORT
+
+    try:
+        weeks = max(1, int(weeks or 12))
+    except (TypeError, ValueError):
+        weeks = 12
+
+    valid_days = {k for k, _ in Task.WEEKDAYS}
+    days = [str(d) for d in (custom_days or []) if str(d) in valid_days]
+    custom_days = days or ["0", "2", "4"]
+    sessions_per_week = max(1, len(custom_days))
+
+    try:
+        raw = ai.generate_plan_draft(
+            prompt=prompt or "", plan_type=plan_type,
+            weeks=weeks, sessions_per_week=sessions_per_week,
+        )
+    except ai.PlanAIError as e:
+        return None, str(e)
+
+    plan_fields = {
+        "name": (raw.get("plan") or {}).get("name") or "",
+        "notes": (raw.get("plan") or {}).get("notes") or "",
+        "weeks": weeks,
+        "custom_days": [int(d) for d in custom_days],
+        "started_on": timezone.localtime(timezone.now()).date().isoformat(),
+        "is_active": True,
+    }
+    draft_plan = Plan(user=user, plan_type=plan_type)
+    error = _apply_plan_fields(draft_plan, plan_fields)
+    if error:
+        return None, f"La IA devolvió un plan inválido: {error}"
+
+    items_out = []
+    if plan_type != Plan.PLAN_TYPE_GENERAL:
+        for raw_item in (raw.get("items") or []):
+            if not isinstance(raw_item, dict):
+                continue
+            if plan_type == Plan.PLAN_TYPE_STUDY:
+                item_fields = {
+                    "label": (raw_item.get("label") or "").strip()[:80],
+                    "target_minutes": raw_item.get("target_minutes") or None,
+                }
+                exercise = None
+            else:
+                exercise = Exercise.objects.filter(slug=raw_item.get("exercise_slug") or "").first()
+                item_fields = dict(raw_item)
+                item_fields.pop("exercise_slug", None)
+                item_fields["exercise"] = exercise.slug if exercise else ""
+                item_fields["sport_mode"] = PlanItem.SPORT_MODE_CIRCUIT
+                ai.apply_pacing(item_fields, exercise=exercise, sessions_per_week=sessions_per_week)
+
+            draft_item = PlanItem(plan=draft_plan)
+            item_error = _apply_plan_item_fields(draft_item, draft_plan, item_fields)
+            if item_error:
+                continue  # se descarta el objetivo inválido en vez de tirar todo el plan
+            items_out.append({
+                "fields": item_fields,
+                "preview": {
+                    "display_name": draft_item.display_name,
+                    "is_headline": bool(draft_item.is_headline),
+                    "progression": draft_item.progression,
+                    "is_timed": bool(exercise and exercise.mode == Exercise.MODE_TIMED),
+                    "is_running": bool(exercise and exercise.mode == Exercise.MODE_DISTANCE),
+                    "exercise_name": exercise.name if exercise else "",
+                    "weekly": draft_item.weekly_schedule(weeks, sessions_per_week),
+                },
+            })
+
+        # Exactamente una medida principal — si la IA no marcó ninguna (o
+        # marcó varias), se decide aquí en vez de dejarlo a medias.
+        headline_idxs = [i for i, it in enumerate(items_out) if it["fields"].get("is_headline")]
+        if items_out and not headline_idxs:
+            items_out[0]["fields"]["is_headline"] = True
+            items_out[0]["preview"]["is_headline"] = True
+        elif len(headline_idxs) > 1:
+            for i in headline_idxs[1:]:
+                items_out[i]["fields"]["is_headline"] = False
+                items_out[i]["preview"]["is_headline"] = False
+
+        if not items_out:
+            return None, "La IA no propuso ningún objetivo válido. Prueba a describir el objetivo de otra forma."
+
+    return {"plan_type": plan_type, "plan_fields": plan_fields, "items": items_out}, None
+
+
+@api("POST")
+def plan_generate(request):
+    """
+    Genera un BORRADOR de plan con IA a partir de un prompt en texto
+    libre — no guarda nada. El usuario lo revisa en la app y, si le vale,
+    lo confirma llamando a los mismos `plan_create` / `plan_item_create`
+    de siempre con los campos de `draft.plan_fields` / `draft.items[].fields`.
+    """
+    data = body(request)
+    draft, error = build_plan_draft(
+        user=_user(), plan_type=data.get("plan_type"), weeks=data.get("weeks"),
+        custom_days=data.get("custom_days"), prompt=data.get("prompt"),
+    )
+    if error:
+        return JsonResponse({"ok": False, "error": error}, status=502)
+    return JsonResponse({"ok": True, "draft": draft})
 
 
 @api("GET")

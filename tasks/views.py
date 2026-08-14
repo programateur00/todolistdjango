@@ -12,6 +12,7 @@ import uuid as _uuid
 
 from django.utils import timezone
 
+from . import api
 from .models import (
     Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, SavedVideo, Task, TimerSession, WorkoutSession,
 )
@@ -1006,6 +1007,115 @@ def plan_detail(request, pk):
         "headline": _pack(head) if head else None,
         "supports": [_pack(i) for i in plan.support_items],
         "progress": plan.progress_pct(),
+    })
+
+
+def plan_ai_form(request):
+    """
+    Crear un plan describiéndolo en una frase en vez de rellenando el
+    formulario objetivo a objetivo. Dos pasos, sin guardar nada hasta
+    el final:
+
+      1. El usuario elige tipo de plan / semanas / días (igual que en la
+         creación manual) y escribe qué quiere conseguir. Al enviarlo se
+         llama a la IA (`api.build_plan_draft`, compartida con el
+         endpoint de la app móvil) y se enseña un borrador.
+      2. El usuario revisa el borrador — puede tocar los números — y lo
+         confirma, o pide "generar otra vez" con el mismo prompt.
+
+    El borrador vive en la sesión entre los dos pasos, para que tocar un
+    número y confirmar no obligue a volver a llamar a la IA.
+    """
+    step = request.POST.get("step")
+
+    if request.method == "POST" and step in ("generar", "regenerar"):
+        plan_type = request.POST.get("plan_type", "")
+        weeks = request.POST.get("weeks")
+        custom_days = request.POST.getlist("custom_days")
+        prompt_text = request.POST.get("prompt", "")
+
+        draft, error = api.build_plan_draft(
+            user=get_current_user(), plan_type=plan_type, weeks=weeks,
+            custom_days=custom_days, prompt=prompt_text,
+        )
+        if error:
+            messages.error(request, error)
+            return render(request, "tasks/plan_ai_form.html", {
+                "plan_type_choices": Plan.PLAN_TYPE_CHOICES,
+                "weekdays": Task.WEEKDAYS,
+                "selected_days": custom_days or ["0", "2", "4"],
+                "prompt": prompt_text,
+                "weeks": weeks or 12,
+                "plan_type": plan_type or Plan.PLAN_TYPE_SPORT,
+            })
+        request.session["plan_ai_draft"] = draft
+        request.session["plan_ai_prompt"] = prompt_text
+        return render(request, "tasks/plan_ai_preview.html", {"draft": draft, "prompt": prompt_text})
+
+    if request.method == "POST" and step == "confirmar":
+        draft = request.session.get("plan_ai_draft")
+        if not draft:
+            messages.error(request, "El borrador ha caducado — genera el plan otra vez.")
+            return redirect(reverse("tasks:plan_ai_create"))
+
+        plan_data = {
+            "name": request.POST.get("name", "").strip(),
+            "notes": request.POST.get("notes", "").strip(),
+            "weeks": draft["plan_fields"].get("weeks"),
+            "custom_days": draft["plan_fields"].get("custom_days"),
+            "started_on": draft["plan_fields"].get("started_on"),
+            "reward": request.POST.get("reward", "").strip(),
+            "is_active": True,
+        }
+        plan = Plan(user=get_current_user(), plan_type=draft["plan_type"])
+        error = api._apply_plan_fields(plan, plan_data)
+        if error:
+            messages.error(request, error)
+            return redirect(reverse("tasks:plan_ai_create"))
+        plan.save()
+
+        for idx, item in enumerate(draft.get("items") or []):
+            prefix = f"items-{idx}-"
+            item_data = dict(item["fields"])
+            # Solo estos números son editables en la vista previa — el
+            # resto (ejercicio, modo, incrementos ya calculados a partir
+            # de "en cuántas semanas quieres llegar"...) se queda tal
+            # como lo propuso la IA.
+            item_data["is_headline"] = bool(request.POST.get(prefix + "is_headline"))
+            for key in (
+                "label", "start_sets", "start_reps", "start_seconds", "start_weight_kg",
+                "goal_reps", "goal_seconds", "goal_weight_kg", "start_distance_km",
+                "start_pace_seconds_per_km", "goal_distance_km", "goal_pace_seconds_per_km",
+                "target_minutes",
+            ):
+                field_name = prefix + key
+                if field_name not in request.POST:
+                    continue
+                raw = request.POST.get(field_name, "").strip()
+                item_data[key] = raw if (raw != "" or key == "label") else None
+
+            plan_item = PlanItem(plan=plan)
+            item_error = api._apply_plan_item_fields(plan_item, plan, item_data)
+            if item_error:
+                continue  # se descarta en vez de tirar el plan entero
+            plan_item.save()
+            if plan_item.is_headline:
+                plan.items.exclude(pk=plan_item.pk).update(is_headline=False)
+
+        plan.sync_task()
+        request.session.pop("plan_ai_draft", None)
+        request.session.pop("plan_ai_prompt", None)
+        messages.success(request, f"Plan «{plan.name}» creado con IA.")
+        return redirect(reverse("tasks:plan_detail", args=[plan.pk]))
+
+    # GET, o "volver" desde la vista previa sin confirmar.
+    return render(request, "tasks/plan_ai_form.html", {
+        "plan_type_choices": Plan.PLAN_TYPE_CHOICES,
+        "weekdays": Task.WEEKDAYS,
+        "selected_days": ["0", "2", "4"],
+        "prompt": request.session.get("plan_ai_prompt", ""),
+        "weeks": 12,
+        "plan_type": Plan.PLAN_TYPE_SPORT,
     })
 
 

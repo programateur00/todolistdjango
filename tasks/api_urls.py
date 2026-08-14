@@ -35,6 +35,7 @@ urlpatterns = [
 
     path("plans/", api.plan_list, name="plan_list"),
     path("plans/create/", api.plan_create, name="plan_create"),
+    path("plans/generate/", api.plan_generate, name="plan_generate"),
     path("plans/<uuid:uuid>/", api.plan_detail, name="plan_detail"),
     path("plans/<uuid:uuid>/close/", api.plan_close, name="plan_close"),
     path("plans/<uuid:uuid>/items/", api.plan_item_create, name="plan_item_create"),

@@ -91,6 +91,17 @@ BASIC_AUTH_USER = os.environ.get("BASIC_AUTH_USER", "")
 BASIC_AUTH_PASSWORD = os.environ.get("BASIC_AUTH_PASSWORD", "")
 
 
+# --------------------------------------------------------------
+# IA para generar planes (ver tasks/ai.py) — Google Gemini, porque tiene
+# tier gratis permanente (sin tarjeta) con salida en JSON estructurado.
+# Clave gratis en https://aistudio.google.com/apikey. Sin ella definida,
+# el botón de "generar con IA" falla con un aviso legible en vez de
+# reventar — el resto de la app funciona igual.
+# --------------------------------------------------------------
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+
+
 # Application definition
 
 INSTALLED_APPS = [

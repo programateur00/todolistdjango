@@ -1,0 +1,191 @@
+{% extends "tasks/base.html" %}
+{% block title %}Revisar plan generado{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">plan · IA · borrador</span>
+        <h1>Revisa tu plan</h1>
+    </div>
+    <a href="{% url 'tasks:plan_list' %}" class="stats-link">← Cancelar</a>
+</header>
+
+<p class="field__hint">
+    Esto es lo que propone la IA. Todavía no se ha guardado nada — puedes tocar
+    cualquier número antes de confirmar, o pedir otra propuesta.
+</p>
+
+<form class="task-form" method="post" id="ai-confirm-form">
+    {% csrf_token %}
+    <input type="hidden" name="step" value="confirmar">
+
+    <label class="field">
+        <span class="field__label">Nombre del plan</span>
+        <input type="text" name="name" maxlength="80" required value="{{ draft.plan_fields.name }}">
+    </label>
+
+    <label class="field">
+        <span class="field__label">Notas</span>
+        <textarea name="notes" rows="2">{{ draft.plan_fields.notes }}</textarea>
+    </label>
+
+    <label class="field">
+        <span class="field__label">Recompensa al cerrar el ciclo (opcional)</span>
+        <input type="text" name="reward" maxlength="200" placeholder="Ej: unas zapatillas nuevas">
+    </label>
+
+    <p class="field__hint">
+        {{ draft.plan_fields.weeks }} semanas ·
+        {{ draft.plan_fields.custom_days|length }} día{{ draft.plan_fields.custom_days|length|pluralize }} a la semana
+        (esto ya no se puede cambiar aquí — «Cambiar la petición» para elegir otro).
+    </p>
+
+    {% if draft.plan_type == 'general' %}
+    <p class="empty-state">
+        Un plan General no lleva objetivos aparte — la propia tarea diaria («{{ draft.plan_fields.name }}»)
+        es el hábito que cumples o no cada día.
+    </p>
+    {% endif %}
+
+    {% for it in draft.items %}
+    <section class="plan-item">
+        <header class="plan-item__head">
+            <h3>
+                {% if draft.plan_type == 'sport' %}{{ it.preview.exercise_name }}{% else %}Objetivo{% endif %}
+                {% if it.preview.is_headline %} ★{% endif %}
+            </h3>
+            {% if draft.plan_type == 'sport' %}
+            <span class="plan-item__prog">
+                {% if it.preview.is_running %}distancia{% elif it.preview.progression == 'double' %}doble progresión{% elif it.preview.progression == 'completion' %}cumplimiento{% else %}repeticiones{% endif %}
+            </span>
+            {% endif %}
+        </header>
+
+        <label class="field">
+            <span class="field__label">Cómo llamarlo (opcional)</span>
+            <input type="text" name="items-{{ forloop.counter0 }}-label" maxlength="80" value="{{ it.fields.label|default:'' }}">
+        </label>
+
+        {% if draft.plan_type == 'sport' %}
+        <label class="field field--inline">
+            <input type="checkbox" name="items-{{ forloop.counter0 }}-is_headline" {% if it.preview.is_headline %}checked{% endif %}>
+            <span class="field__label">Es la medida del plan</span>
+        </label>
+
+        {% if it.preview.is_running %}
+        <div class="field-row">
+            <label class="field">
+                <span class="field__label">Distancia de partida (km)</span>
+                <input type="number" step="0.1" min="0.1" name="items-{{ forloop.counter0 }}-start_distance_km" value="{{ it.fields.start_distance_km }}">
+            </label>
+            <label class="field">
+                <span class="field__label">Distancia de destino (km)</span>
+                <input type="number" step="0.1" min="0.1" name="items-{{ forloop.counter0 }}-goal_distance_km" value="{{ it.fields.goal_distance_km|default:'' }}">
+            </label>
+        </div>
+        <div class="field-row">
+            <label class="field">
+                <span class="field__label">Ritmo de partida (seg/km)</span>
+                <input type="number" min="60" name="items-{{ forloop.counter0 }}-start_pace_seconds_per_km" value="{{ it.fields.start_pace_seconds_per_km }}">
+            </label>
+            <label class="field">
+                <span class="field__label">Ritmo de destino (seg/km)</span>
+                <input type="number" min="60" name="items-{{ forloop.counter0 }}-goal_pace_seconds_per_km" value="{{ it.fields.goal_pace_seconds_per_km|default:'' }}">
+            </label>
+        </div>
+        {% else %}
+        <div class="field-row">
+            <label class="field">
+                <span class="field__label">Series de partida</span>
+                <input type="number" min="1" name="items-{{ forloop.counter0 }}-start_sets" value="{{ it.fields.start_sets }}">
+            </label>
+            {% if it.preview.is_timed %}
+            <label class="field">
+                <span class="field__label">Segundos de partida</span>
+                <input type="number" min="1" name="items-{{ forloop.counter0 }}-start_seconds" value="{{ it.fields.start_seconds }}">
+            </label>
+            {% else %}
+            <label class="field">
+                <span class="field__label">Repeticiones de partida</span>
+                <input type="number" min="1" name="items-{{ forloop.counter0 }}-start_reps" value="{{ it.fields.start_reps }}">
+            </label>
+            {% endif %}
+        </div>
+        {% if it.preview.progression != 'completion' %}
+        <div class="field-row">
+            {% if it.preview.is_timed %}
+            <label class="field">
+                <span class="field__label">Segundos de destino</span>
+                <input type="number" min="1" name="items-{{ forloop.counter0 }}-goal_seconds" value="{{ it.fields.goal_seconds|default:'' }}">
+            </label>
+            {% else %}
+            <label class="field">
+                <span class="field__label">Repeticiones de destino</span>
+                <input type="number" min="1" name="items-{{ forloop.counter0 }}-goal_reps" value="{{ it.fields.goal_reps|default:'' }}">
+            </label>
+            {% endif %}
+        </div>
+        {% endif %}
+        {% if it.preview.progression == 'double' %}
+        <div class="field-row">
+            <label class="field">
+                <span class="field__label">Peso de partida (kg)</span>
+                <input type="number" step="0.5" min="0" name="items-{{ forloop.counter0 }}-start_weight_kg" value="{{ it.fields.start_weight_kg }}">
+            </label>
+            <label class="field">
+                <span class="field__label">Peso de destino (kg)</span>
+                <input type="number" step="0.5" min="0" name="items-{{ forloop.counter0 }}-goal_weight_kg" value="{{ it.fields.goal_weight_kg|default:'' }}">
+            </label>
+        </div>
+        {% endif %}
+        {% endif %}
+        {% else %}
+        {# Estudio #}
+        <label class="field">
+            <span class="field__label">Minutos objetivo por sesión (opcional)</span>
+            <input type="number" min="1" name="items-{{ forloop.counter0 }}-target_minutes" value="{{ it.fields.target_minutes|default:'' }}">
+            <span class="field__hint">En blanco = sesión libre con temporizador manual, sin objetivo fijo.</span>
+        </label>
+        {% endif %}
+
+        {% if it.preview.weekly %}
+        <details class="plan-details">
+            <summary>Ver progresión semana a semana</summary>
+            <table class="plan-table">
+                <thead><tr><th>Semana</th><th>Objetivo</th></tr></thead>
+                <tbody>
+                {% for row in it.preview.weekly %}
+                    <tr>
+                        <td>{{ row.week }}</td>
+                        <td>
+                            {% if row.distance_km %}{{ row.distance_km }} km
+                            {% elif row.reps %}{{ row.sets }} × {{ row.reps }}{% if row.weight_kg %} · {{ row.weight_kg|floatformat:"-1" }} kg{% endif %}
+                            {% elif row.seconds %}{{ row.sets }} × {{ row.seconds }}s
+                            {% else %}cumplir{% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </details>
+        {% endif %}
+    </section>
+    {% endfor %}
+
+    <div class="task-form__actions">
+        <button type="submit" class="primary-btn">Guardar plan</button>
+    </div>
+</form>
+
+<form method="post" class="task-form__actions" style="margin-top:8px;">
+    {% csrf_token %}
+    <input type="hidden" name="step" value="regenerar">
+    <input type="hidden" name="plan_type" value="{{ draft.plan_type }}">
+    <input type="hidden" name="weeks" value="{{ draft.plan_fields.weeks }}">
+    {% for d in draft.plan_fields.custom_days %}<input type="hidden" name="custom_days" value="{{ d }}">{% endfor %}
+    <input type="hidden" name="prompt" value="{{ prompt }}">
+    <button type="submit" class="ghost-btn">↻ Generar otra vez</button>
+    <a class="ghost-btn" href="{% url 'tasks:plan_ai_create' %}">Cambiar la petición</a>
+</form>
+
+{% endblock %}
