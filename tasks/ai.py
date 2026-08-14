@@ -66,11 +66,12 @@ def _exercise_catalog_lines():
 
 _PLAN_TYPE_BRIEF = {
     "sport": (
-        "Deporte: el plan persigue de 1 a 4 objetivos de ejercicio del catálogo de abajo. "
-        "Exactamente UNO debe llevar is_headline=true (la medida que define si el plan se ha "
-        "conseguido, ej. \"llegar a 4x12 dominadas con 20 kg\"); el resto son apoyo (progresan "
-        "pero no deciden). Elige ejercicios que de verdad ayuden al objetivo del usuario — no "
-        "metas relleno."
+        "Deporte: el plan persigue de 3 a 6 objetivos de ejercicio del catálogo de abajo — un "
+        "plan de un solo ejercicio no es un programa de entrenamiento serio. Exactamente UNO "
+        "debe llevar is_headline=true (la medida que define si el plan se ha conseguido, ej. "
+        "\"llegar a 4x12 dominadas con 20 kg\"); el resto son apoyo (progresan pero no deciden). "
+        "Elige ejercicios que de verdad ayuden al objetivo del usuario y cubran su cuerpo de "
+        "forma equilibrada — no metas relleno ni variantes redundantes del mismo movimiento."
     ),
     "study": (
         "Estudio: el plan persigue UN solo hábito diario (estudiar francés, leer, practicar "
@@ -88,10 +89,15 @@ def _build_prompt(user_prompt, plan_type, weeks, sessions_per_week):
     catalog = _exercise_catalog_lines()
     brief = _PLAN_TYPE_BRIEF.get(plan_type, _PLAN_TYPE_BRIEF["sport"])
     parts = [
-        "Eres un entrenador/coach que diseña planes de progresión dentro de la app de tareas "
-        "\"Strive\". El usuario ya ha decidido: el TIPO de plan, cuántas SEMANAS va a durar, y "
-        f"CUÁNTOS DÍAS a la semana entrena ({sessions_per_week} días/semana). Tu trabajo es "
-        "traducir su objetivo en un plan concreto y medible — nada de vaguedades.",
+        "Eres el mejor entrenador personal/coach posible, diseñando planes de progresión "
+        "dentro de la app de tareas \"Strive\" para un cliente real. Programas como lo haría "
+        "un profesional de verdad: sobrecarga progresiva de manual (series Y repeticiones "
+        "suben con el tiempo, no solo repeticiones sin techo hasta el infinito), variedad real "
+        "de patrones de movimiento, y objetivos que de verdad llevan al cliente a su meta — "
+        "nada de rellenar con lo primero que se te ocurra. El usuario ya ha decidido: el TIPO "
+        "de plan, cuántas SEMANAS va a durar, y CUÁNTOS DÍAS a la semana entrena "
+        f"({sessions_per_week} días/semana). Tu trabajo es traducir su objetivo en un plan "
+        "concreto y medible — nada de vaguedades.",
         "",
         f"Tipo de plan: {brief}",
         "",
@@ -114,10 +120,29 @@ def _build_prompt(user_prompt, plan_type, weeks, sessions_per_week):
             "- 'completion': objetivo fijo, no sube. Para hábitos sin progresión numérica.",
             "- El ejercicio de correr ('running') no elige progresión: siempre es 'distance', con "
             "distancia en km y ritmo en segundos/km (más bajo = más rápido).",
+            "",
+            "Sobrecarga progresiva DE VERDAD — esto es lo que distingue a un buen entrenador de uno "
+            "vago: en 'reps' y 'double', start_sets y goal_sets TAMBIÉN tienen que subir con las "
+            "semanas, no solo las repeticiones o el peso. Empieza conservador (2-3 series, algo que "
+            "el cliente pueda cumplir desde el primer día) y sube hacia 3-5 según el nivel de partida "
+            "y las semanas disponibles. goal_sets nunca debe quedarse igual que start_sets salvo que "
+            "el usuario pida explícitamente mantener el volumen fijo — una progresión que solo mueve "
+            "las repeticiones para siempre no es realista (nadie llega a 40 dominadas seguidas).",
             "- 'weeks_to_goal' es en cuántas semanas quiere llegar al destino desde el punto de "
             "partida — sé realista (una progresión de fuerza razonable sube poco a poco).",
             "- Los puntos de partida deben ser alcanzables desde el primer día para alguien que "
             "empieza el plan ahora — mejor quedarse corto que proponer algo imposible.",
+            "",
+            "Cobertura de ejercicios — elige entre 3 y 6 ejercicios DISTINTOS, nunca uno o dos "
+            "sueltos: un programa serio trabaja el cuerpo de forma equilibrada, no un solo "
+            "movimiento. Si el objetivo es general (\"ponerme en forma\"), reparte entre empuje "
+            "(fondos), tracción (dominadas), pierna (sentadillas) y core (plancha/abdominales) — un "
+            "cuerpo completo, no 2-3 ejercicios sueltos. Si el objetivo es específico de una zona "
+            "(ej. \"tren superior\"), cúbrela igualmente con 3-4 movimientos distintos de esa zona, "
+            "no uno solo. NO metas varias variantes del mismo movimiento a la vez (ej. nunca "
+            "dominadas + dominadas anchas + chin ups juntas en el mismo plan) salvo que el usuario "
+            "pida explícitamente trabajar variantes — eso es relleno, no variedad real. Y running "
+            "solo si el objetivo del usuario tiene algo que ver con correr o resistencia cardio.",
         ]
 
     return "\n".join(parts)
@@ -133,6 +158,7 @@ _ITEM_SPORT_SCHEMA = {
         "is_headline": {"type": "BOOLEAN"},
         "progression": {"type": "STRING", "enum": ["reps", "double", "completion"]},
         "start_sets": {"type": "INTEGER"},
+        "goal_sets": {"type": "INTEGER", "description": "Series al llegar al destino. Debe ser mayor que start_sets salvo que el volumen se mantenga fijo a propósito."},
         "start_reps": {"type": "INTEGER"},
         "start_seconds": {"type": "INTEGER"},
         "start_weight_kg": {"type": "NUMBER"},
@@ -148,7 +174,7 @@ _ITEM_SPORT_SCHEMA = {
     },
     "required": [
         "exercise_slug", "is_headline", "progression",
-        "start_sets", "start_reps", "start_seconds", "start_weight_kg",
+        "start_sets", "goal_sets", "start_reps", "start_seconds", "start_weight_kg",
         "goal_reps", "goal_seconds", "goal_weight_kg",
         "start_distance_km", "start_pace_seconds_per_km",
         "goal_distance_km", "goal_pace_seconds_per_km",
@@ -176,7 +202,7 @@ def _response_schema(plan_type):
         "required": ["name", "notes"],
     }
     if plan_type == "sport":
-        items_schema = {"type": "ARRAY", "items": _ITEM_SPORT_SCHEMA, "minItems": 1, "maxItems": 4}
+        items_schema = {"type": "ARRAY", "items": _ITEM_SPORT_SCHEMA, "minItems": 3, "maxItems": 6}
     elif plan_type == "study":
         items_schema = {"type": "ARRAY", "items": _ITEM_STUDY_SCHEMA, "minItems": 1, "maxItems": 1}
     else:
@@ -269,6 +295,28 @@ def _steps_for_weeks(weeks_to_goal, sessions_per_week, sessions_per_step):
     return max(1, round(total_sessions / max(1, sessions_per_step)))
 
 
+def _sanitize_sets(item_fields):
+    """
+    Red de seguridad: fuerza que las series también progresen (no solo
+    reps/peso), incluso si la IA no ha seguido la instrucción del prompt.
+    Un entrenador de verdad sube series poco a poco (2-3 -> 3-5), nunca
+    las deja fijas para siempre ni las dispara a un número absurdo.
+    """
+    try:
+        start_sets = max(1, int(item_fields.get("start_sets") or 3))
+    except (TypeError, ValueError):
+        start_sets = 3
+    try:
+        goal_sets = int(item_fields.get("goal_sets") or 0)
+    except (TypeError, ValueError):
+        goal_sets = 0
+    if goal_sets <= start_sets:
+        goal_sets = start_sets + 1          # progresión mínima garantizada
+    goal_sets = min(goal_sets, start_sets + 3, 6)   # nunca una barbaridad
+    item_fields["start_sets"] = start_sets
+    item_fields["goal_sets"] = goal_sets
+
+
 def apply_pacing(item_fields, *, exercise, sessions_per_week):
     """
     Traduce `weeks_to_goal` (lo que decidió la IA) a `reps_increment` /
@@ -305,6 +353,7 @@ def apply_pacing(item_fields, *, exercise, sessions_per_week):
     if prog == PlanItem.PROG_COMPLETION:
         return item_fields
 
+    _sanitize_sets(item_fields)
     steps = _steps_for_weeks(weeks_to_goal, sessions_per_week, sessions_per_step)
 
     if prog == PlanItem.PROG_DOUBLE:
