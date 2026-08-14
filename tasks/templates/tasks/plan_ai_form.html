@@ -26,7 +26,7 @@
         <div class="repeat-options">
             {% for value, label in plan_type_choices %}
             <label class="repeat-option">
-                <input type="radio" name="plan_type" value="{{ value }}"
+                <input type="radio" name="plan_type" value="{{ value }}" class="plan-type-radio"
                     {% if plan_type == value %}checked{% endif %}>
                 <span>{{ label }}</span>
             </label>
@@ -39,11 +39,75 @@
         </span>
     </fieldset>
 
-    <label class="field">
-        <span class="field__label">¿Qué quieres conseguir?</span>
-        <textarea name="prompt" rows="4" maxlength="800" required
+    <fieldset class="field" id="study-subtype-field" hidden>
+        <legend class="field__label">Subtipo de estudio</legend>
+        <div class="repeat-options">
+            {% for value, label in study_subtype_choices %}
+            <label class="repeat-option">
+                <input type="radio" name="study_subtype" value="{{ value }}" class="study-subtype-radio"
+                    {% if study_subtype == value %}checked{% endif %}>
+                <span>{{ label }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        <span class="field__hint">
+            Idioma: la IA arma el temario eligiendo entre cursos de YouTube ya verificados,
+            organizados por nivel MCER (A1→C2) — no describes el plan en una frase, rellenas
+            estos campos.
+        </span>
+    </fieldset>
+
+    <div id="language-fields" hidden>
+        <label class="field">
+            <span class="field__label">Idioma que quieres aprender</span>
+            <input type="text" name="language_name" maxlength="40" value="{{ language_name }}"
+                placeholder="Ej: francés">
+        </label>
+
+        <div class="field-row">
+            <label class="field">
+                <span class="field__label">Nivel de partida</span>
+                <select name="level_from">
+                    <option value="">— sin especificar (A1) —</option>
+                    {% for value, label in cefr_level_choices %}
+                    <option value="{{ value }}" {% if level_from == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label class="field">
+                <span class="field__label">Nivel al que quieres llegar</span>
+                <select name="level_to">
+                    <option value="">— sin especificar (C2) —</option>
+                    {% for value, label in cefr_level_choices %}
+                    <option value="{{ value }}" {% if level_to == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+        </div>
+
+        <label class="field">
+            <span class="field__label">Idiomas que ya sabes (opcional)</span>
+            <input type="text" name="known_languages" maxlength="200" value="{{ known_languages }}"
+                placeholder="Ej: español, inglés">
+            <span class="field__hint">
+                Ayuda a la IA a dar contexto en sus notas (comparar gramática o vocabulario
+                parecido) — no cambia qué cursos elige.
+            </span>
+        </label>
+
+        <label class="field">
+            <span class="field__label">Test cada cuántos vídeos (opcional)</span>
+            <input type="number" name="quiz_every_n_videos" min="1" value="{{ quiz_every_n_videos }}"
+                placeholder="Ej: 1 (cada vídeo) o 5">
+            <span class="field__hint">Déjalo en blanco si de momento no quieres tests.</span>
+        </label>
+    </div>
+
+    <label class="field" id="prompt-field">
+        <span class="field__label" id="prompt-label">¿Qué quieres conseguir?</span>
+        <textarea name="prompt" rows="4" maxlength="800" id="prompt-textarea"
             placeholder="Ej: quiero ponerme fuerte de tren superior, ahora mismo hago 2 dominadas. También quiero aguantar más la plancha.">{{ prompt }}</textarea>
-        <span class="field__hint">Cuanto más concreto, mejor plan sale — di de dónde partes si lo sabes.</span>
+        <span class="field__hint" id="prompt-hint">Cuanto más concreto, mejor plan sale — di de dónde partes si lo sabes.</span>
     </label>
 
     <div class="field-row">
@@ -73,6 +137,53 @@
 </form>
 
 <script>
+(function () {
+    var studySubtypeField = document.getElementById("study-subtype-field");
+    var languageFields = document.getElementById("language-fields");
+    var languageInputs = languageFields.querySelectorAll("input, select");
+    var promptTextarea = document.getElementById("prompt-textarea");
+    var promptLabel = document.getElementById("prompt-label");
+    var promptHint = document.getElementById("prompt-hint");
+    var planTypeRadios = document.querySelectorAll(".plan-type-radio");
+    var studySubtypeRadios = document.querySelectorAll(".study-subtype-radio");
+
+    function selectedValue(radios) {
+        for (var i = 0; i < radios.length; i++) {
+            if (radios[i].checked) return radios[i].value;
+        }
+        return "";
+    }
+
+    function refresh() {
+        var isStudy = selectedValue(planTypeRadios) === "study";
+        var isLanguage = isStudy && selectedValue(studySubtypeRadios) === "language";
+
+        studySubtypeField.hidden = !isStudy;
+        languageFields.hidden = !isLanguage;
+        for (var i = 0; i < languageInputs.length; i++) {
+            languageInputs[i].disabled = !isLanguage;
+        }
+
+        if (isLanguage) {
+            promptTextarea.required = false;
+            promptLabel.textContent = "Contexto adicional (opcional)";
+            promptHint.textContent = "Cualquier cosa que ayude a la IA a escribir mejores notas — no cambia qué cursos elige.";
+        } else {
+            promptTextarea.required = true;
+            promptLabel.textContent = "¿Qué quieres conseguir?";
+            promptHint.textContent = "Cuanto más concreto, mejor plan sale — di de dónde partes si lo sabes.";
+        }
+    }
+
+    for (var i = 0; i < planTypeRadios.length; i++) {
+        planTypeRadios[i].addEventListener("change", refresh);
+    }
+    for (var j = 0; j < studySubtypeRadios.length; j++) {
+        studySubtypeRadios[j].addEventListener("change", refresh);
+    }
+    refresh();
+})();
+
 document.getElementById("ai-form").addEventListener("submit", function () {
     var btn = document.getElementById("ai-submit-btn");
     btn.disabled = true;

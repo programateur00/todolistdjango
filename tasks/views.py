@@ -33,6 +33,18 @@ def _read_subcategory(request, default=""):
     return raw if raw in valid else default
 
 
+def _read_language_name(request):
+    """Idioma de una tarea suelta con subcategory=Idiomas (Task.language_name)."""
+    return request.POST.get("language_name", "").strip()[:40]
+
+
+def _read_level(request):
+    """Nivel MCER de una tarea suelta con subcategory=Idiomas (Task.level)."""
+    raw = request.POST.get("level", "")
+    valid = {k for k, _ in Task.CEFR_LEVEL_CHOICES}
+    return raw if raw in valid else ""
+
+
 def _read_target_minutes(request):
     """
     Objetivo en minutos — un solo campo en el modelo (Task.target_minutes)
@@ -200,6 +212,8 @@ def task_create(request):
                 notes=request.POST.get("notes", "").strip(),
                 category=_read_category(request),
                 subcategory=_read_subcategory(request),
+                language_name=_read_language_name(request),
+                level=_read_level(request),
                 target_minutes=_read_target_minutes(request),
                 youtube_video_id=_read_youtube_video_id(request),
                 youtube_playlist_id=_read_youtube_playlist_id(request),
@@ -233,6 +247,9 @@ def task_create(request):
         "category_choices": Task.CATEGORY_CHOICES,
         "sport_subcategory_choices": Task.SPORT_SUBCATEGORY_CHOICES,
         "focus_subcategory_choices": Task.FOCUS_SUBCATEGORY_CHOICES,
+        "study_subcategory_choices": Task.STUDY_SUBCATEGORY_CHOICES,
+        "study_subcategory_values": [v for v, _ in Task.STUDY_SUBCATEGORY_CHOICES],
+        "cefr_level_choices": Task.CEFR_LEVEL_CHOICES,
         "pace_presets": Task.PACE_PRESETS,
         "initial_title": initial_title,
     })
@@ -245,6 +262,8 @@ def task_edit(request, pk):
         task.notes = request.POST.get("notes", "").strip()
         task.category = _read_category(request, default=task.category)
         task.subcategory = _read_subcategory(request, default=task.subcategory)
+        task.language_name = _read_language_name(request)
+        task.level = _read_level(request)
         task.target_minutes = _read_target_minutes(request)
         task.youtube_video_id = _read_youtube_video_id(request)
         task.youtube_playlist_id = _read_youtube_playlist_id(request)
@@ -273,6 +292,9 @@ def task_edit(request, pk):
         "category_choices": Task.CATEGORY_CHOICES,
         "sport_subcategory_choices": Task.SPORT_SUBCATEGORY_CHOICES,
         "focus_subcategory_choices": Task.FOCUS_SUBCATEGORY_CHOICES,
+        "study_subcategory_choices": Task.STUDY_SUBCATEGORY_CHOICES,
+        "study_subcategory_values": [v for v, _ in Task.STUDY_SUBCATEGORY_CHOICES],
+        "cefr_level_choices": Task.CEFR_LEVEL_CHOICES,
         "pace_presets": Task.PACE_PRESETS,
     })
 
@@ -1001,12 +1023,20 @@ def plan_detail(request, pk):
             "deloaded": item.successes_and_streak()[1] >= item.deload_after_failures > 0,
         }
 
+    # Estudio · Idiomas no tiene PlanItem — el temario es la lista de
+    # CourseModule, así que la pantalla se arma distinto: en vez de la
+    # medida principal + objetivos, se enseña el progreso del curso y
+    # qué vídeo toca ahora.
+    is_language = plan.plan_type == Plan.PLAN_TYPE_STUDY and plan.study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE
+
     head = plan.headline
     return render(request, "tasks/plan_detail.html", {
         "plan": plan,
         "headline": _pack(head) if head else None,
         "supports": [_pack(i) for i in plan.support_items],
         "progress": plan.progress_pct(),
+        "is_language": is_language,
+        "course_progress": plan.course_progress() if is_language else None,
     })
 
 
@@ -1030,23 +1060,51 @@ def plan_ai_form(request):
 
     if request.method == "POST" and step in ("generar", "regenerar"):
         plan_type = request.POST.get("plan_type", "")
+        study_subtype = request.POST.get("study_subtype", "")
         weeks = request.POST.get("weeks")
         custom_days = request.POST.getlist("custom_days")
         prompt_text = request.POST.get("prompt", "")
+        language_name = request.POST.get("language_name", "").strip()
+        level_from = request.POST.get("level_from", "")
+        level_to = request.POST.get("level_to", "")
+        known_languages = request.POST.get("known_languages", "").strip()
+        quiz_every_n_videos = request.POST.get("quiz_every_n_videos", "").strip()
 
-        draft, error = api.build_plan_draft(
-            user=get_current_user(), plan_type=plan_type, weeks=weeks,
-            custom_days=custom_days, prompt=prompt_text,
-        )
+        # Estudio · Idiomas no describe el plan en una frase libre como
+        # los demás — la IA elige y ordena entre el catálogo curado
+        # (CoursePlaylist) para el idioma y los niveles pedidos, nunca
+        # inventa un curso nuevo.
+        is_language = plan_type == Plan.PLAN_TYPE_STUDY and study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE
+
+        if is_language:
+            draft, error = api.build_language_plan_draft(
+                user=get_current_user(), weeks=weeks, custom_days=custom_days,
+                language=language_name, level_from=level_from, level_to=level_to,
+                known_languages=known_languages, prompt=prompt_text,
+                quiz_every_n_videos=quiz_every_n_videos or None,
+            )
+        else:
+            draft, error = api.build_plan_draft(
+                user=get_current_user(), plan_type=plan_type, weeks=weeks,
+                custom_days=custom_days, prompt=prompt_text,
+            )
         if error:
             messages.error(request, error)
             return render(request, "tasks/plan_ai_form.html", {
                 "plan_type_choices": Plan.PLAN_TYPE_CHOICES,
+                "study_subtype_choices": Plan.STUDY_SUBTYPE_CHOICES,
+                "cefr_level_choices": Plan.CEFR_LEVEL_CHOICES,
                 "weekdays": Task.WEEKDAYS,
                 "selected_days": custom_days or ["0", "2", "4"],
                 "prompt": prompt_text,
                 "weeks": weeks or 12,
                 "plan_type": plan_type or Plan.PLAN_TYPE_SPORT,
+                "study_subtype": study_subtype or Plan.STUDY_SUBTYPE_GENERAL,
+                "language_name": language_name,
+                "level_from": level_from,
+                "level_to": level_to,
+                "known_languages": known_languages,
+                "quiz_every_n_videos": quiz_every_n_videos,
             })
         request.session["plan_ai_draft"] = draft
         request.session["plan_ai_prompt"] = prompt_text
@@ -1058,6 +1116,8 @@ def plan_ai_form(request):
             messages.error(request, "El borrador ha caducado — genera el plan otra vez.")
             return redirect(reverse("tasks:plan_ai_create"))
 
+        is_language = draft.get("study_subtype") == Plan.STUDY_SUBTYPE_LANGUAGE
+
         plan_data = {
             "name": request.POST.get("name", "").strip(),
             "notes": request.POST.get("notes", "").strip(),
@@ -1067,40 +1127,66 @@ def plan_ai_form(request):
             "reward": request.POST.get("reward", "").strip(),
             "is_active": True,
         }
+
+        course_modules = []
+        if is_language:
+            plan_data.update({
+                "study_subtype": draft["plan_fields"].get("study_subtype"),
+                "language_name": draft["plan_fields"].get("language_name"),
+                "level_from": draft["plan_fields"].get("level_from"),
+                "level_to": draft["plan_fields"].get("level_to"),
+                "known_languages": draft["plan_fields"].get("known_languages"),
+                "quiz_every_n_videos": draft["plan_fields"].get("quiz_every_n_videos"),
+            })
+            # Se expande el catálogo elegido (vídeo a vídeo, vía YouTube)
+            # solo ahora que el usuario confirma de verdad — así no se
+            # gasta cuota en borradores que a lo mejor se descartan.
+            course_modules, error = api.expand_language_selection(draft.get("selected") or [])
+            if error:
+                messages.error(request, error)
+                return redirect(reverse("tasks:plan_ai_create"))
+
         plan = Plan(user=get_current_user(), plan_type=draft["plan_type"])
         error = api._apply_plan_fields(plan, plan_data)
+        if not error and is_language:
+            api._apply_language_plan_fields(plan, plan_data)
         if error:
             messages.error(request, error)
             return redirect(reverse("tasks:plan_ai_create"))
         plan.save()
 
-        for idx, item in enumerate(draft.get("items") or []):
-            prefix = f"items-{idx}-"
-            item_data = dict(item["fields"])
-            # Solo estos números son editables en la vista previa — el
-            # resto (ejercicio, modo, incrementos ya calculados a partir
-            # de "en cuántas semanas quieres llegar"...) se queda tal
-            # como lo propuso la IA.
-            item_data["is_headline"] = bool(request.POST.get(prefix + "is_headline"))
-            for key in (
-                "label", "start_sets", "start_reps", "start_seconds", "start_weight_kg",
-                "goal_reps", "goal_seconds", "goal_weight_kg", "start_distance_km",
-                "start_pace_seconds_per_km", "goal_distance_km", "goal_pace_seconds_per_km",
-                "target_minutes",
-            ):
-                field_name = prefix + key
-                if field_name not in request.POST:
-                    continue
-                raw = request.POST.get(field_name, "").strip()
-                item_data[key] = raw if (raw != "" or key == "label") else None
+        if is_language:
+            for module in course_modules:
+                module.plan = plan
+                module.save()
+        else:
+            for idx, item in enumerate(draft.get("items") or []):
+                prefix = f"items-{idx}-"
+                item_data = dict(item["fields"])
+                # Solo estos números son editables en la vista previa — el
+                # resto (ejercicio, modo, incrementos ya calculados a partir
+                # de "en cuántas semanas quieres llegar"...) se queda tal
+                # como lo propuso la IA.
+                item_data["is_headline"] = bool(request.POST.get(prefix + "is_headline"))
+                for key in (
+                    "label", "start_sets", "start_reps", "start_seconds", "start_weight_kg",
+                    "goal_reps", "goal_seconds", "goal_weight_kg", "start_distance_km",
+                    "start_pace_seconds_per_km", "goal_distance_km", "goal_pace_seconds_per_km",
+                    "target_minutes",
+                ):
+                    field_name = prefix + key
+                    if field_name not in request.POST:
+                        continue
+                    raw = request.POST.get(field_name, "").strip()
+                    item_data[key] = raw if (raw != "" or key == "label") else None
 
-            plan_item = PlanItem(plan=plan)
-            item_error = api._apply_plan_item_fields(plan_item, plan, item_data)
-            if item_error:
-                continue  # se descarta en vez de tirar el plan entero
-            plan_item.save()
-            if plan_item.is_headline:
-                plan.items.exclude(pk=plan_item.pk).update(is_headline=False)
+                plan_item = PlanItem(plan=plan)
+                item_error = api._apply_plan_item_fields(plan_item, plan, item_data)
+                if item_error:
+                    continue  # se descarta en vez de tirar el plan entero
+                plan_item.save()
+                if plan_item.is_headline:
+                    plan.items.exclude(pk=plan_item.pk).update(is_headline=False)
 
         plan.sync_task()
         request.session.pop("plan_ai_draft", None)
@@ -1111,11 +1197,19 @@ def plan_ai_form(request):
     # GET, o "volver" desde la vista previa sin confirmar.
     return render(request, "tasks/plan_ai_form.html", {
         "plan_type_choices": Plan.PLAN_TYPE_CHOICES,
+        "study_subtype_choices": Plan.STUDY_SUBTYPE_CHOICES,
+        "cefr_level_choices": Plan.CEFR_LEVEL_CHOICES,
         "weekdays": Task.WEEKDAYS,
         "selected_days": ["0", "2", "4"],
         "prompt": request.session.get("plan_ai_prompt", ""),
         "weeks": 12,
         "plan_type": Plan.PLAN_TYPE_SPORT,
+        "study_subtype": Plan.STUDY_SUBTYPE_GENERAL,
+        "language_name": "",
+        "level_from": "",
+        "level_to": "",
+        "known_languages": "",
+        "quiz_every_n_videos": "",
     })
 
 
@@ -1133,10 +1227,31 @@ def plan_form(request, pk=None):
                 # El tipo solo se decide al crear — cambiarlo después
                 # dejaría objetivos huérfanos que ya no encajan (un
                 # objetivo de ejercicio en un plan que ahora es Estudio
-                # no significa nada).
+                # no significa nada). El subtipo de Estudio (Idiomas) es
+                # la misma decisión un escalón más abajo: cambiarlo
+                # después dejaría un temario de vídeos (CourseModule)
+                # huérfano igual que pasaría con los objetivos.
                 raw_type = request.POST.get("plan_type", "")
                 valid_types = {k for k, _ in Plan.PLAN_TYPE_CHOICES}
                 plan.plan_type = raw_type if raw_type in valid_types else Plan.PLAN_TYPE_SPORT
+                if plan.plan_type == Plan.PLAN_TYPE_STUDY:
+                    raw_subtype = request.POST.get("study_subtype", "")
+                    valid_subtypes = {k for k, _ in Plan.STUDY_SUBTYPE_CHOICES}
+                    plan.study_subtype = raw_subtype if raw_subtype in valid_subtypes else Plan.STUDY_SUBTYPE_GENERAL
+
+            # Idioma + nivel son metadata editable en cualquier momento
+            # (a diferencia del subtipo) — no cambian ningún CourseModule
+            # ya creado, solo el contexto que se enseña y lo que usarán
+            # las próximas generaciones con IA.
+            if plan.plan_type == Plan.PLAN_TYPE_STUDY and plan.study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE:
+                api._apply_language_plan_fields(plan, {
+                    "language_name": request.POST.get("language_name", ""),
+                    "level_from": request.POST.get("level_from", ""),
+                    "level_to": request.POST.get("level_to", ""),
+                    "known_languages": request.POST.get("known_languages", ""),
+                    "quiz_every_n_videos": request.POST.get("quiz_every_n_videos", ""),
+                })
+
             plan.name = name[:80]
             plan.notes = request.POST.get("notes", "").strip()
             raw_started_on = request.POST.get("started_on", "").strip()
@@ -1172,6 +1287,8 @@ def plan_form(request, pk=None):
         "weekdays": Task.WEEKDAYS,
         "selected_days": plan.custom_days_list() if plan else ["0", "2", "4"],
         "plan_type_choices": Plan.PLAN_TYPE_CHOICES,
+        "study_subtype_choices": Plan.STUDY_SUBTYPE_CHOICES,
+        "cefr_level_choices": Plan.CEFR_LEVEL_CHOICES,
     })
 
 

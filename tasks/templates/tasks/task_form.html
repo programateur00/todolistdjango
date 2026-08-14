@@ -148,6 +148,46 @@
         </span>
     </fieldset>
 
+    <fieldset class="field subcategory-field" id="study-subcategory-field">
+        <legend class="field__label">¿De qué trata?</legend>
+        <div class="repeat-options">
+            <label class="repeat-option">
+                <input type="radio" name="subcategory" value="" id="study-subcategory-none"
+                    {% if not task or task.subcategory not in study_subcategory_values %}checked{% endif %}>
+                <span>Estudio (sin más)</span>
+            </label>
+            {% for value, label in study_subcategory_choices %}
+            <label class="repeat-option">
+                <input type="radio" name="subcategory" value="{{ value }}"
+                    {% if task and task.subcategory == value %}checked{% endif %}>
+                <span>{{ label }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        <span class="field__hint">
+            "Idiomas" solo le añade contexto a esta tarea suelta (qué idioma y qué nivel)
+            — para un curso de verdad, organizado por nivel y con varios vídeos, usa un
+            plan de Estudio · Idiomas en vez de una tarea suelta.
+        </span>
+    </fieldset>
+
+    <div id="language-fields">
+        <label class="field">
+            <span class="field__label">Idioma</span>
+            <input type="text" name="language_name" maxlength="40" value="{{ task.language_name|default:'' }}"
+                placeholder="Ej: francés">
+        </label>
+        <label class="field">
+            <span class="field__label">Nivel MCER (opcional)</span>
+            <select name="level">
+                <option value="">— sin especificar —</option>
+                {% for value, label in cefr_level_choices %}
+                <option value="{{ value }}" {% if task.level == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+    </div>
+
     <label class="field focus-target-field" id="focus-target-field">
         <span class="field__label">Objetivo (minutos)</span>
         <input type="number" name="target_minutes" min="1" max="600"
@@ -307,6 +347,8 @@
 
     var subcategoryField = document.getElementById('subcategory-field');
     var focusSubcategoryField = document.getElementById('focus-subcategory-field');
+    var studySubcategoryField = document.getElementById('study-subcategory-field');
+    var languageFields = document.getElementById('language-fields');
     var focusTargetField = document.getElementById('focus-target-field');
     var videoSourceField = document.getElementById('video-source-field');
     var sportModeField = document.getElementById('sport-mode-field');
@@ -332,7 +374,8 @@
         // ángulo de rodilla con MediaPipe), igual que en tren superior.
         var esDeporte = v === 'sport';
         var subSel = document.querySelector('[name="subcategory"]:checked');
-        var sub = esDeporte && subSel ? subSel.value : '';
+        var subSelValue = subSel ? subSel.value : '';
+        var sub = esDeporte ? subSelValue : '';
         var esCarrera = sub === 'running';
         var modosPorSub = { upper_body: ['camera', 'circuit', 'video'], lower_body: ['camera', 'circuit', 'video'] };
         var modosValidos = modosPorSub[sub] || [];
@@ -361,6 +404,8 @@
         // Los campos de vídeo salen en Deporte solo si el modo es vídeo.
         var esEnfoque = v === 'work';
         var esEstudio = v === 'study';
+        studySubcategoryField.style.display = esEstudio ? 'block' : 'none';
+        languageFields.style.display = (esEstudio && subSelValue === 'language') ? 'block' : 'none';
         var videoEnDeporte = esDeporte && modoActual === 'video';
         videoSourceField.style.display = (esEnfoque || videoEnDeporte) ? 'block' : 'none';
         var fuente = (document.querySelector('[name="video_source"]:checked') || {}).value || 'youtube';
@@ -416,6 +461,7 @@
         r.addEventListener('change', updateSubcategory);
     });
     document.getElementById('subcategory-field').addEventListener('click', function(){ setTimeout(updateSubcategory, 0); });
+    studySubcategoryField.addEventListener('click', function(){ setTimeout(updateSubcategory, 0); });
     updateSubcategory();
 
     // ------------------------------------------------- vídeo local

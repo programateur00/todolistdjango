@@ -31,7 +31,7 @@
         <div class="repeat-options">
             {% for value, label in plan_type_choices %}
             <label class="repeat-option">
-                <input type="radio" name="plan_type" value="{{ value }}"
+                <input type="radio" name="plan_type" value="{{ value }}" class="plan-type-radio"
                     {% if plan.plan_type == value or not plan and value == 'sport' %}checked{% endif %}
                     {% if plan %}disabled{% endif %}>
                 <span>{{ label }}</span>
@@ -50,10 +50,75 @@
         {% endif %}
     </fieldset>
 
-    <p class="field__hint">
+    <fieldset class="field" id="study-subtype-field" hidden>
+        <legend class="field__label">Subtipo de estudio</legend>
+        <div class="repeat-options">
+            {% for value, label in study_subtype_choices %}
+            <label class="repeat-option">
+                <input type="radio" name="study_subtype" value="{{ value }}" class="study-subtype-radio"
+                    {% if plan.study_subtype == value or not plan and value == 'general' %}checked{% endif %}
+                    {% if plan %}disabled{% endif %}>
+                <span>{{ label }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        {% if plan %}
+        <input type="hidden" name="study_subtype" value="{{ plan.study_subtype }}">
+        <span class="field__hint">Tampoco se puede cambiar una vez creado — crea un plan nuevo si necesitas otro.</span>
+        {% else %}
+        <span class="field__hint">
+            Idioma: el plan se basa en llegar a un nivel MCER de un idioma concreto — el
+            temario de vídeos se genera con IA en un segundo paso, después de crear el plan.
+        </span>
+        {% endif %}
+    </fieldset>
+
+    <div id="language-fields" hidden>
+        <label class="field">
+            <span class="field__label">Idioma</span>
+            <input type="text" name="language_name" maxlength="40" value="{{ plan.language_name|default:'' }}"
+                placeholder="Ej: francés">
+        </label>
+
+        <div class="field-row">
+            <label class="field">
+                <span class="field__label">Nivel de partida</span>
+                <select name="level_from">
+                    <option value="">— sin especificar (A1) —</option>
+                    {% for value, label in cefr_level_choices %}
+                    <option value="{{ value }}" {% if plan.level_from == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label class="field">
+                <span class="field__label">Nivel al que quieres llegar</span>
+                <select name="level_to">
+                    <option value="">— sin especificar (C2) —</option>
+                    {% for value, label in cefr_level_choices %}
+                    <option value="{{ value }}" {% if plan.level_to == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+        </div>
+
+        <label class="field">
+            <span class="field__label">Idiomas que ya sabes (opcional)</span>
+            <input type="text" name="known_languages" maxlength="200" value="{{ plan.known_languages|default:'' }}"
+                placeholder="Ej: español, inglés">
+        </label>
+
+        <label class="field">
+            <span class="field__label">Test cada cuántos vídeos (opcional)</span>
+            <input type="number" name="quiz_every_n_videos" min="1" value="{{ plan.quiz_every_n_videos|default:'' }}"
+                placeholder="Ej: 1 (cada vídeo) o 5">
+        </label>
+    </div>
+
+    <p class="field__hint" id="items-next-step-hint">
         Los objetivos (ejercicio y progresión en Deporte; vídeo o playlist en
         Estudio) se añaden en el siguiente paso, después de crear el plan. General
-        no necesita ninguno — es solo un hábito que cumples o no cada día.
+        no necesita ninguno — es solo un hábito que cumples o no cada día. Idioma
+        genera su temario con IA desde la pantalla del plan, una vez creado.
     </p>
 
     <div class="field-row">
@@ -111,5 +176,46 @@
         <button type="submit" class="primary-btn">Guardar</button>
     </div>
 </form>
+
+<script>
+(function () {
+    var studySubtypeField = document.getElementById("study-subtype-field");
+    var languageFields = document.getElementById("language-fields");
+    var languageInputs = languageFields.querySelectorAll("input, select");
+    var planTypeRadios = document.querySelectorAll(".plan-type-radio");
+    var studySubtypeRadios = document.querySelectorAll(".study-subtype-radio");
+
+    function selectedValue(radios) {
+        for (var i = 0; i < radios.length; i++) {
+            if (radios[i].checked) return radios[i].value;
+        }
+        return "";
+    }
+
+    function refresh() {
+        var isStudy = selectedValue(planTypeRadios) === "study";
+        var isLanguage = isStudy && selectedValue(studySubtypeRadios) === "language";
+
+        studySubtypeField.hidden = !isStudy;
+        languageFields.hidden = !isLanguage;
+        // Los inputs deshabilitados no se envían — bien cuando el campo
+        // está oculto porque no aplica (plan_type ≠ study, o subtipo ≠
+        // idioma), pero mal si es un plan de Idiomas ya creado, donde SÍ
+        // deben mandarse aunque el radio que decidió el subtipo esté
+        // bloqueado. Por eso esto va aparte de studySubtypeRadios/plan-type-radio.
+        for (var i = 0; i < languageInputs.length; i++) {
+            languageInputs[i].disabled = !isLanguage;
+        }
+    }
+
+    for (var i = 0; i < planTypeRadios.length; i++) {
+        planTypeRadios[i].addEventListener("change", refresh);
+    }
+    for (var j = 0; j < studySubtypeRadios.length; j++) {
+        studySubtypeRadios[j].addEventListener("change", refresh);
+    }
+    refresh();
+})();
+</script>
 
 {% endblock %}

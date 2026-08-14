@@ -12,6 +12,42 @@
 
 {% if plan.notes %}<p class="plan-notes">{{ plan.notes }}</p>{% endif %}
 
+{% if is_language %}
+{# Estudio · Idiomas no tiene PlanItem — el temario es CourseModule, así
+   que la medida del plan es el propio vídeo que toca hoy. #}
+<section class="plan-head">
+    <p class="plan-head__eyebrow">Curso de {{ plan.language_name }}</p>
+    <h2 class="plan-head__name">
+        {% if course_progress.next %}{{ course_progress.next.title }}{% else %}Sin vídeos todavía{% endif %}
+    </h2>
+
+    {% if course_progress.next %}
+    <div class="plan-head__now">
+        <span class="plan-head__label">Hoy te toca</span>
+        <span class="plan-head__target">nivel {{ course_progress.next.level }}</span>
+    </div>
+    {% endif %}
+
+    {% if course_progress.total %}
+    <div class="plan-bar" role="img" aria-label="Progreso del curso: {{ course_progress.pct }}%">
+        <div class="plan-bar__fill" style="width: {{ course_progress.pct }}%"></div>
+    </div>
+    <p class="plan-head__meta">
+        {{ course_progress.watched }} de {{ course_progress.total }} vídeos vistos ({{ course_progress.pct }}%)
+    </p>
+    {% endif %}
+</section>
+
+{% if plan.known_languages %}
+<p class="field__hint">Ya sabes: {{ plan.known_languages }}</p>
+{% endif %}
+
+{% if not course_progress.total %}
+<p class="empty-state">Este curso todavía no tiene vídeos — algo falló al crearlo.</p>
+{% endif %}
+
+{% else %}
+
 {% if headline %}
 {# La medida principal: la prueba concreta de que vas hacia el objetivo. #}
 <section class="plan-head">
@@ -59,8 +95,12 @@
 <p class="empty-state">Este plan todavía no tiene objetivos.</p>
 {% endif %}
 
+{% endif %}
+
 <div class="task-form__actions">
+    {% if not is_language %}
     <a class="primary-btn" href="{% url 'tasks:plan_item_create' plan.pk %}">+ Añadir objetivo</a>
+    {% endif %}
     <a class="ghost-btn" href="{% url 'tasks:plan_edit' plan.pk %}">Editar plan</a>
     {% if not plan.closed_at %}
     <a class="ghost-btn" href="{% url 'tasks:plan_close' plan.pk %}">Cerrar plan</a>

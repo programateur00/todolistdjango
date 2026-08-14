@@ -21,6 +21,12 @@ _YOUTUBE_ID_RE = re.compile(
 # que aparezca list=algo ya vale.
 _YOUTUBE_PLAYLIST_ID_RE = re.compile(r"[?&]list=([A-Za-z0-9_-]+)")
 
+# Niveles MCER (A1→C2), a nivel de módulo porque tanto Task (el nivel del
+# vídeo concreto de hoy) como Plan (el rango de nivel del curso entero) lo
+# necesitan, y Task se define antes que Plan en este archivo.
+CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
+CEFR_LEVEL_CHOICES = [(lvl, lvl) for lvl in CEFR_LEVELS]
+
 
 class Task(models.Model):
     REPEAT_NONE = "none"
@@ -119,6 +125,11 @@ class Task(models.Model):
 
     SUBCATEGORY_CHOICES = SPORT_SUBCATEGORY_CHOICES + FOCUS_SUBCATEGORY_CHOICES + STUDY_SUBCATEGORY_CHOICES
 
+    # Mismo MCER que Plan.CEFR_LEVEL_CHOICES (ver constante de módulo
+    # arriba) — expuesto también aquí para leer/validar Task.level sin
+    # tener que importar Plan.
+    CEFR_LEVEL_CHOICES = CEFR_LEVEL_CHOICES
+
     WEEKDAYS = [
         ("0", "Lunes"),
         ("1", "Martes"),
@@ -152,6 +163,15 @@ class Task(models.Model):
         blank=True,
         help_text="Deporte → qué entrenar. Enfoque → qué cronometrar. En el resto no se usa.",
     )
+    # Idioma + nivel de ESTA tarea concreta — independiente de si viene de
+    # un Plan de Idiomas o se crea suelta a mano (subcategory=SUBCATEGORY_LANGUAGE
+    # en cualquiera de los dos casos). Un solo nivel, no un rango como en
+    # Plan.level_from/level_to: una tarea es un vídeo del día, no un curso
+    # entero. Si la tarea viene de Plan.sync_task(), este nivel es el del
+    # CourseModule que toca hoy — puede no coincidir con el nivel objetivo
+    # del plan (level_to), que es el destino final, no dónde estás ahora.
+    language_name = models.CharField(max_length=40, blank=True)
+    level = models.CharField(max_length=2, blank=True, choices=CEFR_LEVEL_CHOICES)
     target_minutes = models.PositiveIntegerField(
         null=True, blank=True,
         help_text="Objetivo en minutos para tareas de Enfoque (category='work'). Ej. 60 para 'leer una hora'.",
@@ -1103,11 +1123,12 @@ class Plan(models.Model):
 
     # Niveles del Marco Común Europeo de Referencia — mismo orden que se
     # usa para clasificar y ordenar los CourseModule de un curso de
-    # idioma. Vive aquí como constante de clase (no como choices de un
-    # campo) porque tres campos distintos la necesitan: level_from,
-    # level_to, y CourseModule.level.
-    CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
-    CEFR_LEVEL_CHOICES = [(lvl, lvl) for lvl in CEFR_LEVELS]
+    # idioma. Constante a nivel de módulo (ver arriba del archivo) porque
+    # Task.level también la necesita y Task se define antes que Plan;
+    # se deja también como atributo de clase aquí para no romper el
+    # código existente que escribe Plan.CEFR_LEVELS / Plan.CEFR_LEVEL_CHOICES.
+    CEFR_LEVELS = CEFR_LEVELS
+    CEFR_LEVEL_CHOICES = CEFR_LEVEL_CHOICES
 
     # Solo con study_subtype='language'. En blanco, level_from se trata
     # como A1 (empezar desde cero) y level_to como "sin techo" (llega
@@ -1119,11 +1140,19 @@ class Plan(models.Model):
     level_from = models.CharField(max_length=2, blank=True, choices=CEFR_LEVEL_CHOICES)
     level_to = models.CharField(max_length=2, blank=True, choices=CEFR_LEVEL_CHOICES)
 
+    # Qué idiomas ya domina el usuario, en sus propias palabras (ej.
+    # "inglés, italiano"). NO cambia qué playlists elige la IA — el
+    # catálogo ya está filtrado por idioma y nivel — pero sí es contexto
+    # para sus notas (puede explicar gramática comparando con un idioma
+    # que ya conoces). Puramente informativo; nunca bloquea nada si se
+    # deja en blanco.
+    known_languages = models.CharField(max_length=200, blank=True)
+
     # Cada cuántos vídeos vistos se genera un test de repaso — lo decide
     # el usuario al crear el plan (gastar IA en un test por vídeo no es
     # lo mismo que uno cada 5). En blanco, todavía no se generan tests
-    # automáticos — así de momento (Fase 1: solo búsqueda real de
-    # cursos) no se promete algo que aún no existe.
+    # automáticos — el campo ya existe para no tener que migrar otra vez
+    # cuando llegue esa fase, pero de momento no dispara nada por sí solo.
     quiz_every_n_videos = models.PositiveIntegerField(null=True, blank=True)
 
     # Cuándo toca entrenar. El plan crea y mantiene su propia tarea con
@@ -1285,6 +1314,74 @@ class Plan(models.Model):
             "target_video_count": head.target_video_count,
         }
 
+    def _language_completed_count(self):
+        """
+        Cuántas sesiones de este curso se han CUMPLIDO desde que empezó
+        el plan — mismo conteo que PlanItem.successes_and_streak() usa
+        para Deporte, aplicado aquí a la serie de tarea del plan. Es lo
+        que decide qué CourseModule toca hoy: avanza con lo que de
+        verdad has visto, no con los días que han pasado en el
+        calendario — si te saltas un día no te "come" un vídeo sin
+        verlo, y no hace falta que coincida con la semana en la que la
+        IA lo programó al crear el curso (esa semana es solo orientativa,
+        ver CourseModule.scheduled_week).
+        """
+        if not self.task_series_id:
+            return 0
+        return Occurrence.objects.filter(
+            series_id=self.task_series_id, result=Occurrence.RESULT_DONE,
+            deleted_at__isnull=True, recorded_at__date__gte=self.started_on,
+        ).count()
+
+    def _language_target_fields(self):
+        """
+        Si el plan es de Estudio · Idiomas, qué vídeo de CourseModule
+        toca HOY — el siguiente sin ver según `_language_completed_count`.
+        Al llegar al final del temario se queda enseñando el último
+        vídeo en vez de dejar la tarea sin vídeo (más newsletter que un
+        error: el curso se acabó, no hay más que "fallar" mostrando
+        nada). Sin ningún CourseModule todavía (curso recién creado y
+        algo falló al expandirlo, o borrado a mano), sale como Estudio
+        simple sin vídeo — igual que _study_target_fields en ese caso.
+        """
+        # El idioma del plan se enseña siempre, aunque el temario esté
+        # vacío todavía (curso recién creado a mano, sin cursos elegidos
+        # aún) — es contexto barato y útil por sí solo. El nivel, en
+        # cambio, es el del vídeo concreto que toca: sin CourseModule no
+        # hay ninguno que enseñar.
+        fields = {"language_name": self.language_name}
+        modules = list(self.course_modules.all())
+        if not modules:
+            return fields
+        index = min(self._language_completed_count(), len(modules) - 1)
+        module = modules[index]
+        fields.update({
+            "youtube_video_id": module.youtube_video_id,
+            "youtube_playlist_id": "",
+            "target_minutes": None,
+            "target_video_count": None,
+            "level": module.level,
+        })
+        return fields
+
+    def course_progress(self):
+        """
+        Para la pantalla del plan: vídeos vistos / totales y cuál toca
+        ahora, calculado exactamente igual que decide la tarea diaria
+        (`_language_target_fields`) — para que nunca se desincronicen.
+        """
+        modules = list(self.course_modules.all())
+        total = len(modules)
+        if not total:
+            return {"total": 0, "watched": 0, "pct": 0, "next": None}
+        watched = min(self._language_completed_count(), total)
+        return {
+            "total": total,
+            "watched": watched,
+            "pct": round(100 * watched / total),
+            "next": modules[min(watched, total - 1)],
+        }
+
     def sync_task(self):
         """
         Crea o actualiza la tarea que representa este plan en la lista
@@ -1318,7 +1415,13 @@ class Plan(models.Model):
         fields = dict(
             title=self.name,
             category=category,
-            subcategory="",
+            # Solo Estudio · Idiomas lleva subcategoría propia — el resto
+            # se queda en blanco, igual que antes de que esto existiera.
+            subcategory=(
+                Task.SUBCATEGORY_LANGUAGE
+                if self.plan_type == self.PLAN_TYPE_STUDY and self.study_subtype == self.STUDY_SUBTYPE_LANGUAGE
+                else ""
+            ),
             repeat=self.repeat,
             interval=self.interval,
             custom_days=self.custom_days,
@@ -1344,10 +1447,15 @@ class Plan(models.Model):
             target_video_count=None,
             target_distance_km=None,
             max_pace_seconds_per_km=None,
+            language_name="",
+            level="",
         )
 
         if self.plan_type == self.PLAN_TYPE_STUDY:
-            fields.update(self._study_target_fields())
+            if self.study_subtype == self.STUDY_SUBTYPE_LANGUAGE:
+                fields.update(self._language_target_fields())
+            else:
+                fields.update(self._study_target_fields())
         elif self.plan_type == self.PLAN_TYPE_SPORT:
             fields.update(self._running_target_fields())
             fields.update(self._sport_mode_fields())

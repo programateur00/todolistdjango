@@ -33,7 +33,8 @@ import urllib.request
 
 from django.conf import settings
 
-from .models import Exercise, PlanItem
+from .models import CoursePlaylist, Exercise, Plan, PlanItem
+from .youtube_search import YouTubeSearchError, get_playlists_details
 
 
 class PlanAIError(Exception):
@@ -372,3 +373,255 @@ def apply_pacing(item_fields, *, exercise, sessions_per_week):
     delta = int(item_fields.get(goal_key) or 0) - int(item_fields.get(start_key) or 0)
     item_fields["reps_increment"] = max(1, round(delta / steps)) if delta > 0 else 1
     return item_fields
+
+
+# ============================================================ IDIOMAS
+#
+# Diseño distinto a Deporte/Estudio a propósito: para ejercicios, el
+# catálogo (Exercise) es fijo y pequeño, así que se le pasa entero a la
+# IA. Para idiomas, el catálogo (CoursePlaylist) lo cura una persona a
+# mano, playlist a playlist — la búsqueda automática de YouTube
+# demostró (ver tasks/youtube_search.py) que no se puede confiar en
+# ella para decidir qué es de verdad un nivel u otro. Así que aquí la
+# IA elige y ORDENA entre cursos YA VERIFICADOS, nunca busca ni
+# inventa ninguno — mismo espíritu que con los ejercicios, un peldaño
+# más estricto porque el coste de equivocarse (un vídeo del nivel
+# equivocado, o que no existe) es peor que una repetición mal contada.
+#
+# El reparto de semanas entre los cursos elegidos es aritmética pura
+# (`_allocate_weeks`), no se le pide a la IA — mismo motivo que
+# `apply_pacing` para Deporte.
+
+def _levels_in_range(level_from, level_to):
+    """
+    ['A1', 'A2', ...] entre level_from y level_to (incluidos). En
+    blanco, level_from se trata como el nivel más bajo (A1) y level_to
+    como el más alto (C2) — "sin techo" documentado en el propio campo
+    del modelo.
+    """
+    levels = Plan.CEFR_LEVELS
+    start = levels.index(level_from) if level_from in levels else 0
+    end = levels.index(level_to) if level_to in levels else len(levels) - 1
+    if end < start:
+        start, end = end, start
+    return levels[start:end + 1]
+
+
+def _catalog_entries_for_language(language, level_from, level_to):
+    """
+    Playlists curadas (CoursePlaylist) para este idioma y rango de
+    nivel, con su nº de vídeos REAL a día de hoy (llamada barata a la
+    API de YouTube — playlists.list, 1 unidad — nunca una búsqueda
+    nueva; una playlist puede haber cambiado desde que se curó, o
+    haberse borrado).
+
+    Devuelve (entries, missing_levels, levels, stale):
+      - entries: lista de dicts con una `ref` corta y estable
+        (ej. "cat_7") que es lo ÚNICO que se le enseña a la IA — así no
+        hay forma de que invente un ID de playlist que no exista, solo
+        puede elegir de aquí.
+      - missing_levels: niveles del rango pedido sin NINGUNA playlist
+        curada todavía (o cuya única playlist curada resultó borrada/
+        privada desde entonces).
+      - levels: el rango completo pedido, para los mensajes de error.
+      - stale: las CoursePlaylist que ya no se pudieron confirmar
+        (para poder avisar a quien mantiene el catálogo).
+    """
+    levels = _levels_in_range(level_from, level_to)
+    qs = CoursePlaylist.objects.filter(
+        language__iexact=language, level__in=levels, is_active=True,
+    ).order_by("level", "order")
+
+    entries, stale = [], []
+    if qs.exists():
+        try:
+            details = get_playlists_details([c.youtube_playlist_id for c in qs])
+        except YouTubeSearchError as e:
+            # Traducido a PlanAIError: quien llama a esto (build_language_plan_draft)
+            # solo espera fallos de tipo PlanAIError, igual que con Gemini.
+            raise PlanAIError(str(e)) from e
+        for c in qs:
+            d = details.get(c.youtube_playlist_id)
+            if not d or not d.get("is_public") or not d.get("item_count"):
+                stale.append(c)
+                continue
+            entries.append({
+                "ref": f"cat_{c.pk}",
+                "catalog_id": c.pk,
+                "level": c.level,
+                "title": d.get("title") or c.title,
+                "channel_title": d.get("channel_title") or c.channel_title,
+                "item_count": d["item_count"],
+                "youtube_playlist_id": c.youtube_playlist_id,
+            })
+
+    covered = {e["level"] for e in entries}
+    missing_levels = [lvl for lvl in levels if lvl not in covered]
+    return entries, missing_levels, levels, stale
+
+
+def _build_language_prompt(*, prompt, language, levels, weeks, sessions_per_week, known_languages, entries, missing_levels):
+    catalog_lines = [
+        f"- {e['ref']} · nivel {e['level']} · \"{e['title']}\" — canal {e['channel_title']} "
+        f"({e['item_count']} vídeos)"
+        for e in entries
+    ]
+    parts = [
+        "Eres el mejor diseñador de currículos de idiomas posible, dentro de la app de tareas "
+        "\"Strive\", para un estudiante real que va a ver estos vídeos de verdad, día a día. Va "
+        f"a estudiar {language}, en un plan de {weeks} semanas a {sessions_per_week} "
+        "sesiones por semana — eso ya lo decidió el usuario, no lo toques.",
+        "",
+        f"Niveles MCER a cubrir, de más bajo a más alto: {', '.join(levels)}.",
+    ]
+    if known_languages:
+        parts.append(
+            f"Idiomas que el estudiante ya domina (dale color a tus notas con esto si ayuda de "
+            f"verdad — comparar gramática o vocabulario parecido — pero NO cambia qué cursos "
+            f"eliges): {known_languages}."
+        )
+    if prompt:
+        parts.append(f"Contexto adicional del estudiante, en sus palabras: \"{prompt}\"")
+    parts += [
+        "",
+        "Catálogo de cursos YA VERIFICADOS por una persona (usa SOLO estas referencias exactas, "
+        "nunca inventes otra, ni un ID de YouTube, ni un nivel que no esté en esta lista):",
+        "\n".join(catalog_lines) if catalog_lines else "(ninguno disponible para estos niveles)",
+    ]
+    if missing_levels:
+        parts += [
+            "",
+            f"AVISO: no hay ningún curso verificado todavía para: {', '.join(missing_levels)}. "
+            "No los inventes ni fuerces algo del catálogo para rellenar ese hueco — sáltatelos "
+            "sin más. Menciónalo en tus notas de forma natural y honesta, como haría un profesor "
+            "real que no tiene material para esa parte todavía.",
+        ]
+    parts += [
+        "",
+        "Tu trabajo: elige, de la lista de arriba, qué cursos usar y en qué ORDEN (normalmente "
+        "de nivel más bajo a más alto). Si para un mismo nivel hay más de una opción, elige la "
+        "que te parezca más completa o mejor explicada por el título y el canal — no hace falta "
+        "usar todas las opciones de un nivel si una ya es suficiente. NO hagas ningún cálculo de "
+        "semanas ni de ritmo — eso lo hace la app; tu única decisión es la selección y el orden.",
+        "",
+        "Escribe también un nombre corto para el plan y 1-2 frases de notas — con ánimo, algo de "
+        "contexto sobre el camino que le espera, y mencionando los niveles que falten en el "
+        "catálogo si los hay, para que no se lleve una sorpresa a mitad de curso.",
+    ]
+    return "\n".join(parts)
+
+
+_LANGUAGE_ITEM_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "ref": {"type": "STRING", "description": "Referencia EXACTA del catálogo, ej. 'cat_7'. Nunca inventada."},
+    },
+    "required": ["ref"],
+}
+
+
+def _language_response_schema():
+    return {
+        "type": "OBJECT",
+        "properties": {
+            "plan": {
+                "type": "OBJECT",
+                "properties": {
+                    "name": {"type": "STRING", "description": "Título corto, ej. \"Francés desde cero\"."},
+                    "notes": {"type": "STRING"},
+                },
+                "required": ["name", "notes"],
+            },
+            "selected": {
+                "type": "ARRAY", "items": _LANGUAGE_ITEM_SCHEMA, "minItems": 1,
+                "description": "En el orden en que se deben estudiar.",
+            },
+        },
+        "required": ["plan", "selected"],
+    }
+
+
+def _allocate_weeks(item_counts, weeks):
+    """
+    Reparte `weeks` entre los cursos elegidos, a ojo proporcional a
+    cuántos vídeos tiene cada uno. PURAMENTE INFORMATIVO — solo decide
+    la etiqueta "semana X" que se enseña en el temario
+    (CourseModule.scheduled_week); el avance real es por sesiones
+    CUMPLIDAS (ver Plan._language_completed_count), así que un reparto
+    algo torcido por redondeo aquí no rompe nada.
+    """
+    n = len(item_counts)
+    if n == 0:
+        return []
+    weeks = max(weeks, n)  # al menos 1 semana "propia" por curso elegido
+    total_items = sum(item_counts) or n
+    allocated = [max(1, round(weeks * c / total_items)) for c in item_counts]
+    diff = weeks - sum(allocated)
+    while diff != 0:
+        idx = allocated.index(max(allocated)) if diff < 0 else allocated.index(min(allocated))
+        if diff < 0 and allocated[idx] <= 1:
+            break  # nunca por debajo de 1 semana propia
+        allocated[idx] += 1 if diff > 0 else -1
+        diff += -1 if diff > 0 else 1
+    return allocated
+
+
+def generate_language_plan_draft(*, prompt, language, level_from, level_to, weeks, sessions_per_week, known_languages):
+    """
+    Curación con IA de un plan de Estudio · Idiomas: la IA elige y
+    ordena entre las playlists YA CURADAS a mano (CoursePlaylist) para
+    este idioma — nunca busca ni inventa nada nuevo. Igual que
+    `generate_plan_draft`, no guarda nada: `api.build_language_plan_draft`
+    convierte esto en Plan/CourseModule sin guardar todavía, para que
+    el usuario lo revise y confirme.
+    """
+    language = (language or "").strip()[:40]
+    if not language:
+        raise PlanAIError("Falta decir qué idioma quieres aprender.")
+
+    entries, missing_levels, levels, stale = _catalog_entries_for_language(language, level_from, level_to)
+    if not entries:
+        niveles = ", ".join(levels) if levels else "los niveles pedidos"
+        raise PlanAIError(
+            f"No hay ningún curso de {language} verificado en el catálogo para {niveles} "
+            f"todavía. Añade alguno primero con: python manage.py add_course_playlist "
+            f"{language} {levels[0] if levels else 'A1'} \"<url de la playlist>\"."
+        )
+
+    user_prompt = (prompt or "").strip()[:MAX_PROMPT_CHARS]
+    prompt_text = _build_language_prompt(
+        prompt=user_prompt, language=language, levels=levels, weeks=weeks,
+        sessions_per_week=sessions_per_week, known_languages=(known_languages or "").strip()[:200],
+        entries=entries, missing_levels=missing_levels,
+    )
+    raw = _call_gemini(prompt_text, _language_response_schema())
+    if not isinstance(raw, dict) or "selected" not in raw:
+        raise PlanAIError("La IA devolvió un plan con un formato inesperado. Prueba a generar de nuevo.")
+
+    by_ref = {e["ref"]: e for e in entries}
+    seen, chosen = set(), []
+    for raw_item in (raw.get("selected") or []):
+        if not isinstance(raw_item, dict):
+            continue
+        ref = raw_item.get("ref")
+        if ref not in by_ref or ref in seen:
+            continue  # referencia inventada o repetida — se descarta, nunca se inventa nada
+        seen.add(ref)
+        chosen.append(by_ref[ref])
+
+    if not chosen:
+        raise PlanAIError("La IA no eligió ningún curso válido del catálogo. Prueba a generar de nuevo.")
+
+    weeks_allocated = _allocate_weeks([c["item_count"] for c in chosen], weeks)
+    selected_out = [{**entry, "weeks_allocated": wk} for entry, wk in zip(chosen, weeks_allocated)]
+
+    plan_raw = raw.get("plan") or {}
+    return {
+        "plan": {
+            "name": (plan_raw.get("name") or f"Aprender {language}").strip()[:80],
+            "notes": (plan_raw.get("notes") or "").strip(),
+        },
+        "selected": selected_out,
+        "missing_levels": missing_levels,
+        "stale_catalog_ids": [c.pk for c in stale],
+    }

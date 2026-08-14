@@ -30,10 +30,11 @@ from django.views.decorators.http import require_http_methods
 
 from . import ai
 from .models import (
-    AIGenerationLog, Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, SavedVideo, Task, TimerSession,
-    WorkoutSession,
+    AIGenerationLog, CourseModule, CoursePlaylist, Exercise, Occurrence, Plan, PlanItem, Routine,
+    RoutineItem, SavedVideo, Task, TimerSession, WorkoutSession,
 )
 from .utils import get_current_user, resolve_plan_target as _plan_context
+from .youtube_search import YouTubeSearchError, get_videos_details, list_playlist_items
 
 
 # ---------------------------------------------------------------- utils
@@ -1423,6 +1424,169 @@ def build_plan_draft(*, user, plan_type, weeks, custom_days, prompt):
             return None, "La IA no propuso ningún objetivo válido. Prueba a describir el objetivo de otra forma."
 
     return {"plan_type": plan_type, "plan_fields": plan_fields, "items": items_out}, None
+
+
+# ---------------------------------------------------- IA · Estudio · Idiomas
+#
+# Distinto del resto de tipos de plan a propósito: un plan de idioma no
+# se guarda como Plan + PlanItem (un "objetivo" con progresión), sino
+# como Plan + CourseModule (una secuencia de vídeos reales). Por eso
+# tiene su propio par borrador/confirmación en vez de reutilizar
+# `build_plan_draft` / la aplicación de `items` de `plan_ai_form` — los
+# datos no encajan en la misma forma.
+#
+# Solo disponible desde la vista web por ahora (`views.plan_ai_form`),
+# no desde el endpoint JSON de la app móvil (`plan_generate` de abajo,
+# que sigue siendo solo Deporte/Estudio simple/General) — se añadirá
+# ahí cuando la app móvil también sepa reproducir un CourseModule.
+
+def _apply_language_plan_fields(p, data):
+    """Los campos propios de Estudio · Idiomas que _apply_plan_fields no cubre."""
+    if "study_subtype" in data:
+        p.study_subtype = Plan.STUDY_SUBTYPE_LANGUAGE
+    if "language_name" in data:
+        p.language_name = (data.get("language_name") or "").strip()[:40]
+    valid_levels = {k for k, _ in Plan.CEFR_LEVEL_CHOICES}
+    if "level_from" in data:
+        raw = data.get("level_from") or ""
+        p.level_from = raw if raw in valid_levels else ""
+    if "level_to" in data:
+        raw = data.get("level_to") or ""
+        p.level_to = raw if raw in valid_levels else ""
+    if "known_languages" in data:
+        p.known_languages = (data.get("known_languages") or "").strip()[:200]
+    if "quiz_every_n_videos" in data:
+        raw = data.get("quiz_every_n_videos")
+        try:
+            p.quiz_every_n_videos = max(1, int(raw)) if raw not in (None, "") else None
+        except (TypeError, ValueError):
+            p.quiz_every_n_videos = None
+
+
+def build_language_plan_draft(
+    *, user, weeks, custom_days, language, level_from, level_to, known_languages, prompt,
+    quiz_every_n_videos=None,
+):
+    """
+    El núcleo de "generar plan de idioma con IA" — mismo reparto de
+    responsabilidades que `build_plan_draft`: no guarda nada, solo
+    construye y valida. Comparte el mismo tope diario de generaciones
+    (AIGenerationLog) — es la misma cuota de Gemini para toda la app.
+    """
+    try:
+        weeks = max(1, int(weeks or 12))
+    except (TypeError, ValueError):
+        weeks = 12
+
+    valid_days = {k for k, _ in Task.WEEKDAYS}
+    days = [str(d) for d in (custom_days or []) if str(d) in valid_days]
+    custom_days = days or ["0", "2", "4"]
+    sessions_per_week = max(1, len(custom_days))
+
+    limit = getattr(settings, "AI_PLAN_DAILY_LIMIT", 15)
+    if limit and AIGenerationLog.count_today() >= limit:
+        return None, (
+            f"Has llegado al límite de {limit} planes generados con IA hoy — "
+            "es para no agotar la cuota gratis. Prueba mañana, o añade el curso a mano mientras tanto."
+        )
+    AIGenerationLog.record(user=user)
+
+    try:
+        raw = ai.generate_language_plan_draft(
+            prompt=prompt or "", language=language or "", level_from=level_from or "",
+            level_to=level_to or "", weeks=weeks, sessions_per_week=sessions_per_week,
+            known_languages=known_languages or "",
+        )
+    except ai.PlanAIError as e:
+        return None, str(e)
+
+    plan_fields = {
+        "name": raw["plan"]["name"],
+        "notes": raw["plan"]["notes"],
+        "weeks": weeks,
+        "custom_days": [int(d) for d in custom_days],
+        "started_on": timezone.localtime(timezone.now()).date().isoformat(),
+        "is_active": True,
+        "study_subtype": Plan.STUDY_SUBTYPE_LANGUAGE,
+        "language_name": (language or "").strip()[:40],
+        "level_from": level_from or "",
+        "level_to": level_to or "",
+        "known_languages": (known_languages or "").strip()[:200],
+        "quiz_every_n_videos": quiz_every_n_videos,
+    }
+    draft_plan = Plan(user=user, plan_type=Plan.PLAN_TYPE_STUDY)
+    error = _apply_plan_fields(draft_plan, plan_fields)
+    if not error:
+        _apply_language_plan_fields(draft_plan, plan_fields)
+    if error:
+        return None, f"La IA devolvió un plan inválido: {error}"
+
+    return {
+        "plan_type": Plan.PLAN_TYPE_STUDY,
+        "study_subtype": Plan.STUDY_SUBTYPE_LANGUAGE,
+        "plan_fields": plan_fields,
+        "selected": raw["selected"],
+        "missing_levels": raw["missing_levels"],
+    }, None
+
+
+def expand_language_selection(selected):
+    """
+    Convierte los cursos elegidos por la IA (todavía solo referencias al
+    catálogo) en filas de CourseModule listas para guardar — vídeo a
+    vídeo, con duración y subtítulos reales.
+
+    Se llama SOLO al confirmar, nunca al generar el borrador: expandir
+    cada curso cuesta unas llamadas a la API de YouTube (baratas, pero
+    no gratis de tiempo), y el usuario puede pedir "generar otra vez"
+    varias veces antes de confirmar — no tiene sentido gastar eso en
+    borradores que a lo mejor se descartan.
+
+    Todo o nada: si CUALQUIER curso falla al expandirse (playlist
+    borrada entre medias, fallo de red...), no se crea ningún
+    CourseModule — mejor que el usuario reintente confirmar a que el
+    plan se guarde con el temario a medias. Devuelve (modules, None) o
+    (None, mensaje_de_error).
+    """
+    modules = []
+    order = 0
+    week_offset = 0
+    for entry in selected:
+        try:
+            catalog = CoursePlaylist.objects.get(pk=entry["catalog_id"])
+        except CoursePlaylist.DoesNotExist:
+            return None, "Uno de los cursos elegidos ya no está en el catálogo — genera el plan otra vez."
+        try:
+            items = list_playlist_items(entry["youtube_playlist_id"], max_results=50)
+            if not items:
+                return None, f"«{catalog.title}» ya no tiene vídeos — quítalo del catálogo y genera otra vez."
+            details = get_videos_details([it["video_id"] for it in items])
+        except YouTubeSearchError as e:
+            return None, str(e)
+
+        weeks_allocated = max(1, int(entry.get("weeks_allocated") or 1))
+        for i, it in enumerate(items):
+            d = details.get(it["video_id"], {})
+            if d and d.get("embeddable") is False:
+                continue  # no se podría incrustar en la tarea — se salta, no rompe el resto
+            scheduled_week = week_offset + 1 + (i * weeks_allocated) // max(1, len(items))
+            modules.append(CourseModule(
+                order=order,
+                scheduled_week=scheduled_week,
+                level=catalog.level,
+                youtube_video_id=it["video_id"],
+                title=d.get("title") or it["title"],
+                channel_title=d.get("channel_title") or catalog.channel_title,
+                duration_seconds=d.get("duration_seconds"),
+                has_captions=d.get("has_captions", False),
+                source_playlist=catalog,
+            ))
+            order += 1
+        week_offset += weeks_allocated
+
+    if not modules:
+        return None, "Ninguno de los cursos elegidos tenía vídeos que se pudieran incrustar. Genera el plan otra vez."
+    return modules, None
 
 
 @api("POST")
