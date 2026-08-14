@@ -21,12 +21,19 @@ const HANG_STABLE_MS = 500;   // cuanto tiempo seguido con los brazos en alto pa
 const ARMS_DOWN_STABLE_MS = 400; // cuanto tiempo seguido con los brazos abajo para dar la serie por terminada (evita falsos positivos por un frame ruidoso)
 const CALIBRATION_MS = 1200;  // tiempo colgado quieto que se usa como referencia
 const REST_ALERT_SECONDS = 90;
-// Cuánto como mínimo entre dos avisos hablados de estado (instrucciones,
-// "no te veo bien", fin de serie…) — para no leer en voz alta cada frame
-// mientras algo no cambia. El texto en pantalla se sigue actualizando
-// siempre; esto solo limita lo que se DICE. No se aplica al conteo de
-// repeticiones (speakRep), que va aparte y siempre suena al momento.
-const STATUS_VOICE_MIN_GAP_MS = 4000;
+// Avisos hablados de estado (instrucciones, "no te veo bien", fin de
+// serie…): el texto en pantalla se actualiza siempre, pero repetir el
+// MISMO aviso por voz cada pocos segundos cansa rápido — así que un
+// aviso idéntico al anterior no se repite antes de este tiempo.
+const STATUS_VOICE_REPEAT_GAP_MS = 12000;
+// Aun así, si el aviso es DISTINTO al anterior (p.ej. pasas de "no te
+// veo bien" a "¡listo, empieza!"), se dice enseguida — no tiene sentido
+// hacerte esperar para saber que ya puedes empezar. Este margen mínimo
+// es solo para evitar una ráfaga si la detección parpadea entre dos
+// estados en un par de frames seguidos.
+const STATUS_VOICE_MIN_GAP_MS = 1200;
+// No se aplica nada de esto al conteo de repeticiones (speakRep), que
+// va aparte y siempre suena al momento.
 
 // Se mide la NARIZ frente a los CODOS, no el ángulo del brazo. Al bajar
 // en un fondo la cabeza cae por debajo de la línea de los codos, y eso
@@ -232,6 +239,7 @@ class WorkoutSession {
     this.restAlerted = false;
     this.restAlertsTriggered = 0;
     this.lastSpokenStatusAt = null; // performance.now() del último aviso de estado hablado (ver announceStatus)
+    this.lastSpokenStatusText = null; // qué texto era, para saber si el próximo es una repetición o algo nuevo
 
     this.finishBtn.addEventListener("click", () => this.finish());
     this.cancelBtn.addEventListener("click", () => {
@@ -276,19 +284,24 @@ class WorkoutSession {
    * serie…) que antes solo salían como texto bajo la cámara, donde no
    * los ves si estás en mitad del ejercicio y no mirando la pantalla.
    *
-   * No TODO lo que cambia de texto se dice: durante la espera o la
-   * calibración el texto se actualiza cada frame (o cada segundo, con
-   * la cuenta atrás), y leer eso en voz alta sin parar sería un ruido
-   * constante en vez de una ayuda. STATUS_VOICE_MIN_GAP_MS limita a un
-   * aviso hablado como mucho cada pocos segundos — el texto en pantalla
-   * se sigue viendo actualizado siempre, esto solo afecta a la voz.
+   * El texto en pantalla se actualiza siempre, pero la voz es más
+   * selectiva: si el aviso es el MISMO que el anterior (p.ej. sigues sin
+   * ponerte en posición y el mensaje no cambia frame a frame), no se
+   * repite antes de STATUS_VOICE_REPEAT_GAP_MS — si no, sería un
+   * "ponte de perfil… ponte de perfil… ponte de perfil…" sin parar.
+   * Si el aviso es DISTINTO al anterior, se dice casi al momento
+   * (STATUS_VOICE_MIN_GAP_MS, solo de sobra para no pillar un parpadeo
+   * de un par de frames entre dos estados).
    */
   announceStatus(text) {
     this.setStatus(text);
     if (!this.voiceEnabled) return;
     const now = performance.now();
-    if (this.lastSpokenStatusAt !== null && now - this.lastSpokenStatusAt < STATUS_VOICE_MIN_GAP_MS) return;
+    const gap = this.lastSpokenStatusAt === null ? Infinity : now - this.lastSpokenStatusAt;
+    const minGap = text === this.lastSpokenStatusText ? STATUS_VOICE_REPEAT_GAP_MS : STATUS_VOICE_MIN_GAP_MS;
+    if (gap < minGap) return;
     this.lastSpokenStatusAt = now;
+    this.lastSpokenStatusText = text;
     this.speak(text, { flush: false });
   }
 
