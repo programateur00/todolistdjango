@@ -21,17 +21,17 @@ const HANG_STABLE_MS = 500;   // cuanto tiempo seguido con los brazos en alto pa
 const ARMS_DOWN_STABLE_MS = 400; // cuanto tiempo seguido con los brazos abajo para dar la serie por terminada (evita falsos positivos por un frame ruidoso)
 const CALIBRATION_MS = 1200;  // tiempo colgado quieto que se usa como referencia
 const REST_ALERT_SECONDS = 90;
-// Avisos hablados de estado (instrucciones, "no te veo bien", fin de
-// serie…): el texto en pantalla se actualiza siempre, pero repetir el
-// MISMO aviso por voz cada pocos segundos cansa rápido — así que un
-// aviso idéntico al anterior no se repite antes de este tiempo.
-const STATUS_VOICE_REPEAT_GAP_MS = 12000;
+// Avisos hablados de estado (que no te ve bien, fin de serie…): el texto
+// en pantalla se actualiza siempre, pero repetir el MISMO aviso por voz
+// a menudo cansa rápido — así que un aviso idéntico al anterior no se
+// repite antes de este tiempo. Subido a propósito: mejor que se sienta
+// tranquilo que pesado.
+const STATUS_VOICE_REPEAT_GAP_MS = 25000;
 // Aun así, si el aviso es DISTINTO al anterior (p.ej. pasas de "no te
-// veo bien" a "¡listo, empieza!"), se dice enseguida — no tiene sentido
-// hacerte esperar para saber que ya puedes empezar. Este margen mínimo
-// es solo para evitar una ráfaga si la detección parpadea entre dos
-// estados en un par de frames seguidos.
-const STATUS_VOICE_MIN_GAP_MS = 1200;
+// veo bien" a "fin de serie"), se dice enseguida — no tiene sentido
+// hacerte esperar. Este margen mínimo es solo para evitar una ráfaga si
+// la detección parpadea entre dos estados en un par de frames seguidos.
+const STATUS_VOICE_MIN_GAP_MS = 2000;
 // No se aplica nada de esto al conteo de repeticiones (speakRep), que
 // va aparte y siempre suena al momento.
 
@@ -239,7 +239,11 @@ class WorkoutSession {
     this.restAlerted = false;
     this.restAlertsTriggered = 0;
     this.lastSpokenStatusAt = null; // performance.now() del último aviso de estado hablado (ver announceStatus)
-    this.lastSpokenStatusText = null; // qué texto era, para saber si el próximo es una repetición o algo nuevo
+    this.lastSpokenStatusKey = null; // qué tipo de aviso era, para saber si el próximo es una repetición o algo nuevo
+    // Aviso de "ya te veo bien, puedes empezar" — solo una vez en toda la
+    // sesión (primera serie), no hace falta repetirlo entre series: para
+    // la segunda serie ya sabes cómo colocarte.
+    this.startupVoiceGiven = false;
 
     this.finishBtn.addEventListener("click", () => this.finish());
     this.cancelBtn.addEventListener("click", () => {
@@ -280,28 +284,33 @@ class WorkoutSession {
 
   /**
    * Como setStatus(), pero además lo dice en voz alta — para los avisos
-   * importantes (qué hacer para empezar, que no te ve bien, fin de
-   * serie…) que antes solo salían como texto bajo la cámara, donde no
-   * los ves si estás en mitad del ejercicio y no mirando la pantalla.
+   * importantes (que no te ve bien, fin de serie…) que antes solo salían
+   * como texto bajo la cámara, donde no los ves si estás en mitad del
+   * ejercicio y no mirando la pantalla.
    *
    * El texto en pantalla se actualiza siempre, pero la voz es más
-   * selectiva: si el aviso es el MISMO que el anterior (p.ej. sigues sin
-   * ponerte en posición y el mensaje no cambia frame a frame), no se
+   * selectiva: si el aviso es del MISMO tipo que el anterior, no se
    * repite antes de STATUS_VOICE_REPEAT_GAP_MS — si no, sería un
-   * "ponte de perfil… ponte de perfil… ponte de perfil…" sin parar.
-   * Si el aviso es DISTINTO al anterior, se dice casi al momento
-   * (STATUS_VOICE_MIN_GAP_MS, solo de sobra para no pillar un parpadeo
-   * de un par de frames entre dos estados).
+   * "no te veo bien… no te veo bien… no te veo bien…" sin parar. Si es
+   * de un tipo DISTINTO, se dice casi al momento (STATUS_VOICE_MIN_GAP_MS,
+   * solo de sobra para no pillar un parpadeo de un par de frames entre
+   * dos estados).
+   *
+   * `key` identifica el TIPO de aviso para esta comparación — por
+   * defecto es el propio texto, pero hace falta pasarlo aparte cuando el
+   * texto cambia cada vez aunque sea "la misma" repetición (p.ej. una
+   * cuenta atrás con los segundos dentro del texto: sin esto, cada
+   * segundo se trataría como un aviso "nuevo" y se leería sin parar).
    */
-  announceStatus(text) {
+  announceStatus(text, key = text) {
     this.setStatus(text);
     if (!this.voiceEnabled) return;
     const now = performance.now();
     const gap = this.lastSpokenStatusAt === null ? Infinity : now - this.lastSpokenStatusAt;
-    const minGap = text === this.lastSpokenStatusText ? STATUS_VOICE_REPEAT_GAP_MS : STATUS_VOICE_MIN_GAP_MS;
+    const minGap = key === this.lastSpokenStatusKey ? STATUS_VOICE_REPEAT_GAP_MS : STATUS_VOICE_MIN_GAP_MS;
     if (gap < minGap) return;
     this.lastSpokenStatusAt = now;
-    this.lastSpokenStatusText = text;
+    this.lastSpokenStatusKey = key;
     this.speak(text, { flush: false });
   }
 
@@ -380,12 +389,15 @@ class WorkoutSession {
 
     // Los fondos no se calibran ni se cuelgan de ninguna barra: el
     // estado arranca vacío y se fija solo cuando te pones arriba.
+    // setStatus, no announceStatus: el aviso hablado de "ya puedes
+    // empezar" lo da processDip/processSquat la primera vez que te ve
+    // bien en toda la sesión — no hace falta repetirlo en cada serie.
     if (this.counterKey === "dip") {
       this.prepping = false;
       this.state = null;
       this.dipHandsY = null;
       this.dipReleaseSince = null;
-      this.announceStatus("Ponte arriba con los brazos estirados para empezar.");
+      this.setStatus("Ponte arriba con los brazos estirados para empezar.");
     } else if (this.counterKey === "squat") {
       // Tampoco hay barra que calibrar aquí: el ángulo de rodilla no
       // depende de la distancia a la cámara. Solo hace falta esperar a
@@ -394,7 +406,7 @@ class WorkoutSession {
       this.state = null;
       this.squatSide = null;
       this.squatKneeAngle = null;
-      this.announceStatus("Ponte de perfil a la cámara, de pie, para empezar.");
+      this.setStatus("Ponte de perfil a la cámara, de pie, para empezar.");
     } else {
       this.state = "down";
     }
@@ -676,6 +688,14 @@ class WorkoutSession {
       return;
     }
 
+    // La primera vez en toda la sesión que te ve bien en postura válida,
+    // un aviso de que ya puedes empezar — en las siguientes series no
+    // hace falta repetirlo, ya sabes cómo colocarte.
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus("Te veo. ¡Listo! Ponte arriba con los brazos estirados para empezar.", "startup_ready");
+    }
+
     // Si ya teníamos guardada la altura de las manos al ponerte arriba y
     // se han movido más de la cuenta, no estás en mitad de un fondo: te
     // has soltado de las barras, o nunca estuviste agarrado y solo
@@ -699,9 +719,9 @@ class WorkoutSession {
       if (above >= DIP_UP_FACTOR) {
         this.state = "top";
         this.dipHandsY = handsY; // ancla: aquí deben quedarse las manos mientras dure el fondo
-        this.announceStatus("¡Listo! Baja y sube.");
+        this.setStatus("¡Listo! Baja y sube.");
       } else {
-        this.announceStatus("Ponte arriba con los brazos estirados para empezar.");
+        this.setStatus("Ponte arriba con los brazos estirados para empezar.");
       }
     } else if (this.state === "top") {
       if (above <= DIP_DOWN_FACTOR) {
@@ -750,7 +770,7 @@ class WorkoutSession {
       if (this.repsEl) this.repsEl.textContent = "0";
       this.announceStatus(`Serie de ${closedReps} terminada. Agárrate a las barras para empezar la siguiente.`);
     } else {
-      this.announceStatus("Ponte arriba con los brazos estirados para empezar.");
+      this.setStatus("Ponte arriba con los brazos estirados para empezar.");
     }
   }
 
@@ -787,6 +807,14 @@ class WorkoutSession {
       return;
     }
 
+    // La primera vez en toda la sesión que se te ve bien, un aviso de
+    // que ya puedes empezar — en las siguientes series no hace falta
+    // repetirlo, ya sabes cómo colocarte.
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus("Cadera, rodilla y tobillo a la vista. ¡Listo! Ya puedes empezar.", "startup_ready");
+    }
+
     const hip = useLeft ? lHip : rHip;
     const knee = useLeft ? lKnee : rKnee;
     const ankle = useLeft ? lAnkle : rAnkle;
@@ -800,9 +828,9 @@ class WorkoutSession {
       // Hay que empezar de pie, para no contar media repetición al entrar.
       if (kneeAngle >= SQUAT_UP_ANGLE_DEG) {
         this.state = "top";
-        this.announceStatus("¡Listo! Baja en sentadilla y vuelve a subir.");
+        this.setStatus("¡Vale! Baja en sentadilla y vuelve a subir.");
       } else {
-        this.announceStatus("Ponte de pie, de perfil a la cámara, para empezar.");
+        this.setStatus("Ponte de pie, de perfil a la cámara, para empezar.");
       }
     } else if (this.state === "top") {
       if (kneeAngle <= SQUAT_DOWN_ANGLE_DEG) {
@@ -866,6 +894,16 @@ class WorkoutSession {
 
     if (this.prepping) {
       const waitedSeconds = Math.floor((now - this.prepStartTs) / 1000);
+
+      // La primera vez en toda la sesión que se te ve lo bastante (muñeca
+      // o codo visibles) para intentar detectarte, un aviso de que ya
+      // puedes empezar — en las siguientes series no hace falta
+      // repetirlo, ya sabes cómo colocarte.
+      if ((wristVisible || elbowVisible) && !this.startupVoiceGiven) {
+        this.startupVoiceGiven = true;
+        this.announceStatus("Te veo. ¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready");
+      }
+
       if (armsUpNow) {
         if (this.hangStableSince === null) this.hangStableSince = now;
         if (now - this.hangStableSince >= HANG_STABLE_MS) {
@@ -876,11 +914,11 @@ class WorkoutSession {
           this.calibrationStartTs = now;
           this.calibrationSamples = [];
         } else {
-          this.announceStatus("Te veo colgado… confirmando (no te muevas)");
+          this.setStatus("Te veo colgado… confirmando (no te muevas)");
         }
       } else {
         this.hangStableSince = null;
-        this.announceStatus(
+        this.setStatus(
           waitedSeconds < 8
             ? "Ve a la barra y cuélgate con los brazos estirados…"
             : `Esperando a verte colgado (llevas ${waitedSeconds}s)… comprueba que la cámara vea tus brazos y hombros enteros`
