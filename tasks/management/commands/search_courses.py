@@ -8,9 +8,15 @@ Por qué no se fía de esto ningún otro paso: en la práctica (probado con
 francés) la búsqueda de YouTube no entiende "C1"/"C2" como nivel MCER —
 cuando no hay contenido real de un nivel, en vez de admitir que no
 encontró nada, devuelve lo más parecido por relevancia genérica. Este
-comando ahora detecta y avisa cuando la MISMA playlist aparece en varios
+comando detecta y avisa cuando la MISMA playlist aparece en varios
 niveles pedidos — la señal más clara de que no es contenido específico
 de ninguno de ellos, solo relleno.
+
+También se queda con las playlists MÁS LARGAS de entre varios
+candidatos (no las primeras que YouTube considera "relevantes"): pedir
+más candidatos por búsqueda no cuesta cuota extra (ver
+tasks/youtube_search.py), así que aprovecha para comparar 10 y quedarse
+con las que de verdad parecen un curso completo.
 
 Uso:
     python manage.py search_courses francés
@@ -48,18 +54,25 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--max-playlists", type=int, default=3,
-            help="Playlists a inspeccionar por nivel. Ojo: cada nivel gasta 100 unidades de "
-                 "cuota solo en la búsqueda, independientemente de este número.",
+            help="Cuántas playlists (las más largas) enseñar por nivel, de entre los candidatos.",
+        )
+        parser.add_argument(
+            "--raw-candidates", type=int, default=10,
+            help="Candidatos a comparar por nivel antes de quedarse con los --max-playlists más "
+                 "largos. Subir esto no gasta más cuota (search.list cobra por llamada, no por "
+                 "resultado) — solo tarda un poco más.",
         )
 
     def handle(self, *args, **options):
         language = options["language"]
         levels = options["levels"]
         max_playlists = options["max_playlists"]
+        raw_candidates = options["raw_candidates"]
 
         try:
             results = find_language_course_candidates(
                 language, levels=levels, max_playlists_per_level=max_playlists,
+                raw_candidates_per_level=raw_candidates,
             )
         except YouTubeSearchError as e:
             raise CommandError(str(e))
@@ -91,7 +104,8 @@ class Command(BaseCommand):
                     suspect_levels.add(level)
                 self.stdout.write(
                     f"   · \"{p['playlist_title']}\" — {p['channel_title']} "
-                    f"({len(p['videos'])} vídeo(s), {caps} con subtítulos){flag}"
+                    f"({p['item_count']} vídeo(s) en total, {len(p['videos'])} inspeccionados, "
+                    f"{caps} con subtítulos){flag}"
                 )
                 for v in p["videos"][:5]:
                     self.stdout.write(f"       - {v['title'][:70]} ({_fmt_duration(v['duration_seconds'])})")

@@ -15,11 +15,13 @@ Console, no en AI Studio — ver el README, sección "Cursos de idiomas ·
 YouTube". Sin YOUTUBE_API_KEY definida, todo esto falla con un error
 legible en vez de reventar, igual que tasks/ai.py sin GEMINI_API_KEY.
 
-Cuota: `search.list` cuesta 100 unidades por llamada; el resto de
-llamadas de aquí (`playlistItems.list`, `videos.list`) cuestan 1. Con
-la cuota gratis de 10.000 unidades/día, un barrido de los 6 niveles
-MCER (6 búsquedas) cuesta ~600 unidades — de sobra para probar esto a
-mano varias veces al día sin preocuparse.
+Cuota: `search.list` cuesta 100 unidades por llamada — pero por LLAMADA,
+no por resultado devuelto, así que pedir 10 candidatos en vez de 3 no
+cuesta más. El resto de llamadas de aquí (`playlists.list`,
+`playlistItems.list`, `videos.list`) cuestan 1 unidad cada una. Con la
+cuota gratis de 10.000 unidades/día, un barrido de los 6 niveles MCER
+(6 búsquedas) cuesta ~600 unidades — de sobra para probar esto a mano
+varias veces al día sin preocuparse.
 
 Nota sobre subtítulos: `has_captions` viene de `contentDetails.caption`
 (si YouTube dice que el vídeo TIENE subtítulos), no de si se pueden
@@ -149,6 +151,36 @@ def get_playlist_details(playlist_id):
     }
 
 
+def get_playlists_details(playlist_ids):
+    """
+    Versión en lote de `get_playlist_details`, con el número real de
+    vídeos de cada playlist (`item_count`) — para poder ordenar
+    candidatos por "cuánto contenido cubre" sin tener que traer los
+    vídeos de cada uno todavía. Barata (1 unidad, hasta 50 IDs a la
+    vez), y NO cuenta como una búsqueda nueva — mismos IDs que ya
+    devolvió `search_playlists`, solo se les pide más detalle.
+
+    Devuelve {playlist_id: {title, channel_title, item_count, is_public}}.
+    """
+    out = {}
+    ids = [p for p in playlist_ids if p]
+    for i in range(0, len(ids), 50):
+        chunk = ids[i:i + 50]
+        data = _get("playlists", part="snippet,contentDetails,status", id=",".join(chunk))
+        for item in data.get("items", []):
+            pid = item.get("id")
+            snippet = item.get("snippet", {})
+            content = item.get("contentDetails", {})
+            status = item.get("status", {})
+            out[pid] = {
+                "title": snippet.get("title", ""),
+                "channel_title": snippet.get("channelTitle", ""),
+                "item_count": content.get("itemCount", 0),
+                "is_public": status.get("privacyStatus", "public") == "public",
+            }
+    return out
+
+
 def list_playlist_items(playlist_id, max_results=50):
     """
     Vídeos de una playlist, en orden. `max_results` tiene un tope de 50
@@ -202,20 +234,37 @@ def get_videos_details(video_ids):
 
 def find_language_course_candidates(
     language, levels=None, max_playlists_per_level=3, max_videos_per_playlist=15,
+    raw_candidates_per_level=10,
 ):
     """
-    Orquesta las tres llamadas de arriba para un idioma y una lista de
-    niveles MCER: por cada nivel, busca playlists, mira sus vídeos y
-    trae duración/subtítulos de cada uno.
+    Orquesta las llamadas de arriba para un idioma y una lista de
+    niveles MCER: por cada nivel, busca playlists, se queda con las más
+    LARGAS (más vídeos = más probable que sea un curso completo de
+    verdad y no una lección suelta), y de esas trae vídeo a vídeo la
+    duración/subtítulos.
 
-    NO decide nada (ni orden, ni qué playlist es mejor de verdad) — eso
-    es curación, y la hace la IA en la Fase 2 sobre estos datos reales.
-    Esto solo responde "qué hay de verdad", que es lo que hace falta
-    para juzgar si un nivel como C2 tiene contenido gratis suficiente
-    antes de prometerle al usuario un temario completo.
+    Pedir más candidatos por búsqueda (`raw_candidates_per_level`) no
+    cuesta más cuota: `search.list` cobra 100 unidades por LLAMADA, no
+    por resultado devuelto — así que merece la pena pedir de sobra (10)
+    y filtrar después con llamadas baratas (1 unidad), en vez de
+    quedarnos solo con los primeros 3 que YouTube decidió que eran
+    "relevantes".
+
+    Ojo: esto ordena por CANTIDAD de vídeos, no arregla que el nivel
+    esté mal etiquetado — una playlist de A1 mal puesta como "C1" puede
+    seguir siendo la más larga y salir primera. La señal de "misma
+    playlist en varios niveles" (ver `search_courses`) sigue siendo la
+    que de verdad detecta eso; esto solo evita descartar un curso
+    completo bueno en favor de una lección suelta corta.
+
+    NO decide nada más (ni orden final, ni qué playlist usar en un
+    plan) — eso es curación, y la hace un humano con
+    `add_course_playlist`, o más adelante la IA en la Fase 2 sobre
+    playlists ya verificadas. Esto solo responde "qué hay de verdad".
 
     Devuelve {nivel: [{playlist_id, playlist_title, channel_title,
-    videos: [{video_id, title, duration_seconds, has_captions}]}]}.
+    item_count, videos: [{video_id, title, duration_seconds,
+    has_captions}]}]}, ya ordenado de más a menos vídeos.
     """
     from .models import Plan  # import diferido: evita un ciclo de imports con models.py
 
@@ -223,9 +272,20 @@ def find_language_course_candidates(
     results = {}
     for level in levels:
         query = f"curso de {language} {level} gratis completo"
-        playlists = search_playlists(query, max_results=max_playlists_per_level)
+        raw = search_playlists(query, max_results=raw_candidates_per_level)
+        detail_by_id = get_playlists_details([pl["playlist_id"] for pl in raw])
+
+        ranked = []
+        for pl in raw:
+            d = detail_by_id.get(pl["playlist_id"])
+            if not d or not d["is_public"] or not d["item_count"]:
+                continue  # privada, borrada o vacía — no hay nada que enseñar
+            ranked.append({**pl, "item_count": d["item_count"]})
+        ranked.sort(key=lambda p: p["item_count"], reverse=True)
+        chosen = ranked[:max_playlists_per_level]
+
         level_out = []
-        for pl in playlists:
+        for pl in chosen:
             items = list_playlist_items(pl["playlist_id"], max_results=max_videos_per_playlist)
             details = get_videos_details([it["video_id"] for it in items])
             videos = []
@@ -243,6 +303,7 @@ def find_language_course_candidates(
                 "playlist_id": pl["playlist_id"],
                 "playlist_title": pl["title"],
                 "channel_title": pl["channel_title"],
+                "item_count": pl["item_count"],
                 "videos": videos,
             })
         results[level] = level_out
