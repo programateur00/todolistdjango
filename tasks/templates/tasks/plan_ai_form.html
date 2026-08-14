@@ -158,8 +158,12 @@
         var isStudy = selectedValue(planTypeRadios) === "study";
         var isLanguage = isStudy && selectedValue(studySubtypeRadios) === "language";
 
-        studySubtypeField.hidden = !isStudy;
-        languageFields.hidden = !isLanguage;
+        // display, no el atributo `hidden` — con las clases .field del
+        // resto de la app, `hidden` se queda sin efecto (una regla de
+        // display en la hoja de estilos le gana), así que el campo se
+        // quedaba enseñándose siempre pasara lo que pasara.
+        studySubtypeField.style.display = isStudy ? "block" : "none";
+        languageFields.style.display = isLanguage ? "block" : "none";
         for (var i = 0; i < languageInputs.length; i++) {
             languageInputs[i].disabled = !isLanguage;
         }

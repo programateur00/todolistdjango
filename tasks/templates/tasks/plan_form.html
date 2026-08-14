@@ -50,30 +50,28 @@
         {% endif %}
     </fieldset>
 
-    <fieldset class="field" id="study-subtype-field" hidden>
-        <legend class="field__label">Subtipo de estudio</legend>
-        <div class="repeat-options">
+    <label class="field" id="study-subtype-field">
+        <span class="field__label">Materia (opcional)</span>
+        <select name="study_subtype" class="study-subtype-select" {% if plan %}disabled{% endif %}>
+            <option value="">Hábito simple — sin materia concreta</option>
             {% for value, label in study_subtype_choices %}
-            <label class="repeat-option">
-                <input type="radio" name="study_subtype" value="{{ value }}" class="study-subtype-radio"
-                    {% if plan.study_subtype == value or not plan and value == 'general' %}checked{% endif %}
-                    {% if plan %}disabled{% endif %}>
-                <span>{{ label }}</span>
-            </label>
+            {% if value != 'general' %}
+            <option value="{{ value }}" {% if plan.study_subtype == value %}selected{% endif %}>{{ label }}</option>
+            {% endif %}
             {% endfor %}
-        </div>
+        </select>
         {% if plan %}
         <input type="hidden" name="study_subtype" value="{{ plan.study_subtype }}">
-        <span class="field__hint">Tampoco se puede cambiar una vez creado — crea un plan nuevo si necesitas otro.</span>
+        <span class="field__hint">No se puede cambiar una vez creado — crea un plan nuevo si necesitas otro.</span>
         {% else %}
         <span class="field__hint">
-            Idioma: el plan se basa en llegar a un nivel MCER de un idioma concreto — el
+            Idiomas: el plan se basa en llegar a un nivel MCER de un idioma concreto — el
             temario de vídeos se genera con IA en un segundo paso, después de crear el plan.
         </span>
         {% endif %}
-    </fieldset>
+    </label>
 
-    <div id="language-fields" hidden>
+    <div id="language-fields">
         <label class="field">
             <span class="field__label">Idioma</span>
             <input type="text" name="language_name" maxlength="40" value="{{ plan.language_name|default:'' }}"
@@ -180,10 +178,10 @@
 <script>
 (function () {
     var studySubtypeField = document.getElementById("study-subtype-field");
+    var studySubtypeSelect = document.querySelector(".study-subtype-select");
     var languageFields = document.getElementById("language-fields");
     var languageInputs = languageFields.querySelectorAll("input, select");
     var planTypeRadios = document.querySelectorAll(".plan-type-radio");
-    var studySubtypeRadios = document.querySelectorAll(".study-subtype-radio");
 
     function selectedValue(radios) {
         for (var i = 0; i < radios.length; i++) {
@@ -194,15 +192,19 @@
 
     function refresh() {
         var isStudy = selectedValue(planTypeRadios) === "study";
-        var isLanguage = isStudy && selectedValue(studySubtypeRadios) === "language";
+        var isLanguage = isStudy && studySubtypeSelect.value === "language";
 
-        studySubtypeField.hidden = !isStudy;
-        languageFields.hidden = !isLanguage;
+        // display, no el atributo `hidden` — con las clases .field del
+        // resto de la app, `hidden` se queda sin efecto (una regla de
+        // display en la hoja de estilos le gana), así que el campo se
+        // quedaba enseñándose siempre pasara lo que pasara.
+        studySubtypeField.style.display = isStudy ? "block" : "none";
+        languageFields.style.display = isLanguage ? "block" : "none";
         // Los inputs deshabilitados no se envían — bien cuando el campo
-        // está oculto porque no aplica (plan_type ≠ study, o subtipo ≠
-        // idioma), pero mal si es un plan de Idiomas ya creado, donde SÍ
-        // deben mandarse aunque el radio que decidió el subtipo esté
-        // bloqueado. Por eso esto va aparte de studySubtypeRadios/plan-type-radio.
+        // está oculto porque no aplica (plan_type ≠ study, o materia ≠
+        // idiomas), pero mal si es un plan de Idiomas ya creado, donde SÍ
+        // deben mandarse aunque el select que decidió la materia esté
+        // bloqueado. Por eso esto va aparte de studySubtypeSelect/plan-type-radio.
         for (var i = 0; i < languageInputs.length; i++) {
             languageInputs[i].disabled = !isLanguage;
         }
@@ -211,9 +213,7 @@
     for (var i = 0; i < planTypeRadios.length; i++) {
         planTypeRadios[i].addEventListener("change", refresh);
     }
-    for (var j = 0; j < studySubtypeRadios.length; j++) {
-        studySubtypeRadios[j].addEventListener("change", refresh);
-    }
+    studySubtypeSelect.addEventListener("change", refresh);
     refresh();
 })();
 </script>
