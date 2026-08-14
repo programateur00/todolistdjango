@@ -101,6 +101,11 @@ BASIC_AUTH_PASSWORD = os.environ.get("BASIC_AUTH_PASSWORD", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
+# Tope diario de generaciones (ver AIGenerationLog en models.py) — protege
+# la cuota gratis de GEMINI_API_KEY, que hoy es una sola clave compartida
+# por toda la app. Ajustable sin tocar código si algún día hace falta.
+AI_PLAN_DAILY_LIMIT = int(os.environ.get("AI_PLAN_DAILY_LIMIT", "15"))
+
 
 # Application definition
 

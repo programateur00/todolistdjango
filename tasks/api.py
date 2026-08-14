@@ -19,6 +19,7 @@ import json
 import uuid
 from functools import wraps
 
+from django.conf import settings
 from django.db.models import Q, Sum
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404
@@ -29,7 +30,8 @@ from django.views.decorators.http import require_http_methods
 
 from . import ai
 from .models import (
-    Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, SavedVideo, Task, TimerSession, WorkoutSession,
+    AIGenerationLog, Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, SavedVideo, Task, TimerSession,
+    WorkoutSession,
 )
 from .utils import get_current_user, resolve_plan_target as _plan_context
 
@@ -1337,6 +1339,17 @@ def build_plan_draft(*, user, plan_type, weeks, custom_days, prompt):
     days = [str(d) for d in (custom_days or []) if str(d) in valid_days]
     custom_days = days or ["0", "2", "4"]
     sessions_per_week = max(1, len(custom_days))
+
+    # Tope diario, contado global (hoy la app va con una sola clave de
+    # Gemini compartida) — se cuenta el intento en sí, no solo los que
+    # salen bien: una llamada que falla también ha gastado cuota gratis.
+    limit = getattr(settings, "AI_PLAN_DAILY_LIMIT", 15)
+    if limit and AIGenerationLog.count_today() >= limit:
+        return None, (
+            f"Has llegado al límite de {limit} planes generados con IA hoy — "
+            "es para no agotar la cuota gratis. Prueba mañana, o crea el plan a mano mientras tanto."
+        )
+    AIGenerationLog.record(user=user)
 
     try:
         raw = ai.generate_plan_draft(

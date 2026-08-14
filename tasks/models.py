@@ -2191,6 +2191,39 @@ class SavedVideo(models.Model):
         return self.title or self.youtube_video_id
 
 
+class AIGenerationLog(models.Model):
+    """
+    Un registro por cada vez que se llama a la IA para generar un plan
+    (con éxito o sin él — una llamada fallida a Gemini también gasta
+    cuota gratis, así que también cuenta).
+
+    Existe solo para poner un tope diario de generaciones y así proteger
+    la cuota gratis de GEMINI_API_KEY, que hoy es una sola clave
+    compartida por toda la app — si en el futuro hay más de una persona
+    usándola, evita que alguien (a propósito o sin querer) se la deje a
+    cero para todos los demás. En cuanto haya cuentas de usuario de
+    verdad, este tope debería pasar a ser por persona en vez de global
+    (ya lleva el campo `user` preparado para eso).
+    """
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="ai_generation_logs",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @classmethod
+    def count_today(cls, user=None):
+        today = timezone.localtime(timezone.now()).date()
+        qs = cls.objects.filter(created_at__date=today)
+        if user is not None:
+            qs = qs.filter(user=user)
+        return qs.count()
+
+    @classmethod
+    def record(cls, user=None):
+        cls.objects.create(user=user)
+
+
 class Occurrence(models.Model):
     RESULT_DONE = "done"
     RESULT_NOT_DONE = "not_done"
