@@ -928,7 +928,7 @@ def stats_detail(request, series_id):
 # ─────────────────────────────────────────────────────────────────────
 
 # Contadores que existen de verdad en workout.js.
-COUNTERS = {"pullup", "dip"}
+COUNTERS = {"pullup", "dip", "squat"}
 
 
 def _plans_qs():

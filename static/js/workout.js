@@ -45,6 +45,18 @@ const DIP_MIN_VISIBILITY = 0.4;
 // estaban cuando te pusiste arriba antes de asumir eso y descartar la
 // repetición en curso.
 const DIP_HANDS_MAX_DRIFT_FACTOR = 0.35;
+// Sentadillas: se cuentan por el ÁNGULO DE LA RODILLA (cadera-rodilla-tobillo),
+// no por la altura de la nariz como en fondos. Un ángulo no depende de lo
+// cerca que estés de la cámara, así que tampoco hace falta calibrar nada.
+// A diferencia de los fondos (donde se evitó a propósito el ángulo del
+// codo porque "solo se mide bien de perfil" y de frente ya se ve la nariz
+// bajar igual de bien), aquí SÍ interesa el ángulo — pero eso significa
+// que la sentadilla solo se puede contar bien vista DE PERFIL: de frente,
+// la cámara no puede distinguir cuánto se dobla la rodilla en profundidad.
+// Por eso el aviso en pantalla pide colocarse de lado.
+const SQUAT_UP_ANGLE_DEG = 160;   // pierna casi recta -> de pie ("arriba")
+const SQUAT_DOWN_ANGLE_DEG = 100; // rodilla suficientemente doblada -> sentadilla ("abajo")
+const SQUAT_MIN_VISIBILITY = 0.4;
 // En un fondo real la nariz SIEMPRE queda por encima de la línea de los
 // hombros (ni agachando la cabeza del todo baja tanto). Si aparece por
 // debajo — normalmente porque se ha girado el ángulo de la cámara, o la
@@ -61,6 +73,23 @@ const DIP_NOSE_ABOVE_SHOULDER_MARGIN = 0.05;
 
 // Índices de landmarks de MediaPipe Pose que usamos
 const NOSE = 0, L_SHOULDER = 11, R_SHOULDER = 12, L_ELBOW = 13, R_ELBOW = 14, L_WRIST = 15, R_WRIST = 16;
+const L_HIP = 23, R_HIP = 24, L_KNEE = 25, R_KNEE = 26, L_ANKLE = 27, R_ANKLE = 28;
+
+/**
+ * Ángulo (en grados) en el punto b, formado por los puntos a-b-c. Se usa
+ * para medir cuánto se dobla la rodilla (cadera-rodilla-tobillo) en las
+ * sentadillas. Solo usa x/y (2D) porque MediaPipe no da una profundidad
+ * fiable con una sola cámara — de perfil, x/y ya capturan bien la flexión.
+ */
+function angle(a, b, c) {
+  const abx = a.x - b.x, aby = a.y - b.y;
+  const cbx = c.x - b.x, cby = c.y - b.y;
+  const magAB = Math.hypot(abx, aby);
+  const magCB = Math.hypot(cbx, cby);
+  if (!magAB || !magCB) return null;
+  const cos = Math.min(1, Math.max(-1, (abx * cbx + aby * cby) / (magAB * magCB)));
+  return (Math.acos(cos) * 180) / Math.PI;
+}
 
 // Números en palabras para la voz (1–99). No basta con pasarle el
 // dígito tal cual a SpeechSynthesisUtterance: según el motor de TTS
@@ -189,6 +218,8 @@ class WorkoutSession {
     this.liftoffTime = null;   // instante en que detectamos que empezaste a moverte de verdad
     this.dipHandsY = null;     // y (0-1) de las manos cuando confirmamos "arriba" en un fondo — referencia para saber si sigues agarrado a las barras
     this.dipReleaseSince = null; // desde cuándo llevas sin agarre válido seguido en un fondo (para no cerrar la serie por un frame ruidoso)
+    this.squatSide = null;     // "left" | "right" — qué lado del cuerpo se ve mejor este frame (de perfil solo se ve bien uno)
+    this.squatKneeAngle = null; // último ángulo de rodilla medido, solo para overlay/debug
 
     this.sessionStart = null;
     this.lastRepTime = null;
@@ -291,6 +322,15 @@ class WorkoutSession {
       this.dipHandsY = null;
       this.dipReleaseSince = null;
       this.setStatus("Ponte arriba con los brazos estirados para empezar.");
+    } else if (this.counterKey === "squat") {
+      // Tampoco hay barra que calibrar aquí: el ángulo de rodilla no
+      // depende de la distancia a la cámara. Solo hace falta esperar a
+      // verte de pie para no contar media repetición al entrar.
+      this.prepping = false;
+      this.state = null;
+      this.squatSide = null;
+      this.squatKneeAngle = null;
+      this.setStatus("Ponte de perfil a la cámara, de pie, para empezar.");
     } else {
       this.state = "down";
     }
@@ -369,6 +409,28 @@ class WorkoutSession {
           ctx.lineTo(this.canvas.width, triggerY);
           ctx.stroke();
         }
+      }
+
+      if (this.counterKey === "squat" && this.squatSide) {
+        const hip = this.squatSide === "left" ? lm[L_HIP] : lm[R_HIP];
+        const knee = this.squatSide === "left" ? lm[L_KNEE] : lm[R_KNEE];
+        const ankle = this.squatSide === "left" ? lm[L_ANKLE] : lm[R_ANKLE];
+        // Verde cuando estás de pie, naranja en el tramo de bajada/sentadilla
+        // — así se ve de un vistazo si el ángulo se está midiendo bien.
+        ctx.strokeStyle = this.state === "bottom" ? "rgba(216,101,74,0.9)" : "rgba(122,139,111,0.9)";
+        ctx.lineWidth = 3;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(hip.x * this.canvas.width, hip.y * this.canvas.height);
+        ctx.lineTo(knee.x * this.canvas.width, knee.y * this.canvas.height);
+        ctx.lineTo(ankle.x * this.canvas.width, ankle.y * this.canvas.height);
+        ctx.stroke();
+        [hip, knee, ankle].forEach((p) => {
+          ctx.beginPath();
+          ctx.arc(p.x * this.canvas.width, p.y * this.canvas.height, 6, 0, Math.PI * 2);
+          ctx.fillStyle = "#D8654A";
+          ctx.fill();
+        });
       }
     }
     ctx.restore();
@@ -628,6 +690,74 @@ class WorkoutSession {
     }
   }
 
+  /**
+   * Sentadillas: se cuentan por el ángulo de la rodilla (cadera-rodilla-
+   * tobillo), medido de PERFIL. Es la postura que mejor deja ver la
+   * flexión real de la rodilla — de frente la cámara no puede distinguir
+   * bien cuánto bajas (la pierna se acorta en la imagen igual al doblarse
+   * que al alejarse un poco de la cámara).
+   *
+   * De perfil solo se ve bien una pierna (la otra queda tapada por el
+   * cuerpo), así que cada frame se usa la que tenga mejor visibilidad —
+   * no se fija un lado de antemano, porque te puedes colocar de perfil
+   * por cualquiera de los dos lados y hasta puedes girarte a media sesión.
+   *
+   * No hace falta ningún paso de calibración (a diferencia de las
+   * dominadas): un ángulo no cambia aunque te acerques o alejes de la
+   * cámara, así que los umbrales sirven tal cual para cualquiera.
+   */
+  processSquat(lm, now) {
+    const lHip = lm[L_HIP], rHip = lm[R_HIP];
+    const lKnee = lm[L_KNEE], rKnee = lm[R_KNEE];
+    const lAnkle = lm[L_ANKLE], rAnkle = lm[R_ANKLE];
+
+    const leftVis = ((lHip.visibility ?? 1) + (lKnee.visibility ?? 1) + (lAnkle.visibility ?? 1)) / 3;
+    const rightVis = ((rHip.visibility ?? 1) + (rKnee.visibility ?? 1) + (rAnkle.visibility ?? 1)) / 3;
+    const useLeft = leftVis >= rightVis;
+    const vis = useLeft ? leftVis : rightVis;
+
+    if (vis < SQUAT_MIN_VISIBILITY) {
+      this.setStatus("No se te ve bien la cadera, la rodilla y el tobillo. Ponte de perfil a la cámara, con toda la pierna en el encuadre.");
+      if (this.debugEl) this.debugEl.textContent = "buscando cadera, rodilla y tobillo de perfil…";
+      this.squatSide = null;
+      return;
+    }
+
+    const hip = useLeft ? lHip : rHip;
+    const knee = useLeft ? lKnee : rKnee;
+    const ankle = useLeft ? lAnkle : rAnkle;
+    const kneeAngle = angle(hip, knee, ankle);
+    if (kneeAngle === null) return;
+
+    this.squatSide = useLeft ? "left" : "right";
+    this.squatKneeAngle = kneeAngle;
+
+    if (this.state === null) {
+      // Hay que empezar de pie, para no contar media repetición al entrar.
+      if (kneeAngle >= SQUAT_UP_ANGLE_DEG) {
+        this.state = "top";
+        this.setStatus("¡Listo! Baja en sentadilla y vuelve a subir.");
+      } else {
+        this.setStatus("Ponte de pie, de perfil a la cámara, para empezar.");
+      }
+    } else if (this.state === "top") {
+      if (kneeAngle <= SQUAT_DOWN_ANGLE_DEG) {
+        this.state = "bottom";
+        this.repStartTime = now; // la repetición empieza al bajar
+      }
+    } else if (kneeAngle >= SQUAT_UP_ANGLE_DEG) {
+      // Ha vuelto a subir del todo: repetición completa.
+      this.countRep((now - this.repStartTime) / 1000, now, "Sentadilla");
+      this.state = "top";
+    }
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `ángulo rodilla (${useLeft ? "izq" : "der"}): ${kneeAngle.toFixed(0)}° | estado: ${this.state ?? "esperando"} ` +
+        `(abajo ≤${SQUAT_DOWN_ANGLE_DEG}°, arriba ≥${SQUAT_UP_ANGLE_DEG}°)`;
+    }
+  }
+
   processResult(result, now) {
     if (!result.landmarks || !result.landmarks.length) {
       if (this.debugEl) this.debugEl.textContent = "sin detección — ¿sales entero en el encuadre?";
@@ -635,10 +765,14 @@ class WorkoutSession {
     }
     const lm = result.landmarks[0];
 
-    // Cada ejercicio se detecta a su manera. Los fondos no necesitan
-    // calibrar ninguna barra, así que salen antes de todo eso.
+    // Cada ejercicio se detecta a su manera. Los fondos y las sentadillas
+    // no necesitan calibrar ninguna barra, así que salen antes de todo eso.
     if (this.counterKey === "dip") {
       this.processDip(lm, now);
+      return;
+    }
+    if (this.counterKey === "squat") {
+      this.processSquat(lm, now);
       return;
     }
 

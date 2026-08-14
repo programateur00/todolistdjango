@@ -55,13 +55,23 @@
         <button type="button" id="workout-finish" class="workout__btn workout__btn--primary">Terminar sesión</button>
     </div>
 
+    {% if exercise.counter_key == "squat" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti), no de frente —
+        así se ve bien cuánto doblas la rodilla. Encuadra toda la pierna, de la cadera al tobillo.
+    </p>
+    <p class="workout__note">
+        Si pasan más de 1:30 sin contar ninguna repetición (un descanso), la serie se cierra sola y empieza la siguiente.
+    </p>
+    {% else %}
     <p class="workout__note">
         <span style="color:var(--amber);">━</span> línea amarilla = altura de la barra (medida por tus muñecas al calibrar).
         Si no coincide con tu barra real, pulsa «Recalibrar» estando ya colgado.
     </p>
+    {% endif %}
     <p class="workout__note">
         Nada de esto se graba ni se sube a ningún sitio — el vídeo se queda en tu navegador.
-        Solo se guardan los números (dominadas, ritmo, avisos de descanso) al pulsar «Terminar sesión».
+        Solo se guardan los números al pulsar «Terminar sesión».
     </p>
 </div>
 
