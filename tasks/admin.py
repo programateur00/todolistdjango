@@ -1,7 +1,8 @@
 from django.contrib import admin
 
 from .models import (
-    Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, SavedVideo, Task, WorkoutSession,
+    CourseModule, CoursePlaylist, Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem,
+    SavedVideo, Task, WorkoutSession,
 )
 
 
@@ -75,12 +76,21 @@ class PlanItemInline(admin.TabularInline):
     )
 
 
+class CourseModuleInline(admin.TabularInline):
+    model = CourseModule
+    extra = 0
+    fields = ("order", "scheduled_week", "level", "youtube_video_id", "title", "has_captions")
+
+
 @admin.register(Plan)
 class PlanAdmin(admin.ModelAdmin):
-    list_display = ("name", "user", "started_on", "weeks", "ends_on", "is_active", "has_task")
-    list_filter = ("is_active",)
+    list_display = (
+        "name", "user", "started_on", "weeks", "is_active", "has_task",
+        "plan_type", "study_subtype", "language_name",
+    )
+    list_filter = ("is_active", "plan_type", "study_subtype")
     search_fields = ("name",)
-    inlines = [PlanItemInline]
+    inlines = [PlanItemInline, CourseModuleInline]
 
     @admin.display(boolean=True, description="Tarea creada")
     def has_task(self, obj):
@@ -99,3 +109,19 @@ class PlanAdmin(admin.ModelAdmin):
         """
         super().save_related(request, form, formsets, change)
         form.instance.sync_task()
+
+
+@admin.register(CourseModule)
+class CourseModuleAdmin(admin.ModelAdmin):
+    list_display = ("title", "plan", "level", "order", "scheduled_week", "has_captions", "watched_at")
+    list_filter = ("level", "has_captions")
+    search_fields = ("title", "youtube_video_id", "plan__name")
+    list_per_page = 50
+
+
+@admin.register(CoursePlaylist)
+class CoursePlaylistAdmin(admin.ModelAdmin):
+    list_display = ("title", "language", "level", "channel_title", "is_active", "added_at")
+    list_filter = ("language", "level", "is_active")
+    search_fields = ("title", "channel_title", "youtube_playlist_id", "notes")
+    list_per_page = 50

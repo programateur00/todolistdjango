@@ -108,7 +108,16 @@ class Task(models.Model):
         (SUBCATEGORY_FOCUS_OTHER, "Otro"),
     ]
 
-    SUBCATEGORY_CHOICES = SPORT_SUBCATEGORY_CHOICES + FOCUS_SUBCATEGORY_CHOICES
+    # Subcategorías de "Estudio": de momento solo "Idiomas" — un curso con
+    # vídeos organizados por nivel (ver Plan.STUDY_SUBTYPE_LANGUAGE y
+    # CourseModule), en vez del hábito diario simple de siempre. En
+    # blanco sigue siendo el Estudio de toda la vida, sin curso detrás.
+    SUBCATEGORY_LANGUAGE = "language"
+    STUDY_SUBCATEGORY_CHOICES = [
+        (SUBCATEGORY_LANGUAGE, "Idiomas"),
+    ]
+
+    SUBCATEGORY_CHOICES = SPORT_SUBCATEGORY_CHOICES + FOCUS_SUBCATEGORY_CHOICES + STUDY_SUBCATEGORY_CHOICES
 
     WEEKDAYS = [
         ("0", "Lunes"),
@@ -1075,6 +1084,47 @@ class Plan(models.Model):
         (PLAN_TYPE_GENERAL, "General"),
     ]
     plan_type = models.CharField(max_length=10, choices=PLAN_TYPE_CHOICES, default=PLAN_TYPE_SPORT)
+
+    # Subtipo de "Estudio": 'general' es el hábito diario de siempre (un
+    # vídeo/playlist fijo o un temporizador, sin más). 'language' es un
+    # curso de verdad: una secuencia de vídeos reales de YouTube,
+    # ordenados de nivel MCER más bajo a más alto y repartidos en las
+    # semanas del plan — ver CourseModule más abajo. Solo tiene sentido
+    # cuando plan_type='study'; en Deporte/General se queda en blanco.
+    STUDY_SUBTYPE_GENERAL = "general"
+    STUDY_SUBTYPE_LANGUAGE = "language"
+    STUDY_SUBTYPE_CHOICES = [
+        (STUDY_SUBTYPE_GENERAL, "Hábito simple"),
+        (STUDY_SUBTYPE_LANGUAGE, "Idioma (curso con vídeos por nivel)"),
+    ]
+    study_subtype = models.CharField(
+        max_length=10, choices=STUDY_SUBTYPE_CHOICES, blank=True, default=STUDY_SUBTYPE_GENERAL,
+    )
+
+    # Niveles del Marco Común Europeo de Referencia — mismo orden que se
+    # usa para clasificar y ordenar los CourseModule de un curso de
+    # idioma. Vive aquí como constante de clase (no como choices de un
+    # campo) porque tres campos distintos la necesitan: level_from,
+    # level_to, y CourseModule.level.
+    CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
+    CEFR_LEVEL_CHOICES = [(lvl, lvl) for lvl in CEFR_LEVELS]
+
+    # Solo con study_subtype='language'. En blanco, level_from se trata
+    # como A1 (empezar desde cero) y level_to como "sin techo" (llega
+    # hasta donde dé el número de semanas).
+    language_name = models.CharField(
+        max_length=40, blank=True,
+        help_text="Solo con study_subtype='language': el idioma del curso, ej. 'francés'.",
+    )
+    level_from = models.CharField(max_length=2, blank=True, choices=CEFR_LEVEL_CHOICES)
+    level_to = models.CharField(max_length=2, blank=True, choices=CEFR_LEVEL_CHOICES)
+
+    # Cada cuántos vídeos vistos se genera un test de repaso — lo decide
+    # el usuario al crear el plan (gastar IA en un test por vídeo no es
+    # lo mismo que uno cada 5). En blanco, todavía no se generan tests
+    # automáticos — así de momento (Fase 1: solo búsqueda real de
+    # cursos) no se promete algo que aún no existe.
+    quiz_every_n_videos = models.PositiveIntegerField(null=True, blank=True)
 
     # Cuándo toca entrenar. El plan crea y mantiene su propia tarea con
     # estos datos, para que el usuario no tenga que crear una a mano ni
@@ -2141,6 +2191,107 @@ class TimerSession(models.Model):
 
     def __str__(self):
         return f"{self.subcategory_label} — {self.minutes} min ({self.recorded_at:%Y-%m-%d %H:%M})"
+
+
+class CoursePlaylist(models.Model):
+    """
+    Un curso de idioma verificado A MANO: una playlist real de YouTube
+    que una persona ha comprobado que de verdad es del idioma y nivel
+    que dice ser.
+
+    Por qué existe esto en vez de buscar en caliente cada vez: la
+    búsqueda automática (ver `youtube_search.search_playlists`, comando
+    `search_courses`) demostró en la práctica que para niveles con poco
+    contenido gratis (C1, C2 sobre todo) YouTube no dice "no hay nada"
+    — devuelve lo más parecido por relevancia genérica, que suele ser
+    el mismo curso de principiantes repetido bajo una etiqueta de nivel
+    que no le corresponde. Confiar en eso automáticamente habría colado
+    lecciones de A1 como si fueran de C2.
+
+    La solución es la misma que ya usa la app para Deporte: un catálogo
+    CURADO (`Exercise` es el equivalente ahí) del que la IA elige y
+    ordena, pero nunca que descubre por su cuenta. `search_courses`
+    sigue siendo útil, pero ahora como herramienta de DESCUBRIMIENTO
+    para encontrar candidatos que un humano revisa antes de añadirlos
+    aquí — no como fuente de verdad automática. Ver el comando
+    `add_course_playlist`, que enseña un preview real (títulos,
+    duración, subtítulos) antes de guardar nada.
+    """
+    language = models.CharField(max_length=40, help_text="Ej. 'francés'. En minúscula, sin acentos raros.")
+    level = models.CharField(max_length=2, choices=Plan.CEFR_LEVEL_CHOICES)
+    youtube_playlist_id = models.CharField(max_length=64)
+    title = models.CharField(max_length=300, blank=True)
+    channel_title = models.CharField(max_length=200, blank=True)
+    notes = models.TextField(
+        blank=True, help_text="Por qué se eligió esta playlist, qué cubre, algo a vigilar...",
+    )
+    is_active = models.BooleanField(
+        default=True, help_text="Desactivar en vez de borrar si deja de estar disponible o resulta floja.",
+    )
+    order = models.PositiveIntegerField(default=0, help_text="Orden dentro de su idioma+nivel, si hay varias.")
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["language", "level", "order"]
+
+    def __str__(self):
+        return f"{self.title or self.youtube_playlist_id} ({self.language} · {self.level})"
+
+
+class CourseModule(models.Model):
+    """
+    Un vídeo concreto dentro del temario de un plan de Estudio · Idiomas
+    (Plan.study_subtype='language').
+
+    A diferencia del resto de Estudio (donde el objetivo es el mismo
+    vídeo/playlist repetido cada sesión, ver PlanItem), un curso de
+    idioma es una SECUENCIA: vídeos distintos, de nivel creciente, uno
+    (o varios) por sesión — casi nunca de una sola playlist de YouTube,
+    porque ninguna playlist gratis suele cubrir de A1 a C2 seguido. Por
+    eso el orden lo posee esta tabla, no una playlist de YouTube.
+
+    Se rellena (Fase 2, todavía no implementada) a partir de las
+    `CoursePlaylist` ya verificadas para el idioma del plan — nunca de
+    una búsqueda en caliente sin revisar. El modelo ya existe para no
+    tener que parar a mitad de esa fase a migrar la base de datos otra
+    vez.
+    """
+    plan = models.ForeignKey(Plan, on_delete=models.CASCADE, related_name="course_modules")
+    order = models.PositiveIntegerField(default=0, help_text="Posición en el temario completo del curso.")
+    scheduled_week = models.PositiveIntegerField(
+        null=True, blank=True, help_text="En qué semana del plan toca ver este vídeo.",
+    )
+    level = models.CharField(max_length=2, blank=True, choices=Plan.CEFR_LEVEL_CHOICES)
+
+    youtube_video_id = models.CharField(max_length=32)
+    title = models.CharField(max_length=300, blank=True)
+    channel_title = models.CharField(max_length=200, blank=True)
+    duration_seconds = models.PositiveIntegerField(null=True, blank=True)
+    has_captions = models.BooleanField(
+        default=False,
+        help_text="Si YouTube reporta subtítulos disponibles — no garantiza que se puedan "
+                   "descargar (ver notas de tasks/youtube_search.py), pero ayuda a priorizar.",
+    )
+    source_playlist = models.ForeignKey(
+        CoursePlaylist, on_delete=models.SET_NULL, null=True, blank=True,
+        help_text="De qué playlist curada salió, para poder revisar la fuente.",
+    )
+
+    # Tema del bloque al que pertenece este vídeo (varios vídeos seguidos
+    # suelen compartir tema, ej. "saludos y presentarse"). Es la red de
+    # seguridad para generar tests aunque el vídeo en sí no tenga
+    # descripción útil — ver la discusión en tasks/ai.py cuando exista
+    # la generación de tests (Fase 3).
+    topic = models.CharField(max_length=200, blank=True)
+
+    watched_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["order"]
+
+    def __str__(self):
+        return f"{self.title or self.youtube_video_id} ({self.level or 'sin nivel'})"
 
 
 class SavedVideo(models.Model):

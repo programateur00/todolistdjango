@@ -109,6 +109,16 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
 # por toda la app. Ajustable sin tocar código si algún día hace falta.
 AI_PLAN_DAILY_LIMIT = int(os.environ.get("AI_PLAN_DAILY_LIMIT", "15"))
 
+# --------------------------------------------------------------
+# Búsqueda de cursos reales en YouTube (ver tasks/youtube_search.py) —
+# para los planes de Estudio · Idiomas. Es una clave GRATIS pero
+# DISTINTA de GEMINI_API_KEY: se pide en Google Cloud Console, no en
+# AI Studio (ver README, sección "Cursos de idiomas · YouTube"). Sin
+# ella, la búsqueda falla con un aviso legible — el resto de la app
+# funciona igual, igual que con la IA de planes.
+# --------------------------------------------------------------
+YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
+
 
 # Application definition
 
