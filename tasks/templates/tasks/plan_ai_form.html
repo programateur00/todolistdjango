@@ -237,6 +237,13 @@
             promptTextarea.required = false;
             promptLabel.textContent = "Contexto adicional (opcional)";
             promptHint.textContent = "Cualquier cosa que ayude a la IA a escribir mejores notas — no cambia qué cursos elige.";
+        } else if (isSport) {
+            // Con nivel + foco (arriba) ya hay suficiente para un plan serio —
+            // el texto libre ahora es solo para precisar (marca actual,
+            // una lesión concreta, un objetivo con fecha...), no obligatorio.
+            promptTextarea.required = false;
+            promptLabel.textContent = "¿Algo más que contarle a la IA? (opcional)";
+            promptHint.textContent = "Con el nivel y el foco de arriba ya alcanza para un buen plan — añade esto solo si quieres precisar más (tu marca actual, un objetivo con fecha...).";
         } else {
             promptTextarea.required = true;
             promptLabel.textContent = "¿Qué quieres conseguir?";

@@ -209,7 +209,15 @@ def _build_prompt(
         "",
         f"Duración: {weeks} semanas.",
         "",
-        f"Lo que pide el usuario, en sus propias palabras:\n\"{user_prompt}\"",
+        (
+            f"Lo que pide el usuario, en sus propias palabras:\n\"{user_prompt}\""
+            if user_prompt else
+            "El usuario no ha escrito contexto adicional en texto libre — básate solo en los "
+            "campos estructurados de abajo (nivel, foco corporal, equipamiento, tiempo, "
+            "lesiones). No lo trates como una señal de que hay que dar un plan flojo: la "
+            "ausencia de frase no es lo mismo que la ausencia de nivel — usa igualmente el "
+            "nivel indicado abajo tal cual."
+        ),
     ]
     if plan_type == "sport":
         parts += ["", _LEVEL_BRIEF.get(fitness_level, _LEVEL_UNKNOWN_BRIEF)]
@@ -417,7 +425,12 @@ def generate_plan_draft(
     10") cuando el usuario escribía algo tan vago como "ponerme en forma".
     """
     user_prompt = (prompt or "").strip()[:MAX_PROMPT_CHARS]
-    if not user_prompt:
+    # Estudio y General no tienen cuestionario estructurado — la frase libre
+    # es su ÚNICA fuente de información (ni siquiera el nombre del plan sale
+    # de otro sitio), así que ahí sigue siendo obligatoria. Deporte sí tiene
+    # nivel/foco/equipamiento como campos propios, así que puede generar un
+    # plan serio aunque el usuario no escriba nada más.
+    if not user_prompt and plan_type != "sport":
         raise PlanAIError("Cuéntame qué quieres conseguir con este plan.")
 
     exercises = []
