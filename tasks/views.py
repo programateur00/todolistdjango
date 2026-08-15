@@ -1080,6 +1080,13 @@ def plan_ai_form(request):
         no_bar_equipment = request.POST.get("no_bar_equipment") == "on"
         session_minutes = request.POST.get("session_minutes", "").strip()
         limitations = request.POST.get("limitations", "").strip()
+        # Datos físicos (opcionales) — calibran la dificultad relativa
+        # (peso/sexo/altura) y el tope realista de peso añadido en
+        # ejercicios con lastre (la mayoría de chalecos son de 20 kg).
+        body_weight_kg = request.POST.get("body_weight_kg", "").strip()
+        height_cm = request.POST.get("height_cm", "").strip()
+        sex = request.POST.get("sex", "")
+        max_load_kg = request.POST.get("max_load_kg", "").strip()
 
         # Estudio · Idiomas no describe el plan en una frase libre como
         # los demás — la IA elige y ordena entre el catálogo curado
@@ -1100,7 +1107,8 @@ def plan_ai_form(request):
                 custom_days=custom_days, prompt=prompt_text,
                 fitness_level=fitness_level, focus_area=focus_area,
                 no_bar_equipment=no_bar_equipment, session_minutes=session_minutes,
-                limitations=limitations,
+                limitations=limitations, body_weight_kg=body_weight_kg, height_cm=height_cm,
+                sex=sex, max_load_kg=max_load_kg,
             )
         if error:
             messages.error(request, error)
@@ -1110,6 +1118,7 @@ def plan_ai_form(request):
                 "cefr_level_choices": Plan.CEFR_LEVEL_CHOICES,
                 "fitness_level_choices": ai.FITNESS_LEVEL_CHOICES,
                 "focus_area_choices": ai.FOCUS_AREA_CHOICES,
+                "body_sex_choices": ai.BODY_SEX_CHOICES,
                 "weekdays": Task.WEEKDAYS,
                 "selected_days": custom_days or ["0", "2", "4"],
                 "prompt": prompt_text,
@@ -1126,6 +1135,10 @@ def plan_ai_form(request):
                 "no_bar_equipment": no_bar_equipment,
                 "session_minutes": session_minutes,
                 "limitations": limitations,
+                "body_weight_kg": body_weight_kg,
+                "height_cm": height_cm,
+                "sex": sex,
+                "max_load_kg": max_load_kg,
             })
         request.session["plan_ai_draft"] = draft
         request.session["plan_ai_prompt"] = prompt_text
@@ -1133,7 +1146,8 @@ def plan_ai_form(request):
             "draft": draft, "prompt": prompt_text,
             "fitness_level": fitness_level, "focus_area": focus_area,
             "no_bar_equipment": no_bar_equipment, "session_minutes": session_minutes,
-            "limitations": limitations,
+            "limitations": limitations, "body_weight_kg": body_weight_kg,
+            "height_cm": height_cm, "sex": sex, "max_load_kg": max_load_kg,
         })
 
     if request.method == "POST" and step == "confirmar":
@@ -1227,6 +1241,7 @@ def plan_ai_form(request):
         "cefr_level_choices": Plan.CEFR_LEVEL_CHOICES,
         "fitness_level_choices": ai.FITNESS_LEVEL_CHOICES,
         "focus_area_choices": ai.FOCUS_AREA_CHOICES,
+        "body_sex_choices": ai.BODY_SEX_CHOICES,
         "weekdays": Task.WEEKDAYS,
         "selected_days": ["0", "2", "4"],
         "prompt": request.session.get("plan_ai_prompt", ""),
@@ -1243,6 +1258,10 @@ def plan_ai_form(request):
         "no_bar_equipment": False,
         "session_minutes": "",
         "limitations": "",
+        "body_weight_kg": "",
+        "height_cm": "",
+        "sex": "",
+        "max_load_kg": "",
     })
 
 

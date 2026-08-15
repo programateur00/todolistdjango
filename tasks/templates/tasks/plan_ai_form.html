@@ -135,6 +135,35 @@
             <span class="field__hint">Tren superior, tren inferior/core, running, o cuerpo completo.</span>
         </fieldset>
 
+        <fieldset class="field" id="body-stats-field">
+            <legend class="field__label">Datos físicos (opcional, pero ayudan)</legend>
+            <div class="field-row">
+                <label class="field">
+                    <span class="field__label">Peso corporal (kg)</span>
+                    <input type="number" name="body_weight_kg" min="20" max="300" step="0.5"
+                        value="{{ body_weight_kg }}" placeholder="Ej: 75">
+                </label>
+                <label class="field">
+                    <span class="field__label">Altura (cm)</span>
+                    <input type="number" name="height_cm" min="100" max="250" value="{{ height_cm }}"
+                        placeholder="Ej: 178">
+                </label>
+            </div>
+            <div class="repeat-options">
+                {% for value, label in body_sex_choices %}
+                <label class="repeat-option">
+                    <input type="radio" name="sex" value="{{ value }}" {% if sex == value %}checked{% endif %}>
+                    <span>{{ label }}</span>
+                </label>
+                {% endfor %}
+            </div>
+            <span class="field__hint">
+                Un entrenador de verdad los tiene en cuenta: a igualdad de repeticiones en
+                dominadas o fondos, alguien más pesado mueve más masa. No cambian tu nivel — solo
+                afinan el punto de partida.
+            </span>
+        </fieldset>
+
         <label class="field field--inline">
             <input type="checkbox" name="no_bar_equipment" {% if no_bar_equipment %}checked{% endif %}>
             <span class="field__label">No tengo barra de dominadas ni paralelas en casa</span>
@@ -145,6 +174,11 @@
                 <span class="field__label">Minutos por sesión (opcional)</span>
                 <input type="number" name="session_minutes" min="5" max="180" value="{{ session_minutes }}"
                     placeholder="Ej: 30">
+            </label>
+            <label class="field">
+                <span class="field__label">Peso máximo de lastre disponible en kg (opcional)</span>
+                <input type="number" name="max_load_kg" min="0" max="100" step="0.5"
+                    value="{{ max_load_kg }}" placeholder="Por defecto se asume ~20 (chaleco lastrado)">
             </label>
         </div>
 

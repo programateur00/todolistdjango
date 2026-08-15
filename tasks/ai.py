@@ -66,6 +66,18 @@ _NEEDS_BAR_EQUIPMENT = {
     "dips", "weighted-dips",
 }
 
+# Tope de peso AÑADIDO por defecto (kg) para dominadas/fondos con peso —
+# la inmensa mayoría de chalecos lastrados de uso doméstico llegan hasta
+# aquí. Sin un `max_load_kg` explícito del usuario, se asume este techo
+# en vez de dejar que la IA proponga un peso que nadie puede cargar.
+_DEFAULT_MAX_LOAD_KG = 20
+
+BODY_SEX_CHOICES = [
+    ("", "Prefiero no decirlo"),
+    ("female", "Mujer"),
+    ("male", "Hombre"),
+]
+
 FITNESS_LEVEL_CHOICES = [
     ("beginner", "Principiante"),
     ("intermediate", "Intermedio"),
@@ -190,7 +202,8 @@ _PLAN_TYPE_BRIEF = {
 def _build_prompt(
     user_prompt, plan_type, weeks, sessions_per_week, *,
     exercises=None, fitness_level="", focus_area="", no_bar_equipment=False,
-    session_minutes=None, limitations="",
+    session_minutes=None, limitations="", body_weight_kg=None, height_cm=None,
+    sex="", max_load_kg=None,
 ):
     brief = _PLAN_TYPE_BRIEF.get(plan_type, _PLAN_TYPE_BRIEF["sport"])
     parts = [
@@ -222,6 +235,42 @@ def _build_prompt(
     if plan_type == "sport":
         parts += ["", _LEVEL_BRIEF.get(fitness_level, _LEVEL_UNKNOWN_BRIEF)]
         parts += ["", _FOCUS_AREA_BRIEF.get(focus_area, _FOCUS_AREA_FULL_BODY_BRIEF)]
+        if body_weight_kg or height_cm or sex:
+            datos = []
+            if body_weight_kg:
+                datos.append(f"peso corporal {body_weight_kg} kg")
+            if height_cm:
+                datos.append(f"altura {height_cm} cm")
+            if sex:
+                datos.append(dict(BODY_SEX_CHOICES).get(sex, sex).lower())
+            parts.append(
+                "Datos físicos del usuario (" + ", ".join(datos) + "). OJO: esto NO es un peso a "
+                "levantar, es su cuerpo — solo sirve para calibrar mejor la dificultad relativa. A "
+                "igualdad de repeticiones en dominadas/fondos, alguien más pesado mueve más masa "
+                "(es más fuerte de lo que parece); ajusta ligeramente start_reps y el ritmo de "
+                "progresión con esto en cuenta, sin exagerar el efecto. El sexo y la altura son "
+                "solo referencia estadística de estándares de fuerza típicos — si hay conflicto, "
+                "manda siempre el nivel de partida que ya ha dado el usuario arriba, nunca esto."
+            )
+        if max_load_kg is not None:
+            parts.append(
+                f"Peso máximo de lastre disponible: {max_load_kg} kg. En cualquier ejercicio con "
+                "progresión 'double', el goal_weight_kg NUNCA puede superar "
+                f"start_weight_kg + {max_load_kg} — no hay forma de cargar más que eso en casa."
+                + (
+                    " Con 0 kg disponibles, no uses progresión 'double' en ningún ejercicio — usa "
+                    "'reps' en su lugar, porque no hay manera de añadir peso."
+                    if max_load_kg <= 0 else ""
+                )
+            )
+        else:
+            parts.append(
+                f"Peso máximo de lastre disponible: no especificado — asume un máximo realista de "
+                f"~{_DEFAULT_MAX_LOAD_KG} kg añadidos (lo habitual en un chaleco lastrado "
+                "doméstico) para dominadas/fondos con peso, salvo que el usuario diga "
+                "explícitamente en su texto libre que tiene más (un cinturón de dominadas con "
+                "discos, por ejemplo, sí puede superar eso)."
+            )
         if no_bar_equipment:
             parts.append(
                 "Equipamiento: el usuario NO tiene barra de dominadas ni paralelas en casa — el "
@@ -409,7 +458,8 @@ def _call_gemini(prompt_text, schema):
 def generate_plan_draft(
     *, prompt, plan_type, weeks, sessions_per_week,
     fitness_level="", focus_area="", no_bar_equipment=False,
-    session_minutes=None, limitations="",
+    session_minutes=None, limitations="", body_weight_kg=None, height_cm=None,
+    sex="", max_load_kg=None,
 ):
     """
     Llama a Gemini y devuelve el dict crudo `{"plan": {...}, "items": [...]}`
@@ -418,11 +468,12 @@ def generate_plan_draft(
     `_apply_plan_fields` / `_apply_plan_item_fields`.
 
     `fitness_level` / `focus_area` / `no_bar_equipment` / `session_minutes` /
-    `limitations` son el cuestionario estructurado que rellena el usuario
-    antes de generar (ver plan_ai_form.html / plan-view.js): se le dan a la
-    IA como hechos concretos en vez de esperar que los adivine de una frase
-    libre — que es justo lo que producía planes de mínimos ("2 series de
-    10") cuando el usuario escribía algo tan vago como "ponerme en forma".
+    `limitations` / `body_weight_kg` / `height_cm` / `sex` / `max_load_kg` son
+    el cuestionario estructurado que rellena el usuario antes de generar (ver
+    plan_ai_form.html / plan-view.js): se le dan a la IA como hechos
+    concretos en vez de esperar que los adivine de una frase libre — que es
+    justo lo que producía planes de mínimos ("2 series de 10") cuando el
+    usuario escribía algo tan vago como "ponerme en forma".
     """
     user_prompt = (prompt or "").strip()[:MAX_PROMPT_CHARS]
     # Estudio y General no tienen cuestionario estructurado — la frase libre
@@ -458,7 +509,8 @@ def generate_plan_draft(
     prompt_text = _build_prompt(
         user_prompt, plan_type, weeks, sessions_per_week, exercises=exercises,
         fitness_level=fitness_level, focus_area=focus_area, no_bar_equipment=no_bar_equipment,
-        session_minutes=session_minutes, limitations=limitations,
+        session_minutes=session_minutes, limitations=limitations, body_weight_kg=body_weight_kg,
+        height_cm=height_cm, sex=sex, max_load_kg=max_load_kg,
     )
     schema = _response_schema(plan_type, focus_area=focus_area)
     draft = _call_gemini(prompt_text, schema)
@@ -497,7 +549,7 @@ def _sanitize_sets(item_fields):
     item_fields["goal_sets"] = goal_sets
 
 
-def apply_pacing(item_fields, *, exercise, sessions_per_week):
+def apply_pacing(item_fields, *, exercise, sessions_per_week, max_load_kg=None):
     """
     Traduce `weeks_to_goal` (lo que decidió la IA) a `reps_increment` /
     `weight_increment_kg` / `distance_increment_km` / `pace_decrement_seconds`
@@ -505,6 +557,12 @@ def apply_pacing(item_fields, *, exercise, sessions_per_week):
     calculadora del formulario. También sanea combinaciones que la IA
     podría proponer mal (progresión 'double' en un ejercicio cronometrado,
     progresión que no sea 'distance' en running).
+
+    `max_load_kg` es el tope de peso AÑADIDO (chaleco lastrado, cinturón
+    con discos...) que el usuario tiene disponible de verdad — sin esto
+    por defecto se asume ~20 kg (`_DEFAULT_MAX_LOAD_KG`), lo habitual en
+    un chaleco lastrado doméstico, para no proponer un `goal_weight_kg`
+    que nadie puede cargar en casa.
 
     Muta y devuelve `item_fields` (el dict que luego se pasa tal cual a
     `_apply_plan_item_fields`).
@@ -537,11 +595,30 @@ def apply_pacing(item_fields, *, exercise, sessions_per_week):
     steps = _steps_for_weeks(weeks_to_goal, sessions_per_week, sessions_per_step)
 
     if prog == PlanItem.PROG_DOUBLE:
-        low = int(item_fields.get("rep_range_low") or 6)
+        # El suelo del ciclo de doble progresión tiene que ser de dónde
+        # parte el usuario de verdad, no un valor inventado — si no, el
+        # primer escalón del plan le manda "bajar" a un número que no
+        # tiene nada que ver con lo que puede hacer ya el primer día (el
+        # bug que reportó Alex: pasar de 3x12 a 4x6 sin sentido). La IA
+        # nunca manda `rep_range_low` (no está en el schema — no hace
+        # falta que la IA haga esta cuenta), así que se deriva de
+        # `start_reps`, que sí manda siempre.
+        low = int(item_fields.get("rep_range_low") or item_fields.get("start_reps") or 6)
         top = int(item_fields.get("goal_reps") or (low + 6))
+        if top <= low:
+            top = low + 6  # techo inválido propuesto por la IA — evita un rango de 0 o negativo
         span = max(1, top - low + 1)
         cycles = max(1, round(steps / span))
-        d_weight = float(item_fields.get("goal_weight_kg") or 0) - float(item_fields.get("start_weight_kg") or 0)
+
+        # Tope de peso añadido realista: la mayoría de chalecos lastrados
+        # domésticos llegan hasta ~20 kg — sin esto la IA puede proponer
+        # un goal_weight_kg que nadie tiene forma de cargar en casa.
+        start_weight = float(item_fields.get("start_weight_kg") or 0)
+        cap = start_weight + (max_load_kg if max_load_kg is not None else _DEFAULT_MAX_LOAD_KG)
+        goal_weight = min(float(item_fields.get("goal_weight_kg") or 0), cap)
+        item_fields["goal_weight_kg"] = goal_weight
+
+        d_weight = goal_weight - start_weight
         item_fields["weight_increment_kg"] = round(max(0.5, d_weight / cycles), 1) if d_weight > 0 else 2.5
         item_fields["rep_range_low"] = low
         item_fields["goal_reps"] = top

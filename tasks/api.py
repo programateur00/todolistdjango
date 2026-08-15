@@ -1261,7 +1261,12 @@ def _apply_plan_item_fields(item, plan, data):
     item.sessions_per_step = _int("sessions_per_step", 2) or 1
     item.reps_increment = _int("reps_increment", 1) or 1
     item.weight_increment_kg = _float("weight_increment_kg", 2.5) or 2.5
-    item.rep_range_low = _int("rep_range_low", 6) or 1
+    # Por defecto, el suelo del ciclo de doble progresión es de dónde
+    # parte el usuario (start_reps) — no un 6 fijo sin relación con nada.
+    # Sin esto, un progresión 'double' sin `rep_range_low` explícito podía
+    # mandar "bajar" en el primer escalón a un número que no tenía nada
+    # que ver con lo que la persona ya podía hacer el primer día.
+    item.rep_range_low = _int("rep_range_low", item.start_reps) or 1
     item.deload_after_failures = _int("deload_after_failures", 3)
     if "is_headline" in data:
         item.is_headline = bool(data["is_headline"])
@@ -1318,7 +1323,8 @@ def plan_item_detail(request, uuid, item_id):
 def build_plan_draft(
     *, user, plan_type, weeks, custom_days, prompt,
     fitness_level=None, focus_area=None, no_bar_equipment=None,
-    session_minutes=None, limitations=None,
+    session_minutes=None, limitations=None, body_weight_kg=None, height_cm=None,
+    sex=None, max_load_kg=None,
 ):
     """
     El núcleo de "generar plan con IA", compartido por el endpoint JSON
@@ -1327,10 +1333,12 @@ def build_plan_draft(
     de donde venga, en vez de mantener la lógica duplicada en dos sitios.
 
     `fitness_level` / `focus_area` / `no_bar_equipment` / `session_minutes` /
-    `limitations` son el cuestionario estructurado de Deporte (nivel, foco
-    corporal, equipamiento, minutos por sesión, lesiones) — se validan aquí
-    contra los choices de `ai` y se sanean antes de pasarlos a la IA, igual
-    que el resto de campos de este formulario. Ignorados para Estudio/General.
+    `limitations` / `body_weight_kg` / `height_cm` / `sex` / `max_load_kg` son
+    el cuestionario estructurado de Deporte (nivel, foco corporal,
+    equipamiento, minutos por sesión, lesiones, datos físicos) — se validan
+    aquí contra los choices de `ai` y se sanean antes de pasarlos a la IA,
+    igual que el resto de campos de este formulario. Ignorados para
+    Estudio/General.
 
     No guarda nada: construye Plan/PlanItem SIN GUARDAR y les aplica
     `_apply_plan_fields` / `_apply_plan_item_fields` — las mismas que usa
@@ -1347,6 +1355,9 @@ def build_plan_draft(
     valid_focus = {k for k, _ in ai.FOCUS_AREA_CHOICES}
     focus_area = focus_area if focus_area in valid_focus else ""
 
+    valid_sexes = {k for k, _ in ai.BODY_SEX_CHOICES}
+    sex = sex if sex in valid_sexes else ""
+
     if isinstance(no_bar_equipment, bool):
         no_bar_equipment = no_bar_equipment
     else:
@@ -1360,6 +1371,30 @@ def build_plan_draft(
         session_minutes = None
 
     limitations = (limitations or "").strip()[:200]
+
+    # Datos físicos — opcionales, con límites amplios pero sanos para no
+    # dejar pasar basura (un 0 o un texto no numérico se descartan en vez
+    # de fallar, igual que el resto de este formulario).
+    try:
+        body_weight_kg = float(body_weight_kg) if body_weight_kg not in (None, "") else None
+        if body_weight_kg is not None:
+            body_weight_kg = max(20.0, min(300.0, body_weight_kg))
+    except (TypeError, ValueError):
+        body_weight_kg = None
+
+    try:
+        height_cm = int(height_cm) if height_cm not in (None, "") else None
+        if height_cm is not None:
+            height_cm = max(100, min(250, height_cm))
+    except (TypeError, ValueError):
+        height_cm = None
+
+    try:
+        max_load_kg = float(max_load_kg) if max_load_kg not in (None, "") else None
+        if max_load_kg is not None:
+            max_load_kg = max(0.0, min(100.0, max_load_kg))
+    except (TypeError, ValueError):
+        max_load_kg = None
 
     try:
         weeks = max(1, int(weeks or 12))
@@ -1388,7 +1423,8 @@ def build_plan_draft(
             weeks=weeks, sessions_per_week=sessions_per_week,
             fitness_level=fitness_level, focus_area=focus_area,
             no_bar_equipment=no_bar_equipment, session_minutes=session_minutes,
-            limitations=limitations,
+            limitations=limitations, body_weight_kg=body_weight_kg, height_cm=height_cm,
+            sex=sex, max_load_kg=max_load_kg,
         )
     except ai.PlanAIError as e:
         return None, str(e)
@@ -1423,7 +1459,10 @@ def build_plan_draft(
                 item_fields.pop("exercise_slug", None)
                 item_fields["exercise"] = exercise.slug if exercise else ""
                 item_fields["sport_mode"] = PlanItem.SPORT_MODE_CIRCUIT
-                ai.apply_pacing(item_fields, exercise=exercise, sessions_per_week=sessions_per_week)
+                ai.apply_pacing(
+                    item_fields, exercise=exercise, sessions_per_week=sessions_per_week,
+                    max_load_kg=max_load_kg,
+                )
 
             draft_item = PlanItem(plan=draft_plan)
             item_error = _apply_plan_item_fields(draft_item, draft_plan, item_fields)
@@ -1636,7 +1675,8 @@ def plan_generate(request):
         custom_days=data.get("custom_days"), prompt=data.get("prompt"),
         fitness_level=data.get("fitness_level"), focus_area=data.get("focus_area"),
         no_bar_equipment=data.get("no_bar_equipment"), session_minutes=data.get("session_minutes"),
-        limitations=data.get("limitations"),
+        limitations=data.get("limitations"), body_weight_kg=data.get("body_weight_kg"),
+        height_cm=data.get("height_cm"), sex=data.get("sex"), max_load_kg=data.get("max_load_kg"),
     )
     if error:
         return JsonResponse({"ok": False, "error": error}, status=502)

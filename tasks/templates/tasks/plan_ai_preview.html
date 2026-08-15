@@ -223,6 +223,10 @@
     {% if no_bar_equipment %}<input type="hidden" name="no_bar_equipment" value="on">{% endif %}
     <input type="hidden" name="session_minutes" value="{{ session_minutes }}">
     <input type="hidden" name="limitations" value="{{ limitations }}">
+    <input type="hidden" name="body_weight_kg" value="{{ body_weight_kg }}">
+    <input type="hidden" name="height_cm" value="{{ height_cm }}">
+    <input type="hidden" name="sex" value="{{ sex }}">
+    <input type="hidden" name="max_load_kg" value="{{ max_load_kg }}">
     {% if draft.study_subtype == 'language' %}
     <input type="hidden" name="study_subtype" value="{{ draft.study_subtype }}">
     <input type="hidden" name="language_name" value="{{ draft.plan_fields.language_name }}">
