@@ -218,6 +218,11 @@
     <input type="hidden" name="weeks" value="{{ draft.plan_fields.weeks }}">
     {% for d in draft.plan_fields.custom_days %}<input type="hidden" name="custom_days" value="{{ d }}">{% endfor %}
     <input type="hidden" name="prompt" value="{{ prompt }}">
+    <input type="hidden" name="fitness_level" value="{{ fitness_level }}">
+    <input type="hidden" name="focus_area" value="{{ focus_area }}">
+    {% if no_bar_equipment %}<input type="hidden" name="no_bar_equipment" value="on">{% endif %}
+    <input type="hidden" name="session_minutes" value="{{ session_minutes }}">
+    <input type="hidden" name="limitations" value="{{ limitations }}">
     {% if draft.study_subtype == 'language' %}
     <input type="hidden" name="study_subtype" value="{{ draft.study_subtype }}">
     <input type="hidden" name="language_name" value="{{ draft.plan_fields.language_name }}">

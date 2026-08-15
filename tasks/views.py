@@ -12,7 +12,7 @@ import uuid as _uuid
 
 from django.utils import timezone
 
-from . import api
+from . import ai, api
 from .models import (
     Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, SavedVideo, Task, TimerSession, WorkoutSession,
 )
@@ -1070,6 +1070,17 @@ def plan_ai_form(request):
         known_languages = request.POST.get("known_languages", "").strip()
         quiz_every_n_videos = request.POST.get("quiz_every_n_videos", "").strip()
 
+        # Cuestionario estructurado de Deporte — nivel, foco corporal,
+        # equipamiento, minutos por sesión, lesiones. Se le pasan a la IA
+        # como hechos explícitos en vez de esperar que los adivine de la
+        # frase libre (ver docstring de ai.generate_plan_draft): es lo que
+        # evita que "ponerme en forma" a secas salga como un plan de mínimos.
+        fitness_level = request.POST.get("fitness_level", "")
+        focus_area = request.POST.get("focus_area", "")
+        no_bar_equipment = request.POST.get("no_bar_equipment") == "on"
+        session_minutes = request.POST.get("session_minutes", "").strip()
+        limitations = request.POST.get("limitations", "").strip()
+
         # Estudio · Idiomas no describe el plan en una frase libre como
         # los demás — la IA elige y ordena entre el catálogo curado
         # (CoursePlaylist) para el idioma y los niveles pedidos, nunca
@@ -1087,6 +1098,9 @@ def plan_ai_form(request):
             draft, error = api.build_plan_draft(
                 user=get_current_user(), plan_type=plan_type, weeks=weeks,
                 custom_days=custom_days, prompt=prompt_text,
+                fitness_level=fitness_level, focus_area=focus_area,
+                no_bar_equipment=no_bar_equipment, session_minutes=session_minutes,
+                limitations=limitations,
             )
         if error:
             messages.error(request, error)
@@ -1094,6 +1108,8 @@ def plan_ai_form(request):
                 "plan_type_choices": Plan.PLAN_TYPE_CHOICES,
                 "study_subtype_choices": Plan.STUDY_SUBTYPE_CHOICES,
                 "cefr_level_choices": Plan.CEFR_LEVEL_CHOICES,
+                "fitness_level_choices": ai.FITNESS_LEVEL_CHOICES,
+                "focus_area_choices": ai.FOCUS_AREA_CHOICES,
                 "weekdays": Task.WEEKDAYS,
                 "selected_days": custom_days or ["0", "2", "4"],
                 "prompt": prompt_text,
@@ -1105,10 +1121,20 @@ def plan_ai_form(request):
                 "level_to": level_to,
                 "known_languages": known_languages,
                 "quiz_every_n_videos": quiz_every_n_videos,
+                "fitness_level": fitness_level,
+                "focus_area": focus_area,
+                "no_bar_equipment": no_bar_equipment,
+                "session_minutes": session_minutes,
+                "limitations": limitations,
             })
         request.session["plan_ai_draft"] = draft
         request.session["plan_ai_prompt"] = prompt_text
-        return render(request, "tasks/plan_ai_preview.html", {"draft": draft, "prompt": prompt_text})
+        return render(request, "tasks/plan_ai_preview.html", {
+            "draft": draft, "prompt": prompt_text,
+            "fitness_level": fitness_level, "focus_area": focus_area,
+            "no_bar_equipment": no_bar_equipment, "session_minutes": session_minutes,
+            "limitations": limitations,
+        })
 
     if request.method == "POST" and step == "confirmar":
         draft = request.session.get("plan_ai_draft")
@@ -1199,6 +1225,8 @@ def plan_ai_form(request):
         "plan_type_choices": Plan.PLAN_TYPE_CHOICES,
         "study_subtype_choices": Plan.STUDY_SUBTYPE_CHOICES,
         "cefr_level_choices": Plan.CEFR_LEVEL_CHOICES,
+        "fitness_level_choices": ai.FITNESS_LEVEL_CHOICES,
+        "focus_area_choices": ai.FOCUS_AREA_CHOICES,
         "weekdays": Task.WEEKDAYS,
         "selected_days": ["0", "2", "4"],
         "prompt": request.session.get("plan_ai_prompt", ""),
@@ -1210,6 +1238,11 @@ def plan_ai_form(request):
         "level_to": "",
         "known_languages": "",
         "quiz_every_n_videos": "",
+        "fitness_level": "",
+        "focus_area": "",
+        "no_bar_equipment": False,
+        "session_minutes": "",
+        "limitations": "",
     })
 
 

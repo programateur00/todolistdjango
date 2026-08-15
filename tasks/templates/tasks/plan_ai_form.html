@@ -103,6 +103,58 @@
         </label>
     </div>
 
+    <div id="sport-fields">
+        <fieldset class="field" id="fitness-level-field">
+            <legend class="field__label">Nivel físico de partida</legend>
+            <div class="repeat-options">
+                {% for value, label in fitness_level_choices %}
+                <label class="repeat-option">
+                    <input type="radio" name="fitness_level" value="{{ value }}" class="fitness-level-radio"
+                        {% if fitness_level == value %}checked{% endif %}>
+                    <span>{{ label }}</span>
+                </label>
+                {% endfor %}
+            </div>
+            <span class="field__hint">
+                Sin esto, la IA tira a lo mínimo seguro para no pasarse — con tu nivel real puede
+                empezar (y exigir) mucho más.
+            </span>
+        </fieldset>
+
+        <fieldset class="field" id="focus-area-field">
+            <legend class="field__label">Foco corporal</legend>
+            <div class="repeat-options">
+                {% for value, label in focus_area_choices %}
+                <label class="repeat-option">
+                    <input type="radio" name="focus_area" value="{{ value }}"
+                        {% if focus_area == value %}checked{% endif %}>
+                    <span>{{ label }}</span>
+                </label>
+                {% endfor %}
+            </div>
+            <span class="field__hint">Tren superior, tren inferior/core, running, o cuerpo completo.</span>
+        </fieldset>
+
+        <label class="field field--inline">
+            <input type="checkbox" name="no_bar_equipment" {% if no_bar_equipment %}checked{% endif %}>
+            <span class="field__label">No tengo barra de dominadas ni paralelas en casa</span>
+        </label>
+
+        <div class="field-row">
+            <label class="field">
+                <span class="field__label">Minutos por sesión (opcional)</span>
+                <input type="number" name="session_minutes" min="5" max="180" value="{{ session_minutes }}"
+                    placeholder="Ej: 30">
+            </label>
+        </div>
+
+        <label class="field">
+            <span class="field__label">Lesión o limitación a tener en cuenta (opcional)</span>
+            <input type="text" name="limitations" maxlength="200" value="{{ limitations }}"
+                placeholder="Ej: molestia en la rodilla derecha">
+        </label>
+    </div>
+
     <label class="field" id="prompt-field">
         <span class="field__label" id="prompt-label">¿Qué quieres conseguir?</span>
         <textarea name="prompt" rows="4" maxlength="800" id="prompt-textarea"
@@ -146,6 +198,8 @@
     var promptHint = document.getElementById("prompt-hint");
     var planTypeRadios = document.querySelectorAll(".plan-type-radio");
     var studySubtypeRadios = document.querySelectorAll(".study-subtype-radio");
+    var sportFields = document.getElementById("sport-fields");
+    var fitnessLevelRadios = document.querySelectorAll(".fitness-level-radio");
 
     function selectedValue(radios) {
         for (var i = 0; i < radios.length; i++) {
@@ -155,6 +209,7 @@
     }
 
     function refresh() {
+        var isSport = selectedValue(planTypeRadios) === "sport";
         var isStudy = selectedValue(planTypeRadios) === "study";
         var isLanguage = isStudy && selectedValue(studySubtypeRadios) === "language";
 
@@ -166,6 +221,16 @@
         languageFields.style.display = isLanguage ? "block" : "none";
         for (var i = 0; i < languageInputs.length; i++) {
             languageInputs[i].disabled = !isLanguage;
+        }
+
+        // El cuestionario de nivel/foco/equipamiento solo tiene sentido
+        // para Deporte — es lo que evita que la IA improvise esos datos
+        // cuando el usuario solo escribe una frase corta como "ponerme en
+        // forma". Se exige nivel y foco (radios sin opción en blanco) para
+        // forzar una respuesta concreta en vez de dejarlo a la suerte.
+        sportFields.style.display = isSport ? "block" : "none";
+        for (var k = 0; k < fitnessLevelRadios.length; k++) {
+            fitnessLevelRadios[k].required = isSport;
         }
 
         if (isLanguage) {

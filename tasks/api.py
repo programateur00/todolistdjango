@@ -1315,12 +1315,22 @@ def plan_item_detail(request, uuid, item_id):
     return JsonResponse({"ok": True, "plan": plan_json(plan, detail=True)})
 
 
-def build_plan_draft(*, user, plan_type, weeks, custom_days, prompt):
+def build_plan_draft(
+    *, user, plan_type, weeks, custom_days, prompt,
+    fitness_level=None, focus_area=None, no_bar_equipment=None,
+    session_minutes=None, limitations=None,
+):
     """
     El núcleo de "generar plan con IA", compartido por el endpoint JSON
     (`plan_generate`, para la app móvil) y la vista web (`views.plan_ai_form`)
     — así un plan de IA se construye y se valida exactamente igual venga
     de donde venga, en vez de mantener la lógica duplicada en dos sitios.
+
+    `fitness_level` / `focus_area` / `no_bar_equipment` / `session_minutes` /
+    `limitations` son el cuestionario estructurado de Deporte (nivel, foco
+    corporal, equipamiento, minutos por sesión, lesiones) — se validan aquí
+    contra los choices de `ai` y se sanean antes de pasarlos a la IA, igual
+    que el resto de campos de este formulario. Ignorados para Estudio/General.
 
     No guarda nada: construye Plan/PlanItem SIN GUARDAR y les aplica
     `_apply_plan_fields` / `_apply_plan_item_fields` — las mismas que usa
@@ -1330,6 +1340,26 @@ def build_plan_draft(*, user, plan_type, weeks, custom_days, prompt):
     """
     valid_types = {k for k, _ in Plan.PLAN_TYPE_CHOICES}
     plan_type = plan_type if plan_type in valid_types else Plan.PLAN_TYPE_SPORT
+
+    valid_levels = {k for k, _ in ai.FITNESS_LEVEL_CHOICES}
+    fitness_level = fitness_level if fitness_level in valid_levels else ""
+
+    valid_focus = {k for k, _ in ai.FOCUS_AREA_CHOICES}
+    focus_area = focus_area if focus_area in valid_focus else ""
+
+    if isinstance(no_bar_equipment, bool):
+        no_bar_equipment = no_bar_equipment
+    else:
+        no_bar_equipment = str(no_bar_equipment or "").strip().lower() in ("1", "true", "on", "yes", "si", "sí")
+
+    try:
+        session_minutes = int(session_minutes) if session_minutes not in (None, "") else None
+        if session_minutes is not None:
+            session_minutes = max(5, min(180, session_minutes))
+    except (TypeError, ValueError):
+        session_minutes = None
+
+    limitations = (limitations or "").strip()[:200]
 
     try:
         weeks = max(1, int(weeks or 12))
@@ -1356,6 +1386,9 @@ def build_plan_draft(*, user, plan_type, weeks, custom_days, prompt):
         raw = ai.generate_plan_draft(
             prompt=prompt or "", plan_type=plan_type,
             weeks=weeks, sessions_per_week=sessions_per_week,
+            fitness_level=fitness_level, focus_area=focus_area,
+            no_bar_equipment=no_bar_equipment, session_minutes=session_minutes,
+            limitations=limitations,
         )
     except ai.PlanAIError as e:
         return None, str(e)
@@ -1601,6 +1634,9 @@ def plan_generate(request):
     draft, error = build_plan_draft(
         user=_user(), plan_type=data.get("plan_type"), weeks=data.get("weeks"),
         custom_days=data.get("custom_days"), prompt=data.get("prompt"),
+        fitness_level=data.get("fitness_level"), focus_area=data.get("focus_area"),
+        no_bar_equipment=data.get("no_bar_equipment"), session_minutes=data.get("session_minutes"),
+        limitations=data.get("limitations"),
     )
     if error:
         return JsonResponse({"ok": False, "error": error}, status=502)

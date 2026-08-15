@@ -33,7 +33,7 @@ import urllib.request
 
 from django.conf import settings
 
-from .models import CoursePlaylist, Exercise, Plan, PlanItem
+from .models import CoursePlaylist, Exercise, Plan, PlanItem, Task
 from .youtube_search import YouTubeSearchError, get_playlists_details
 
 
@@ -47,11 +47,112 @@ MAX_PROMPT_CHARS = 800
 DEFAULT_TIMEOUT = 30
 
 
+# ------------------------------------------------ cuestionario estructurado
+#
+# Antes de esto, lo único que decidía el contenido del plan era una frase
+# libre ("ponerme en forma") — y ante la ambigüedad, la IA por defecto
+# tiraba a lo mínimo seguro (2 series de 10, un par de ejercicios). En vez
+# de confiar en que la IA adivine nivel/foco/equipamiento de una frase
+# corta, se le piden como campos explícitos al usuario (ver
+# plan_ai_form.html / plan-view.js) y se le dan a la IA como hechos, no
+# como algo que tenga que inferir.
+
+# Ejercicios que necesitan barra de dominadas o paralelas — es el único
+# "equipamiento" que de verdad cambia qué se puede proponer, porque es lo
+# único que falta en muchas casas. El resto del catálogo (core, pierna,
+# running) es peso corporal / aire libre.
+_NEEDS_BAR_EQUIPMENT = {
+    "pullup", "wide-pullup", "chinup", "weighted-pullup", "jumping-pullup",
+    "dips", "weighted-dips",
+}
+
+FITNESS_LEVEL_CHOICES = [
+    ("beginner", "Principiante"),
+    ("intermediate", "Intermedio"),
+    ("advanced", "Avanzado"),
+]
+
+_LEVEL_BRIEF = {
+    "beginner": (
+        "Nivel de partida: PRINCIPIANTE — no entrena de forma regular todavía, o lleva muy poco "
+        "tiempo. El punto de partida tiene que ser algo que pueda cumplir desde el primer día, "
+        "pero eso no significa quedarse ahí para siempre: tiene que haber una progresión real y "
+        "visible a lo largo de las semanas, no un techo bajo mantenido de principio a fin."
+    ),
+    "intermediate": (
+        "Nivel de partida: INTERMEDIO — entrena de forma más o menos regular desde hace meses y "
+        "ya domina la técnica básica de los movimientos. Empieza más arriba que a un principiante "
+        "absoluto — no tiene sentido arrancarle en el mismo sitio que a alguien que no ha hecho "
+        "nunca el ejercicio."
+    ),
+    "advanced": (
+        "Nivel de partida: AVANZADO — entrena con regularidad desde hace años y ya tiene una base "
+        "de fuerza sólida. Empieza alto de verdad (series, repeticiones y/o peso ya exigentes) y "
+        "plantea una meta ambiciosa — un plan flojo para alguien con este nivel es peor que no dar "
+        "plan."
+    ),
+}
+_LEVEL_UNKNOWN_BRIEF = (
+    "Nivel de partida: el usuario no lo ha especificado. Búscalo en sus propias palabras (\"ahora "
+    "mismo hago 2 dominadas\", \"llevo meses sin entrenar\"...) y ajústate a eso. Si tampoco hay "
+    "ninguna pista, parte de un nivel intermedio-bajo razonable — NUNCA del mínimo absoluto por "
+    "defecto; un entrenador de verdad nunca da un plan de mínimos solo porque no le han dado todos "
+    "los datos, hace la mejor estimación razonable."
+)
+
+FOCUS_AREA_CHOICES = [
+    ("", "Cuerpo completo"),
+    (Task.SUBCATEGORY_UPPER_BODY, "Tren superior"),
+    (Task.SUBCATEGORY_LOWER_BODY, "Tren inferior / core"),
+    (Task.SUBCATEGORY_RUNNING, "Running / cardio"),
+]
+
+_FOCUS_AREA_BRIEF = {
+    Task.SUBCATEGORY_UPPER_BODY: (
+        "Foco elegido por el usuario: TREN SUPERIOR. Al menos la mitad de los ejercicios elegidos "
+        "tienen que ser de tren superior (marcados «tren superior» en el catálogo), usando "
+        "distintos patrones de movimiento sin repetir variantes del mismo ejercicio. Si el "
+        "catálogo de tren superior no da para llegar solo al mínimo de ejercicios pedido más "
+        "abajo, completa con ejercicios de core (marcados «tren inferior/core») que sostengan el "
+        "trabajo de tren superior — nunca con pierna suelta ni running."
+    ),
+    Task.SUBCATEGORY_LOWER_BODY: (
+        "Foco elegido por el usuario: TREN INFERIOR / CORE. Todo el plan gira en torno a esa zona "
+        "(marcada «tren inferior/core» en el catálogo) — el catálogo da de sobra para cubrir el "
+        "mínimo de ejercicios pedido sin salir de ahí. Nada de tren superior ni running salvo que "
+        "el usuario lo haya pedido también en su frase."
+    ),
+    Task.SUBCATEGORY_RUNNING: (
+        "Foco elegido por el usuario: RUNNING. El ejercicio 'running' es OBLIGATORIAMENTE el "
+        "único is_headline=true y el centro absoluto del plan (progresión de distancia y ritmo, "
+        "nunca de series/repeticiones). Puedes añadir como mucho 1-2 ejercicios de apoyo (core o "
+        "pierna) si de verdad ayudan a correr mejor y a prevenir lesiones — nunca conviertas esto "
+        "en un plan de fuerza con el running de relleno, y nunca superes esos 1-2 de apoyo."
+    ),
+}
+_FOCUS_AREA_FULL_BODY_BRIEF = (
+    "Foco elegido por el usuario: CUERPO COMPLETO — sin restricción de zona. Si el objetivo es "
+    "genérico (\"ponerme en forma\"), reparte entre empuje (fondos), tracción (dominadas), pierna "
+    "(sentadillas) y core (plancha/abdominales): un cuerpo completo de verdad, no 2-3 ejercicios "
+    "sueltos. Añade running solo si el objetivo del usuario tiene algo que ver con correr o "
+    "resistencia cardio."
+)
+
+
 # --------------------------------------------------------------- prompt
 
-def _exercise_catalog_lines():
+def _catalog_exercises(exclude_slugs=None):
+    """Catálogo activo, sin los `exclude_slugs` (p. ej. porque el usuario no
+    tiene el equipamiento que necesitan). Devuelve instancias de Exercise,
+    no texto — el texto para el prompt lo arma `_exercise_catalog_lines`."""
+    exclude_slugs = exclude_slugs or set()
+    qs = Exercise.objects.filter(is_active=True).order_by("order", "name")
+    return [e for e in qs if e.slug not in exclude_slugs]
+
+
+def _exercise_catalog_lines(exercises):
     lines = []
-    for e in Exercise.objects.filter(is_active=True).order_by("order", "name"):
+    for e in exercises:
         if e.mode == Exercise.MODE_DISTANCE:
             medida = "se mide en distancia (km) y ritmo (min/km) — SIEMPRE progresión 'distance'"
         elif e.mode == Exercise.MODE_TIMED:
@@ -62,7 +163,7 @@ def _exercise_catalog_lines():
             e.body_area, e.body_area or "general"
         )
         lines.append(f"- slug=\"{e.slug}\" · {e.name} · {area} · {medida}")
-    return "\n".join(lines)
+    return "\n".join(lines) if lines else "(ninguno disponible con los filtros actuales)"
 
 
 _PLAN_TYPE_BRIEF = {
@@ -86,8 +187,11 @@ _PLAN_TYPE_BRIEF = {
 }
 
 
-def _build_prompt(user_prompt, plan_type, weeks, sessions_per_week):
-    catalog = _exercise_catalog_lines()
+def _build_prompt(
+    user_prompt, plan_type, weeks, sessions_per_week, *,
+    exercises=None, fitness_level="", focus_area="", no_bar_equipment=False,
+    session_minutes=None, limitations="",
+):
     brief = _PLAN_TYPE_BRIEF.get(plan_type, _PLAN_TYPE_BRIEF["sport"])
     parts = [
         "Eres el mejor entrenador personal/coach posible, diseñando planes de progresión "
@@ -95,22 +199,43 @@ def _build_prompt(user_prompt, plan_type, weeks, sessions_per_week):
         "un profesional de verdad: sobrecarga progresiva de manual (series Y repeticiones "
         "suben con el tiempo, no solo repeticiones sin techo hasta el infinito), variedad real "
         "de patrones de movimiento, y objetivos que de verdad llevan al cliente a su meta — "
-        "nada de rellenar con lo primero que se te ocurra. El usuario ya ha decidido: el TIPO "
-        "de plan, cuántas SEMANAS va a durar, y CUÁNTOS DÍAS a la semana entrena "
-        f"({sessions_per_week} días/semana). Tu trabajo es traducir su objetivo en un plan "
-        "concreto y medible — nada de vaguedades.",
+        "nada de rellenar con lo primero que se te ocurra, y nunca un plan flojo o genérico solo "
+        "porque el usuario ha escrito poco en su frase (para eso están los campos de más abajo). "
+        "El usuario ya ha decidido: el TIPO de plan, cuántas SEMANAS va a durar, y CUÁNTOS DÍAS a "
+        f"la semana entrena ({sessions_per_week} días/semana). Tu trabajo es traducir su objetivo "
+        "en un plan concreto y medible — nada de vaguedades.",
         "",
         f"Tipo de plan: {brief}",
         "",
         f"Duración: {weeks} semanas.",
         "",
-        f"Lo que pide el usuario, en sus palabras:\n\"{user_prompt}\"",
+        f"Lo que pide el usuario, en sus propias palabras:\n\"{user_prompt}\"",
     ]
     if plan_type == "sport":
+        parts += ["", _LEVEL_BRIEF.get(fitness_level, _LEVEL_UNKNOWN_BRIEF)]
+        parts += ["", _FOCUS_AREA_BRIEF.get(focus_area, _FOCUS_AREA_FULL_BODY_BRIEF)]
+        if no_bar_equipment:
+            parts.append(
+                "Equipamiento: el usuario NO tiene barra de dominadas ni paralelas en casa — el "
+                "catálogo de abajo ya viene sin esos ejercicios, no los eches de menos ni los "
+                "sugieras en las notas."
+            )
+        if session_minutes:
+            parts.append(
+                f"Tiempo disponible: cada sesión tiene que caber en unos {session_minutes} "
+                "minutos — ajusta cuántos ejercicios y series metes para que el plan sea realista "
+                "en ese tiempo, no lo sobrecargues pensando que hay tiempo ilimitado."
+            )
+        if limitations:
+            parts.append(
+                f"Lesión o limitación a tener en cuenta: \"{limitations}\" — adapta o evita "
+                "cualquier ejercicio del catálogo que pueda agravarla, y menciona en las notas qué "
+                "has tenido en cuenta por esto."
+            )
         parts += [
             "",
             "Catálogo de ejercicios disponibles (usa SOLO estos slugs, no inventes otros):",
-            catalog,
+            _exercise_catalog_lines(exercises or []),
             "",
             "Reglas de progresión:",
             "- 'reps' (o 'seconds' si el ejercicio se mide en segundos): sube hasta un techo y se "
@@ -124,26 +249,23 @@ def _build_prompt(user_prompt, plan_type, weeks, sessions_per_week):
             "",
             "Sobrecarga progresiva DE VERDAD — esto es lo que distingue a un buen entrenador de uno "
             "vago: en 'reps' y 'double', start_sets y goal_sets TAMBIÉN tienen que subir con las "
-            "semanas, no solo las repeticiones o el peso. Empieza conservador (2-3 series, algo que "
-            "el cliente pueda cumplir desde el primer día) y sube hacia 3-5 según el nivel de partida "
-            "y las semanas disponibles. goal_sets nunca debe quedarse igual que start_sets salvo que "
-            "el usuario pida explícitamente mantener el volumen fijo — una progresión que solo mueve "
-            "las repeticiones para siempre no es realista (nadie llega a 40 dominadas seguidas).",
+            "semanas, no solo las repeticiones o el peso. El punto de partida (series y "
+            "repeticiones) tiene que encajar con el NIVEL DE PARTIDA de arriba — ni tan bajo que "
+            "sea insultante para alguien con experiencia, ni tan alto que sea imposible para quien "
+            "empieza. goal_sets nunca debe quedarse igual que start_sets salvo que el usuario pida "
+            "explícitamente mantener el volumen fijo — una progresión que solo mueve las "
+            "repeticiones para siempre no es realista (nadie llega a 40 dominadas seguidas).",
             "- 'weeks_to_goal' es en cuántas semanas quiere llegar al destino desde el punto de "
             "partida — sé realista (una progresión de fuerza razonable sube poco a poco).",
             "- Los puntos de partida deben ser alcanzables desde el primer día para alguien que "
             "empieza el plan ahora — mejor quedarse corto que proponer algo imposible.",
             "",
-            "Cobertura de ejercicios — elige entre 3 y 6 ejercicios DISTINTOS, nunca uno o dos "
-            "sueltos: un programa serio trabaja el cuerpo de forma equilibrada, no un solo "
-            "movimiento. Si el objetivo es general (\"ponerme en forma\"), reparte entre empuje "
-            "(fondos), tracción (dominadas), pierna (sentadillas) y core (plancha/abdominales) — un "
-            "cuerpo completo, no 2-3 ejercicios sueltos. Si el objetivo es específico de una zona "
-            "(ej. \"tren superior\"), cúbrela igualmente con 3-4 movimientos distintos de esa zona, "
-            "no uno solo. NO metas varias variantes del mismo movimiento a la vez (ej. nunca "
-            "dominadas + dominadas anchas + chin ups juntas en el mismo plan) salvo que el usuario "
-            "pida explícitamente trabajar variantes — eso es relleno, no variedad real. Y running "
-            "solo si el objetivo del usuario tiene algo que ver con correr o resistencia cardio.",
+            "Cobertura de ejercicios — elige entre 3 y 6 ejercicios DISTINTOS, salvo que el foco "
+            "sea running puro (ver arriba, donde el mínimo es distinto): un programa serio trabaja "
+            "el cuerpo de forma equilibrada, no un solo movimiento. NO metas varias variantes del "
+            "mismo movimiento a la vez (ej. nunca dominadas + dominadas anchas + chin ups juntas en "
+            "el mismo plan) salvo que el usuario pida explícitamente trabajar variantes — eso es "
+            "relleno, no variedad real.",
         ]
 
     return "\n".join(parts)
@@ -193,7 +315,7 @@ _ITEM_STUDY_SCHEMA = {
 }
 
 
-def _response_schema(plan_type):
+def _response_schema(plan_type, focus_area=""):
     plan_schema = {
         "type": "OBJECT",
         "properties": {
@@ -202,7 +324,14 @@ def _response_schema(plan_type):
         },
         "required": ["name", "notes"],
     }
-    if plan_type == "sport":
+    if plan_type == "sport" and focus_area == Task.SUBCATEGORY_RUNNING:
+        # Un plan de running puro no tiene 3-6 movimientos distintos entre
+        # los que elegir — el catálogo solo tiene UN ejercicio de running.
+        # El propio "running" es el plan; como mucho 1-2 de apoyo (ver
+        # _FOCUS_AREA_BRIEF). Pedir aquí el mismo mínimo de 3 forzaría a la
+        # IA a inflar el plan con relleno o a inventar ejercicios.
+        items_schema = {"type": "ARRAY", "items": _ITEM_SPORT_SCHEMA, "minItems": 1, "maxItems": 3}
+    elif plan_type == "sport":
         items_schema = {"type": "ARRAY", "items": _ITEM_SPORT_SCHEMA, "minItems": 3, "maxItems": 6}
     elif plan_type == "study":
         items_schema = {"type": "ARRAY", "items": _ITEM_STUDY_SCHEMA, "minItems": 1, "maxItems": 1}
@@ -269,19 +398,56 @@ def _call_gemini(prompt_text, schema):
         raise PlanAIError("La IA devolvió algo que no se pudo interpretar. Prueba a generar de nuevo.") from e
 
 
-def generate_plan_draft(*, prompt, plan_type, weeks, sessions_per_week):
+def generate_plan_draft(
+    *, prompt, plan_type, weeks, sessions_per_week,
+    fitness_level="", focus_area="", no_bar_equipment=False,
+    session_minutes=None, limitations="",
+):
     """
     Llama a Gemini y devuelve el dict crudo `{"plan": {...}, "items": [...]}`
     tal como lo mandó la IA — sin aplicar todavía sobre el modelo. La
     validación/clamping de verdad la hace `api.plan_generate` reutilizando
     `_apply_plan_fields` / `_apply_plan_item_fields`.
+
+    `fitness_level` / `focus_area` / `no_bar_equipment` / `session_minutes` /
+    `limitations` son el cuestionario estructurado que rellena el usuario
+    antes de generar (ver plan_ai_form.html / plan-view.js): se le dan a la
+    IA como hechos concretos en vez de esperar que los adivine de una frase
+    libre — que es justo lo que producía planes de mínimos ("2 series de
+    10") cuando el usuario escribía algo tan vago como "ponerme en forma".
     """
     user_prompt = (prompt or "").strip()[:MAX_PROMPT_CHARS]
     if not user_prompt:
         raise PlanAIError("Cuéntame qué quieres conseguir con este plan.")
 
-    prompt_text = _build_prompt(user_prompt, plan_type, weeks, sessions_per_week)
-    schema = _response_schema(plan_type)
+    exercises = []
+    if plan_type == "sport":
+        exclude = _NEEDS_BAR_EQUIPMENT if no_bar_equipment else set()
+        exercises = _catalog_exercises(exclude_slugs=exclude)
+
+        if focus_area in (Task.SUBCATEGORY_UPPER_BODY, Task.SUBCATEGORY_LOWER_BODY, Task.SUBCATEGORY_RUNNING):
+            if not any(e.body_area == focus_area for e in exercises):
+                zona = dict(FOCUS_AREA_CHOICES).get(focus_area, focus_area).lower()
+                if no_bar_equipment:
+                    raise PlanAIError(
+                        f"No hay ningún ejercicio de {zona} en el catálogo que no necesite barra "
+                        "de dominadas ni paralelas. Marca que sí tienes barra/paralelas, o elige "
+                        "otro foco corporal."
+                    )
+                raise PlanAIError(f"No hay ningún ejercicio activo de {zona} en el catálogo todavía.")
+
+        if not exercises:
+            raise PlanAIError(
+                "No queda ningún ejercicio activo en el catálogo con ese equipamiento — revisa el "
+                "catálogo de ejercicios antes de generar un plan de Deporte."
+            )
+
+    prompt_text = _build_prompt(
+        user_prompt, plan_type, weeks, sessions_per_week, exercises=exercises,
+        fitness_level=fitness_level, focus_area=focus_area, no_bar_equipment=no_bar_equipment,
+        session_minutes=session_minutes, limitations=limitations,
+    )
+    schema = _response_schema(plan_type, focus_area=focus_area)
     draft = _call_gemini(prompt_text, schema)
     if not isinstance(draft, dict) or "plan" not in draft:
         raise PlanAIError("La IA devolvió un plan con un formato inesperado. Prueba a generar de nuevo.")
