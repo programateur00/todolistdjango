@@ -36,6 +36,8 @@ urlpatterns = [
     path("planes/<int:plan_pk>/objetivo/nuevo/", views.plan_item_form, name="plan_item_create"),
     path("planes/<int:plan_pk>/objetivo/<int:pk>/", views.plan_item_form, name="plan_item_edit"),
     path("planes/<int:plan_pk>/objetivo/<int:pk>/eliminar/", views.plan_item_delete, name="plan_item_delete"),
+    path("planes/idiomas/test/<uuid:quiz_uuid>/", views.quiz_take, name="quiz_take"),
+    path("planes/idiomas/test/<uuid:quiz_uuid>/resultado/", views.quiz_result, name="quiz_result"),
 
     path("circuitos/nuevo/", views.routine_create, name="routine_create"),
     path("circuitos/<int:pk>/editar/", views.routine_edit, name="routine_edit"),

@@ -14,7 +14,8 @@ from django.utils import timezone
 
 from . import ai, api
 from .models import (
-    Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, SavedVideo, Task, TimerSession, WorkoutSession,
+    CourseQuiz, Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, SavedVideo, Task,
+    TimerSession, WorkoutSession,
 )
 from .utils import get_current_user, resolve_plan_target
 
@@ -392,9 +393,10 @@ def task_workout(request, pk):
             "task": task, "exercise": exercise,
         })
 
-    # Contadores implementados en workout.js. Un ejercicio con mode=pose
-    # pero sin contador (sentadillas, abdominales) está en el catálogo
-    # pero todavía no se puede contar con la cámara.
+    # Contadores implementados en workout.js: dominadas (y variantes),
+    # fondos y sentadillas SÍ cuentan con cámara. "Abdominales" (situp)
+    # está en el catálogo con mode=pose pero su contador todavía no
+    # existe en workout.js, así que cae aquí como "no soportado".
     if exercise.mode != Exercise.MODE_POSE or exercise.counter_key not in COUNTERS:
         return render(request, "tasks/task_workout_select.html", {
             "task": task, "exercises": exercises_qs, "routines": routines_qs, "videos": videos_qs,
@@ -692,15 +694,40 @@ def task_video(request, pk):
 @require_POST
 def task_video_save(request, pk):
     """
-    El vídeo llegó al final (evento ENDED en el navegador) -> la tarea
-    se marca hecha directamente. No hay objetivo que comparar ni sesión
-    que guardar: la tarea ENTERA es "ver el vídeo", así que verlo entero
-    es todo lo que hace falta.
+    El vídeo llegó al objetivo en minutos, o al final (evento ENDED en
+    el navegador) -> la tarea se marca hecha directamente. No hay
+    objetivo que comparar contra un mínimo para dejarla pendiente (a
+    diferencia de Enfoque): aquí target_minutes solo decide CUÁNDO
+    cortar, no si la tarea vale o no — ver task_video.html.
+
+    `minutes` son los minutos reales vistos, contados en el navegador
+    con la IFrame API de YouTube (no un dato de confianza del cliente
+    sin más: solo cuenta mientras el vídeo está de verdad reproduciéndose).
+    Se guardan en la Occurrence del día para que salgan en resultados.
+
+    Si esto era un vídeo de un curso de idioma con Plan.quiz_every_n_videos
+    puesto, y justo tocaba test de repaso, se redirige al test en vez de
+    a la lista de tareas — ver api.maybe_trigger_quiz. La tarea ya está
+    hecha de todas formas: el test es aparte y nunca bloquea nada.
     """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
-    task.mark_done()
+    try:
+        data = json.loads(request.body or b"{}")
+    except (json.JSONDecodeError, TypeError):
+        data = {}
+    raw_minutes = data.get("minutes")
+    minutes_watched = max(0, int(raw_minutes)) if isinstance(raw_minutes, (int, float)) else None
+    plan = task.plan
+    task.mark_done(minutes_watched=minutes_watched)
     messages.success(request, "Vídeo visto — tarea completada.")
-    return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
+
+    redirect_url = reverse("tasks:task_list")
+    if plan and plan.plan_type == Plan.PLAN_TYPE_STUDY and plan.study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE:
+        plan.mark_current_module_watched()
+        quiz = api.maybe_trigger_quiz(plan)
+        if quiz:
+            redirect_url = reverse("tasks:quiz_take", args=[quiz.uuid])
+    return JsonResponse({"ok": True, "redirect_url": redirect_url})
 
 
 def _save_routine(request, routine=None):
@@ -1037,6 +1064,70 @@ def plan_detail(request, pk):
         "progress": plan.progress_pct(),
         "is_language": is_language,
         "course_progress": plan.course_progress() if is_language else None,
+        "quiz_streaks": plan.quiz_streak_stats() if is_language and plan.quiz_every_n_videos else None,
+    })
+
+
+# ------------------------------------------------- tests de repaso (idiomas)
+
+def _quizzes_qs():
+    return CourseQuiz.objects.filter(plan__user=get_current_user())
+
+
+def quiz_take(request, quiz_uuid):
+    """
+    Pantalla del test de repaso: preguntas de opción múltiple sobre los
+    últimos vídeos vistos de un curso de idioma (ver
+    api.maybe_trigger_quiz). NO bloquea nada — el vídeo que lo disparó
+    ya se dio por visto antes de llegar aquí; esto es aparte, con su
+    propia racha (ver plan_detail.html).
+    """
+    quiz = get_object_or_404(_quizzes_qs(), uuid=quiz_uuid)
+    if quiz.answered_at:
+        return redirect(reverse("tasks:quiz_result", args=[quiz.uuid]))
+
+    if request.method == "POST":
+        selected = []
+        for i in range(len(quiz.questions)):
+            raw = request.POST.get(f"q{i}")
+            try:
+                selected.append(int(raw))
+            except (TypeError, ValueError):
+                selected.append(-1)
+        quiz.answer(selected)
+        return redirect(reverse("tasks:quiz_result", args=[quiz.uuid]))
+
+    return render(request, "tasks/quiz_take.html", {"quiz": quiz, "plan": quiz.plan})
+
+
+def quiz_result(request, quiz_uuid):
+    """
+    Corrección del test: se arma `review` aquí (no en la plantilla) para
+    no necesitar un filtro a medida solo para mirar `quiz.answers[i]` —
+    cada opción ya lleva consigo si era la correcta y si fue la elegida.
+    """
+    quiz = get_object_or_404(_quizzes_qs(), uuid=quiz_uuid)
+    if not quiz.answered_at:
+        return redirect(reverse("tasks:quiz_take", args=[quiz.uuid]))
+
+    answers = quiz.answers or []
+    review = []
+    for i, q in enumerate(quiz.questions):
+        chosen = answers[i] if i < len(answers) else None
+        review.append({
+            "question": q.get("question", ""),
+            "options": [
+                {
+                    "text": opt,
+                    "is_correct": idx == q.get("correct_index"),
+                    "is_chosen": idx == chosen,
+                }
+                for idx, opt in enumerate(q.get("options") or [])
+            ],
+        })
+
+    return render(request, "tasks/quiz_result.html", {
+        "quiz": quiz, "plan": quiz.plan, "streaks": quiz.plan.quiz_streak_stats(), "review": review,
     })
 
 
@@ -1068,6 +1159,7 @@ def plan_ai_form(request):
         level_from = request.POST.get("level_from", "")
         level_to = request.POST.get("level_to", "")
         known_languages = request.POST.get("known_languages", "").strip()
+        language_daily_minutes = request.POST.get("language_daily_minutes", "").strip()
         quiz_every_n_videos = request.POST.get("quiz_every_n_videos", "").strip()
 
         # Cuestionario estructurado de Deporte — nivel, foco corporal,
@@ -1094,12 +1186,21 @@ def plan_ai_form(request):
         # inventa un curso nuevo.
         is_language = plan_type == Plan.PLAN_TYPE_STUDY and study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE
 
-        if is_language:
+        if is_language and not (known_languages and language_daily_minutes):
+            # Se comprueba ANTES de llamar a la IA — known_languages y
+            # language_daily_minutes son obligatorios (el HTML ya los pide
+            # con `required`, pero el de minutos es un campo oculto que
+            # rellena JS, así que el navegador no lo valida solo). Si
+            # faltan, ni se gasta una generación del límite diario ni una
+            # llamada a la IA para nada.
+            draft, error = None, "Un plan de idiomas necesita el idioma que ya sabes y los minutos de vídeo al día."
+        elif is_language:
             draft, error = api.build_language_plan_draft(
                 user=get_current_user(), weeks=weeks, custom_days=custom_days,
                 language=language_name, level_from=level_from, level_to=level_to,
                 known_languages=known_languages, prompt=prompt_text,
                 quiz_every_n_videos=quiz_every_n_videos or None,
+                language_daily_minutes=language_daily_minutes or None,
             )
         else:
             draft, error = api.build_plan_draft(
@@ -1129,6 +1230,7 @@ def plan_ai_form(request):
                 "level_from": level_from,
                 "level_to": level_to,
                 "known_languages": known_languages,
+                "language_daily_minutes": language_daily_minutes,
                 "quiz_every_n_videos": quiz_every_n_videos,
                 "fitness_level": fitness_level,
                 "focus_area": focus_area,
@@ -1176,6 +1278,7 @@ def plan_ai_form(request):
                 "level_from": draft["plan_fields"].get("level_from"),
                 "level_to": draft["plan_fields"].get("level_to"),
                 "known_languages": draft["plan_fields"].get("known_languages"),
+                "language_daily_minutes": draft["plan_fields"].get("language_daily_minutes"),
                 "quiz_every_n_videos": draft["plan_fields"].get("quiz_every_n_videos"),
             })
             # Se expande el catálogo elegido (vídeo a vídeo, vía YouTube)
@@ -1295,49 +1398,70 @@ def plan_form(request, pk=None):
             # (a diferencia del subtipo) — no cambian ningún CourseModule
             # ya creado, solo el contexto que se enseña y lo que usarán
             # las próximas generaciones con IA.
-            if plan.plan_type == Plan.PLAN_TYPE_STUDY and plan.study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE:
+            is_language = plan.plan_type == Plan.PLAN_TYPE_STUDY and plan.study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE
+            if is_language:
                 api._apply_language_plan_fields(plan, {
                     "language_name": request.POST.get("language_name", ""),
                     "level_from": request.POST.get("level_from", ""),
                     "level_to": request.POST.get("level_to", ""),
                     "known_languages": request.POST.get("known_languages", ""),
+                    "language_daily_minutes": request.POST.get("language_daily_minutes", ""),
                     "quiz_every_n_videos": request.POST.get("quiz_every_n_videos", ""),
                 })
 
-            plan.name = name[:80]
-            plan.notes = request.POST.get("notes", "").strip()
-            raw_started_on = request.POST.get("started_on", "").strip()
-            if raw_started_on:
-                try:
-                    plan.started_on = _dt.date.fromisoformat(raw_started_on)
-                except ValueError:
-                    plan.started_on = plan.started_on or _dt.date.today()
+            # known_languages y language_daily_minutes son obligatorios en
+            # un plan de idiomas: sin idioma ya sabido la IA no tiene con
+            # qué comparar, y sin minutos/día no hay objetivo que corte el
+            # vídeo (ver task_video.html — target_minutes sale de aquí).
+            # El HTML ya los pide con `required`, pero el de minutos es en
+            # verdad un campo oculto que rellena JS — el navegador no lo
+            # valida solo — así que el mínimo se repite aquí en el servidor.
+            if is_language and not (plan.known_languages and plan.language_daily_minutes):
+                messages.error(
+                    request,
+                    "Un plan de idiomas necesita el idioma que ya sabes y los minutos de vídeo al día.",
+                )
             else:
-                plan.started_on = plan.started_on or _dt.date.today()
-            try:
-                plan.weeks = max(1, int(request.POST.get("weeks", 12)))
-            except (TypeError, ValueError):
-                plan.weeks = 12
-            plan.is_active = bool(request.POST.get("is_active"))
-            plan.reward = request.POST.get("reward", "").strip()[:200]
-            plan.repeat = request.POST.get("repeat", "custom")
-            plan.custom_days = ",".join(request.POST.getlist("custom_days")) or "0,2,4"
-            plan.due_time = request.POST.get("due_time") or None
-            try:
-                plan.interval = max(1, int(request.POST.get("interval", 1)))
-            except (TypeError, ValueError):
-                plan.interval = 1
-            plan.save()
-            # El plan crea y mantiene su propia tarea: el usuario no tiene
-            # que crear nada a mano ni saber qué es un circuito.
-            plan.sync_task()
-            messages.success(request, f"Plan «{plan.name}» guardado.")
-            return redirect(reverse("tasks:plan_detail", args=[plan.pk]))
+                plan.name = name[:80]
+                plan.notes = request.POST.get("notes", "").strip()
+                raw_started_on = request.POST.get("started_on", "").strip()
+                if raw_started_on:
+                    try:
+                        plan.started_on = _dt.date.fromisoformat(raw_started_on)
+                    except ValueError:
+                        plan.started_on = plan.started_on or _dt.date.today()
+                else:
+                    plan.started_on = plan.started_on or _dt.date.today()
+                try:
+                    plan.weeks = max(1, int(request.POST.get("weeks", 12)))
+                except (TypeError, ValueError):
+                    plan.weeks = 12
+                plan.is_active = bool(request.POST.get("is_active"))
+                plan.reward = request.POST.get("reward", "").strip()[:200]
+                plan.repeat = request.POST.get("repeat", "custom")
+                plan.custom_days = ",".join(request.POST.getlist("custom_days")) or "0,2,4"
+                plan.due_time = request.POST.get("due_time") or None
+                try:
+                    plan.interval = max(1, int(request.POST.get("interval", 1)))
+                except (TypeError, ValueError):
+                    plan.interval = 1
+                plan.save()
+                # El plan crea y mantiene su propia tarea: el usuario no
+                # tiene que crear nada a mano ni saber qué es un circuito.
+                plan.sync_task()
+                messages.success(request, f"Plan «{plan.name}» guardado.")
+                return redirect(reverse("tasks:plan_detail", args=[plan.pk]))
 
+    # Si esto era una creación (sin pk) y se quedó a medias por el error
+    # de idiomas de arriba, `plan` es ya una instancia sin guardar — no
+    # se le pasa tal cual a la plantilla, o se vería como "editar" un
+    # plan que en realidad no existe (radios bloqueados, tipo fijado...).
+    # Mismo criterio que ya tenía el error de "falta el nombre".
+    display_plan = plan if pk else None
     return render(request, "tasks/plan_form.html", {
-        "plan": plan,
+        "plan": display_plan,
         "weekdays": Task.WEEKDAYS,
-        "selected_days": plan.custom_days_list() if plan else ["0", "2", "4"],
+        "selected_days": display_plan.custom_days_list() if display_plan else ["0", "2", "4"],
         "plan_type_choices": Plan.PLAN_TYPE_CHOICES,
         "study_subtype_choices": Plan.STUDY_SUBTYPE_CHOICES,
         "cefr_level_choices": Plan.CEFR_LEVEL_CHOICES,

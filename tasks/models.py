@@ -572,7 +572,7 @@ class Task(models.Model):
             max_pace_seconds_per_km=self.max_pace_seconds_per_km,
         )
 
-    def _record_occurrence(self, result, auto_expired=False):
+    def _record_occurrence(self, result, auto_expired=False, minutes_watched=None):
         """
         Registra el resultado del día en Occurrence, de forma idempotente.
 
@@ -588,29 +588,35 @@ class Task(models.Model):
 
         Sin due_date (tareas sueltas de "cuando pueda") no hay día al que
         anclarlo, así que ahí sí se crea una fila normal.
+
+        minutes_watched es opcional y solo lo mandan las tareas de vídeo
+        (ver task_video.html) — se guarda tal cual para que salga en el
+        historial/estadísticas, no cambia si el día cuenta como hecho o no
+        (eso ya lo decidió quien llamó a mark_done()).
         """
         if self.due_date is None:
             return Occurrence.objects.create(
                 task=self, series_id=self.series_id, title=self.title,
                 result=result, due_date=None, auto_expired=auto_expired,
-                user=self.user,
+                user=self.user, minutes_watched=minutes_watched,
             )
         obj, _ = Occurrence.objects.update_or_create(
             series_id=self.series_id, due_date=self.due_date,
             defaults=dict(
                 task=self, title=self.title, result=result,
                 auto_expired=auto_expired, user=self.user,
+                minutes_watched=minutes_watched,
             ),
         )
         return obj
 
-    def mark_done(self):
+    def mark_done(self, minutes_watched=None):
         self.is_done = True
         self.expired = False
         self.completed_at = timezone.now()
         self.reopened_at = None
         self.save()
-        self._record_occurrence(Occurrence.RESULT_DONE)
+        self._record_occurrence(Occurrence.RESULT_DONE, minutes_watched=minutes_watched)
         self._spawn_next()
 
     def reopen(self, delete_sessions=False):
@@ -1141,18 +1147,33 @@ class Plan(models.Model):
     level_to = models.CharField(max_length=2, blank=True, choices=CEFR_LEVEL_CHOICES)
 
     # Qué idiomas ya domina el usuario, en sus propias palabras (ej.
-    # "inglés, italiano"). NO cambia qué playlists elige la IA — el
-    # catálogo ya está filtrado por idioma y nivel — pero sí es contexto
-    # para sus notas (puede explicar gramática comparando con un idioma
-    # que ya conoces). Puramente informativo; nunca bloquea nada si se
-    # deja en blanco.
+    # "inglés, italiano"). El PRIMERO que escribe es el que se usa como
+    # "idioma nativo" para filtrar el catálogo (ver
+    # api._catalog_entries_for_language): solo entran cursos explicados
+    # en ese idioma, o cursos neutros sin idioma de explicación fijado
+    # (CoursePlaylist.native_language en blanco) — nunca uno pensado
+    # para hablantes de otro idioma distinto. También da contexto a las
+    # notas del plan (comparar gramática con un idioma que ya conoces).
+    # Ya es obligatorio en el formulario — nunca queda en blanco.
     known_languages = models.CharField(max_length=200, blank=True)
+
+    # Cuántos minutos de vídeo al día quiere ver el usuario — objetivo
+    # DIARIO del plan, no la duración de un vídeo concreto (eso vive en
+    # CourseModule.duration_seconds). Se copia tal cual a Task.target_minutes
+    # en _language_target_fields(). En blanco, la tarea diaria exige ver
+    # el vídeo entero (comportamiento de siempre, sin objetivo en minutos).
+    language_daily_minutes = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Solo con study_subtype='language': minutos de vídeo al día. En blanco, "
+                   "exige ver el vídeo del día entero.",
+    )
 
     # Cada cuántos vídeos vistos se genera un test de repaso — lo decide
     # el usuario al crear el plan (gastar IA en un test por vídeo no es
-    # lo mismo que uno cada 5). En blanco, todavía no se generan tests
-    # automáticos — el campo ya existe para no tener que migrar otra vez
-    # cuando llegue esa fase, pero de momento no dispara nada por sí solo.
+    # lo mismo que uno cada 5). En blanco, no se generan tests
+    # automáticos. El disparo vive en api.maybe_trigger_quiz(), llamado
+    # desde views.task_video_save justo después de marcar el vídeo como
+    # visto — ver CourseQuiz más abajo para el resultado y la racha.
     quiz_every_n_videos = models.PositiveIntegerField(null=True, blank=True)
 
     # Cuándo toca entrenar. El plan crea y mantiene su propia tarea con
@@ -1230,19 +1251,38 @@ class Plan(models.Model):
     @classmethod
     def auto_close_expired(cls, user=None):
         """
-        Cierra solos los planes cuyas semanas ya se cumplieron.
+        Cierra solos los planes que ya han llegado a su fin.
 
         Sin scheduler en este hosting, así que se comprueba de gorra
         cada vez que se abre la lista de tareas — mismo criterio que
         Task.expire_overdue(): barato, y no hace falta que nadie entre
         a "planes" para que un ciclo vencido deje de generar tareas.
+
+        Deporte/General: "su fin" es que se cumplan las semanas
+        (`ends_on`), como siempre. Estudio · Idiomas es distinto a
+        propósito: el objetivo es terminar el temario asignado, no una
+        fecha — `weeks` ahí es solo una ESTIMACIÓN del ritmo elegido
+        (ver api.build_language_plan_draft), no un plazo. Si el ritmo
+        real va más lento de lo estimado, el plan sigue abierto en vez
+        de cerrarse a medias; si el temario se acaba antes de lo
+        estimado (playlist corta), se cierra en cuanto se ve el último
+        vídeo en vez de seguir repitiéndolo hasta que pasen las
+        semanas que sobran.
         """
         today = timezone.localtime(timezone.now()).date()
         qs = cls.objects.filter(deleted_at__isnull=True, closed_at__isnull=True, is_active=True)
         if user is not None:
             qs = qs.filter(user=user)
         for plan in qs:
-            if today >= plan.ends_on:
+            is_language = (
+                plan.plan_type == cls.PLAN_TYPE_STUDY and plan.study_subtype == cls.STUDY_SUBTYPE_LANGUAGE
+            )
+            if is_language:
+                progress = plan.course_progress()
+                finished = progress["total"] > 0 and progress["pct"] >= 100
+            else:
+                finished = today >= plan.ends_on
+            if finished:
                 plan.final_progress_pct = plan.progress_pct()
                 plan.closed_at = timezone.now()
                 plan.is_active = False
@@ -1358,7 +1398,12 @@ class Plan(models.Model):
         fields.update({
             "youtube_video_id": module.youtube_video_id,
             "youtube_playlist_id": "",
-            "target_minutes": None,
+            # Objetivo DIARIO del usuario (ej. "1h al día"), no la
+            # duración del vídeo — task_video.html decide con esto si
+            # corta al llegar al objetivo o deja terminar el vídeo (ver
+            # el margen de sobra en el propio JS). En blanco, exige ver
+            # el vídeo entero, como antes de que existiera este campo.
+            "target_minutes": self.language_daily_minutes,
             "target_video_count": None,
             "level": module.level,
         })
@@ -1381,6 +1426,35 @@ class Plan(models.Model):
             "pct": round(100 * watched / total),
             "next": modules[min(watched, total - 1)],
         }
+
+    def mark_current_module_watched(self):
+        """
+        Apunta `CourseModule.watched_at` en el vídeo que se acaba de dar
+        por visto — solo para poder revisarlo (auditoría, depurar un
+        test raro). El avance real del curso sigue siendo
+        `_language_completed_count()` sobre Occurrence, no esto: se
+        llama DESPUÉS de guardar la Occurrence del día, así que el
+        índice ya incluye el vídeo recién visto.
+        """
+        modules = list(self.course_modules.all())
+        completed = self._language_completed_count()
+        if not modules or completed <= 0:
+            return None
+        module = modules[min(completed, len(modules)) - 1]
+        if not module.watched_at:
+            module.watched_at = timezone.now()
+            module.save(update_fields=["watched_at"])
+        return module
+
+    def quiz_streak_stats(self):
+        """
+        Racha de tests de idioma aprobados (ver CourseQuiz) — aparte de
+        `course_progress`, que es solo vídeos vistos. Un test flojo no
+        toca el progreso del curso (el vídeo ya contó como visto al
+        verlo), pero SÍ rompe esta racha: es el "empujón" para que se
+        preste atención de verdad, sin poder atascar el curso en sí.
+        """
+        return CourseQuiz.streak_stats(self.pk)
 
     def sync_task(self):
         """
@@ -1577,7 +1651,19 @@ class Plan(models.Model):
         numérico al que subir — es un hábito, no una meta con destino —
         así que el progreso se mide en cuántas veces de las que tocaba
         la cumpliste desde que empezó el plan.
+
+        Estudio · Idiomas no tiene PlanItem (su medida es CourseModule,
+        no un ejercicio con escalones) — se delega en `course_progress`,
+        que ya calcula vídeos vistos/totales con el mismo criterio
+        (Occurrence cumplida, no semanas pasadas). Antes de esto
+        `progress_pct` devolvía None para estos planes al no tener
+        `headline`, así que `is_completed`/`auto_close_expired` nunca
+        los daba por completados aunque se hubiera visto el curso
+        entero — quedaba corregido aparte, no es un cambio de conducta
+        nuevo para el usuario, es arreglar algo que estaba roto de base.
         """
+        if self.plan_type == self.PLAN_TYPE_STUDY and self.study_subtype == self.STUDY_SUBTYPE_LANGUAGE:
+            return self.course_progress()["pct"]
         head = self.headline
         if not head:
             return None
@@ -2317,16 +2403,51 @@ class CoursePlaylist(models.Model):
     lecciones de A1 como si fueran de C2.
 
     La solución es la misma que ya usa la app para Deporte: un catálogo
-    CURADO (`Exercise` es el equivalente ahí) del que la IA elige y
-    ordena, pero nunca que descubre por su cuenta. `search_courses`
-    sigue siendo útil, pero ahora como herramienta de DESCUBRIMIENTO
-    para encontrar candidatos que un humano revisa antes de añadirlos
-    aquí — no como fuente de verdad automática. Ver el comando
-    `add_course_playlist`, que enseña un preview real (títulos,
-    duración, subtítulos) antes de guardar nada.
+    CURADO (`Exercise` es el equivalente ahí) del que la app asigna
+    directamente, sin buscar ni inventar nada por su cuenta —
+    `api._catalog_entries_for_language` elige, por idioma + nivel +
+    idioma nativo, sin IA de por medio (ver docstring de
+    `api.build_language_plan_draft`). `search_courses` sigue siendo
+    útil, pero como herramienta de DESCUBRIMIENTO para encontrar
+    candidatos que un humano revisa antes de añadirlos aquí — no como
+    fuente de verdad automática. Ver el comando `add_course_playlist`,
+    que enseña un preview real (títulos, duración, subtítulos) antes de
+    guardar nada.
     """
     language = models.CharField(max_length=40, help_text="Ej. 'francés'. En minúscula, sin acentos raros.")
-    level = models.CharField(max_length=2, choices=Plan.CEFR_LEVEL_CHOICES)
+    level = models.CharField(
+        max_length=2, choices=Plan.CEFR_LEVEL_CHOICES,
+        help_text="Nivel más bajo que cubre esta playlist (si solo cubre uno, es el único).",
+    )
+    # La mayoría de playlists curadas cubren un único nivel MCER — pero
+    # algunas (sobre todo canales grandes, tipo curso completo en una
+    # sola lista) van seguidas de A1 a B2 o similar, sin cortes. En
+    # blanco = cubre solo `level`, como antes de que existiera este
+    # campo (compatible con todo el catálogo ya cargado). Puesto, dice
+    # el nivel más alto que cubre — ver CoursePlaylist.levels_covered()
+    # y api._catalog_entries_for_language, que ya no exige coincidencia
+    # exacta de nivel: basta con que el rango [level, level_to] toque
+    # alguno de los niveles pedidos.
+    level_to = models.CharField(
+        max_length=2, blank=True, choices=Plan.CEFR_LEVEL_CHOICES,
+        help_text="Si esta playlist cubre VARIOS niveles seguidos sin cortes (ej. una sola "
+                   "playlist de A1 a B2), el nivel más alto que cubre. En blanco = cubre solo "
+                   "`level`, como hasta ahora.",
+    )
+    # En qué idioma están las explicaciones del curso — no el idioma que
+    # se aprende (eso es `language`), sino el del hablante al que va
+    # dirigido (ej. un curso de francés "para hispanohablantes" lleva
+    # native_language="español"). En blanco = neutro/inmersión (vale
+    # para cualquiera, ej. subtítulos en el propio idioma que se
+    # aprende, sin explicaciones de por medio). Sirve para no recomendar
+    # un curso pensado para hablantes de otro idioma distinto al nativo
+    # del usuario — ver Plan.known_languages y
+    # api._catalog_entries_for_language.
+    native_language = models.CharField(
+        max_length=40, blank=True,
+        help_text="Idioma en el que se explica el curso (ej. 'español'). En blanco = neutro, "
+                   "vale para cualquier hablante.",
+    )
     youtube_playlist_id = models.CharField(max_length=64)
     title = models.CharField(max_length=300, blank=True)
     channel_title = models.CharField(max_length=200, blank=True)
@@ -2336,14 +2457,34 @@ class CoursePlaylist(models.Model):
     is_active = models.BooleanField(
         default=True, help_text="Desactivar en vez de borrar si deja de estar disponible o resulta floja.",
     )
-    order = models.PositiveIntegerField(default=0, help_text="Orden dentro de su idioma+nivel, si hay varias.")
+    order = models.PositiveIntegerField(
+        default=0,
+        help_text="Orden dentro de su idioma+nivel+idioma nativo, si hay varias — la de menor "
+                   "número es la que se asigna primero.",
+    )
     added_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["language", "level", "order"]
 
     def __str__(self):
-        return f"{self.title or self.youtube_playlist_id} ({self.language} · {self.level})"
+        audience = f" · para {self.native_language}" if self.native_language else " · neutro"
+        return f"{self.title or self.youtube_playlist_id} ({self.language} · {self.level_label}{audience})"
+
+    @property
+    def level_label(self):
+        """'A1' si es de un solo nivel, 'A1 → B2' si cubre varios seguidos."""
+        return self.level if not self.level_to or self.level_to == self.level else f"{self.level} → {self.level_to}"
+
+    def levels_covered(self):
+        """Todos los niveles MCER que cubre, de `level` a `level_to`
+        (o solo `level` si `level_to` está en blanco) — ver CEFR_LEVELS
+        al principio de este archivo."""
+        start = CEFR_LEVELS.index(self.level) if self.level in CEFR_LEVELS else 0
+        end = CEFR_LEVELS.index(self.level_to) if self.level_to in CEFR_LEVELS else start
+        if end < start:
+            start, end = end, start
+        return CEFR_LEVELS[start:end + 1]
 
 
 class CourseModule(models.Model):
@@ -2354,15 +2495,19 @@ class CourseModule(models.Model):
     A diferencia del resto de Estudio (donde el objetivo es el mismo
     vídeo/playlist repetido cada sesión, ver PlanItem), un curso de
     idioma es una SECUENCIA: vídeos distintos, de nivel creciente, uno
-    (o varios) por sesión — casi nunca de una sola playlist de YouTube,
-    porque ninguna playlist gratis suele cubrir de A1 a C2 seguido. Por
-    eso el orden lo posee esta tabla, no una playlist de YouTube.
+    (o varios) por sesión — casi siempre de VARIAS playlists de YouTube
+    encadenadas (pocas playlists gratis cubren de A1 a C2 seguido), pero
+    una sola playlist puede aportar varios módulos seguidos si cubre
+    más de un nivel (ver CoursePlaylist.level_to). Por eso el orden lo
+    posee esta tabla, no una playlist de YouTube.
 
-    Se rellena (Fase 2, todavía no implementada) a partir de las
-    `CoursePlaylist` ya verificadas para el idioma del plan — nunca de
-    una búsqueda en caliente sin revisar. El modelo ya existe para no
-    tener que parar a mitad de esa fase a migrar la base de datos otra
-    vez.
+    Se rellena a partir de las `CoursePlaylist` ya verificadas para el
+    idioma (y el idioma nativo) del plan — nunca de una búsqueda en
+    caliente sin revisar. Ver `api._apply_language_plan_fields` /
+    `api.build_language_plan_draft` / `api.expand_language_selection`
+    para el flujo completo (asignación directa del catálogo →
+    previsualizar → confirmar) — ya no pasa por IA, ver docstring de
+    `build_language_plan_draft`.
     """
     plan = models.ForeignKey(Plan, on_delete=models.CASCADE, related_name="course_modules")
     order = models.PositiveIntegerField(default=0, help_text="Posición en el temario completo del curso.")
@@ -2386,12 +2531,17 @@ class CourseModule(models.Model):
     )
 
     # Tema del bloque al que pertenece este vídeo (varios vídeos seguidos
-    # suelen compartir tema, ej. "saludos y presentarse"). Es la red de
-    # seguridad para generar tests aunque el vídeo en sí no tenga
-    # descripción útil — ver la discusión en tasks/ai.py cuando exista
-    # la generación de tests (Fase 3).
+    # suelen compartir tema, ej. "saludos y presentarse"). Hoy se deja
+    # en blanco al crear el temario (nadie lo rellena todavía a mano) —
+    # api.maybe_trigger_quiz() usa esto si está, y si no, cae en
+    # `title` — ver CourseQuiz para el test que se genera con esto.
     topic = models.CharField(max_length=200, blank=True)
 
+    # Cuándo se vio de verdad, para poder revisarlo — el avance real
+    # (qué vídeo toca hoy) sigue basándose en Occurrence, no en esto
+    # (ver Plan._language_completed_count). Lo pone
+    # Plan.mark_current_module_watched(), llamado justo después de
+    # guardar la Occurrence del día (ver views.task_video_save).
     watched_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -2400,6 +2550,99 @@ class CourseModule(models.Model):
 
     def __str__(self):
         return f"{self.title or self.youtube_video_id} ({self.level or 'sin nivel'})"
+
+
+class CourseQuiz(models.Model):
+    """
+    Un test corto de opción múltiple, generado con IA a partir de los
+    temas de los últimos `Plan.quiz_every_n_videos` vídeos vistos de un
+    curso de idioma — ver `api.maybe_trigger_quiz` (se dispara solo,
+    desde `views.task_video_save`, justo después de marcar el vídeo
+    como visto).
+
+    A propósito NO bloquea nada: el vídeo ya cuenta como hecho al
+    verlo (Task.mark_done), pase lo que pase aquí — este test es un
+    "aparte" con su propia racha (ver `Plan.quiz_streak_stats` /
+    `streak_stats` de abajo), pensado para forzar que se preste
+    atención de verdad sin arriesgar el progreso del curso en sí si un
+    día sale mal.
+    """
+    plan = models.ForeignKey(Plan, on_delete=models.CASCADE, related_name="quizzes")
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+
+    # CourseModule.order del último vídeo cubierto por este test — solo
+    # para trazabilidad y para no generar dos tests seguidos sobre
+    # exactamente el mismo tramo (ver api.maybe_trigger_quiz).
+    up_to_order = models.PositiveIntegerField(default=0)
+    topics = models.JSONField(
+        default=list, blank=True, help_text="Temas de los vídeos usados para generar este test.",
+    )
+    # [{"question": "...", "options": ["...", "...", "...", "..."], "correct_index": 0}, ...]
+    questions = models.JSONField(default=list, blank=True)
+    # Índices elegidos por el usuario, mismo orden que `questions`. En
+    # blanco hasta que se responde.
+    answers = models.JSONField(null=True, blank=True)
+    score = models.PositiveIntegerField(null=True, blank=True)
+    total = models.PositiveIntegerField(default=0)
+    passed = models.BooleanField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    answered_at = models.DateTimeField(null=True, blank=True)
+
+    # ≥70% de aciertos aprueba — ni "todo perfecto o nada" (desanima sin
+    # motivo por un despiste) ni "con que respondas ya vale" (no fuerza
+    # a prestar atención de verdad, que es todo el propósito de esto).
+    PASS_THRESHOLD = 0.7
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        estado = "sin responder" if not self.answered_at else ("aprobado" if self.passed else "no aprobado")
+        return f"Test de {self.plan.language_name} — {estado}"
+
+    def answer(self, selected):
+        """
+        Corrige `selected` (lista de índices elegidos, mismo orden que
+        `questions`) y guarda el resultado. Un índice que falta o no es
+        válido cuenta como fallo, nunca como excepción — un test a
+        medio responder simplemente saca peor nota, no rompe la página.
+        """
+        total = len(self.questions)
+        score = 0
+        for i, q in enumerate(self.questions):
+            chosen = selected[i] if i < len(selected) else None
+            if isinstance(chosen, int) and chosen == q.get("correct_index"):
+                score += 1
+        self.answers = list(selected)
+        self.score = score
+        self.total = total
+        self.passed = total > 0 and (score / total) >= self.PASS_THRESHOLD
+        self.answered_at = timezone.now()
+        self.save(update_fields=["answers", "score", "total", "passed", "answered_at"])
+        return self
+
+    @classmethod
+    def streak_stats(cls, plan_id):
+        """Misma cuenta que Occurrence.streak_stats, pero sobre tests ya
+        respondidos de este plan: se rompe en cuanto uno no se aprueba."""
+        quizzes = list(
+            cls.objects.filter(plan_id=plan_id, answered_at__isnull=False).order_by("-answered_at")
+        )
+        current = 0
+        for q in quizzes:
+            if q.passed:
+                current += 1
+            else:
+                break
+        max_s = 0
+        running = 0
+        for q in reversed(quizzes):
+            if q.passed:
+                running += 1
+                max_s = max(max_s, running)
+            else:
+                running = 0
+        return {"current_streak": current, "max_streak": max_s}
 
 
 class SavedVideo(models.Model):
@@ -2504,6 +2747,11 @@ class Occurrence(models.Model):
     result = models.CharField(max_length=10, choices=RESULT_CHOICES)
     due_date = models.DateField(null=True, blank=True)
     auto_expired = models.BooleanField(default=False)
+    minutes_watched = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Solo en tareas de vídeo: minutos reales vistos en el navegador "
+                   "(IFrame API de YouTube), no un dato introducido a mano.",
+    )
     recorded_at = models.DateTimeField(auto_now_add=True)
     uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     updated_at = models.DateTimeField(auto_now=True)

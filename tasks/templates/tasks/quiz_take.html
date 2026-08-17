@@ -1,0 +1,40 @@
+{% extends "tasks/base.html" %}
+{% block title %}Test de repaso — {{ plan.language_name }}{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">test de repaso · {{ plan.language_name }}</span>
+        <h1>¿Qué se te ha quedado?</h1>
+    </div>
+    <a href="{% url 'tasks:task_list' %}" class="stats-link">Saltar por ahora →</a>
+</header>
+
+<p class="field__hint">
+    Sobre lo último que has visto — no cuenta para el curso en sí (el vídeo ya está
+    dado por visto), pero sí para tu racha de tests. Elige la opción correcta en
+    cada pregunta.
+</p>
+
+<form class="task-form" method="post">
+    {% csrf_token %}
+    {% for q in quiz.questions %}
+    <fieldset class="field">
+        <legend class="field__label">{{ forloop.counter }}. {{ q.question }}</legend>
+        <div class="repeat-options">
+            {% for opt in q.options %}
+            <label class="repeat-option">
+                <input type="radio" name="q{{ forloop.parentloop.counter0 }}" value="{{ forloop.counter0 }}" required>
+                <span>{{ opt }}</span>
+            </label>
+            {% endfor %}
+        </div>
+    </fieldset>
+    {% endfor %}
+
+    <div class="task-form__actions">
+        <button type="submit" class="primary-btn">Corregir</button>
+    </div>
+</form>
+
+{% endblock %}

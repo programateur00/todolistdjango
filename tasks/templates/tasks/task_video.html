@@ -44,6 +44,12 @@
     var targetVideoCount = {{ target_video_count|default_if_none:"null" }} || (playlistId && !targetMinutes ? 1 : null);
     var saveUrl = "{% url 'tasks:task_video_save' task.pk %}";
     var csrfToken = "{{ csrf_token }}";
+    // Margen para no cortar el vídeo justo al llegar al objetivo en
+    // minutos: si al vídeo le quedan pocos minutos, lo dejamos terminar
+    // solo (el objetivo se pasa un poco, pero no se corta a media frase);
+    // si le queda mucho (un directo de 2h con objetivo de 1h), se corta
+    // en seco al llegar al objetivo. Ver saveDone()/shouldCutAtTarget().
+    var OVERSHOOT_BUFFER_SECONDS = 15 * 60;
     // Un vídeo local guardado en ESTE navegador para esta tarea, además
     // del de YouTube — solo tiene sentido en Deporte/Enfoque (vídeos
     // cortos); Estudio ya usa playlists/vídeos largos de YouTube.
@@ -83,7 +89,7 @@
         fetch(saveUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-            body: '{}',
+            body: JSON.stringify({ minutes: Math.round(elapsedSeconds / 60) }),
         })
             .then(function (r) { return r.json(); })
             .then(function (data) {
@@ -93,6 +99,22 @@
                 saved = false;
                 hint.textContent = 'No se pudo guardar — inténtalo otra vez.';
             });
+    }
+
+    /**
+     * Al llegar al objetivo en minutos, decide si cortar ya o dejar que
+     * el vídeo termine solo. `duration`/`currentTime` en segundos —
+     * mismos nombres que dan tanto el reproductor de YouTube como
+     * <video> local, así que sirve para los dos casos.
+     *
+     * Sin duración fiable (getDuration() puede devolver 0 en directos o
+     * antes de cargar del todo), se corta por seguridad: mejor un corte
+     * de más que un vídeo que nunca se sabe cuándo termina.
+     */
+    function shouldCutAtTarget(duration, currentTime) {
+        if (!duration) return true;
+        var remaining = duration - currentTime;
+        return remaining > OVERSHOOT_BUFFER_SECONDS;
     }
 
     /** Si el vídeo/playlist se acaba antes de llegar al objetivo, no hay
@@ -128,7 +150,13 @@
                             elapsedSeconds += 1;
                             if (targetMinutes) {
                                 updateProgressLabel();
-                                if (elapsedSeconds >= targetMinutes * 60) saveDone();
+                                if (elapsedSeconds >= targetMinutes * 60) {
+                                    var duration = typeof player.getDuration === 'function' ? player.getDuration() : 0;
+                                    var current = typeof player.getCurrentTime === 'function' ? player.getCurrentTime() : 0;
+                                    if (shouldCutAtTarget(duration, current)) saveDone();
+                                    // si no, se deja seguir: el evento ENDED de abajo se
+                                    // encarga de guardar en cuanto el vídeo termine solo.
+                                }
                             }
                         }
                     }, 1000);
@@ -226,7 +254,10 @@
                 elapsedSeconds += 1;
                 if (targetMinutes) {
                     updateProgressLabel();
-                    if (elapsedSeconds >= targetMinutes * 60) saveDone();
+                    if (elapsedSeconds >= targetMinutes * 60) {
+                        if (shouldCutAtTarget(localVideoEl.duration, localVideoEl.currentTime)) saveDone();
+                        // si no, se deja seguir: el evento 'ended' de abajo guarda al terminar.
+                    }
                 }
             }
         }, 1000);

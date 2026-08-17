@@ -1,0 +1,52 @@
+{% extends "tasks/base.html" %}
+{% block title %}Resultado del test — {{ plan.language_name }}{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">test de repaso · {{ plan.language_name }}</span>
+        <h1>{% if quiz.passed %}¡Aprobado!{% else %}No esta vez{% endif %}</h1>
+    </div>
+    <a href="{% url 'tasks:plan_detail' plan.pk %}" class="stats-link">← Volver al plan</a>
+</header>
+
+<section class="plan-head">
+    <p class="plan-head__eyebrow">Resultado</p>
+    <h2 class="plan-head__name">{{ quiz.score }} de {{ quiz.total }} correctas</h2>
+    <div class="plan-bar" role="img" aria-label="Aciertos: {{ quiz.score }} de {{ quiz.total }}">
+        <div class="plan-bar__fill" style="width: {% widthratio quiz.score quiz.total 100 %}%"></div>
+    </div>
+    <p class="plan-head__meta">
+        Racha actual: {{ streaks.current_streak }}
+        {% if streaks.max_streak %}· máxima: {{ streaks.max_streak }}{% endif %}
+    </p>
+</section>
+
+{% if not quiz.passed %}
+<p class="field__hint">
+    Hace falta al menos un 70% para que cuente como aprobado y siga la racha —
+    no pasa nada, el vídeo ya cuenta como visto igualmente.
+</p>
+{% endif %}
+
+<h2 class="section-title">Revisión</h2>
+{% for q in review %}
+<section class="plan-item">
+    <header class="plan-item__head">
+        <h3>{{ forloop.counter }}. {{ q.question }}</h3>
+    </header>
+    <ul class="quiz-review-options">
+        {% for opt in q.options %}
+        <li class="{% if opt.is_correct %}quiz-review-options__correct{% elif opt.is_chosen %}quiz-review-options__wrong{% endif %}">
+            {{ opt.text }}{% if opt.is_correct %} ✓{% elif opt.is_chosen %} ✗{% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+{% endfor %}
+
+<div class="task-form__actions">
+    <a class="primary-btn" href="{% url 'tasks:task_list' %}">Volver a las tareas</a>
+</div>
+
+{% endblock %}

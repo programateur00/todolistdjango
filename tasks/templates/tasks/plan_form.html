@@ -100,10 +100,62 @@
         </div>
 
         <label class="field">
-            <span class="field__label">Idiomas que ya sabes (opcional)</span>
+            <span class="field__label">Idiomas que ya sabes</span>
             <input type="text" name="known_languages" maxlength="200" value="{{ plan.known_languages|default:'' }}"
-                placeholder="Ej: español, inglés">
+                placeholder="Ej: español, inglés" required>
+            <span class="field__hint">Ayuda a la IA a explicar comparando con un idioma que ya conoces.</span>
         </label>
+
+        <div class="field" id="daily-minutes-field">
+            <span class="field__label">Minutos de vídeo al día</span>
+            <div class="repeat-options" id="daily-minutes-presets">
+                <label class="repeat-option">
+                    <input type="radio" name="daily_minutes_preset" value="15">
+                    <span>15 min</span>
+                </label>
+                <label class="repeat-option">
+                    <input type="radio" name="daily_minutes_preset" value="30">
+                    <span>30 min</span>
+                </label>
+                <label class="repeat-option">
+                    <input type="radio" name="daily_minutes_preset" value="45">
+                    <span>45 min</span>
+                </label>
+                <label class="repeat-option">
+                    <input type="radio" name="daily_minutes_preset" value="60">
+                    <span>1 h</span>
+                </label>
+                <label class="repeat-option">
+                    <input type="radio" name="daily_minutes_preset" value="90">
+                    <span>1 h 30</span>
+                </label>
+                <label class="repeat-option">
+                    <input type="radio" name="daily_minutes_preset" value="120">
+                    <span>2 h</span>
+                </label>
+                <label class="repeat-option">
+                    <input type="radio" name="daily_minutes_preset" value="custom">
+                    <span>Personalizado</span>
+                </label>
+            </div>
+            <div class="field-row" id="daily-minutes-custom" hidden>
+                <label class="field">
+                    <span class="field__label">Horas</span>
+                    <input type="number" min="0" max="12" id="daily-minutes-hours" placeholder="0">
+                </label>
+                <label class="field">
+                    <span class="field__label">Minutos</span>
+                    <input type="number" min="0" max="59" id="daily-minutes-minutes" placeholder="0">
+                </label>
+            </div>
+            <input type="hidden" name="language_daily_minutes" id="language-daily-minutes-value"
+                value="{{ plan.language_daily_minutes|default:'' }}">
+            <p class="field__hint" id="daily-minutes-error" hidden>Elige cuántos minutos quieres ver al día.</p>
+            <span class="field__hint">
+                Si al llegar al objetivo al vídeo le queda poco (≤15 min), lo dejamos
+                terminar solo; si le queda mucho, se corta ahí.
+            </span>
+        </div>
 
         <label class="field">
             <span class="field__label">Test cada cuántos vídeos (opcional)</span>
@@ -215,6 +267,75 @@
     }
     studySubtypeSelect.addEventListener("change", refresh);
     refresh();
+
+    // --------------------------------------------- minutos/día (idiomas)
+    // Escoger "120" a mano en un input de número queda raro — en vez de
+    // eso, chips con duraciones típicas + "Personalizado" (horas y
+    // minutos por separado) que rellenan un input oculto con el total
+    // en minutos, que es lo único que de verdad viaja al servidor.
+    var dailyMinutesValue = document.getElementById("language-daily-minutes-value");
+    var dailyMinutesPresets = document.querySelectorAll('input[name="daily_minutes_preset"]');
+    var dailyMinutesCustom = document.getElementById("daily-minutes-custom");
+    var dailyMinutesHours = document.getElementById("daily-minutes-hours");
+    var dailyMinutesMinutes = document.getElementById("daily-minutes-minutes");
+    var dailyMinutesError = document.getElementById("daily-minutes-error");
+
+    function setDailyMinutes(minutes) {
+        dailyMinutesValue.value = minutes || "";
+        if (minutes) dailyMinutesError.hidden = true;
+    }
+
+    function updateFromCustom() {
+        var h = parseInt(dailyMinutesHours.value, 10) || 0;
+        var m = parseInt(dailyMinutesMinutes.value, 10) || 0;
+        setDailyMinutes((h * 60 + m) || "");
+    }
+
+    for (var p = 0; p < dailyMinutesPresets.length; p++) {
+        dailyMinutesPresets[p].addEventListener("change", function () {
+            if (this.value === "custom") {
+                dailyMinutesCustom.hidden = false;
+                updateFromCustom();
+            } else {
+                dailyMinutesCustom.hidden = true;
+                setDailyMinutes(parseInt(this.value, 10));
+            }
+        });
+    }
+    dailyMinutesHours.addEventListener("input", updateFromCustom);
+    dailyMinutesMinutes.addEventListener("input", updateFromCustom);
+
+    // Al editar un plan ya creado: selecciona el chip que corresponda
+    // al valor guardado, o "Personalizado" con horas/minutos ya
+    // rellenos si el valor no coincide con ningún preset (ej. 20 min).
+    (function initDailyMinutes() {
+        var current = parseInt(dailyMinutesValue.value, 10);
+        if (!current) return;
+        for (var i = 0; i < dailyMinutesPresets.length; i++) {
+            if (parseInt(dailyMinutesPresets[i].value, 10) === current) {
+                dailyMinutesPresets[i].checked = true;
+                return;
+            }
+        }
+        for (var j = 0; j < dailyMinutesPresets.length; j++) {
+            if (dailyMinutesPresets[j].value === "custom") dailyMinutesPresets[j].checked = true;
+        }
+        dailyMinutesCustom.hidden = false;
+        dailyMinutesHours.value = Math.floor(current / 60);
+        dailyMinutesMinutes.value = current % 60;
+    })();
+
+    // El input real que viaja al servidor es type=hidden — el navegador
+    // no valida "required" en campos ocultos, así que el mínimo (elegir
+    // algún valor) se comprueba a mano justo antes de enviar.
+    document.querySelector("form.task-form").addEventListener("submit", function (e) {
+        var isLanguage = selectedValue(planTypeRadios) === "study" && studySubtypeSelect.value === "language";
+        if (isLanguage && !dailyMinutesValue.value) {
+            e.preventDefault();
+            dailyMinutesError.hidden = false;
+            dailyMinutesError.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+    });
 })();
 </script>
 

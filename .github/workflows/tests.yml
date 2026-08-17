@@ -1,0 +1,43 @@
+name: Tests
+
+# Corre los 115 tests (y comprueba que no falte ninguna migración) en
+# cada push y cada pull request a main — sin secretos que configurar:
+# la base de datos es SQLite y todas las variables de entorno
+# (GEMINI_API_KEY, YOUTUBE_API_KEY...) tienen valor por defecto en
+# todoapp/settings.py, así que el job funciona "de fábrica".
+#
+# Esto NO despliega nada — el despliegue en PythonAnywhere sigue
+# siendo manual (git pull + migrate/collectstatic si hace falta +
+# Reload en su panel). Esto solo te avisa, antes de ese paso, de si
+# algo se ha roto.
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar el repo
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          # Cualquier 3.10+ vale para Django 5.2 — ajusta esto si
+          # quieres que coincida exactamente con la versión de Python
+          # que usa tu cuenta de PythonAnywhere.
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Comprobar que no falta ninguna migración
+        run: python manage.py makemigrations tasks --check --dry-run
+
+      - name: Correr los tests
+        run: python manage.py test

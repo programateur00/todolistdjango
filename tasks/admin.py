@@ -1,8 +1,8 @@
 from django.contrib import admin
 
 from .models import (
-    CourseModule, CoursePlaylist, Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem,
-    SavedVideo, Task, WorkoutSession,
+    CourseModule, CoursePlaylist, CourseQuiz, Exercise, Occurrence, Plan, PlanItem, Routine,
+    RoutineItem, SavedVideo, Task, WorkoutSession,
 )
 
 
@@ -121,7 +121,18 @@ class CourseModuleAdmin(admin.ModelAdmin):
 
 @admin.register(CoursePlaylist)
 class CoursePlaylistAdmin(admin.ModelAdmin):
-    list_display = ("title", "language", "level", "channel_title", "is_active", "added_at")
-    list_filter = ("language", "level", "is_active")
+    list_display = (
+        "title", "language", "level_label", "native_language", "channel_title", "is_active", "order", "added_at",
+    )
+    list_filter = ("language", "level", "native_language", "is_active")
     search_fields = ("title", "channel_title", "youtube_playlist_id", "notes")
+    list_per_page = 50
+
+
+@admin.register(CourseQuiz)
+class CourseQuizAdmin(admin.ModelAdmin):
+    list_display = ("plan", "up_to_order", "total", "score", "passed", "created_at", "answered_at")
+    list_filter = ("passed",)
+    search_fields = ("plan__name", "plan__language_name")
+    readonly_fields = ("topics", "questions", "answers")
     list_per_page = 50

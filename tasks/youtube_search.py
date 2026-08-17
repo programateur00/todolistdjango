@@ -6,9 +6,11 @@ vídeo existe de verdad — pedirle directamente "dame los vídeos de un
 curso de francés de A1 a C2" produce IDs inventados que no cargan, o
 que ni siquiera son de francés. Este módulo hace la parte que Gemini no
 puede hacer: buscar playlists y vídeos REALES con la propia API de
-YouTube. La curación (elegir y ordenar estos resultados con IA) es la
-Fase 2 — aquí todavía no entra ningún LLM, a propósito, para poder
-juzgar la calidad de los datos reales antes de construir nada encima.
+YouTube. La curación final (elegir y ordenar playlists ya verificadas
+con IA) vive en tasks/ai.py (`generate_language_plan_draft`) y
+tasks/api.py (`build_language_plan_draft`) — aquí, a propósito, no
+entra ningún LLM, para poder juzgar la calidad de los datos reales
+antes de construir nada encima.
 
 Clave gratis, DISTINTA de GEMINI_API_KEY: se pide en Google Cloud
 Console, no en AI Studio — ver el README, sección "Cursos de idiomas ·
@@ -258,9 +260,11 @@ def find_language_course_candidates(
     completo bueno en favor de una lección suelta corta.
 
     NO decide nada más (ni orden final, ni qué playlist usar en un
-    plan) — eso es curación, y la hace un humano con
-    `add_course_playlist`, o más adelante la IA en la Fase 2 sobre
-    playlists ya verificadas. Esto solo responde "qué hay de verdad".
+    plan) — eso es curación, y pasa en dos pasos: primero un humano con
+    `add_course_playlist` decide qué playlist entra al catálogo
+    verificado; luego la IA (`generate_language_plan_draft` en
+    tasks/ai.py) elige y ordena solo entre lo ya verificado. Esto solo
+    responde "qué hay de verdad".
 
     Devuelve {nivel: [{playlist_id, playlist_title, channel_title,
     item_count, videos: [{video_id, title, duration_seconds,

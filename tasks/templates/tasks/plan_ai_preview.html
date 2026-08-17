@@ -4,15 +4,20 @@
 
 <header class="topbar">
     <div class="topbar__title">
-        <span class="topbar__eyebrow">plan · IA · borrador</span>
+        <span class="topbar__eyebrow">plan · {% if draft.study_subtype == 'language' %}borrador{% else %}IA · borrador{% endif %}</span>
         <h1>Revisa tu plan</h1>
     </div>
     <a href="{% url 'tasks:plan_list' %}" class="stats-link">← Cancelar</a>
 </header>
 
 <p class="field__hint">
+    {% if draft.study_subtype == 'language' %}
+    Esto es lo que se ha asignado del catálogo, sin IA de por medio — puedes tocar el
+    nombre y las notas antes de confirmar, o volver atrás y cambiar el idioma o el nivel.
+    {% else %}
     Esto es lo que propone la IA. Todavía no se ha guardado nada — puedes tocar
     cualquier número antes de confirmar, o pedir otra propuesta.
+    {% endif %}
 </p>
 
 <form class="task-form" method="post" id="ai-confirm-form">
@@ -34,11 +39,20 @@
         <input type="text" name="reward" maxlength="200" placeholder="Ej: unas zapatillas nuevas">
     </label>
 
+    {% if draft.study_subtype == 'language' %}
+    <p class="field__hint">
+        ≈{{ draft.plan_fields.weeks }} semana{{ draft.plan_fields.weeks|pluralize }} estimadas a
+        {{ draft.plan_fields.custom_days|length }} día{{ draft.plan_fields.custom_days|length|pluralize }} a la semana
+        — no es una fecha límite: el curso sigue abierto hasta que termines todos los vídeos,
+        tardes más o menos de lo estimado («Cambiar la petición» para elegir otro ritmo).
+    </p>
+    {% else %}
     <p class="field__hint">
         {{ draft.plan_fields.weeks }} semanas ·
         {{ draft.plan_fields.custom_days|length }} día{{ draft.plan_fields.custom_days|length|pluralize }} a la semana
         (esto ya no se puede cambiar aquí — «Cambiar la petición» para elegir otro).
     </p>
+    {% endif %}
 
     {% if draft.study_subtype == 'language' %}
     <p class="field__hint">
@@ -57,11 +71,17 @@
     {% endif %}
 
     <h2 class="section-title">Cursos elegidos, en orden</h2>
+    <p class="field__hint">
+        Si hay varios cursos para el mismo nivel, se encadenan todos uno tras otro — por si el
+        primero se queda corto, sigues con el siguiente sin quedarte sin vídeos.
+    </p>
     {% for c in draft.selected %}
     <section class="plan-item">
         <header class="plan-item__head">
             <h3>{{ forloop.counter }}. {{ c.title }}</h3>
-            <span class="plan-item__prog">nivel {{ c.level }}</span>
+            <span class="plan-item__prog">
+                {% if c.level_to and c.level_to != c.level %}nivel {{ c.level }} → {{ c.level_to }}{% else %}nivel {{ c.level }}{% endif %}
+            </span>
         </header>
         <p class="field__hint">
             Canal: {{ c.channel_title }} · {{ c.item_count }} vídeo{{ c.item_count|pluralize }}
@@ -69,7 +89,7 @@
         </p>
     </section>
     {% empty %}
-    <p class="empty-state">La IA no eligió ningún curso — prueba a generar otra vez.</p>
+    <p class="empty-state">No se ha asignado ningún curso — vuelve atrás y prueba otro nivel.</p>
     {% endfor %}
     {% else %}
 
@@ -211,6 +231,14 @@
     </div>
 </form>
 
+{% if draft.study_subtype == 'language' %}
+{# Sin IA de por medio, "generar otra vez" con los mismos datos saldría
+   exactamente igual — no tiene sentido ofrecerlo. Para cambiar algo
+   (idioma, nivel, idioma nativo) hay que volver al formulario. #}
+<div class="task-form__actions" style="margin-top:8px;">
+    <a class="ghost-btn" href="{% url 'tasks:plan_ai_create' %}">← Cambiar idioma o nivel</a>
+</div>
+{% else %}
 <form method="post" class="task-form__actions" style="margin-top:8px;">
     {% csrf_token %}
     <input type="hidden" name="step" value="regenerar">
@@ -227,16 +255,9 @@
     <input type="hidden" name="height_cm" value="{{ height_cm }}">
     <input type="hidden" name="sex" value="{{ sex }}">
     <input type="hidden" name="max_load_kg" value="{{ max_load_kg }}">
-    {% if draft.study_subtype == 'language' %}
-    <input type="hidden" name="study_subtype" value="{{ draft.study_subtype }}">
-    <input type="hidden" name="language_name" value="{{ draft.plan_fields.language_name }}">
-    <input type="hidden" name="level_from" value="{{ draft.plan_fields.level_from }}">
-    <input type="hidden" name="level_to" value="{{ draft.plan_fields.level_to }}">
-    <input type="hidden" name="known_languages" value="{{ draft.plan_fields.known_languages }}">
-    <input type="hidden" name="quiz_every_n_videos" value="{{ draft.plan_fields.quiz_every_n_videos|default:'' }}">
-    {% endif %}
     <button type="submit" class="ghost-btn">↻ Generar otra vez</button>
     <a class="ghost-btn" href="{% url 'tasks:plan_ai_create' %}">Cambiar la petición</a>
 </form>
+{% endif %}
 
 {% endblock %}

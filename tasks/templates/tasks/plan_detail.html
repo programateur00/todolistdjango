@@ -4,7 +4,13 @@
 
 <header class="topbar">
     <div class="topbar__title">
-        <span class="topbar__eyebrow">plan · semana {{ plan.week_number }} de {{ plan.weeks }}</span>
+        <span class="topbar__eyebrow">
+            {% if is_language %}
+            curso de idioma · semana {{ plan.week_number }} (≈{{ plan.weeks }} estimadas)
+            {% else %}
+            plan · semana {{ plan.week_number }} de {{ plan.weeks }}
+            {% endif %}
+        </span>
         <h1>{{ plan.name }}</h1>
     </div>
     <a href="{% url 'tasks:plan_list' %}" class="stats-link">← Planes</a>
@@ -40,6 +46,14 @@
 
 {% if plan.known_languages %}
 <p class="field__hint">Ya sabes: {{ plan.known_languages }}</p>
+{% endif %}
+
+{% if quiz_streaks %}
+<p class="field__hint">
+    Racha de tests de repaso: {{ quiz_streaks.current_streak }}
+    {% if quiz_streaks.max_streak %}· máxima: {{ quiz_streaks.max_streak }}{% endif %}
+    — toca uno cada {{ plan.quiz_every_n_videos }} vídeo{{ plan.quiz_every_n_videos|pluralize }} vistos.
+</p>
 {% endif %}
 
 {% if not course_progress.total %}
