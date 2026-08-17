@@ -34,7 +34,7 @@ from .models import (
     AIGenerationLog, CourseModule, CoursePlaylist, CourseQuiz, Exercise, Occurrence, Plan, PlanItem,
     Routine, RoutineItem, SavedVideo, Task, TimerSession, WorkoutSession,
 )
-from .utils import get_current_user, resolve_plan_target as _plan_context
+from .utils import get_current_user, read_mobile_release, resolve_plan_target as _plan_context
 from .youtube_search import (
     YouTubeSearchError, get_playlists_details, get_videos_details, list_playlist_items,
 )
@@ -195,6 +195,7 @@ def routine_json(r):
 def meta(request):
     """Catálogos fijos (categorías, días de la semana...) para que la app
     no tenga que repetirlos hardcodeados y desincronizarse del servidor."""
+    release = read_mobile_release()
     return JsonResponse({
         "categories": [{"value": v, "label": l} for v, l in Task.CATEGORY_CHOICES],
         # Separadas porque significan cosas distintas según la categoría:
@@ -206,6 +207,14 @@ def meta(request):
         "repeats": [{"value": v, "label": l} for v, l in Task.REPEAT_CHOICES],
         "weekdays": [{"value": v, "label": l} for v, l in Task.WEEKDAYS],
         "capabilities": Task.CATEGORY_CAPABILITIES,
+        # None si no hay ninguna build publicada todavía (ver
+        # mobile_releases/latest.json) — la app simplemente no avisa de
+        # nada en ese caso, en vez de fallar.
+        "mobile_app": {
+            "version": release["version"],
+            "download_url": "/mobile/apk/",
+            "notes": release["notes"],
+        } if release else None,
     })
 
 

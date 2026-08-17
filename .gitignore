@@ -4,3 +4,5 @@ staticfiles/
 .env
 *.sqlite3-journal
 db.sqlite3
+backups/
+mobile_releases/

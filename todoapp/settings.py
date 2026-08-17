@@ -29,6 +29,16 @@ SECRET_KEY = os.environ.get(
 
 # SECURITY WARNING: don't run with debug turned on in production!
 # En local (sin la variable definida) sigue en True. En el hosting, la pondremos en "False".
+#
+# Nota: el default se deja en "True" a propósito, NO al revés. En
+# producción (PythonAnywhere) DJANGO_DEBUG se fija explícitamente en el
+# archivo WSGI, que vive fuera del repo y no lo toca `git pull` — así
+# que el escenario de "se despliega y por defecto queda en modo debug"
+# no aplica a este hosting. Si el default fuera "False", cada
+# `runserver` local sin la variable definida perdería los hosts locales
+# de la línea de abajo (ALLOWED_HOSTS quedaría vacío) y los tracebacks
+# detallados de desarrollo, por una ganancia de seguridad que aquí no
+# corresponde.
 DEBUG = os.environ.get("DJANGO_DEBUG", "True") == "True"
 
 # En producción, define DJANGO_ALLOWED_HOSTS como "tuapp.up.railway.app,tudominio.com"
@@ -89,6 +99,32 @@ CORS_URLS_REGEX = r"^/api/.*$"
 # --------------------------------------------------------------
 BASIC_AUTH_USER = os.environ.get("BASIC_AUTH_USER", "")
 BASIC_AUTH_PASSWORD = os.environ.get("BASIC_AUTH_PASSWORD", "")
+
+
+# --------------------------------------------------------------
+# Cookies seguras en producción.
+# Solo se activan cuando DEBUG=False — en local (runserver, sin HTTPS)
+# siguen desactivadas, así que esto no cambia nada en tu día a día.
+# Con esto, si algún día una cookie de sesión o de CSRF viajara por
+# error sobre HTTP en vez de HTTPS, el navegador se niega a mandarla.
+# --------------------------------------------------------------
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+# El token CSRF de esta app se lee del HTML ({{ csrf_token }}), no de la
+# cookie desde JS (comprobado: task_video.html usa la variable de
+# plantilla, no document.cookie) — así que la cookie puede ir marcada
+# HttpOnly sin romper nada, y así JavaScript no puede leerla.
+CSRF_COOKIE_HTTPONLY = True
+
+# Sobre forzar HTTPS (redirigir toda visita http:// a https://):
+# NO se hace aquí con SECURE_SSL_REDIRECT. PythonAnywhere terminó
+# recomendando en contra de hacerlo a nivel de Django ("Force HTTPS on
+# your website", blog.pythonanywhere.com/167) — lo gestionan en su
+# propio proxy porque hacerlo en el código corre el riesgo de bucles de
+# redirección si Django no detecta bien el esquema (http/https) detrás
+# del proxy. Actívalo en su lugar desde el panel: pestaña "Web" → tu
+# sitio → sección "Security" → toggle de forzar HTTPS. Cero riesgo de
+# bucle, y es la vía que el propio hosting recomienda.
 
 
 # --------------------------------------------------------------

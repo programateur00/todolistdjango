@@ -1,9 +1,18 @@
 """
 Utilidades compartidas de la app.
 """
+import json
+from pathlib import Path
+
+from django.conf import settings
 from django.contrib.auth import get_user_model
 
 DEFAULT_USERNAME = "default"
+
+# Carpeta donde caen a mano el APK y su ficha de versión cuando hay una
+# build nueva de la app móvil (ver README, "Actualizaciones de la app
+# móvil"). Fuera de git (.gitignore) — son binarios, no código.
+MOBILE_RELEASES_DIR = Path(settings.BASE_DIR) / "mobile_releases"
 
 
 def get_current_user():
@@ -72,4 +81,42 @@ def resolve_plan_target(exercise_slug, sets=None, reps=None, seconds=None):
         "target_sets": sets if sets is not None else t["sets"],
         "target_reps": reps if reps is not None else t["reps"],
         "target_seconds": seconds if seconds is not None else t["seconds"],
+    }
+
+
+def read_mobile_release():
+    """
+    Lee mobile_releases/latest.json EN CADA LLAMADA, sin caché — así
+    subir un APK y editar ese archivo se nota en la siguiente petición,
+    sin reiniciar nada en PythonAnywhere.
+
+    Formato esperado del JSON (se edita a mano, ver README):
+        {"version": "3", "apk_filename": "libreta-v3.apk", "notes": "..."}
+
+    Devuelve None si no hay ninguna build publicada, el JSON está mal
+    formado, o el archivo que declara no existe de verdad — en
+    cualquiera de esos casos, tanto /api/meta/ como la descarga se
+    comportan como si no hubiera ninguna actualización, en vez de dar
+    un error. Compartido entre api.py (avisa de la versión nueva) y
+    views.py (sirve el archivo) para no leer el JSON de dos formas
+    distintas.
+    """
+    info_path = MOBILE_RELEASES_DIR / "latest.json"
+    try:
+        data = json.loads(info_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+    version = str(data.get("version") or "").strip()
+    # .name descarta cualquier ruta que traiga el campo — nunca se sirve
+    # un archivo fuera de mobile_releases/, pase lo que pase en el JSON.
+    apk_filename = Path(str(data.get("apk_filename") or "").strip()).name
+    if not version or not apk_filename:
+        return None
+    apk_path = MOBILE_RELEASES_DIR / apk_filename
+    if not apk_path.is_file():
+        return None
+    return {
+        "version": version,
+        "apk_path": apk_path,
+        "notes": str(data.get("notes") or "").strip(),
     }

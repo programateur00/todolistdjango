@@ -2,7 +2,7 @@ import json
 
 from django.contrib import messages
 from django.db.models import Count, Q
-from django.http import JsonResponse
+from django.http import FileResponse, Http404, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
@@ -17,7 +17,7 @@ from .models import (
     CourseQuiz, Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, SavedVideo, Task,
     TimerSession, WorkoutSession,
 )
-from .utils import get_current_user, resolve_plan_target
+from .utils import get_current_user, read_mobile_release, resolve_plan_target
 
 
 def _read_category(request, default=Task.CATEGORY_GENERAL):
@@ -1748,3 +1748,31 @@ def plan_session_save(request, pk, plan_pk):
     task.mark_done()
     messages.success(request, f"Sesión de «{plan.name}» guardada.")
     return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
+
+
+# ---------------------------------------------------- app móvil: updates
+
+def mobile_apk_download(request):
+    """
+    Sirve el último APK publicado a mano en mobile_releases/ (ver
+    utils.read_mobile_release y el README, sección "Actualizaciones de
+    la app móvil"). La app móvil llega aquí abriendo esta URL en el
+    navegador del sistema (no vía fetch), después de ver en /api/meta/
+    que hay una versión más reciente que la suya.
+
+    Sigue detrás del candado Basic Auth de siempre — BasicAuthMiddleware
+    envuelve toda la app, y aquí no se hace ninguna excepción a
+    propósito (se decidió así conscientemente en vez de dejarla pública).
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    release = read_mobile_release()
+    if not release:
+        raise Http404("Todavía no hay ninguna build de la app publicada.")
+    apk_path = release["apk_path"]
+    response = FileResponse(
+        open(apk_path, "rb"),
+        content_type="application/vnd.android.package-archive",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{apk_path.name}"'
+    return response

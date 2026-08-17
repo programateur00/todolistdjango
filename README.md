@@ -52,6 +52,49 @@ python3 manage.py createsuperuser
 ```
 y entra en http://127.0.0.1:8000/admin/
 
+## Seguridad y despliegue en producción
+
+Variables de entorno: ver `.env.example` en la raíz del proyecto — documenta
+las 9 que existen (clave secreta, DEBUG, hosts permitidos, CORS extra,
+candado Basic Auth, claves de Gemini/YouTube) y cómo cargarlas en
+PythonAnywhere (con `python-dotenv` desde el archivo WSGI, que vive fuera
+del repo y no lo toca `git pull`).
+
+`DJANGO_DEBUG` sigue con default `"True"` a propósito, no al revés: en este
+hosting el valor real de producción se fija explícitamente en el archivo
+WSGI, así que invertir el default no añade seguridad aquí y sí rompería
+`runserver` en local sin la variable definida (se perderían los
+`ALLOWED_HOSTS` locales y los tracebacks detallados de desarrollo).
+
+Cookies de sesión y CSRF: con `DEBUG=False`, `SESSION_COOKIE_SECURE` y
+`CSRF_COOKIE_SECURE` fuerzan a que esas cookies solo viajen por HTTPS, y
+`CSRF_COOKIE_HTTPONLY` evita que JavaScript pueda leer la cookie CSRF (el
+token se lee de la plantilla, no de la cookie, así que esto no rompe nada).
+En local (`DEBUG=True`) no cambia nada de esto.
+
+Forzar HTTPS (redirigir toda visita `http://` a `https://`): no se hace
+desde Django con `SECURE_SSL_REDIRECT` — PythonAnywhere lo desaconseja,
+porque puede acabar en un bucle de redirección si el proxy no comunica
+bien el esquema. Se activa en su lugar desde su panel: pestaña "Web" → tu
+sitio → sección "Security" → toggle de forzar HTTPS.
+
+Copia de seguridad de la base de datos (`db.sqlite3`):
+```bash
+python manage.py backup_db            # copia a backups/, con marca de tiempo
+python manage.py backup_db --keep 30  # conserva las últimas 30 (por defecto 14)
+python manage.py backup_db --dry-run  # enseña qué haría, sin tocar nada
+```
+`backups/` no se sube a git. Para que corra sola, prográmala en la pestaña
+"Tasks" de PythonAnywhere (las cuentas gratuitas creadas antes del
+15-01-2026 incluyen 1 tarea diaria):
+```
+cd /home/tu_usuario/tu_proyecto && python manage.py backup_db
+```
+Esto protege de un borrado accidental o una migración que sale mal — no de
+perder la cuenta entera, porque la copia queda en el mismo disco. Si algún
+día hay datos que de verdad importe no perder, conviene bajarse `backups/`
+de vez en cuando a otro sitio.
+
 ## IA para generar planes
 
 El botón "✨ Generar con IA" de la pantalla de Planes usa **Google Gemini**
@@ -255,3 +298,45 @@ esta misma web y habla con la API bajo `/api/` — ver
 (caché de lecturas + cola de escrituras pendientes) salvo para
 generar planes de idioma, que por ahora solo está disponible desde el
 navegador (ver "Cursos de idiomas · YouTube" más arriba).
+
+### Actualizaciones de la app móvil
+
+En vez de pasar el APK por Drive cada vez, la app comprueba sola si
+hay una versión más reciente colgada en el servidor y te deja
+descargarla con un toque. No usa Play Store ni ningún servicio
+externo — todo vive en tu propio hosting.
+
+Para publicar una build nueva:
+
+1. Compila el APK como siempre, en tu máquina.
+2. En PythonAnywhere, pestaña **Files**, entra en la carpeta del
+   proyecto y crea (la primera vez) la carpeta `mobile_releases/` —
+   no está en git a propósito (son binarios, no código), así que hay
+   que crearla a mano una vez.
+3. Sube el `.apk` ahí con el botón naranja de subir archivo.
+4. Crea o edita `mobile_releases/latest.json` (con el editor de texto
+   de la propia pestaña Files, igual que editas el archivo WSGI) con
+   este formato — ver `latest.json.ejemplo` en la raíz del repo:
+   ```json
+   {
+     "version": "2",
+     "apk_filename": "libreta-v2.apk",
+     "notes": "Lo que cambió en esta versión (opcional, solo para ti)"
+   }
+   ```
+5. Sube también `mobile-app/www/js/version.js` con `APP_VERSION`
+   puesto al mismo número que `"version"` de arriba, y compila el APK
+   con ese cambio ya dentro (para que la propia build compare bien
+   contra la siguiente).
+
+No hace falta reiniciar ni recargar nada — `/api/meta/` lee ese JSON
+en cada petición. La próxima vez que abras la app en el móvil, si el
+número no coincide con el que lleva grabado, aparece un aviso fijo con
+un enlace "actualizar" que abre el navegador del sistema, descarga el
+APK y Android pregunta si quieres instalarlo.
+
+La descarga sigue detrás del candado Basic Auth de siempre — al tocar
+"actualizar" el navegador te va a pedir usuario/contraseña otra vez
+(es un navegador aparte del WebView de la app, no comparte el login).
+Es una decisión consciente: se prefirió mantener el mismo candado que
+protege el resto del sitio antes que dejar esa URL sin autenticación.
