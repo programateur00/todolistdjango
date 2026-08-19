@@ -1276,6 +1276,18 @@ def plan_ai_form(request):
             messages.error(request, "El borrador ha caducado — genera el plan otra vez.")
             return redirect(reverse("tasks:plan_ai_create"))
 
+        # Igual que en la creación manual: sin hora no hay a qué hora
+        # avisar ni cuándo cerrar el día solo (ver Task.expire_overdue).
+        # La IA no la propone — es una decisión del usuario, no algo que
+        # se pueda adivinar de la petición — así que se pide aquí, en la
+        # vista previa, antes de guardar nada.
+        due_time = request.POST.get("due_time") or None
+        if not due_time:
+            messages.error(request, "Ponle una hora — la notificación y el cierre automático del día la necesitan.")
+            return render(request, "tasks/plan_ai_preview.html", {
+                "draft": draft, "prompt": request.session.get("plan_ai_prompt", ""),
+            })
+
         is_language = draft.get("study_subtype") == Plan.STUDY_SUBTYPE_LANGUAGE
 
         plan_data = {
@@ -1285,6 +1297,7 @@ def plan_ai_form(request):
             "custom_days": draft["plan_fields"].get("custom_days"),
             "started_on": draft["plan_fields"].get("started_on"),
             "reward": request.POST.get("reward", "").strip(),
+            "due_time": due_time,
             "is_active": True,
         }
 

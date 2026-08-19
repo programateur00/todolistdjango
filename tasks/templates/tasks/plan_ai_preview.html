@@ -35,6 +35,12 @@
     </label>
 
     <label class="field">
+        <span class="field__label">Hora</span>
+        <input type="time" name="due_time" value="{{ draft.plan_fields.due_time|default:'' }}" required>
+        <span class="field__hint">A esta hora avisa la app y, si sigue sin hacerse, se marca sola como no hecha.</span>
+    </label>
+
+    <label class="field">
         <span class="field__label">Recompensa al cerrar el ciclo (opcional)</span>
         <input type="text" name="reward" maxlength="200" placeholder="Ej: unas zapatillas nuevas">
     </label>
