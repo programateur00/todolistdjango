@@ -23,6 +23,7 @@ from django.conf import settings
 from django.db.models import Q, Sum
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_time
 from django.views.decorators.csrf import csrf_exempt
@@ -33,7 +34,7 @@ from .models import (
     AIGenerationLog, CourseModule, CoursePlaylist, Exercise, Occurrence, Plan, PlanItem, Routine,
     RoutineItem, SavedVideo, Task, TimerSession, WorkoutSession,
 )
-from .utils import get_current_user, resolve_plan_target as _plan_context
+from .utils import get_current_user, read_mobile_release, resolve_plan_target as _plan_context
 from .youtube_search import YouTubeSearchError, get_videos_details, list_playlist_items
 
 
@@ -192,7 +193,7 @@ def routine_json(r):
 def meta(request):
     """Catálogos fijos (categorías, días de la semana...) para que la app
     no tenga que repetirlos hardcodeados y desincronizarse del servidor."""
-    return JsonResponse({
+    payload = {
         "categories": [{"value": v, "label": l} for v, l in Task.CATEGORY_CHOICES],
         # Separadas porque significan cosas distintas según la categoría:
         # en Deporte filtran qué ejercicios se ofrecen; en Enfoque, qué se
@@ -203,7 +204,23 @@ def meta(request):
         "repeats": [{"value": v, "label": l} for v, l in Task.REPEAT_CHOICES],
         "weekdays": [{"value": v, "label": l} for v, l in Task.WEEKDAYS],
         "capabilities": Task.CATEGORY_CAPABILITIES,
-    })
+    }
+    # Aviso de actualización de la app móvil (ver app.js:checkForAppUpdate
+    # y utils.read_mobile_release). Sin build publicada, release es None y
+    # el campo se omite — así la app sigue sin avisar de nada, igual que
+    # antes de que existiera esto.
+    release = read_mobile_release()
+    if release:
+        payload["mobile_app"] = {
+            "version": release["version"],
+            # Sin namespace "tasks:" -- esta ruta se registra directa en
+            # todoapp/urls.py, fuera de /tareas/ y de /api/ a propósito
+            # (ver el comentario de ahí: así CORS, que solo aplica bajo
+            # /api/, no le afecta -- la abre el navegador del sistema).
+            "download_url": reverse("mobile_apk_download"),
+            "notes": release["notes"],
+        }
+    return JsonResponse(payload)
 
 
 @api("GET")
