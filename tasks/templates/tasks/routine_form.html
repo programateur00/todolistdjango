@@ -5,7 +5,7 @@
 
 <header class="topbar">
     <div class="topbar__title">
-        <span class="topbar__eyebrow">circuito cronometrado</span>
+        <span class="topbar__eyebrow">circuito</span>
         <h1>{% if routine %}Editar «{{ routine.name }}»{% else %}Nuevo circuito{% endif %}</h1>
     </div>
     <a href="{{ next_url|default:'/tareas/' }}" class="stats-link">← Volver</a>
@@ -52,12 +52,14 @@
             {% for exercise in exercises %}
             <li class="routine-builder__available-item">
                 <span class="routine-builder__icon">{% exercise_icon exercise.slug compact=True %}</span>
-                <span class="routine-builder__available-name">{{ exercise.name }}</span>
+                <span class="routine-builder__available-name">{{ exercise.name }}
+                    <small class="routine-mode">{% if exercise.mode == "pose" %}cámara{% else %}cronómetro{% endif %}</small>
+                </span>
                 <button type="button" class="ghost-btn" data-add
                         data-id="{{ exercise.pk }}" data-name="{{ exercise.name }}">+ Añadir</button>
             </li>
             {% empty %}
-            <li>No hay ejercicios cronometrados en el catálogo todavía.</li>
+            <li>No hay ejercicios en el catálogo todavía.</li>
             {% endfor %}
         </ul>
     </fieldset>

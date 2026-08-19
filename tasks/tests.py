@@ -75,7 +75,7 @@ class CategoryViewTests(TestCase):
     def test_create_without_category_defaults_to_general(self):
         resp = self.client.post(
             reverse("tasks:task_create"),
-            {"title": "Una cosa", "due_time": "09:00"},
+            {"title": "Una cosa"},
         )
         self.assertEqual(resp.status_code, 302)
         t = Task.objects.get(title="Una cosa")
@@ -97,42 +97,6 @@ class CategoryViewTests(TestCase):
         self.assertContains(resp, "Hacer sentadillas")
         self.assertNotContains(resp, "Estudiar cálculo")
 
-
-class RequiredDueTimeTests(TestCase):
-    """
-    La hora es lo que dispara el aviso (ver notifications.js, en la app
-    móvil) y lo que usa Task.expire_overdue() para marcar sola la tarea
-    como no hecha al final del día — sin ella, ninguna de las dos cosas
-    tiene con qué disparar. El formulario ya la pide con `required`, pero
-    eso no protege un envío que se lo salte (curl, un form manipulado…),
-    así que el mínimo se repite en el servidor.
-    """
-
-    def test_task_create_without_due_time_is_rejected(self):
-        resp = self.client.post(reverse("tasks:task_create"), {
-            "title": "Sin hora", "repeat": Task.REPEAT_NONE, "interval": 1,
-        })
-        self.assertEqual(resp.status_code, 200)
-        self.assertFalse(Task.objects.filter(title="Sin hora").exists())
-
-    def test_task_edit_without_due_time_is_rejected(self):
-        t = Task.objects.create(
-            title="Con hora", due_time=time(9, 0), user=get_current_user(),
-        )
-        resp = self.client.post(reverse("tasks:task_edit", args=[t.pk]), {
-            "title": "Con hora", "repeat": Task.REPEAT_NONE, "interval": 1,
-        })
-        self.assertEqual(resp.status_code, 200)
-        t.refresh_from_db()
-        self.assertEqual(t.due_time, time(9, 0))  # no se ha tocado
-
-    def test_plan_create_without_due_time_is_rejected(self):
-        resp = self.client.post(reverse("tasks:plan_create"), {
-            "name": "Sin hora", "weeks": 12, "is_active": "on",
-        })
-        self.assertEqual(resp.status_code, 200)
-        self.assertFalse(Plan.objects.filter(name="Sin hora").exists())
-
     def test_list_renders_category_pill(self):
         Task.objects.create(title="Ir al gym", category=Task.CATEGORY_SPORT, user=get_current_user())
         resp = self.client.get(reverse("tasks:task_list"))
@@ -148,7 +112,6 @@ class RequiredDueTimeTests(TestCase):
                 "category": Task.CATEGORY_WORK,
                 "repeat": Task.REPEAT_NONE,
                 "interval": 1,
-                "due_time": "10:00",
             },
         )
         self.assertEqual(resp.status_code, 302)
@@ -231,7 +194,6 @@ class AntiTaskTests(TestCase):
     def test_create_form_saves_avoid_category(self):
         resp = self.client.post(reverse("tasks:task_create"), {
             "title": "No fumar", "category": "avoid", "repeat": Task.REPEAT_NONE, "interval": 1,
-            "due_time": "22:00",
         })
         self.assertEqual(resp.status_code, 302)
         t = Task.objects.get(title="No fumar")
@@ -241,7 +203,6 @@ class AntiTaskTests(TestCase):
     def test_create_form_defaults_to_general_not_avoid(self):
         resp = self.client.post(reverse("tasks:task_create"), {
             "title": "Tarea normal", "repeat": Task.REPEAT_NONE, "interval": 1,
-            "due_time": "18:00",
         })
         self.assertEqual(resp.status_code, 302)
         t = Task.objects.get(title="Tarea normal")
@@ -857,7 +818,7 @@ class PlanViewTests(TestCase):
 
     def _create_plan(self):
         self.client.post(reverse("tasks:plan_create"), {
-            "name": "Ponerme en forma", "weeks": 12, "is_active": "on", "due_time": "19:00",
+            "name": "Ponerme en forma", "weeks": 12, "is_active": "on",
         })
         return Plan.objects.get(name="Ponerme en forma")
 
@@ -991,7 +952,7 @@ class PlanTaskFlowTests(TestCase):
     def _plan_with_exercise(self):
         self.client.post(reverse("tasks:plan_create"), {
             "name": "Ponerme en forma", "weeks": 12, "is_active": "on",
-            "custom_days": ["0", "2", "4"], "due_time": "19:00",
+            "custom_days": ["0", "2", "4"],
         })
         plan = Plan.objects.get(name="Ponerme en forma")
         self.client.post(reverse("tasks:plan_item_create", args=[plan.pk]), {
@@ -1287,6 +1248,131 @@ class MultiExerciseCompletionTests(TestCase):
         ws = WorkoutSession.objects.get(task=self.task)
         self.assertIsNone(ws.plan)
         self.assertEqual(ws.exercise, "plank-c")
+
+
+class ExerciseCatalogTests(TestCase):
+    """
+    Estado del catálogo tras 0002_seed_exercise_catalog (ya editada) +
+    0011_camera_exercise_updates (por si alguna base de datos ya había
+    corrido la 0002 vieja) — decisión del usuario: Superman y Circuito
+    de abdominales fuera del todo; crunch y elevación de piernas con
+    cámara; plancha y plancha lateral cronometradas pero con
+    counter_key para la comprobación de postura.
+    """
+
+    def test_ab_circuit_and_superman_are_gone(self):
+        self.assertFalse(Exercise.objects.filter(slug="ab-circuit").exists())
+        self.assertFalse(Exercise.objects.filter(slug="superman").exists())
+
+    def test_crunch_and_leg_raise_are_camera_exercises(self):
+        crunch = Exercise.objects.get(slug="crunch")
+        leg_raise = Exercise.objects.get(slug="leg-raise")
+        self.assertEqual(crunch.mode, Exercise.MODE_POSE)
+        self.assertEqual(crunch.counter_key, "crunch")
+        self.assertEqual(leg_raise.mode, Exercise.MODE_POSE)
+        self.assertEqual(leg_raise.counter_key, "legraise")
+
+    def test_situp_already_has_its_own_counter(self):
+        situp = Exercise.objects.get(slug="situp")
+        self.assertEqual(situp.mode, Exercise.MODE_POSE)
+        self.assertEqual(situp.counter_key, "situp")
+
+    def test_plank_and_side_plank_stay_timed_with_counter_key(self):
+        plank = Exercise.objects.get(slug="plank")
+        side_plank = Exercise.objects.get(slug="side-plank")
+        self.assertEqual(plank.mode, Exercise.MODE_TIMED)
+        self.assertEqual(plank.counter_key, "plank")
+        self.assertEqual(side_plank.mode, Exercise.MODE_TIMED)
+        self.assertEqual(side_plank.counter_key, "sideplank")
+
+    def test_bicycle_crunch_stays_plain_timed(self):
+        """No todos los cronometrados llevan cámara — bicicleta no tiene
+        contador propio y se queda como cronómetro a secas."""
+        bicycle = Exercise.objects.get(slug="bicycle-crunch")
+        self.assertEqual(bicycle.mode, Exercise.MODE_TIMED)
+        self.assertEqual(bicycle.counter_key, "")
+
+    def test_default_routine_no_longer_includes_superman(self):
+        routine = Routine.objects.get(name="Abdominales completo")
+        slugs = list(routine.items.values_list("exercise__slug", flat=True))
+        self.assertNotIn("superman", slugs)
+        self.assertNotIn("ab-circuit", slugs)
+        self.assertIn("plank", slugs)
+
+
+class WebCircuitBuilderTests(TestCase):
+    """
+    El constructor de circuitos de la web aceptaba solo ejercicios
+    mode="timed" — se relaja para admitir cualquier ejercicio activo
+    (cámara incluida), igual que ya hacía la API para la app móvil (ver
+    ApiTests.test_routine_accepts_any_active_exercise).
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.plank = Exercise.objects.create(slug="plank-w", name="Plancha", mode=Exercise.MODE_TIMED)
+        self.crunch = Exercise.objects.create(
+            slug="crunch-w", name="Crunch", mode=Exercise.MODE_POSE, counter_key="crunch",
+        )
+
+    def test_camera_exercises_appear_in_the_available_list(self):
+        r = self.client.get(reverse("tasks:routine_create"))
+        self.assertContains(r, "Crunch")
+        self.assertContains(r, "Plancha")
+
+    def test_saving_a_mixed_routine_keeps_both_items(self):
+        r = self.client.post(reverse("tasks:routine_create"), {
+            "name": "Mixto", "subcategory": "lower_body",
+            "default_work_seconds": 40, "default_rest_seconds": 20,
+            "items": f"{self.plank.pk},{self.crunch.pk}",
+        })
+        self.assertEqual(r.status_code, 302)
+        routine = Routine.objects.get(name="Mixto")
+        self.assertEqual(
+            list(routine.items.order_by("order").values_list("exercise_id", flat=True)),
+            [self.plank.pk, self.crunch.pk],
+        )
+
+
+class WebCircuitPlayAndSaveTests(TestCase):
+    def setUp(self):
+        self.user = get_current_user()
+        self.plank = Exercise.objects.create(
+            slug="plank-play", name="Plancha", mode=Exercise.MODE_TIMED, counter_key="plank",
+        )
+        self.crunch = Exercise.objects.create(
+            slug="crunch-play", name="Crunch", mode=Exercise.MODE_POSE, counter_key="crunch",
+        )
+        self.routine = Routine.objects.create(name="Circuito mixto", user=self.user)
+        RoutineItem.objects.create(routine=self.routine, exercise=self.plank, order=0)
+        RoutineItem.objects.create(routine=self.routine, exercise=self.crunch, order=1)
+        self.task = Task.objects.create(title="Circuito", category=Task.CATEGORY_SPORT, user=self.user)
+
+    def test_items_json_carries_mode_and_counter_key(self):
+        r = self.client.get(reverse("tasks:routine_play", args=[self.task.pk, self.routine.pk]))
+        self.assertEqual(r.status_code, 200)
+        items = json.loads(r.context["items_json"])
+        by_slug = {i["slug"]: i for i in items}
+        self.assertEqual(by_slug["plank-play"]["mode"], Exercise.MODE_TIMED)
+        self.assertEqual(by_slug["plank-play"]["counter_key"], "plank")
+        self.assertEqual(by_slug["crunch-play"]["mode"], Exercise.MODE_POSE)
+        self.assertEqual(by_slug["crunch-play"]["counter_key"], "crunch")
+
+    def test_routine_save_records_reps_for_camera_items(self):
+        r = self.client.post(
+            reverse("tasks:routine_save", args=[self.task.pk, self.routine.pk]),
+            data=json.dumps({"breakdown": [
+                {"exercise": "plank-play", "seconds": 40},
+                {"exercise": "crunch-play", "reps": 15, "sets": 3, "seconds": 60},
+            ]}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        crunch_session = WorkoutSession.objects.get(task=self.task, exercise="crunch-play")
+        self.assertEqual(crunch_session.total_reps, 15)
+        self.assertEqual(crunch_session.total_sets, 3)
+        plank_session = WorkoutSession.objects.get(task=self.task, exercise="plank-play")
+        self.assertEqual(plank_session.session_duration_seconds, 40)
 
 
 class PlanMissedDayTests(TestCase):

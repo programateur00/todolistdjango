@@ -2,10 +2,19 @@
 #
 # Reconstruida a partir de seis migraciones de datos antiguas
 # (0008, 0009, 0011, 0018, 0026, 0031 del historial previo al reseteo
-# de migraciones) en una sola, reflejando el estado FINAL — con
-# "Plancha lateral" en vez de "Mountain climbers" en el circuito, que
-# fue sustituido a mitad de proyecto por no tener ilustración en
-# Everkinetic y aportar menos al abdomen.
+# de migraciones) en una sola, reflejando el estado FINAL.
+#
+# Segunda pasada (ver 0011_camera_exercise_updates, que aplica lo mismo
+# a bases de datos que ya habían corrido esta migración con el estado
+# viejo): "Superman" y "Circuito de abdominales" (un placeholder de
+# sesión combinada, deprecado desde que cada ejercicio guarda su propia
+# WorkoutSession — ver routine_save) se quitan del todo. Crunch y
+# elevación de piernas pasan a mode="pose": ya tienen contador de
+# cámara propio en workout.js, así que no tiene sentido dejarlos solo
+# cronometrados. Plancha y plancha lateral se quedan cronometradas (una
+# plancha se aguanta, no se cuenta en repeticiones) pero con
+# counter_key puesto: el reproductor de circuitos usa la cámara para
+# comprobar la postura y pausar la cuenta atrás si se rompe.
 #
 # config={} en todos: no hay ajustes de MediaPipe que perder aquí — el
 # conteo por cámara vive en el JS, indexado por counter_key, no en
@@ -26,13 +35,11 @@ UPPER_BODY = [
 LOWER_BODY = [
     dict(slug="situp", name="Abdominales", mode="pose", counter_key="situp", order=5),
     dict(slug="squat", name="Sentadillas", mode="pose", counter_key="squat", order=6),
-    dict(slug="plank", name="Plancha", mode="timed", counter_key="", order=8),
-    dict(slug="crunch", name="Crunch", mode="timed", counter_key="", order=9),
-    dict(slug="leg-raise", name="Elevación de piernas", mode="timed", counter_key="", order=10),
+    dict(slug="plank", name="Plancha", mode="timed", counter_key="plank", order=8),
+    dict(slug="crunch", name="Crunch", mode="pose", counter_key="crunch", order=9),
+    dict(slug="leg-raise", name="Elevación de piernas", mode="pose", counter_key="legraise", order=10),
     dict(slug="bicycle-crunch", name="Bicicleta", mode="timed", counter_key="", order=11),
-    dict(slug="side-plank", name="Plancha lateral", mode="timed", counter_key="", order=12),
-    dict(slug="superman", name="Superman", mode="timed", counter_key="", order=13),
-    dict(slug="ab-circuit", name="Circuito de abdominales", mode="timed", counter_key="", order=14),
+    dict(slug="side-plank", name="Plancha lateral", mode="timed", counter_key="sideplank", order=12),
 ]
 
 RUNNING = [
@@ -40,7 +47,7 @@ RUNNING = [
 ]
 
 DEFAULT_ROUTINE_NAME = "Abdominales completo"
-DEFAULT_ROUTINE_ORDER = ["plank", "crunch", "leg-raise", "bicycle-crunch", "side-plank", "superman"]
+DEFAULT_ROUTINE_ORDER = ["plank", "crunch", "leg-raise", "bicycle-crunch", "side-plank"]
 
 
 def seed(apps, schema_editor):

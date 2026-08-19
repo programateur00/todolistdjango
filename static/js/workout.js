@@ -4,8 +4,10 @@
    salen de aquí (reps, duración de cada rep, avisos de descanso).
    ============================================================ */
 
-const MEDIAPIPE_VERSION = "0.10.14";
-const MODEL_URL =
+// Exportados: circuit.js los reutiliza para la comprobación de postura
+// de plancha/plancha lateral, sin duplicar la URL del modelo.
+export const MEDIAPIPE_VERSION = "0.10.14";
+export const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
 
 // Umbral de movimiento (proporcional al ancho de hombros) para
@@ -84,9 +86,50 @@ const DIP_NOSE_ABOVE_SHOULDER_MARGIN = 0.05;
 // ARMS_DOWN_STABLE_MS: es el mismo concepto que "te has soltado de la
 // barra" en dominadas, solo que aplicado a las barras de los fondos.
 
+// ── Abdominales tumbado (crunch, elevación de piernas, abdominal
+// completo) ──────────────────────────────────────────────────────────
+// Los tres se hacen BOCA ARRIBA con la cámara A UN LADO (de perfil), no
+// de frente — así se ve bien cuánto se levantan los hombros o las
+// piernas del suelo. El aviso de colocación sale al empezar cada serie
+// (ver beginPrep). Los tres arrancan en reposo ("tumbado") y cuentan
+// una repetición por cada ciclo completo tumbado→arriba→tumbado, igual
+// que dominadas o fondos.
+
+// Crunch: solo se levantan cabeza y hombros, la cadera casi no se
+// dobla — por eso NO se mide un ángulo de cadera (apenas cambiaría),
+// sino cuánto sube el HOMBRO por encima de la CADERA (que se queda
+// quieta y sirve de referencia). En proporción al muslo (cadera-
+// rodilla, que no se mueve en este ejercicio) para no depender de lo
+// cerca que estés de la cámara.
+const CRUNCH_UP_FACTOR = 0.15;   // hombro claramente por encima de la cadera -> arriba
+const CRUNCH_DOWN_FACTOR = 0.05; // hombro casi a la altura de la cadera -> tumbado
+const CRUNCH_MIN_VISIBILITY = 0.4;
+
+// Elevación de piernas: aquí la cadera SÍ es el pivote (las piernas
+// suben mientras el torso se queda en el suelo), así que se mide el
+// ÁNGULO de cadera (hombro-cadera-tobillo) — mismo enfoque que la
+// rodilla en sentadillas, y por el mismo motivo no hace falta calibrar
+// nada ni depende de la distancia a la cámara.
+const LEG_RAISE_DOWN_ANGLE_DEG = 165; // piernas estiradas en el suelo, en línea con el torso
+const LEG_RAISE_UP_ANGLE_DEG = 100;   // piernas levantadas
+const LEG_RAISE_MIN_VISIBILITY = 0.4;
+
+// Abdominal completo (situp): sube el torso ENTERO hasta sentarte — a
+// diferencia del crunch, que solo levanta cabeza y hombros — así que
+// aquí el ángulo de cadera (hombro-cadera-rodilla) sí cambia mucho: de
+// ~180° tumbado a ~90° o menos sentado. Comparte fórmula con elevación
+// de piernas pero mirando la RODILLA en vez del tobillo (con las
+// rodillas dobladas, que es como se hace un abdominal completo).
+const SITUP_DOWN_ANGLE_DEG = 165;
+const SITUP_UP_ANGLE_DEG = 90;
+const SITUP_MIN_VISIBILITY = 0.4;
+
 // Índices de landmarks de MediaPipe Pose que usamos
-const NOSE = 0, L_SHOULDER = 11, R_SHOULDER = 12, L_ELBOW = 13, R_ELBOW = 14, L_WRIST = 15, R_WRIST = 16;
-const L_HIP = 23, R_HIP = 24, L_KNEE = 25, R_KNEE = 26, L_ANKLE = 27, R_ANKLE = 28;
+// Exportados (además de usarse aquí dentro): circuit.js los reutiliza
+// para comprobar la postura de plancha/plancha lateral sin duplicar
+// los índices de landmarks ni la función de ángulo.
+export const NOSE = 0, L_SHOULDER = 11, R_SHOULDER = 12, L_ELBOW = 13, R_ELBOW = 14, L_WRIST = 15, R_WRIST = 16;
+export const L_HIP = 23, R_HIP = 24, L_KNEE = 25, R_KNEE = 26, L_ANKLE = 27, R_ANKLE = 28;
 
 /**
  * Ángulo (en grados) en el punto b, formado por los puntos a-b-c. Se usa
@@ -94,7 +137,7 @@ const L_HIP = 23, R_HIP = 24, L_KNEE = 25, R_KNEE = 26, L_ANKLE = 27, R_ANKLE = 
  * sentadillas. Solo usa x/y (2D) porque MediaPipe no da una profundidad
  * fiable con una sola cámara — de perfil, x/y ya capturan bien la flexión.
  */
-function angle(a, b, c) {
+export function angle(a, b, c) {
   const abx = a.x - b.x, aby = a.y - b.y;
   const cbx = c.x - b.x, cby = c.y - b.y;
   const magAB = Math.hypot(abx, aby);
@@ -233,6 +276,7 @@ class WorkoutSession {
     this.dipReleaseSince = null; // desde cuándo llevas sin agarre válido seguido en un fondo (para no cerrar la serie por un frame ruidoso)
     this.squatSide = null;     // "left" | "right" — qué lado del cuerpo se ve mejor este frame (de perfil solo se ve bien uno)
     this.squatKneeAngle = null; // último ángulo de rodilla medido, solo para overlay/debug
+    this.legRaiseSide = null;  // mismo concepto que squatSide, para elevación de piernas
 
     this.sessionStart = null;
     this.lastRepTime = null;
@@ -407,6 +451,22 @@ class WorkoutSession {
       this.squatSide = null;
       this.squatKneeAngle = null;
       this.setStatus("Ponte de perfil a la cámara, de pie, para empezar.");
+    } else if (this.counterKey === "crunch") {
+      // Tampoco hay nada que calibrar: se mide el hombro frente a la
+      // cadera, en proporción al muslo — ningún valor depende de la
+      // distancia a la cámara.
+      this.prepping = false;
+      this.state = null;
+      this.setStatus("Túmbate boca arriba, con la cámara a un lado (de perfil), y encuadra el hombro, la cadera y la rodilla.");
+    } else if (this.counterKey === "legraise") {
+      this.prepping = false;
+      this.state = null;
+      this.legRaiseSide = null;
+      this.setStatus("Túmbate boca arriba, con la cámara a un lado (de perfil), y encuadra el cuerpo entero, de los hombros a los tobillos.");
+    } else if (this.counterKey === "situp") {
+      this.prepping = false;
+      this.state = null;
+      this.setStatus("Túmbate boca arriba con las rodillas dobladas, con la cámara a un lado (de perfil).");
     } else {
       this.state = "down";
     }
@@ -850,6 +910,183 @@ class WorkoutSession {
     }
   }
 
+  /**
+   * Crunch: cuenta cuánto sube el HOMBRO por encima de la CADERA (que
+   * se queda fija en el suelo y sirve de referencia de escala junto al
+   * muslo). Ver el bloque de comentarios junto a CRUNCH_UP_FACTOR más
+   * arriba para por qué no se usa un ángulo aquí, a diferencia de
+   * elevación de piernas o abdominal completo.
+   */
+  processCrunch(lm, now) {
+    const lShoulder = lm[L_SHOULDER], rShoulder = lm[R_SHOULDER];
+    const lHip = lm[L_HIP], rHip = lm[R_HIP];
+    const lKnee = lm[L_KNEE], rKnee = lm[R_KNEE];
+
+    const leftVis = ((lShoulder.visibility ?? 1) + (lHip.visibility ?? 1) + (lKnee.visibility ?? 1)) / 3;
+    const rightVis = ((rShoulder.visibility ?? 1) + (rHip.visibility ?? 1) + (rKnee.visibility ?? 1)) / 3;
+    const useLeft = leftVis >= rightVis;
+    const vis = useLeft ? leftVis : rightVis;
+
+    if (vis < CRUNCH_MIN_VISIBILITY) {
+      this.announceStatus("No se te ven bien el hombro, la cadera y la rodilla. Ponte de perfil a la cámara, tumbado boca arriba.");
+      if (this.debugEl) this.debugEl.textContent = "buscando hombro, cadera y rodilla de perfil…";
+      return;
+    }
+
+    const shoulder = useLeft ? lShoulder : rShoulder;
+    const hip = useLeft ? lHip : rHip;
+    const knee = useLeft ? lKnee : rKnee;
+    const thighLength = Math.hypot(hip.x - knee.x, hip.y - knee.y);
+    if (!thighLength) return;
+
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus("Te veo. ¡Listo! Túmbate boca arriba y empieza cuando quieras.", "startup_ready");
+    }
+
+    // Cuánto sube el hombro por ENCIMA de la cadera (en pantalla, arriba
+    // es "y" menor), en proporción al muslo.
+    const lift = (hip.y - shoulder.y) / thighLength;
+
+    if (this.state === null) {
+      if (lift <= CRUNCH_DOWN_FACTOR) {
+        this.state = "down";
+        this.setStatus("¡Listo! Sube los hombros y vuelve a bajar.");
+      } else {
+        this.setStatus("Túmbate boca arriba, con los hombros en el suelo, para empezar.");
+      }
+    } else if (this.state === "down") {
+      if (lift >= CRUNCH_UP_FACTOR) {
+        this.state = "up";
+        this.repStartTime = now;
+      }
+    } else if (lift <= CRUNCH_DOWN_FACTOR) {
+      this.countRep((now - this.repStartTime) / 1000, now, "Crunch");
+      this.state = "down";
+    }
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `hombro sobre cadera: ${lift.toFixed(2)} | estado: ${this.state ?? "esperando"} ` +
+        `(tumbado ≤${CRUNCH_DOWN_FACTOR}, arriba ≥${CRUNCH_UP_FACTOR})`;
+    }
+  }
+
+  /**
+   * Elevación de piernas: ángulo de cadera (hombro-cadera-tobillo).
+   * Mismo enfoque que la rodilla en sentadillas, aplicado a la cadera
+   * como pivote — ver el comentario junto a LEG_RAISE_DOWN_ANGLE_DEG.
+   */
+  processLegRaise(lm, now) {
+    const lShoulder = lm[L_SHOULDER], rShoulder = lm[R_SHOULDER];
+    const lHip = lm[L_HIP], rHip = lm[R_HIP];
+    const lAnkle = lm[L_ANKLE], rAnkle = lm[R_ANKLE];
+
+    const leftVis = ((lShoulder.visibility ?? 1) + (lHip.visibility ?? 1) + (lAnkle.visibility ?? 1)) / 3;
+    const rightVis = ((rShoulder.visibility ?? 1) + (rHip.visibility ?? 1) + (rAnkle.visibility ?? 1)) / 3;
+    const useLeft = leftVis >= rightVis;
+    const vis = useLeft ? leftVis : rightVis;
+
+    if (vis < LEG_RAISE_MIN_VISIBILITY) {
+      this.announceStatus("No se te ven bien el hombro, la cadera y el tobillo. Ponte de perfil a la cámara, tumbado boca arriba, con las piernas enteras en el encuadre.");
+      if (this.debugEl) this.debugEl.textContent = "buscando hombro, cadera y tobillo de perfil…";
+      this.legRaiseSide = null;
+      return;
+    }
+
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus("Te veo. ¡Listo! Túmbate boca arriba y empieza cuando quieras.", "startup_ready");
+    }
+
+    const shoulder = useLeft ? lShoulder : rShoulder;
+    const hip = useLeft ? lHip : rHip;
+    const ankle = useLeft ? lAnkle : rAnkle;
+    const hipAngle = angle(shoulder, hip, ankle);
+    if (hipAngle === null) return;
+
+    this.legRaiseSide = useLeft ? "left" : "right";
+
+    if (this.state === null) {
+      if (hipAngle >= LEG_RAISE_DOWN_ANGLE_DEG) {
+        this.state = "down";
+        this.setStatus("¡Listo! Sube las piernas y vuelve a bajar.");
+      } else {
+        this.setStatus("Baja las piernas al suelo para empezar.");
+      }
+    } else if (this.state === "down") {
+      if (hipAngle <= LEG_RAISE_UP_ANGLE_DEG) {
+        this.state = "up";
+        this.repStartTime = now;
+      }
+    } else if (hipAngle >= LEG_RAISE_DOWN_ANGLE_DEG) {
+      this.countRep((now - this.repStartTime) / 1000, now, "Elevación");
+      this.state = "down";
+    }
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `ángulo cadera (${useLeft ? "izq" : "der"}): ${hipAngle.toFixed(0)}° | estado: ${this.state ?? "esperando"} ` +
+        `(abajo ≥${LEG_RAISE_DOWN_ANGLE_DEG}°, arriba ≤${LEG_RAISE_UP_ANGLE_DEG}°)`;
+    }
+  }
+
+  /**
+   * Abdominal completo (situp): ángulo de cadera (hombro-cadera-rodilla),
+   * mismo cálculo que elevación de piernas pero mirando la rodilla en
+   * vez del tobillo — ver el comentario junto a SITUP_DOWN_ANGLE_DEG.
+   */
+  processSitup(lm, now) {
+    const lShoulder = lm[L_SHOULDER], rShoulder = lm[R_SHOULDER];
+    const lHip = lm[L_HIP], rHip = lm[R_HIP];
+    const lKnee = lm[L_KNEE], rKnee = lm[R_KNEE];
+
+    const leftVis = ((lShoulder.visibility ?? 1) + (lHip.visibility ?? 1) + (lKnee.visibility ?? 1)) / 3;
+    const rightVis = ((rShoulder.visibility ?? 1) + (rHip.visibility ?? 1) + (rKnee.visibility ?? 1)) / 3;
+    const useLeft = leftVis >= rightVis;
+    const vis = useLeft ? leftVis : rightVis;
+
+    if (vis < SITUP_MIN_VISIBILITY) {
+      this.announceStatus("No se te ven bien el hombro, la cadera y la rodilla. Ponte de perfil a la cámara, tumbado boca arriba.");
+      if (this.debugEl) this.debugEl.textContent = "buscando hombro, cadera y rodilla de perfil…";
+      return;
+    }
+
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus("Te veo. ¡Listo! Túmbate boca arriba, con las rodillas dobladas, y empieza cuando quieras.", "startup_ready");
+    }
+
+    const shoulder = useLeft ? lShoulder : rShoulder;
+    const hip = useLeft ? lHip : rHip;
+    const knee = useLeft ? lKnee : rKnee;
+    const hipAngle = angle(shoulder, hip, knee);
+    if (hipAngle === null) return;
+
+    if (this.state === null) {
+      if (hipAngle >= SITUP_DOWN_ANGLE_DEG) {
+        this.state = "down";
+        this.setStatus("¡Listo! Sube hasta sentarte y vuelve a bajar.");
+      } else {
+        this.setStatus("Túmbate boca arriba del todo para empezar.");
+      }
+    } else if (this.state === "down") {
+      if (hipAngle <= SITUP_UP_ANGLE_DEG) {
+        this.state = "up";
+        this.repStartTime = now;
+      }
+    } else if (hipAngle >= SITUP_DOWN_ANGLE_DEG) {
+      this.countRep((now - this.repStartTime) / 1000, now, "Abdominal");
+      this.state = "down";
+    }
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `ángulo cadera (${useLeft ? "izq" : "der"}): ${hipAngle.toFixed(0)}° | estado: ${this.state ?? "esperando"} ` +
+        `(tumbado ≥${SITUP_DOWN_ANGLE_DEG}°, sentado ≤${SITUP_UP_ANGLE_DEG}°)`;
+    }
+  }
+
   processResult(result, now) {
     if (!result.landmarks || !result.landmarks.length) {
       if (this.debugEl) this.debugEl.textContent = "sin detección — ¿sales entero en el encuadre?";
@@ -865,6 +1102,18 @@ class WorkoutSession {
     }
     if (this.counterKey === "squat") {
       this.processSquat(lm, now);
+      return;
+    }
+    if (this.counterKey === "crunch") {
+      this.processCrunch(lm, now);
+      return;
+    }
+    if (this.counterKey === "legraise") {
+      this.processLegRaise(lm, now);
+      return;
+    }
+    if (this.counterKey === "situp") {
+      this.processSitup(lm, now);
       return;
     }
 

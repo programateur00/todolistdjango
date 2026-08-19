@@ -63,7 +63,12 @@
     <p class="workout__note">
         Si pasan más de 1:30 sin contar ninguna repetición (un descanso), la serie se cierra sola y empieza la siguiente.
     </p>
-    {% else %}
+    {% elif exercise.counter_key == "crunch" or exercise.counter_key == "legraise" or exercise.counter_key == "situp" %}
+    <p class="workout__note">
+        🛏️ Túmbate boca arriba y coloca el móvil o el portátil <strong>a un lado</strong> (de perfil respecto a ti) —
+        así se ve bien cuánto se levantan los hombros o las piernas del suelo. Encuadra el cuerpo entero.
+    </p>
+    {% elif exercise.counter_key == "pullup" %}
     <p class="workout__note">
         <span style="color:var(--amber);">━</span> línea amarilla = altura de la barra (medida por tus muñecas al calibrar).
         Si no coincide con tu barra real, pulsa «Recalibrar» estando ya colgado.

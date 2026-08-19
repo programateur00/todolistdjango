@@ -412,9 +412,9 @@ def task_workout(request, pk):
         })
 
     # Contadores implementados en workout.js: dominadas (y variantes),
-    # fondos y sentadillas SÍ cuentan con cámara. "Abdominales" (situp)
-    # está en el catálogo con mode=pose pero su contador todavía no
-    # existe en workout.js, así que cae aquí como "no soportado".
+    # fondos, sentadillas, abdominales, crunch y elevación de piernas.
+    # Cualquier otro counter_key (o un ejercicio sin cámara) cae aquí
+    # como "no soportado".
     if exercise.mode != Exercise.MODE_POSE or exercise.counter_key not in COUNTERS:
         return render(request, "tasks/task_workout_select.html", {
             "task": task, "exercises": exercises_qs, "routines": routines_qs, "videos": videos_qs,
@@ -789,10 +789,14 @@ def _save_routine(request, routine=None):
         routine.save()
         routine.items.all().delete()
 
-    # Solo se aceptan ejercicios mode="timed" reales — evita que alguien
-    # cuele por POST un id de ejercicio que no toca aquí.
+    # Se admite cualquier ejercicio activo, no solo los cronometrados: un
+    # circuito de tren superior (dominadas, fondos) es tan válido como
+    # uno de abdominales — cada uno se reproduce luego con lo que le
+    # toque (cámara, cronómetro, o cronómetro con cámara comprobando la
+    # postura). Esto solo evita que alguien cuele por POST un id de
+    # ejercicio que no existe o está desactivado.
     valid_exercise_ids = set(
-        Exercise.objects.filter(id__in=exercise_ids, mode=Exercise.MODE_TIMED).values_list("id", flat=True)
+        Exercise.objects.filter(id__in=exercise_ids, is_active=True).values_list("id", flat=True)
     )
     order = 0
     for eid in exercise_ids:
@@ -808,9 +812,10 @@ def _save_routine(request, routine=None):
 def routine_create(request):
     if request.method == "POST":
         return _save_routine(request)
-    exercises = Exercise.objects.filter(
-        mode=Exercise.MODE_TIMED, is_active=True
-    ).exclude(slug="ab-circuit")
+    # Cualquier ejercicio activo vale para un circuito, no solo los
+    # cronometrados (ver _save_routine) — cada uno se reproduce luego
+    # con lo suyo.
+    exercises = Exercise.objects.filter(is_active=True)
     return render(request, "tasks/routine_form.html", {
         "exercises": exercises,
         "subcategory_choices": Task.SPORT_SUBCATEGORY_CHOICES,
@@ -823,9 +828,7 @@ def routine_edit(request, pk):
     routine = get_object_or_404(Routine, pk=pk, user=get_current_user())
     if request.method == "POST":
         return _save_routine(request, routine=routine)
-    exercises = Exercise.objects.filter(
-        mode=Exercise.MODE_TIMED, is_active=True
-    ).exclude(slug="ab-circuit")
+    exercises = Exercise.objects.filter(is_active=True)
     return render(request, "tasks/routine_form.html", {
         "routine": routine,
         "exercises": exercises,
@@ -845,9 +848,15 @@ def routine_delete(request, pk):
 
 
 def routine_play(request, pk, routine_pk):
-    """Reproductor del circuito: cronómetro por ejercicio + descanso,
-    encadenando todos los RoutineItem de la rutina. No usa cámara ni
-    MediaPipe — es solo temporizador (ver static/js/circuit.js)."""
+    """
+    Reproductor del circuito: encadena todos los RoutineItem de la
+    rutina, cada uno con lo que le toca — cronómetro, cámara contando
+    reps, o cronómetro con cámara comprobando la postura (plancha) —,
+    ver static/js/circuit.js. `mode`/`counter_key`/`target_*` van en
+    items_data igual que en la API (ver api._routine_item_json), así
+    que el objetivo de un ejercicio de cámara sube solo si hay un plan
+    activo siguiéndolo.
+    """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
     routine = get_object_or_404(Routine, pk=routine_pk, user=get_current_user())
     items = list(routine.items.select_related("exercise"))
@@ -856,15 +865,21 @@ def routine_play(request, pk, routine_pk):
         messages.error(request, "Este circuito todavía no tiene ejercicios.")
         return redirect(reverse("tasks:task_workout", args=[task.pk]))
 
-    items_data = [
-        {
+    items_data = []
+    for it in items:
+        t = it.resolved_target()
+        items_data.append({
             "slug": it.exercise.slug,
             "name": it.exercise.name,
-            "work": it.effective_work_seconds,
+            "mode": it.exercise.mode,
+            "counter_key": it.exercise.counter_key,
+            "work": t["seconds"],
             "rest": it.effective_rest_seconds,
-        }
-        for it in items
-    ]
+            "target_sets": t["sets"],
+            "target_reps": t["reps"],
+            "target_source": t["source"],
+            "plan_name": t["plan_name"],
+        })
     return render(request, "tasks/routine_play.html", {
         "task": task, "routine": routine, "items": items, "items_json": json.dumps(items_data),
     })
@@ -906,9 +921,11 @@ def routine_save(request, pk, routine_pk):
                 continue
             slug = str(b.get("exercise", ""))[:32]
             seconds = int(b.get("seconds", 0)) if isinstance(b.get("seconds"), (int, float)) else 0
+            reps = int(b.get("reps", 0)) if isinstance(b.get("reps"), (int, float)) else 0
+            sets = int(b.get("sets", 0)) if isinstance(b.get("sets"), (int, float)) else 0
             if not slug:
                 continue
-            entries.append({"exercise": slug, "seconds": seconds})
+            entries.append({"exercise": slug, "seconds": seconds, "reps": reps, "sets": sets})
             total_seconds += seconds
 
     if not entries:
@@ -922,6 +939,7 @@ def routine_save(request, pk, routine_pk):
             plan=ctx["plan"], target_sets=ctx["target_sets"],
             target_reps=ctx["target_reps"], target_seconds=ctx["target_seconds"],
             exercise=e["exercise"],
+            total_reps=e["reps"], total_sets=e["sets"],
             session_duration_seconds=e["seconds"],
         ))
 
@@ -995,7 +1013,7 @@ def stats_detail(request, series_id):
 # ─────────────────────────────────────────────────────────────────────
 
 # Contadores que existen de verdad en workout.js.
-COUNTERS = {"pullup", "dip", "squat"}
+COUNTERS = {"pullup", "dip", "squat", "crunch", "legraise", "situp"}
 
 
 def _plans_qs():
