@@ -75,7 +75,7 @@ class CategoryViewTests(TestCase):
     def test_create_without_category_defaults_to_general(self):
         resp = self.client.post(
             reverse("tasks:task_create"),
-            {"title": "Una cosa"},
+            {"title": "Una cosa", "due_time": "09:00"},
         )
         self.assertEqual(resp.status_code, 302)
         t = Task.objects.get(title="Una cosa")
@@ -97,6 +97,42 @@ class CategoryViewTests(TestCase):
         self.assertContains(resp, "Hacer sentadillas")
         self.assertNotContains(resp, "Estudiar cálculo")
 
+
+class RequiredDueTimeTests(TestCase):
+    """
+    La hora es lo que dispara el aviso (ver notifications.js, en la app
+    móvil) y lo que usa Task.expire_overdue() para marcar sola la tarea
+    como no hecha al final del día — sin ella, ninguna de las dos cosas
+    tiene con qué disparar. El formulario ya la pide con `required`, pero
+    eso no protege un envío que se lo salte (curl, un form manipulado…),
+    así que el mínimo se repite en el servidor.
+    """
+
+    def test_task_create_without_due_time_is_rejected(self):
+        resp = self.client.post(reverse("tasks:task_create"), {
+            "title": "Sin hora", "repeat": Task.REPEAT_NONE, "interval": 1,
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(Task.objects.filter(title="Sin hora").exists())
+
+    def test_task_edit_without_due_time_is_rejected(self):
+        t = Task.objects.create(
+            title="Con hora", due_time=time(9, 0), user=get_current_user(),
+        )
+        resp = self.client.post(reverse("tasks:task_edit", args=[t.pk]), {
+            "title": "Con hora", "repeat": Task.REPEAT_NONE, "interval": 1,
+        })
+        self.assertEqual(resp.status_code, 200)
+        t.refresh_from_db()
+        self.assertEqual(t.due_time, time(9, 0))  # no se ha tocado
+
+    def test_plan_create_without_due_time_is_rejected(self):
+        resp = self.client.post(reverse("tasks:plan_create"), {
+            "name": "Sin hora", "weeks": 12, "is_active": "on",
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(Plan.objects.filter(name="Sin hora").exists())
+
     def test_list_renders_category_pill(self):
         Task.objects.create(title="Ir al gym", category=Task.CATEGORY_SPORT, user=get_current_user())
         resp = self.client.get(reverse("tasks:task_list"))
@@ -112,6 +148,7 @@ class CategoryViewTests(TestCase):
                 "category": Task.CATEGORY_WORK,
                 "repeat": Task.REPEAT_NONE,
                 "interval": 1,
+                "due_time": "10:00",
             },
         )
         self.assertEqual(resp.status_code, 302)
@@ -194,6 +231,7 @@ class AntiTaskTests(TestCase):
     def test_create_form_saves_avoid_category(self):
         resp = self.client.post(reverse("tasks:task_create"), {
             "title": "No fumar", "category": "avoid", "repeat": Task.REPEAT_NONE, "interval": 1,
+            "due_time": "22:00",
         })
         self.assertEqual(resp.status_code, 302)
         t = Task.objects.get(title="No fumar")
@@ -203,6 +241,7 @@ class AntiTaskTests(TestCase):
     def test_create_form_defaults_to_general_not_avoid(self):
         resp = self.client.post(reverse("tasks:task_create"), {
             "title": "Tarea normal", "repeat": Task.REPEAT_NONE, "interval": 1,
+            "due_time": "18:00",
         })
         self.assertEqual(resp.status_code, 302)
         t = Task.objects.get(title="Tarea normal")
@@ -818,7 +857,7 @@ class PlanViewTests(TestCase):
 
     def _create_plan(self):
         self.client.post(reverse("tasks:plan_create"), {
-            "name": "Ponerme en forma", "weeks": 12, "is_active": "on",
+            "name": "Ponerme en forma", "weeks": 12, "is_active": "on", "due_time": "19:00",
         })
         return Plan.objects.get(name="Ponerme en forma")
 
@@ -952,7 +991,7 @@ class PlanTaskFlowTests(TestCase):
     def _plan_with_exercise(self):
         self.client.post(reverse("tasks:plan_create"), {
             "name": "Ponerme en forma", "weeks": 12, "is_active": "on",
-            "custom_days": ["0", "2", "4"],
+            "custom_days": ["0", "2", "4"], "due_time": "19:00",
         })
         plan = Plan.objects.get(name="Ponerme en forma")
         self.client.post(reverse("tasks:plan_item_create", args=[plan.pk]), {

@@ -206,7 +206,19 @@ def task_list(request):
 def task_create(request):
     if request.method == "POST":
         title = request.POST.get("title", "").strip()
-        if title:
+        due_time = request.POST.get("due_time") or None
+        if not title:
+            messages.error(request, "Ponle un título a la tarea.")
+        elif not due_time:
+            # Sin hora no hay a qué hora sonar el aviso ni cuándo darla
+            # por no hecha sola al final del día (ver Task.expire_overdue
+            # y notifications.js, en la app móvil). El HTML ya la pide
+            # con `required`, pero eso no protege envíos que se lo salten.
+            messages.error(
+                request,
+                "Ponle una hora — la notificación y el aviso de «no hecha» al final del día la necesitan.",
+            )
+        else:
             client_uuid = _read_client_uuid(request)
             task = Task(
                 title=title,
@@ -225,7 +237,7 @@ def task_create(request):
                 target_distance_km=_read_target_distance_km(request),
                 max_pace_seconds_per_km=_read_max_pace(request),
                 due_date=request.POST.get("due_date") or None,
-                due_time=request.POST.get("due_time") or None,
+                due_time=due_time,
                 repeat=request.POST.get("repeat", Task.REPEAT_NONE),
                 interval=request.POST.get("interval") or 1,
                 custom_days=",".join(request.POST.getlist("custom_days")),
@@ -239,7 +251,7 @@ def task_create(request):
                 task.uuid = client_uuid
             task.save()
             messages.success(request, "Tarea creada.")
-        return redirect(reverse("tasks:task_list"))
+            return redirect(reverse("tasks:task_list"))
 
     initial_title = request.GET.get("title", "")
     return render(request, "tasks/task_form.html", {
@@ -283,9 +295,15 @@ def task_edit(request, pk):
         task.avoid_question = request.POST.get("avoid_question", "").strip()[:120]
         task.avoid_success_label = request.POST.get("avoid_success_label", "").strip()[:32]
         task.avoid_fail_label = request.POST.get("avoid_fail_label", "").strip()[:32]
-        task.save()
-        messages.success(request, "Tarea actualizada.")
-        return redirect(reverse("tasks:task_list"))
+        if not task.due_time:
+            messages.error(
+                request,
+                "Ponle una hora — la notificación y el aviso de «no hecha» al final del día la necesitan.",
+            )
+        else:
+            task.save()
+            messages.success(request, "Tarea actualizada.")
+            return redirect(reverse("tasks:task_list"))
     return render(request, "tasks/task_form.html", {
         "task": task,
         "repeat_choices": Task.REPEAT_CHOICES,
@@ -1374,8 +1392,17 @@ def plan_form(request, pk=None):
 
     if request.method == "POST":
         name = request.POST.get("name", "").strip()
+        due_time = request.POST.get("due_time") or None
         if not name:
             messages.error(request, "Ponle un nombre al plan.")
+        elif not due_time:
+            # Igual que en la tarea suelta: sin hora no hay a qué hora
+            # avisar ni cuándo cerrar el día solo (ver Task.expire_overdue
+            # — la tarea del plan hereda esta hora en Plan.sync_task()).
+            messages.error(
+                request,
+                "Ponle una hora — la notificación y el cierre automático del día la necesitan.",
+            )
         else:
             if plan is None:
                 plan = Plan(user=get_current_user())
@@ -1440,7 +1467,7 @@ def plan_form(request, pk=None):
                 plan.reward = request.POST.get("reward", "").strip()[:200]
                 plan.repeat = request.POST.get("repeat", "custom")
                 plan.custom_days = ",".join(request.POST.getlist("custom_days")) or "0,2,4"
-                plan.due_time = request.POST.get("due_time") or None
+                plan.due_time = due_time
                 try:
                     plan.interval = max(1, int(request.POST.get("interval", 1)))
                 except (TypeError, ValueError):

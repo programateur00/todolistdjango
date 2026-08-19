@@ -16,7 +16,6 @@ van con @csrf_exempt porque la API no usa cookies de sesión — la
 protección CSRF existe para ataques basados en cookies, y aquí no aplica.
 """
 import json
-import math
 import uuid
 from functools import wraps
 
@@ -31,13 +30,11 @@ from django.views.decorators.http import require_http_methods
 
 from . import ai
 from .models import (
-    AIGenerationLog, CourseModule, CoursePlaylist, CourseQuiz, Exercise, Occurrence, Plan, PlanItem,
-    Routine, RoutineItem, SavedVideo, Task, TimerSession, WorkoutSession,
+    AIGenerationLog, CourseModule, CoursePlaylist, Exercise, Occurrence, Plan, PlanItem, Routine,
+    RoutineItem, SavedVideo, Task, TimerSession, WorkoutSession,
 )
-from .utils import get_current_user, read_mobile_release, resolve_plan_target as _plan_context
-from .youtube_search import (
-    YouTubeSearchError, get_playlists_details, get_videos_details, list_playlist_items,
-)
+from .utils import get_current_user, resolve_plan_target as _plan_context
+from .youtube_search import YouTubeSearchError, get_videos_details, list_playlist_items
 
 
 # ---------------------------------------------------------------- utils
@@ -195,7 +192,6 @@ def routine_json(r):
 def meta(request):
     """Catálogos fijos (categorías, días de la semana...) para que la app
     no tenga que repetirlos hardcodeados y desincronizarse del servidor."""
-    release = read_mobile_release()
     return JsonResponse({
         "categories": [{"value": v, "label": l} for v, l in Task.CATEGORY_CHOICES],
         # Separadas porque significan cosas distintas según la categoría:
@@ -207,14 +203,6 @@ def meta(request):
         "repeats": [{"value": v, "label": l} for v, l in Task.REPEAT_CHOICES],
         "weekdays": [{"value": v, "label": l} for v, l in Task.WEEKDAYS],
         "capabilities": Task.CATEGORY_CAPABILITIES,
-        # None si no hay ninguna build publicada todavía (ver
-        # mobile_releases/latest.json) — la app simplemente no avisa de
-        # nada en ese caso, en vez de fallar.
-        "mobile_app": {
-            "version": release["version"],
-            "download_url": "/mobile/apk/",
-            "notes": release["notes"],
-        } if release else None,
     })
 
 
@@ -1562,287 +1550,52 @@ def _apply_language_plan_fields(p, data):
             p.quiz_every_n_videos = None
 
 
-# ---------------------------------- asignación directa del catálogo (idiomas)
-#
-# Ya NO pasa por IA (antes: ai.generate_language_plan_draft, con Gemini).
-# El catálogo de CoursePlaylist ya está curado a mano — elegir entre
-# opciones ya verificadas por idioma + nivel + idioma nativo es una
-# decisión mecánica (gana la de menor CoursePlaylist.order), no algo
-# que necesite un LLM. Esto también libera la cuota diaria de Gemini
-# (AIGenerationLog) para lo que sí es generativo de verdad: Deporte,
-# Estudio general y los tests de repaso (ver maybe_trigger_quiz).
-
-def _levels_in_range(level_from, level_to):
-    """
-    ['A1', 'A2', ...] entre level_from y level_to (incluidos). En
-    blanco, level_from se trata como el nivel más bajo (A1) y level_to
-    como el más alto (C2) — "sin techo" documentado en el propio campo
-    del modelo.
-    """
-    levels = Plan.CEFR_LEVELS
-    start = levels.index(level_from) if level_from in levels else 0
-    end = levels.index(level_to) if level_to in levels else len(levels) - 1
-    if end < start:
-        start, end = end, start
-    return levels[start:end + 1]
-
-
-def _primary_native_language(known_languages):
-    """
-    El PRIMERO de los idiomas que el usuario escribió en "Idiomas que
-    ya sabes" (ej. "español, inglés" -> "español") — es el que se usa
-    para filtrar el catálogo por CoursePlaylist.native_language. En
-    minúscula, para comparar sin depender de mayúsculas.
-    """
-    return (known_languages or "").split(",")[0].strip().lower()
-
-
-def _catalog_entries_for_language(language, level_from, level_to, known_languages):
-    """
-    Encadena TODAS las playlists curadas (CoursePlaylist) vivas de este
-    idioma cuyo rango de niveles (`level` → `level_to`, ver el modelo)
-    toque el rango pedido — no solo las de coincidencia exacta de
-    nivel. La mayoría cubren un único nivel, pero algunas cubren varios
-    seguidos sin cortes (ej. una sola playlist de A1 a B2) y también
-    entran, una sola vez, en la posición que les toque. Se encadenan
-    TODAS las que apliquen, no solo la primera de cada nivel: así, si
-    la playlist principal de un nivel se queda corta (pocos vídeos), la
-    siguiente sigue en el mismo nivel en vez de dar el nivel por
-    cubierto con un puñado de vídeos y dejar al usuario sin más que
-    ver — el objetivo real es terminar TODO el temario asignado, no un
-    número de semanas.
-
-    Preferencia por las explicadas en el idioma nativo del usuario
-    (`known_languages`, ver `_primary_native_language`) y, si no hay
-    ninguna así, las neutras (CoursePlaylist.native_language en
-    blanco) — en ese orden. Una playlist pensada para hablantes de
-    OTRO idioma nativo distinto queda excluida del todo — es justo lo
-    que se pidió: nunca un curso genérico para cualquiera si hay uno
-    mejor pensado para este estudiante en concreto.
-
-    Todas las candidatas se ordenan por (nivel de inicio, prioridad de
-    idioma nativo, `order`) — así el temario avanza de nivel más bajo a
-    más alto, con las explicadas en el idioma nativo por delante de las
-    neutras dentro de cada nivel, y el orden manual del catálogo como
-    desempate. Una playlist que empieza ANTES del rango pedido (ej.
-    cubre A1-B2 pero el usuario solo pidió desde B1) se coloca como si
-    empezara en el mínimo pedido, en vez de saltar al principio de
-    todo — no se recorta el contenido (no hay forma de saber qué vídeo
-    exacto marca el cambio de nivel dentro de una playlist ajena), así
-    que entra entera, pero en el sitio que le corresponde.
-
-    Cada candidata se confirma con una llamada barata a la API de
-    YouTube (playlists.list): si ya no existe o no es pública, se salta
-    sin más (no rompe la cadena del resto).
-
-    Devuelve (entries, missing_levels, levels):
-      - entries: todas las playlists vivas encadenadas, en orden —
-        puede haber varias por el mismo nivel, y alguna puede cubrir
-        varios niveles a la vez — con su nº de vídeos REAL a día de hoy
-        y el rango de niveles que cubre.
-      - missing_levels: niveles del rango pedido que ninguna playlist
-        viva (ni de respaldo) llega a cubrir.
-      - levels: el rango completo pedido, para los mensajes de error.
-    """
-    levels = _levels_in_range(level_from, level_to)
-    level_index = {lvl: i for i, lvl in enumerate(Plan.CEFR_LEVELS)}
-    wanted = {level_index[lvl] for lvl in levels}
-    min_wanted = min(wanted)
-    native = _primary_native_language(known_languages)
-
-    def _priority(c):
-        # 0 = coincide con el idioma nativo pedido, 1 = neutra (vale
-        # para cualquiera), None = pensada para OTRO idioma nativo —
-        # se descarta sin más, nunca se ofrece como si valiera igual.
-        if native and c.native_language and c.native_language.strip().lower() == native:
-            return 0
-        if not c.native_language:
-            return 1
-        return None
-
-    qs = CoursePlaylist.objects.filter(language__iexact=language, is_active=True)
-
-    candidates = []  # (sort_start, priority, order, playlist, covered_indices)
-    for c in qs:
-        start = level_index.get(c.level)
-        end = level_index.get(c.level_to or c.level, start)
-        if start is None:
-            continue  # nivel inválido guardado a mano — se ignora en vez de reventar
-        if end is None or end < start:
-            end = start
-        c_range = set(range(start, end + 1))
-        if not (c_range & wanted):
-            continue  # su rango no toca ni un solo nivel de los pedidos
-        prio = _priority(c)
-        if prio is None:
-            continue
-        candidates.append((max(start, min_wanted), prio, c.order, c, c_range))
-
-    if not candidates:
-        return [], levels, levels
-
-    candidates.sort(key=lambda t: (t[0], t[1], t[2]))
-
-    all_ids = [c.youtube_playlist_id for _, _, _, c, _ in candidates]
-    details = get_playlists_details(all_ids)  # YouTubeSearchError se deja subir tal cual
-
-    entries = []
-    covered = set()
-    for _, _, _, c, c_range in candidates:
-        d = details.get(c.youtube_playlist_id)
-        if not d or not d.get("is_public") or not d.get("item_count"):
-            continue  # esta en concreto ya no vale — se salta, no corta la cadena
-        entries.append({
-            "catalog_id": c.pk,
-            "level": c.level,
-            "level_to": c.level_to or c.level,
-            "title": d.get("title") or c.title,
-            "channel_title": d.get("channel_title") or c.channel_title,
-            "item_count": d["item_count"],
-            "youtube_playlist_id": c.youtube_playlist_id,
-        })
-        # SIN break: se encadenan todas las playlists vivas que
-        # apliquen, no solo la primera de cada nivel — ver docstring.
-        covered |= (c_range & wanted)
-
-    missing_levels = [lvl for lvl in levels if level_index[lvl] not in covered]
-    return entries, missing_levels, levels
-
-
-def _allocate_weeks(item_counts, weeks):
-    """
-    Reparte `weeks` entre los cursos elegidos, a ojo proporcional a
-    cuántos vídeos tiene cada uno. PURAMENTE INFORMATIVO — solo decide
-    la etiqueta "semana X" que se enseña en el temario
-    (CourseModule.scheduled_week); el avance real es por sesiones
-    CUMPLIDAS (ver Plan._language_completed_count), así que un reparto
-    algo torcido por redondeo aquí no rompe nada.
-    """
-    n = len(item_counts)
-    if n == 0:
-        return []
-    weeks = max(weeks, n)  # al menos 1 semana "propia" por curso elegido
-    total_items = sum(item_counts) or n
-    allocated = [max(1, round(weeks * c / total_items)) for c in item_counts]
-    diff = weeks - sum(allocated)
-    while diff != 0:
-        idx = allocated.index(max(allocated)) if diff < 0 else allocated.index(min(allocated))
-        if diff < 0 and allocated[idx] <= 1:
-            break  # nunca por debajo de 1 semana propia
-        allocated[idx] += 1 if diff > 0 else -1
-        diff += -1 if diff > 0 else 1
-    return allocated
-
-
-def _language_plan_name_and_notes(language, levels, missing_levels, native, weeks, sessions_per_week):
-    """Nombre y notas del plan — plantilla simple, sin IA: no hay nada
-    que "redactar", solo describir lo que ya se decidió mecánicamente.
-
-    `weeks` aquí es la ESTIMACIÓN calculada a partir del ritmo elegido
-    (ver build_language_plan_draft) — se enseña como orientación, nunca
-    como una fecha límite: el plan sigue abierto hasta terminar el
-    temario, tarde lo que tarde (ver Plan.auto_close_expired)."""
-    lvl_from, lvl_to = levels[0], levels[-1]
-    name = f"{language.strip().capitalize()} · {lvl_from} → {lvl_to}"[:80]
-    notes = [f"Curso de {language} armado del catálogo verificado, de {lvl_from} a {lvl_to}."]
-    if native:
-        notes.append(f"Se han priorizado cursos explicados en {native} cuando los había.")
-    notes.append(
-        f"A {sessions_per_week} día{'s' if sessions_per_week != 1 else ''} por semana, esto llevará "
-        f"unas {weeks} semana{'s' if weeks != 1 else ''} — es solo una estimación: el plan no se "
-        "cierra por fecha, sigue abierto hasta que termines todos los vídeos."
-    )
-    if missing_levels:
-        notes.append(
-            "Todavía no hay ningún curso verificado para: " + ", ".join(missing_levels) +
-            " — se saltan por ahora."
-        )
-    return name, " ".join(notes)
-
-
 def build_language_plan_draft(
     *, user, weeks, custom_days, language, level_from, level_to, known_languages, prompt,
     quiz_every_n_videos=None, language_daily_minutes=None,
 ):
     """
-    El núcleo de "crear plan de idioma": asigna, SIN IA, qué cursos del
-    catálogo (CoursePlaylist) tocan según idioma + rango de nivel +
-    idioma nativo del usuario (ver `_catalog_entries_for_language`),
-    encadenando TODAS las playlists vivas que apliquen por nivel — no
-    una sola. No guarda nada todavía, solo construye y valida — mismo
-    reparto de responsabilidades que `build_plan_draft` (que sí usa IA
-    de verdad, para Deporte/Estudio general), pero sin gastar cuota de
-    Gemini ni contar contra AI_PLAN_DAILY_LIMIT: aquí no hay nada que
-    generar.
-
-    `prompt` se acepta y se ignora — el mismo formulario que
-    Deporte/General lo manda siempre, pero una asignación determinista
-    no tiene nada que "leer" de una frase libre.
-
-    `weeks` TAMBIÉN se acepta y se ignora — el objetivo real de un
-    curso de idioma es terminar el temario asignado, no encajarlo en
-    un número de semanas fijado de antemano (si el ritmo elegido no
-    llega, el plan seguiría cerrándose a medias; si el temario es
-    corto, sobrarían semanas enseñando el último vídeo sin más que
-    hacer). En vez de eso, aquí se ESTIMA cuántas semanas hacen falta a
-    partir del ritmo real que marca el usuario — sus días de la semana
-    (`custom_days`) — y el nº de vídeos asignado; ver
-    Plan.auto_close_expired para el cierre automático por progreso en
-    vez de por fecha.
+    El núcleo de "generar plan de idioma con IA" — mismo reparto de
+    responsabilidades que `build_plan_draft`: no guarda nada, solo
+    construye y valida. Comparte el mismo tope diario de generaciones
+    (AIGenerationLog) — es la misma cuota de Gemini para toda la app.
     """
+    try:
+        weeks = max(1, int(weeks or 12))
+    except (TypeError, ValueError):
+        weeks = 12
+
     valid_days = {k for k, _ in Task.WEEKDAYS}
     days = [str(d) for d in (custom_days or []) if str(d) in valid_days]
     custom_days = days or ["0", "2", "4"]
+    sessions_per_week = max(1, len(custom_days))
 
-    language = (language or "").strip()
-    if not language:
-        return None, "Falta decir qué idioma quieres aprender."
+    limit = getattr(settings, "AI_PLAN_DAILY_LIMIT", 15)
+    if limit and AIGenerationLog.count_today() >= limit:
+        return None, (
+            f"Has llegado al límite de {limit} planes generados con IA hoy — "
+            "es para no agotar la cuota gratis. Prueba mañana, o añade el curso a mano mientras tanto."
+        )
+    AIGenerationLog.record(user=user)
 
     try:
-        entries, missing_levels, levels = _catalog_entries_for_language(
-            language, level_from or "", level_to or "", known_languages or "",
+        raw = ai.generate_language_plan_draft(
+            prompt=prompt or "", language=language or "", level_from=level_from or "",
+            level_to=level_to or "", weeks=weeks, sessions_per_week=sessions_per_week,
+            known_languages=known_languages or "",
         )
-    except YouTubeSearchError as e:
+    except ai.PlanAIError as e:
         return None, str(e)
 
-    if not entries:
-        niveles = ", ".join(levels) if levels else "los niveles pedidos"
-        native = _primary_native_language(known_languages)
-        pista_nativo = f" para hablantes de {native}" if native else ""
-        return None, (
-            f"No hay ningún curso de {language}{pista_nativo} verificado en el catálogo para "
-            f"{niveles} todavía. Añade alguno primero con: python manage.py add_course_playlist "
-            f"{language} {levels[0] if levels else 'A1'} \"<url de la playlist>\" "
-            f"--native-language \"{native or '<idioma nativo>'}\"."
-        )
-
-    # Semanas ESTIMADAS a partir del ritmo real (cuántos días a la
-    # semana estudia) y de cuántos vídeos se han encadenado en total —
-    # ya no un número que el usuario fija de antemano y que el catálogo
-    # tiene que "encajar" (ver docstring). Puramente informativo: quien
-    # de verdad decide cuándo se cierra el plan es el progreso
-    # (Plan.auto_close_expired), no esto.
-    sessions_per_week = len(custom_days) or 1
-    total_items = sum(e["item_count"] for e in entries)
-    weeks = max(1, math.ceil(total_items / sessions_per_week)) if total_items else 1
-
-    weeks_allocated = _allocate_weeks([e["item_count"] for e in entries], weeks)
-    selected_out = [{**entry, "weeks_allocated": wk} for entry, wk in zip(entries, weeks_allocated)]
-
-    native = _primary_native_language(known_languages)
-    name, notes = _language_plan_name_and_notes(
-        language, levels, missing_levels, native, weeks, sessions_per_week,
-    )
-
     plan_fields = {
-        "name": name,
-        "notes": notes,
+        "name": raw["plan"]["name"],
+        "notes": raw["plan"]["notes"],
         "weeks": weeks,
         "custom_days": [int(d) for d in custom_days],
         "started_on": timezone.localtime(timezone.now()).date().isoformat(),
         "is_active": True,
         "study_subtype": Plan.STUDY_SUBTYPE_LANGUAGE,
-        "language_name": language[:40],
+        "language_name": (language or "").strip()[:40],
         "level_from": level_from or "",
         "level_to": level_to or "",
         "known_languages": (known_languages or "").strip()[:200],
@@ -1854,29 +1607,28 @@ def build_language_plan_draft(
     if not error:
         _apply_language_plan_fields(draft_plan, plan_fields)
     if error:
-        return None, f"Ese plan no es válido: {error}"
+        return None, f"La IA devolvió un plan inválido: {error}"
 
     return {
         "plan_type": Plan.PLAN_TYPE_STUDY,
         "study_subtype": Plan.STUDY_SUBTYPE_LANGUAGE,
         "plan_fields": plan_fields,
-        "selected": selected_out,
-        "missing_levels": missing_levels,
+        "selected": raw["selected"],
+        "missing_levels": raw["missing_levels"],
     }, None
 
 
 def expand_language_selection(selected):
     """
-    Convierte los cursos elegidos (todavía solo referencias al
-    catálogo, ver `_catalog_entries_for_language`) en filas de
-    CourseModule listas para guardar — vídeo a vídeo, con duración y
-    subtítulos reales.
+    Convierte los cursos elegidos por la IA (todavía solo referencias al
+    catálogo) en filas de CourseModule listas para guardar — vídeo a
+    vídeo, con duración y subtítulos reales.
 
     Se llama SOLO al confirmar, nunca al generar el borrador: expandir
     cada curso cuesta unas llamadas a la API de YouTube (baratas, pero
-    no gratis de tiempo), y el usuario puede volver a la pantalla
-    anterior y cambiar algo antes de confirmar — no tiene sentido
-    gastar eso en borradores que a lo mejor se descartan.
+    no gratis de tiempo), y el usuario puede pedir "generar otra vez"
+    varias veces antes de confirmar — no tiene sentido gastar eso en
+    borradores que a lo mejor se descartan.
 
     Todo o nada: si CUALQUIER curso falla al expandirse (playlist
     borrada entre medias, fallo de red...), no se crea ningún
@@ -1901,27 +1653,15 @@ def expand_language_selection(selected):
             return None, str(e)
 
         weeks_allocated = max(1, int(entry.get("weeks_allocated") or 1))
-        # Si esta playlist cubre varios niveles seguidos (ver
-        # CoursePlaylist.level_to), no hay forma de saber en qué vídeo
-        # exacto cambia de nivel — se reparte en tramos iguales, en
-        # orden, como mejor aproximación (mejor que etiquetar TODOS sus
-        # vídeos con el nivel de partida, que sería más engañoso
-        # todavía al acercarse al final de la playlist).
-        levels_covered = catalog.levels_covered()
         for i, it in enumerate(items):
             d = details.get(it["video_id"], {})
             if d and d.get("embeddable") is False:
                 continue  # no se podría incrustar en la tarea — se salta, no rompe el resto
             scheduled_week = week_offset + 1 + (i * weeks_allocated) // max(1, len(items))
-            if len(levels_covered) > 1:
-                bucket = min(len(levels_covered) - 1, (i * len(levels_covered)) // max(1, len(items)))
-                video_level = levels_covered[bucket]
-            else:
-                video_level = catalog.level
             modules.append(CourseModule(
                 order=order,
                 scheduled_week=scheduled_week,
-                level=video_level,
+                level=catalog.level,
                 youtube_video_id=it["video_id"],
                 title=d.get("title") or it["title"],
                 channel_title=d.get("channel_title") or catalog.channel_title,
@@ -1935,76 +1675,6 @@ def expand_language_selection(selected):
     if not modules:
         return None, "Ninguno de los cursos elegidos tenía vídeos que se pudieran incrustar. Genera el plan otra vez."
     return modules, None
-
-
-# --------------------------------------------------- tests de repaso (idiomas)
-
-def maybe_trigger_quiz(plan):
-    """
-    Tras ver un vídeo de un curso de idioma, comprueba si toca test de
-    repaso (cada `plan.quiz_every_n_videos` vídeos vistos) y si toca,
-    lo genera con IA a partir de los temas de esos vídeos — ver
-    CourseQuiz y ai.generate_quiz. Se llama desde
-    views.task_video_save, JUSTO DESPUÉS de guardar la Occurrence del
-    día (mark_done), para que `plan._language_completed_count()` ya
-    cuente el vídeo recién visto.
-
-    A propósito no bloquea nada si algo falla (sin cuota de IA, sin
-    conexión, la IA devuelve basura...): el vídeo ya se dio por visto
-    de todas formas — sencillamente no hay test esta vez. Devuelve el
-    CourseQuiz creado, o None si no tocaba test o no se pudo generar.
-    """
-    n = plan.quiz_every_n_videos
-    if not n:
-        return None
-
-    modules = list(plan.course_modules.all())
-    if not modules:
-        return None
-
-    completed = plan._language_completed_count()
-    if completed <= 0 or completed % n != 0:
-        return None
-
-    batch = modules[:min(completed, len(modules))][-n:]
-    if not batch:
-        return None
-    last_order = batch[-1].order
-
-    # Ya hay un test para este mismo tramo — no lo dupliques (ej. si
-    # esta vista se llamara dos veces por lo que sea).
-    if CourseQuiz.objects.filter(plan=plan, up_to_order=last_order).exists():
-        return None
-
-    topics = []
-    for m in batch:
-        t = (m.topic or m.title or "").strip()
-        if t and t not in topics:
-            topics.append(t)
-    if not topics:
-        return None
-
-    limit = getattr(settings, "AI_PLAN_DAILY_LIMIT", 15)
-    if limit and AIGenerationLog.count_today() >= limit:
-        return None  # sin test esta vez — no es motivo para bloquear nada
-
-    try:
-        raw = ai.generate_quiz(
-            language=plan.language_name,
-            level=batch[-1].level or plan.level_to or plan.level_from,
-            topics=topics, known_languages=plan.known_languages,
-        )
-    except ai.PlanAIError:
-        return None
-    AIGenerationLog.record(user=plan.user)
-
-    questions = raw.get("questions") or []
-    if not questions:
-        return None
-
-    return CourseQuiz.objects.create(
-        plan=plan, up_to_order=last_order, topics=topics, questions=questions,
-    )
 
 
 @api("POST")

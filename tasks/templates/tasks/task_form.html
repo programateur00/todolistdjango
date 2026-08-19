@@ -25,8 +25,8 @@
         </label>
         <label class="field">
             <span class="field__label" data-label-time>Hora límite</span>
-            <input type="time" name="due_time" value="{{ task.due_time|time:'H:i'|default:'' }}">
-            <span class="field__hint" data-hint-time>Si pasa sin marcarla → auto no hecha</span>
+            <input type="time" name="due_time" value="{{ task.due_time|time:'H:i'|default:'' }}" required>
+            <span class="field__hint" data-hint-time>Si pasa sin marcarla → auto no hecha. También es la hora del aviso.</span>
         </label>
     </div>
 
@@ -434,7 +434,7 @@
         hd.textContent = esAnti ? 'Si la repites, sigue indefinidamente.' : '';
         document.querySelector('[data-hint-time]').textContent = esAnti
             ? 'A esta hora te preguntamos si has caído.'
-            : 'Si pasa sin marcarla → auto no hecha';
+            : 'Si pasa sin marcarla → auto no hecha. También es la hora del aviso.';
     }
     categoryRadios.forEach(function(r){ r.addEventListener('change', updateSubcategory); });
     document.querySelectorAll('[name="video_source"]').forEach(function(r){
