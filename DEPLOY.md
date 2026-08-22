@@ -83,26 +83,36 @@ solo 2-3 ejercicios sueltos).
 
 Todo esto en PowerShell, dentro de la carpeta `mobile-app`. Todo el proceso
 se puede hacer por comandos, firma del APK incluida — no hace falta pasar
-por Android Studio en ningún momento. Se usa el mecanismo estándar de
-Gradle para firmar en CI (`-Pandroid.injected.signing.*`): las credenciales
-del keystore se pasan como propiedades al comando, sin tocar `build.gradle`
-ni meter el keystore en el repo.
+por Android Studio en ningún momento. La firma la coge Gradle sola de
+`android/keystore.properties` (nunca se sube al repo) — no hay que teclear
+ni pasar contraseñas cada vez.
 
-### 2.0 Configuración — solo la primera vez
+### 2.0 Configuración — solo la primera vez en cada PC
 
-Define estas 5 variables de entorno (una vez; abre una PowerShell **nueva**
-después para que se apliquen):
+**a) Keystore.** Copia `android\keystore.properties.example` como
+`android\keystore.properties` (misma carpeta) y rellena ahí tus datos
+reales: ruta al `.jks`, contraseña del store, alias y contraseña de la
+clave. Ese fichero está en `.gitignore`, así que se queda solo en tu PC.
+
+**b) Token de PythonAnywhere** — una variable de entorno (una vez; abre
+una PowerShell **nueva** después para que se aplique):
 
 ```powershell
 setx PYTHONANYWHERE_API_TOKEN "tu-token-de-pythonanywhere"
-setx LIBRETA_KEYSTORE_PATH "C:\ruta\a\tu\keystore.jks"
-setx LIBRETA_KEYSTORE_PASSWORD "contraseña-del-keystore"
-setx LIBRETA_KEY_ALIAS "alias-de-tu-clave"
-setx LIBRETA_KEY_PASSWORD "contraseña-de-la-clave"
 ```
 
-(Si tu keystore usa la misma contraseña para el store y la key, repite el
-mismo valor en las dos.)
+**c) JDK 21.** Capacitor 8 (lo que usa este proyecto) necesita compilarse
+con JDK 21 o superior. Si compilar desde Android Studio te funciona pero
+`gradlew` desde PowerShell falla con algo como `invalid source release:
+21`, es porque la consola está usando un JDK más antiguo que el que usa
+la IDE por dentro. Arréglalo una vez, apuntando Gradle al JDK que ya usa
+Android Studio (ajusta la ruta si la tuya es distinta — la ves en
+Android Studio: *Settings → Build, Execution, Deployment → Build Tools →
+Gradle → Gradle JDK*):
+
+```powershell
+Add-Content -Path "$env:USERPROFILE\.gradle\gradle.properties" -Value 'org.gradle.java.home=C:\\Program Files\\Android\\Android Studio\\jbr'
+```
 
 ### 2.1 Todo de un tirón
 
@@ -110,15 +120,15 @@ mismo valor en las dos.)
 .\release.ps1 -Notes "notas opcionales de esta versión"
 ```
 
-Este script (nuevo, en la raíz de `mobile-app`) encadena los cuatro pasos
-de siempre:
+Este script (en la raíz de `mobile-app`) encadena los cuatro pasos de
+siempre:
 
 1. `python subir_version.py` — sube `APP_VERSION` en `www/js/version.js`
    y `versionCode`/`versionName` en `android/app/build.gradle` a la vez.
 2. `npx cap copy android` — copia `www/` al proyecto Android.
-3. `gradlew.bat assembleRelease` con las credenciales de firma inyectadas
-   por `-P` — compila y firma el APK sin Android Studio. Sale en
-   `android\app\build\outputs\apk\release\app-release.apk`.
+3. `gradlew.bat assembleRelease` — compila y firma el APK sin Android
+   Studio (firma automática vía `keystore.properties`, ver 2.0a). Sale
+   en `android\app\build\outputs\apk\release\app-release.apk`.
 4. `python publicar_release.py` con ese APK — lo sube a
    `mobile_releases/` en PythonAnywhere. No hace falta `git pull` ni
    reload para esto, es independiente del despliegue web.
@@ -129,19 +139,14 @@ de siempre:
 python subir_version.py
 npx cap copy android
 cd android
-.\gradlew.bat assembleRelease `
-  "-Pandroid.injected.signing.store.file=$env:LIBRETA_KEYSTORE_PATH" `
-  "-Pandroid.injected.signing.store.password=$env:LIBRETA_KEYSTORE_PASSWORD" `
-  "-Pandroid.injected.signing.key.alias=$env:LIBRETA_KEY_ALIAS" `
-  "-Pandroid.injected.signing.key.password=$env:LIBRETA_KEY_PASSWORD"
+.\gradlew.bat assembleRelease
 cd ..
 python publicar_release.py "android\app\build\outputs\apk\release\app-release.apk" "notas de esta versión"
 ```
 
 (`npx cap open android` + Build → Generate Signed Bundle/APK en Android
 Studio sigue funcionando igual si alguna vez prefieres la interfaz
-gráfica — ambos caminos firman con el mismo keystore, solo cambia cómo
-se lo pasas a Gradle.)
+gráfica — coge el mismo `keystore.properties` sin pedir nada aparte.)
 
 ### 2.3 Instalarlo esta semana
 
