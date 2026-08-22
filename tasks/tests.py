@@ -818,7 +818,7 @@ class PlanViewTests(TestCase):
 
     def _create_plan(self):
         self.client.post(reverse("tasks:plan_create"), {
-            "name": "Ponerme en forma", "weeks": 12, "is_active": "on",
+            "name": "Ponerme en forma", "weeks": 12, "is_active": "on", "due_time": "18:00",
         })
         return Plan.objects.get(name="Ponerme en forma")
 
@@ -952,7 +952,7 @@ class PlanTaskFlowTests(TestCase):
     def _plan_with_exercise(self):
         self.client.post(reverse("tasks:plan_create"), {
             "name": "Ponerme en forma", "weeks": 12, "is_active": "on",
-            "custom_days": ["0", "2", "4"],
+            "custom_days": ["0", "2", "4"], "due_time": "18:00",
         })
         plan = Plan.objects.get(name="Ponerme en forma")
         self.client.post(reverse("tasks:plan_item_create", args=[plan.pk]), {

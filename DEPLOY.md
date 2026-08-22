@@ -81,38 +81,23 @@ solo 2-3 ejercicios sueltos).
 
 ## 2. App móvil (Capacitor → APK → publicar en PythonAnywhere)
 
-Todo esto en PowerShell, dentro de la carpeta `mobile-app`. Todo el proceso
-se puede hacer por comandos, firma del APK incluida — no hace falta pasar
-por Android Studio en ningún momento. La firma la coge Gradle sola de
-`android/keystore.properties` (nunca se sube al repo) — no hay que teclear
-ni pasar contraseñas cada vez.
+Todo esto en PowerShell, dentro de la carpeta `mobile-app`. La firma del
+APK se sigue haciendo con el asistente de Android Studio, como siempre
+lo has hecho — ahí tus datos ya salen rellenos solos, sin tener que
+copiar ni buscar ninguna contraseña. El script solo automatiza lo de
+alrededor (versión, sync, subida) y te avisa cuándo te toca compilar.
 
 ### 2.0 Configuración — solo la primera vez en cada PC
 
-**a) Keystore.** Copia `android\keystore.properties.example` como
-`android\keystore.properties` (misma carpeta) y rellena ahí tus datos
-reales: ruta al `.jks`, contraseña del store, alias y contraseña de la
-clave. Ese fichero está en `.gitignore`, así que se queda solo en tu PC.
-
-**b) Token de PythonAnywhere** — una variable de entorno (una vez; abre
-una PowerShell **nueva** después para que se aplique):
+Una única variable de entorno, para poder subir el APK a PythonAnywhere
+(una vez; abre una PowerShell **nueva** después para que se aplique):
 
 ```powershell
 setx PYTHONANYWHERE_API_TOKEN "tu-token-de-pythonanywhere"
 ```
 
-**c) JDK 21.** Capacitor 8 (lo que usa este proyecto) necesita compilarse
-con JDK 21 o superior. Si compilar desde Android Studio te funciona pero
-`gradlew` desde PowerShell falla con algo como `invalid source release:
-21`, es porque la consola está usando un JDK más antiguo que el que usa
-la IDE por dentro. Arréglalo una vez, apuntando Gradle al JDK que ya usa
-Android Studio (ajusta la ruta si la tuya es distinta — la ves en
-Android Studio: *Settings → Build, Execution, Deployment → Build Tools →
-Gradle → Gradle JDK*):
-
-```powershell
-Add-Content -Path "$env:USERPROFILE\.gradle\gradle.properties" -Value 'org.gradle.java.home=C:\\Program Files\\Android\\Android Studio\\jbr'
-```
+Nada de keystores ni JDK que configurar — de eso se sigue encargando
+Android Studio como hasta ahora.
 
 ### 2.1 Todo de un tirón
 
@@ -120,16 +105,17 @@ Add-Content -Path "$env:USERPROFILE\.gradle\gradle.properties" -Value 'org.gradl
 .\release.ps1 -Notes "notas opcionales de esta versión"
 ```
 
-Este script (en la raíz de `mobile-app`) encadena los cuatro pasos de
-siempre:
+Este script (en la raíz de `mobile-app`) hace lo siguiente:
 
 1. `python subir_version.py` — sube `APP_VERSION` en `www/js/version.js`
    y `versionCode`/`versionName` en `android/app/build.gradle` a la vez.
 2. `npx cap copy android` — copia `www/` al proyecto Android.
-3. `gradlew.bat assembleRelease` — compila y firma el APK sin Android
-   Studio (firma automática vía `keystore.properties`, ver 2.0a). Sale
-   en `android\app\build\outputs\apk\release\app-release.apk`.
-4. `python publicar_release.py` con ese APK — lo sube a
+3. Se para y te dice que compiles en Android Studio (**Build → Generate
+   Signed App Bundle / APK… → APK → Next → Finish**, tus datos ya
+   rellenos como siempre) — pulsas Enter cuando termine.
+4. Busca el `.apk` que acabas de generar (el más reciente dentro de
+   `android\`) y te pide confirmación antes de subirlo.
+5. `python publicar_release.py` con ese APK — lo sube a
    `mobile_releases/` en PythonAnywhere. No hace falta `git pull` ni
    reload para esto, es independiente del despliegue web.
 
@@ -138,15 +124,26 @@ siempre:
 ```powershell
 python subir_version.py
 npx cap copy android
-cd android
-.\gradlew.bat assembleRelease
-cd ..
-python publicar_release.py "android\app\build\outputs\apk\release\app-release.apk" "notas de esta versión"
+npx cap open android
 ```
 
-(`npx cap open android` + Build → Generate Signed Bundle/APK en Android
-Studio sigue funcionando igual si alguna vez prefieres la interfaz
-gráfica — coge el mismo `keystore.properties` sin pedir nada aparte.)
+Compila en Android Studio (Build → Generate Signed App Bundle / APK…
+→ APK), y cuando tengas el `.apk`:
+
+```powershell
+python publicar_release.py "ruta\a\tu\app-release.apk" "notas de esta versión"
+```
+
+### 2.9 Alternativa: 100% por comandos, sin abrir Android Studio nunca
+
+Si en algún momento prefieres que ni siquiera haga falta el clic en
+Android Studio (por ejemplo, para automatizarlo del todo), existe la
+opción de firmar por Gradle directamente — pero trae dos cosas que
+configurar aparte (un JDK 21 para la consola, y las credenciales del
+keystore en un fichero local `android/keystore.properties`). No hace
+falta para el uso normal — Alex lo probó y prefirió quedarse con el
+flujo de arriba (2.0-2.2), que reusa Android Studio. Si quieres retomar
+esa vía más adelante, dilo y se recupera esa configuración.
 
 ### 2.3 Instalarlo esta semana
 

@@ -1147,9 +1147,16 @@ def _apply_plan_fields(p, data):
         if isinstance(days, list):
             valid = {k for k, _ in Task.WEEKDAYS}
             p.custom_days = ",".join(str(d) for d in days if str(d) in valid) or "0,2,4"
+    # Si se manda due_time vacío explícitamente, es un error (ver
+    # plan_create para el "es obligatorio al crear" — aquí NO se exige
+    # solo por estar creando, porque esta función también la reutilizan
+    # los borradores de IA que aún no han llegado a la pregunta de la
+    # hora, ver generate_plan_draft/generate_language_plan_draft).
     if "due_time" in data:
         raw = data["due_time"]
         parsed = parse_time(raw) if isinstance(raw, str) else raw
+        if not parsed:
+            return "Ponle una hora — la notificación y el cierre automático del día la necesitan."
         p.due_time = parsed
     return None
 
@@ -1169,6 +1176,17 @@ def plan_create(request):
         return JsonResponse({"ok": False, "error": error}, status=400)
     if not p.name:
         return JsonResponse({"ok": False, "error": "Falta el nombre."}, status=400)
+    # Obligatoria al crear un plan de verdad (no en los borradores de
+    # IA sin guardar que también pasan por _apply_plan_fields) — mismo
+    # control y mismo mensaje que ya usan las vistas web (plan_form /
+    # plan_ai_create): sin hora no hay a qué hora avisar
+    # (mobile-app/www/js/notifications.js) ni cuándo cerrar el día solo
+    # si no se ha cumplido (Task.expire_overdue).
+    if not p.due_time:
+        return JsonResponse({
+            "ok": False,
+            "error": "Ponle una hora — la notificación y el cierre automático del día la necesitan.",
+        }, status=400)
 
     p.save()
     p.sync_task()
