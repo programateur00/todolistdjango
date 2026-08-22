@@ -387,7 +387,14 @@ def task_workout(request, pk):
     if plan and not exercise_slug and plan.items.filter(exercise__isnull=False).exists():
         return redirect(reverse("tasks:plan_session", args=[task.pk, plan.pk]))
 
-    exercises_qs = Exercise.objects.filter(is_active=True).exclude(mode=Exercise.MODE_TIMED)
+    # "timed" normalmente solo vive dentro de un circuito (cuenta atrás a
+    # secas) — pero plancha y plancha lateral, al llevar cámara propia
+    # comprobando la postura, también se pueden entrenar sueltas para
+    # una sola tarea, igual que dominadas o sentadillas. El resto de
+    # "timed" (bicicleta…) se queda fuera del selector individual.
+    exercises_qs = Exercise.objects.filter(is_active=True).exclude(
+        Q(mode=Exercise.MODE_TIMED) & ~Q(counter_key__in=POSTURE_COUNTERS)
+    )
     routines_qs = Routine.objects.filter(user=get_current_user())
     if task.subcategory:
         exercises_qs = exercises_qs.filter(body_area=task.subcategory)
@@ -412,10 +419,15 @@ def task_workout(request, pk):
         })
 
     # Contadores implementados en workout.js: dominadas (y variantes),
-    # fondos, sentadillas, abdominales, crunch y elevación de piernas.
-    # Cualquier otro counter_key (o un ejercicio sin cámara) cae aquí
+    # fondos, flexiones, sentadillas, abdominales, crunch, elevación de
+    # piernas, doble crunch y tijeretas cuentan repeticiones (mode="pose");
+    # plancha y plancha lateral se aguantan y llevan la cámara para
+    # comprobar la postura (mode="timed", ver POSTURE_COUNTERS).
+    # Cualquier otra combinación (o un ejercicio sin cámara) cae aquí
     # como "no soportado".
-    if exercise.mode != Exercise.MODE_POSE or exercise.counter_key not in COUNTERS:
+    is_pose_supported = exercise.mode == Exercise.MODE_POSE and exercise.counter_key in COUNTERS
+    is_posture_supported = exercise.mode == Exercise.MODE_TIMED and exercise.counter_key in POSTURE_COUNTERS
+    if not (is_pose_supported or is_posture_supported):
         return render(request, "tasks/task_workout_select.html", {
             "task": task, "exercises": exercises_qs, "routines": routines_qs, "videos": videos_qs,
             "unsupported": exercise,
@@ -1013,7 +1025,15 @@ def stats_detail(request, series_id):
 # ─────────────────────────────────────────────────────────────────────
 
 # Contadores que existen de verdad en workout.js.
-COUNTERS = {"pullup", "dip", "squat", "crunch", "legraise", "situp"}
+COUNTERS = {"pullup", "dip", "pushup", "squat", "crunch", "legraise", "situp", "doublecrunch", "scissor", "archerpullup"}
+
+# Ejercicios "timed" (se aguantan, no se cuentan en repeticiones) que
+# workout.js sabe seguir con cámara comprobando la postura — plancha,
+# plancha lateral, silla en pared, kneehold en barra y dead hang. Ver
+# task_workout: a estos, a diferencia del resto de "timed" (bicicleta…),
+# sí se les deja entrar en el entreno individual de una tarea con cámara
+# encendida, no solo dentro de un circuito.
+POSTURE_COUNTERS = {"plank", "sideplank", "wallsit", "kneeholdbar", "deadhang"}
 
 
 def _plans_qs():

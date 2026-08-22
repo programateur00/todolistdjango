@@ -1019,6 +1019,43 @@ class PlanTaskFlowTests(TestCase):
         self.assertIsNone(plan.task)
 
 
+class PostureCameraWorkoutTests(TestCase):
+    """
+    Plancha / plancha lateral ahora se pueden entrenar sueltas (fuera de
+    un circuito): antes, al ser mode="timed", task_workout las excluía
+    del todo y las trataba como "no soportadas". Ver POSTURE_COUNTERS en
+    views.py.
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.task = Task.objects.create(title="Plancha", category=Task.CATEGORY_SPORT, user=self.user)
+
+    def test_standalone_plank_renders_the_camera_workout_screen(self):
+        r = self.client.get(
+            reverse("tasks:task_workout", args=[self.task.pk]) + "?exercise=plank"
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertTemplateUsed(r, "tasks/task_workout.html")
+        self.assertEqual(r.context["exercise"].counter_key, "plank")
+
+    def test_standalone_side_plank_renders_the_camera_workout_screen(self):
+        r = self.client.get(
+            reverse("tasks:task_workout", args=[self.task.pk]) + "?exercise=side-plank"
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertTemplateUsed(r, "tasks/task_workout.html")
+        self.assertEqual(r.context["exercise"].counter_key, "sideplank")
+
+    def test_standalone_wall_sit_renders_the_camera_workout_screen(self):
+        r = self.client.get(
+            reverse("tasks:task_workout", args=[self.task.pk]) + "?exercise=wall-sit"
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertTemplateUsed(r, "tasks/task_workout.html")
+        self.assertEqual(r.context["exercise"].counter_key, "wallsit")
+
+
 class PlanAndFreestyleTests(TestCase):
     """
     Plan y "a mi aire" conviviendo: si el ejercicio está en un plan
@@ -1298,6 +1335,45 @@ class ExerciseCatalogTests(TestCase):
         self.assertNotIn("superman", slugs)
         self.assertNotIn("ab-circuit", slugs)
         self.assertIn("plank", slugs)
+
+    def test_double_crunch_is_a_camera_exercise(self):
+        double_crunch = Exercise.objects.get(slug="double-crunch")
+        self.assertEqual(double_crunch.mode, Exercise.MODE_POSE)
+        self.assertEqual(double_crunch.counter_key, "doublecrunch")
+
+    def test_scissor_kick_is_a_camera_exercise(self):
+        scissor = Exercise.objects.get(slug="scissor-kick")
+        self.assertEqual(scissor.mode, Exercise.MODE_POSE)
+        self.assertEqual(scissor.counter_key, "scissor")
+
+    def test_wall_sit_stays_timed_with_counter_key(self):
+        """Silla en pared se aguanta, igual que plancha/plancha lateral
+        — no se cuenta en repeticiones, así que va como mode="timed" con
+        counter_key puesto, no mode="pose"."""
+        wall_sit = Exercise.objects.get(slug="wall-sit")
+        self.assertEqual(wall_sit.mode, Exercise.MODE_TIMED)
+        self.assertEqual(wall_sit.counter_key, "wallsit")
+        self.assertEqual(wall_sit.body_area, "lower_body")
+
+    def test_archer_pullup_is_a_camera_exercise(self):
+        """Dominadas de arquero: mismo criterio de subida/bajada que las
+        dominadas normales, con su propio counter_key porque además hace
+        falta medir el ángulo de cada brazo (ver processArcherPullup en
+        workout.js) — por eso no comparte "pullup" como sí hacen
+        wide-pullup/chinup/etc."""
+        archer = Exercise.objects.get(slug="archer-pullup")
+        self.assertEqual(archer.mode, Exercise.MODE_POSE)
+        self.assertEqual(archer.counter_key, "archerpullup")
+        self.assertEqual(archer.body_area, "upper_body")
+
+    def test_archer_pullup_counter_key_is_registered_as_supported(self):
+        """0013 añade el ejercicio al catálogo, pero task_workout solo lo
+        trata como soportado por cámara si su counter_key también está en
+        views.COUNTERS (ver is_pose_supported) — sin esto, el ejercicio
+        existiría pero la pantalla de entreno lo trataría como "no
+        soportado"."""
+        from tasks.views import COUNTERS
+        self.assertIn("archerpullup", COUNTERS)
 
 
 class WebCircuitBuilderTests(TestCase):

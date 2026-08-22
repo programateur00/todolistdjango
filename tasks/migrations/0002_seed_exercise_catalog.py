@@ -19,6 +19,10 @@
 # config={} en todos: no hay ajustes de MediaPipe que perder aquí — el
 # conteo por cámara vive en el JS, indexado por counter_key, no en
 # este campo.
+#
+# Tercera pasada (ver 0012_add_camera_exercises): doble crunch y
+# tijeretas, dos ejercicios de abdominales que no existían antes, ambos
+# con contador de cámara propio en workout.js desde el principio.
 
 from django.db import migrations
 
@@ -40,6 +44,12 @@ LOWER_BODY = [
     dict(slug="leg-raise", name="Elevación de piernas", mode="pose", counter_key="legraise", order=10),
     dict(slug="bicycle-crunch", name="Bicicleta", mode="timed", counter_key="", order=11),
     dict(slug="side-plank", name="Plancha lateral", mode="timed", counter_key="sideplank", order=12),
+    # Añadidos en 0012_add_camera_exercises — puestos aquí también (get_or_create,
+    # así que no pasa nada si 0012 los crea de todas formas) para que una
+    # instalación nueva los tenga desde el primer momento, igual que el
+    # resto del catálogo. Ver ese archivo para el porqué de cada uno.
+    dict(slug="double-crunch", name="Doble crunch", mode="pose", counter_key="doublecrunch", order=13),
+    dict(slug="scissor-kick", name="Scissor Kicks", mode="pose", counter_key="scissor", order=14),
 ]
 
 RUNNING = [

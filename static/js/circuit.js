@@ -17,7 +17,8 @@
  */
 import {
   NOSE, L_SHOULDER, R_SHOULDER, L_HIP, R_HIP, L_ANKLE, R_ANKLE, L_WRIST, R_WRIST,
-  angle, MEDIAPIPE_VERSION, MODEL_URL,
+  angle, MEDIAPIPE_VERSION, MODEL_URL, checkPlankPosture, checkSidePlankPosture, checkWallSitPosture,
+  checkKneeHoldBarPosture, checkDeadHangPosture,
 } from "./workout.js";
 
 (function () {
@@ -98,8 +99,9 @@ import {
 
   // Ejercicios cronometrados que además llevan cámara: comprueban
   // postura en vez de contar repeticiones. Ver checkPlankPosture /
-  // checkSidePlankPosture más abajo.
-  const POSTURE_COUNTERS = new Set(["plank", "sideplank"]);
+  // checkSidePlankPosture / checkWallSitPosture / checkKneeHoldBarPosture /
+  // checkDeadHangPosture más abajo.
+  const POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "deadhang"]);
 
   function runCurrent() {
     const item = current();
@@ -168,91 +170,25 @@ import {
 
   // --------------------------------------- cronómetro + postura (plancha)
 
-  /**
-   * LIMITACIÓN CONOCIDA: MediaPipe Pose da la posición 2D de los
-   * landmarks, no hacia dónde mira la cara — "la nariz boca abajo" no
-   * se puede comprobar tal cual. Se aproxima con la nariz sin subir
-   * por encima de la línea de hombros (cabeza no levantada mirando al
-   * frente) + cuerpo en línea recta + los brazos apoyados. Es una
-   * aproximación razonable, no una detección exacta de hacia dónde
-   * miras.
-   */
-  const PLANK_LINE_MIN_DEG = 155;      // hombro-cadera-tobillo casi recto
-  const PLANK_HEAD_UP_MARGIN = 0.15;   // cuánto puede subir la nariz sobre el hombro (proporción al ancho de hombros) antes de contar como "cabeza levantada"
-  const PLANK_ARMS_DOWN_MARGIN = 0.05; // las muñecas deben quedar a la altura del hombro o por debajo
-  const PLANK_MIN_VISIBILITY = 0.4;
-
-  const SIDEPLANK_HIP_TOUCH_FACTOR = 0.35; // cuánto puede estar la muñeca "de arriba" lejos de la cadera y seguir contando como apoyada
-  const SIDEPLANK_LINE_MIN_DEG = 145;      // algo más laxo que la plancha normal: la cadera sube un poco de forma natural
-  const SIDEPLANK_MIN_VISIBILITY = 0.4;
-
-  function checkPlankPosture(lm) {
-    const nose = lm[NOSE];
-    const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
-    const lH = lm[L_HIP], rH = lm[R_HIP];
-    const lA = lm[L_ANKLE], rA = lm[R_ANKLE];
-    const lW = lm[L_WRIST], rW = lm[R_WRIST];
-
-    if ([nose, lS, rS, lH, rH, lA, rA, lW, rW].some((p) => (p.visibility ?? 1) < PLANK_MIN_VISIBILITY)) {
-      return { ok: false, reason: "No se te ve entera/o. Ponte de perfil a la cámara, con todo el cuerpo en el encuadre." };
-    }
-
-    const shoulderWidth = Math.hypot(lS.x - rS.x, lS.y - rS.y) || 1;
-    const shoulderMidY = (lS.y + rS.y) / 2;
-    const wristMidY = (lW.y + rW.y) / 2;
-
-    const leftVis = (lS.visibility ?? 1) + (lH.visibility ?? 1) + (lA.visibility ?? 1);
-    const rightVis = (rS.visibility ?? 1) + (rH.visibility ?? 1) + (rA.visibility ?? 1);
-    const useLeft = leftVis >= rightVis;
-    const lineAngle = angle(useLeft ? lS : rS, useLeft ? lH : rH, useLeft ? lA : rA);
-    if (lineAngle === null || lineAngle < PLANK_LINE_MIN_DEG) {
-      return { ok: false, reason: "Cadera desalineada — mantén el cuerpo en línea recta, de los hombros a los tobillos." };
-    }
-    if ((shoulderMidY - nose.y) / shoulderWidth > PLANK_HEAD_UP_MARGIN) {
-      return { ok: false, reason: "Baja la cabeza — mira al suelo, no al frente." };
-    }
-    if ((wristMidY - shoulderMidY) / shoulderWidth < -PLANK_ARMS_DOWN_MARGIN) {
-      return { ok: false, reason: "Apoya los dos brazos en el suelo." };
-    }
-    return { ok: true };
-  }
-
-  function checkSidePlankPosture(lm) {
-    const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
-    const lH = lm[L_HIP], rH = lm[R_HIP];
-    const lA = lm[L_ANKLE], rA = lm[R_ANKLE];
-    const lW = lm[L_WRIST], rW = lm[R_WRIST];
-
-    if ([lS, rS, lH, rH, lA, rA, lW, rW].some((p) => (p.visibility ?? 1) < SIDEPLANK_MIN_VISIBILITY)) {
-      return { ok: false, reason: "No se te ve entera/o. Encuadra todo el cuerpo." };
-    }
-
-    const shoulderWidth = Math.hypot(lS.x - rS.x, lS.y - rS.y) || 1;
-    // El brazo de apoyo es el que queda más abajo en la imagen (mayor "y").
-    const leftIsDown = lW.y > rW.y;
-    const downWrist = leftIsDown ? lW : rW;
-    const upWrist = leftIsDown ? rW : lW;
-    const upHip = leftIsDown ? rH : lH;
-    const downShoulder = leftIsDown ? lS : rS;
-    const downHip = leftIsDown ? lH : rH;
-    const downAnkle = leftIsDown ? lA : rA;
-
-    const lineAngle = angle(downShoulder, downHip, downAnkle);
-    if (lineAngle === null || lineAngle < SIDEPLANK_LINE_MIN_DEG) {
-      return { ok: false, reason: "Cadera desalineada — mantén el cuerpo en línea recta." };
-    }
-    const handToHip = Math.hypot(upWrist.x - upHip.x, upWrist.y - upHip.y) / shoulderWidth;
-    if (handToHip > SIDEPLANK_HIP_TOUCH_FACTOR) {
-      return { ok: false, reason: "Apoya la mano de arriba en la cadera." };
-    }
-    if ((downWrist.y - downShoulder.y) / shoulderWidth < PLANK_ARMS_DOWN_MARGIN) {
-      return { ok: false, reason: "Apoya el brazo de abajo en el suelo." };
-    }
-    return { ok: true };
-  }
+  // checkPlankPosture / checkSidePlankPosture / checkWallSitPosture /
+  // checkKneeHoldBarPosture / checkDeadHangPosture viven ahora en
+  // workout.js (importadas arriba) — se comparten con el entreno suelto
+  // de una tarea (plancha, plancha lateral, silla en pared, kneehold en
+  // barra y dead hang ya no dependen solo de estar dentro de un
+  // circuito), en vez de mantener la misma comprobación duplicada en dos
+  // sitios.
 
   async function runTimerWithPosture(item) {
-    const checker = item.counter_key === "sideplank" ? checkSidePlankPosture : checkPlankPosture;
+    const checker =
+      item.counter_key === "sideplank"
+        ? checkSidePlankPosture
+        : item.counter_key === "wallsit"
+        ? checkWallSitPosture
+        : item.counter_key === "kneeholdbar"
+        ? checkKneeHoldBarPosture
+        : item.counter_key === "deadhang"
+        ? checkDeadHangPosture
+        : checkPlankPosture;
 
     playerHost.innerHTML = `
       <div class="circuit">

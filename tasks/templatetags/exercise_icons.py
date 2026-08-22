@@ -27,17 +27,52 @@ AVAILABLE = {
 
 # Isométricos: no hay dos posturas, así que se enseña una y se indica
 # que hay que aguantar, en vez de fingir un movimiento.
-STATIC = {"plank", "side-plank"}
+STATIC = {"plank", "side-plank", "wall-sit", "kneehold-bar", "dead-hang"}
 
 # Variantes que comparten dibujo: el movimiento es el mismo y solo cambia
 # el agarre (ancho, supino) o si añades peso o impulso. Repetir la
 # ilustración es más honesto que dejar un hueco.
+#
+# double-crunch y scissor-kick son ejercicios nuevos y todavía no tienen
+# dibujo propio: se prestan la silueta del ejercicio existente que más
+# se parece en postura, en vez de dejar el hueco discreto.
+#   - double-crunch: tumbado boca arriba con el torso ya levantado del
+#     suelo (postura intermedia mantenida) mientras las piernas se
+#     flexionan — visualmente es un abdominal (situp) con las rodillas
+#     dobladas, así que reutiliza esa silueta.
+#   - scissor-kick: tumbado boca arriba con las piernas rectas alternando
+#     altura sobre el suelo — el mismo gesto que leg-raise, solo que
+#     alternando de pierna, así que reutiliza esa silueta.
+#   - wall-sit: rodillas dobladas a 90°, muslos paralelos al suelo — la
+#     misma postura de piernas que el punto más bajo de una sentadilla
+#     (squat), solo que aguantada contra una pared en vez de en
+#     movimiento, así que reutiliza esa silueta.
+#   - kneehold-bar: colgado de la barra con los brazos estirados — misma
+#     postura de partida que las dominadas (pullup), solo que en vez de
+#     subir y bajar se suben las rodillas y se aguantan; reutiliza esa
+#     silueta.
+#   - dead-hang: colgado de la barra con los brazos estirados, sin más —
+#     exactamente la postura de partida de las dominadas (pullup, misma
+#     silueta que kneehold-bar), solo que aquí no se sube nada, se
+#     aguanta tal cual.
+#   - archer-pullup: misma postura de partida (colgado de la barra) y el
+#     mismo gesto de subir tirando con los brazos que una dominada
+#     normal — lo único que cambia es que un brazo se dobla más que el
+#     otro al llegar arriba, algo que esta silueta de dos posturas no
+#     distingue de todas formas, así que reutiliza la de pullup en vez
+#     de dejar el hueco discreto.
 ALIAS = {
     "wide-pullup": "pullup",
     "chinup": "pullup",
     "weighted-pullup": "pullup",
     "jumping-pullup": "pullup",
     "weighted-dips": "dips",
+    "double-crunch": "situp",
+    "scissor-kick": "leg-raise",
+    "wall-sit": "squat",
+    "kneehold-bar": "pullup",
+    "dead-hang": "pullup",
+    "archer-pullup": "pullup",
 }
 
 LABELS = {
@@ -46,6 +81,9 @@ LABELS = {
     "superman": "Superman", "squat": "Sentadillas", "situp": "Abdominales",
     "pullup": "Dominadas", "push-up": "Flexiones", "side-plank": "Plancha lateral",
     "dips": "Fondos", "lunge": "Zancadas", "weighted-dips": "Fondos con peso",
+    "double-crunch": "Doble crunch", "scissor-kick": "Scissor Kicks",
+    "wall-sit": "Silla en pared", "kneehold-bar": "Kneehold Bar",
+    "dead-hang": "Dead Hang", "archer-pullup": "Dominadas de arquero",
 }
 
 
@@ -61,7 +99,11 @@ def exercise_icon(slug, compact=False):
             label, label,
         )
 
-    is_static = art in STATIC
+    # OJO: se comprueba el SLUG original, no `art` — un ejercicio puede
+    # tomar prestado el dibujo de otro que no es isométrico (wall-sit
+    # reutiliza el de squat, que sí tiene dos posturas de movimiento) y
+    # aun así necesitar el badge "mantener" él mismo.
+    is_static = slug in STATIC
     cls = " ".join(filter(None, [
         "ex-fig",
         "ex-fig--compact" if compact else "",

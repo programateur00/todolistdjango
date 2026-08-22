@@ -74,6 +74,17 @@ _NEEDS_BAR_EQUIPMENT = {
     "dips", "weighted-dips",
 }
 
+# Ejercicios cuyo contador de cámara existe en la web (static/js/workout.js)
+# pero todavía no se ha portado a la app móvil (mobile-app/www/js/workout.js
+# le falta processArcherPullup(); mobile-app/www/js/workout-view.js no trae
+# "wallsit" en POSTURE_COUNTERS ni a checkWallSitPosture en workout.js). Si
+# la IA los propusiera, un item de plan con ese ejercicio se quedaría
+# colgado en la pantalla de cámara del móvil sin contar nada. Se excluyen
+# aquí (para web Y para móvil por igual, ya que la API no distingue quién
+# llama) hasta que se porten — quitar de este set en cuanto workout.js de
+# la app cuente con ambos.
+_PENDING_MOBILE_PORT = {"archer-pullup", "wall-sit"}
+
 # Tope de peso AÑADIDO por defecto (kg) para dominadas/fondos con peso —
 # la inmensa mayoría de chalecos lastrados de uso doméstico llegan hasta
 # aquí. Sin un `max_load_kg` explícito del usuario, se asume este techo
@@ -152,10 +163,12 @@ _FOCUS_AREA_BRIEF = {
 }
 _FOCUS_AREA_FULL_BODY_BRIEF = (
     "Foco elegido por el usuario: CUERPO COMPLETO — sin restricción de zona. Si el objetivo es "
-    "genérico (\"ponerme en forma\"), reparte entre empuje (fondos), tracción (dominadas), pierna "
-    "(sentadillas) y core (plancha/abdominales): un cuerpo completo de verdad, no 2-3 ejercicios "
-    "sueltos. Añade running solo si el objetivo del usuario tiene algo que ver con correr o "
-    "resistencia cardio."
+    "genérico (\"ponerme en forma\"), reparte de verdad entre empuje (fondos/flexiones), tracción "
+    "(dominadas), pierna (sentadillas) y core/aguantes (plancha, abdominales, plancha lateral...): "
+    "un cuerpo completo de verdad, con ejercicios de TREN SUPERIOR Y de TREN INFERIOR a la vez "
+    "(no te quedes en 2-3 ejercicios sueltos de un solo lado del cuerpo — usa el rango alto de "
+    "objetivos indicado abajo para poder cubrir ambos). Añade running solo si el objetivo del "
+    "usuario tiene algo que ver con correr o resistencia cardio."
 )
 
 
@@ -188,12 +201,19 @@ def _exercise_catalog_lines(exercises):
 
 _PLAN_TYPE_BRIEF = {
     "sport": (
-        "Deporte: el plan persigue de 3 a 6 objetivos de ejercicio del catálogo de abajo — un "
-        "plan de un solo ejercicio no es un programa de entrenamiento serio. Exactamente UNO "
-        "debe llevar is_headline=true (la medida que define si el plan se ha conseguido, ej. "
-        "\"llegar a 4x12 dominadas con 20 kg\"); el resto son apoyo (progresan pero no deciden). "
-        "Elige ejercicios que de verdad ayuden al objetivo del usuario y cubran su cuerpo de "
-        "forma equilibrada — no metas relleno ni variantes redundantes del mismo movimiento."
+        "Deporte: el plan persigue de 4 a 6 objetivos de ejercicio del catálogo de abajo — usa "
+        "solo 3 si de verdad no da para más (sesión muy corta, foco muy estrecho); por defecto "
+        "apunta a la parte alta del rango (5-6), el catálogo de abajo tiene variedad de sobra "
+        "para no quedarte corto. Un plan de uno o dos ejercicios no es un programa de "
+        "entrenamiento serio. Exactamente UNO debe llevar is_headline=true (la medida que define "
+        "si el plan se ha conseguido, ej. \"llegar a 4x12 dominadas con 20 kg\"); el resto son "
+        "apoyo (progresan pero no deciden). Elige ejercicios que de verdad ayuden al objetivo del "
+        "usuario y cubran su cuerpo de forma equilibrada, mezclando movimientos de repeticiones "
+        "con aguantes isométricos cuando el catálogo los tenga para esa zona (dan una sesión más "
+        "completa y variada, no son un relleno) — no metas relleno ni variantes redundantes del "
+        "mismo movimiento (dominadas y dominadas anchas SÍ son la misma variante repetida; "
+        "sentadillas y plancha lateral NO lo son, son estímulos distintos y cuentan como "
+        "diversidad real)."
     ),
     "study": (
         "Estudio: el plan persigue UN solo hábito diario (estudiar francés, leer, practicar "
@@ -494,7 +514,7 @@ def generate_plan_draft(
 
     exercises = []
     if plan_type == "sport":
-        exclude = _NEEDS_BAR_EQUIPMENT if no_bar_equipment else set()
+        exclude = (_NEEDS_BAR_EQUIPMENT if no_bar_equipment else set()) | _PENDING_MOBILE_PORT
         exercises = _catalog_exercises(exclude_slugs=exclude)
 
         if focus_area in (Task.SUBCATEGORY_UPPER_BODY, Task.SUBCATEGORY_LOWER_BODY, Task.SUBCATEGORY_RUNNING):
