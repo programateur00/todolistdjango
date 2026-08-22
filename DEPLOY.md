@@ -81,61 +81,69 @@ solo 2-3 ejercicios sueltos).
 
 ## 2. App móvil (Capacitor → APK → publicar en PythonAnywhere)
 
-Todo esto en PowerShell, dentro de la carpeta `mobile-app`.
+Todo esto en PowerShell, dentro de la carpeta `mobile-app`. Todo el proceso
+se puede hacer por comandos, firma del APK incluida — no hace falta pasar
+por Android Studio en ningún momento. Se usa el mecanismo estándar de
+Gradle para firmar en CI (`-Pandroid.injected.signing.*`): las credenciales
+del keystore se pasan como propiedades al comando, sin tocar `build.gradle`
+ni meter el keystore en el repo.
 
-### 2.1 Subir el número de versión
+### 2.0 Configuración — solo la primera vez
+
+Define estas 5 variables de entorno (una vez; abre una PowerShell **nueva**
+después para que se apliquen):
+
+```powershell
+setx PYTHONANYWHERE_API_TOKEN "tu-token-de-pythonanywhere"
+setx LIBRETA_KEYSTORE_PATH "C:\ruta\a\tu\keystore.jks"
+setx LIBRETA_KEYSTORE_PASSWORD "contraseña-del-keystore"
+setx LIBRETA_KEY_ALIAS "alias-de-tu-clave"
+setx LIBRETA_KEY_PASSWORD "contraseña-de-la-clave"
+```
+
+(Si tu keystore usa la misma contraseña para el store y la key, repite el
+mismo valor en las dos.)
+
+### 2.1 Todo de un tirón
+
+```powershell
+.\release.ps1 -Notes "notas opcionales de esta versión"
+```
+
+Este script (nuevo, en la raíz de `mobile-app`) encadena los cuatro pasos
+de siempre:
+
+1. `python subir_version.py` — sube `APP_VERSION` en `www/js/version.js`
+   y `versionCode`/`versionName` en `android/app/build.gradle` a la vez.
+2. `npx cap copy android` — copia `www/` al proyecto Android.
+3. `gradlew.bat assembleRelease` con las credenciales de firma inyectadas
+   por `-P` — compila y firma el APK sin Android Studio. Sale en
+   `android\app\build\outputs\apk\release\app-release.apk`.
+4. `python publicar_release.py` con ese APK — lo sube a
+   `mobile_releases/` en PythonAnywhere. No hace falta `git pull` ni
+   reload para esto, es independiente del despliegue web.
+
+### 2.2 Paso a paso, si prefieres ir viendo cada cosa
 
 ```powershell
 python subir_version.py
-```
-
-Sube a la vez `APP_VERSION` en `www/js/version.js` y `versionCode`/
-`versionName` en `android/app/build.gradle` — hazlo SIEMPRE antes de
-compilar, los números quedan grabados dentro del APK.
-
-### 2.2 Copiar los cambios web al proyecto Android
-
-```powershell
 npx cap copy android
+cd android
+.\gradlew.bat assembleRelease `
+  "-Pandroid.injected.signing.store.file=$env:LIBRETA_KEYSTORE_PATH" `
+  "-Pandroid.injected.signing.store.password=$env:LIBRETA_KEYSTORE_PASSWORD" `
+  "-Pandroid.injected.signing.key.alias=$env:LIBRETA_KEY_ALIAS" `
+  "-Pandroid.injected.signing.key.password=$env:LIBRETA_KEY_PASSWORD"
+cd ..
+python publicar_release.py "android\app\build\outputs\apk\release\app-release.apk" "notas de esta versión"
 ```
 
-(Usa `npx cap sync android` en vez de `copy` solo si además has añadido o
-actualizado algún plugin de Capacitor — `copy` basta para cambios de
-`www/`.)
+(`npx cap open android` + Build → Generate Signed Bundle/APK en Android
+Studio sigue funcionando igual si alguna vez prefieres la interfaz
+gráfica — ambos caminos firman con el mismo keystore, solo cambia cómo
+se lo pasas a Gradle.)
 
-### 2.3 Compilar y firmar el APK
-
-```powershell
-npx cap open android
-```
-
-Y en Android Studio: **Build → Generate Signed Bundle / APK → APK**, con tu
-keystore de siempre. No hay una `signingConfig` en el `build.gradle` del
-repo (a propósito — el keystore no va en git), así que este paso sigue
-siendo por la interfaz gráfica, no por línea de comandos.
-
-Te deja el `.apk` firmado en algo como
-`android\app\release\app-release.apk`.
-
-### 2.4 Publicarlo en PythonAnywhere
-
-La primera vez, define el token (una PowerShell nueva después de esto):
-
-```powershell
-setx PYTHONANYWHERE_API_TOKEN "tu-token-aqui"
-```
-
-Luego, en cada release:
-
-```powershell
-python publicar_release.py "android\app\release\app-release.apk" "notas de esta versión"
-```
-
-Esto sube `latest.apk` y `latest.json` a `mobile_releases/` en el
-servidor — no hace falta ni `git pull` ni reload para esto, es
-independiente del despliegue web.
-
-### 2.5 Instalarlo esta semana
+### 2.3 Instalarlo esta semana
 
 - Si ya tienes una build anterior instalada en el móvil: ábrela, el aviso
   de "hay una versión nueva" debería salir solo (compara `APP_VERSION`

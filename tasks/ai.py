@@ -85,6 +85,61 @@ _NEEDS_BAR_EQUIPMENT = {
 # la app cuente con ambos.
 _PENDING_MOBILE_PORT = {"archer-pullup", "wall-sit"}
 
+# Dificultad del MOVIMIENTO en sí — no confundir con el nivel del usuario
+# (_LEVEL_BRIEF, que ajusta series/reps/peso sobre un mismo ejercicio).
+# Esto dice qué variantes tiene sentido siquiera PROPONER: un principiante
+# de verdad no debería abrir con dominadas lastradas o kneehold en barra,
+# necesita una base antes. Un avanzado, en cambio, puede seguir usando
+# ejercicios "de principiante" (sentadillas, flexiones...) sin que eso sea
+# un problema — lo que cambia para él es la exigencia (series/reps/peso),
+# no que el movimiento deje de valer. Por eso el filtro por dificultad
+# (ver generate_plan_draft) solo excluye en duro para "beginner"; para
+# intermedio/avanzado es el propio texto del prompt el que empuja hacia
+# arriba, sin cerrar la puerta a lo básico.
+_EXERCISE_DIFFICULTY = {
+    # Tren superior
+    "push-up": "beginner",
+    "dead-hang": "beginner",
+    "jumping-pullup": "beginner",
+    "dips": "intermediate",
+    "pullup": "intermediate",
+    "chinup": "intermediate",
+    "wide-pullup": "advanced",
+    "weighted-pullup": "advanced",
+    "weighted-dips": "advanced",
+    "archer-pullup": "advanced",
+    # Tren inferior / core
+    "squat": "beginner",
+    "situp": "beginner",
+    "crunch": "beginner",
+    "plank": "beginner",
+    "wall-sit": "beginner",
+    "bicycle-crunch": "intermediate",
+    "leg-raise": "intermediate",
+    "double-crunch": "intermediate",
+    "scissor-kick": "intermediate",
+    "side-plank": "intermediate",
+    "kneehold-bar": "advanced",
+}
+_DIFFICULTY_LABEL = {"beginner": "principiante", "intermediate": "intermedio", "advanced": "avanzado"}
+
+# Ejercicios de CORE dentro de tren inferior/core — sirven de relleno de
+# un plan de TREN SUPERIOR si ese catálogo por sí solo no llega al mínimo
+# pedido (ver _FOCUS_AREA_BRIEF). A propósito NO incluye ejercicios de
+# pierna suelta (sentadillas, silla en pared): esos no pintan nada en un
+# plan de tren superior aunque anden cortos de ejercicios.
+_CORE_SLUGS = {
+    "situp", "crunch", "leg-raise", "bicycle-crunch", "side-plank",
+    "double-crunch", "scissor-kick", "plank", "kneehold-bar",
+}
+
+# Mínimo de objetivos para un plan de UNA sola zona (tren superior o
+# inferior) — ver _response_schema. Cuerpo completo usa un rango más
+# alto porque tiene que cubrir las dos zonas a la vez (ver
+# _FOCUS_AREA_FULL_BODY_BRIEF). Se usa también para decidir si hace
+# falta rellenar tren superior con apoyo de core (ver más abajo).
+_FOCUSED_ZONE_MIN_ITEMS = 4
+
 # Tope de peso AÑADIDO por defecto (kg) para dominadas/fondos con peso —
 # la inmensa mayoría de chalecos lastrados de uso doméstico llegan hasta
 # aquí. Sin un `max_load_kg` explícito del usuario, se asume este techo
@@ -108,19 +163,28 @@ _LEVEL_BRIEF = {
         "Nivel de partida: PRINCIPIANTE — no entrena de forma regular todavía, o lleva muy poco "
         "tiempo. El punto de partida tiene que ser algo que pueda cumplir desde el primer día, "
         "pero eso no significa quedarse ahí para siempre: tiene que haber una progresión real y "
-        "visible a lo largo de las semanas, no un techo bajo mantenido de principio a fin."
+        "visible a lo largo de las semanas, no un techo bajo mantenido de principio a fin. El "
+        "catálogo de abajo YA viene sin los ejercicios de dificultad=avanzado para este nivel (se "
+        "han quitado de raíz, ni los menciones ni los eches de menos) — elige con confianza entre "
+        "los que quedan."
     ),
     "intermediate": (
         "Nivel de partida: INTERMEDIO — entrena de forma más o menos regular desde hace meses y "
         "ya domina la técnica básica de los movimientos. Empieza más arriba que a un principiante "
         "absoluto — no tiene sentido arrancarle en el mismo sitio que a alguien que no ha hecho "
-        "nunca el ejercicio."
+        "nunca el ejercicio. El catálogo de abajo lleva una etiqueta de dificultad por ejercicio "
+        "(dificultad=principiante/intermedio/avanzado): para este nivel, que la MAYORÍA de los "
+        "objetivos sean dificultad=intermedio o avanzado — los de dificultad=principiante vale "
+        "usarlos como mucho en uno de apoyo, nunca como el grueso del plan."
     ),
     "advanced": (
         "Nivel de partida: AVANZADO — entrena con regularidad desde hace años y ya tiene una base "
         "de fuerza sólida. Empieza alto de verdad (series, repeticiones y/o peso ya exigentes) y "
         "plantea una meta ambiciosa — un plan flojo para alguien con este nivel es peor que no dar "
-        "plan."
+        "plan. El catálogo de abajo lleva una etiqueta de dificultad por ejercicio: para este "
+        "nivel, prioriza los de dificultad=avanzado e intermedio — un ejercicio de "
+        "dificultad=principiante solo si de verdad aporta algo (p. ej. como calentamiento breve), "
+        "nunca como protagonista del plan."
     ),
 }
 _LEVEL_UNKNOWN_BRIEF = (
@@ -128,7 +192,9 @@ _LEVEL_UNKNOWN_BRIEF = (
     "mismo hago 2 dominadas\", \"llevo meses sin entrenar\"...) y ajústate a eso. Si tampoco hay "
     "ninguna pista, parte de un nivel intermedio-bajo razonable — NUNCA del mínimo absoluto por "
     "defecto; un entrenador de verdad nunca da un plan de mínimos solo porque no le han dado todos "
-    "los datos, hace la mejor estimación razonable."
+    "los datos, hace la mejor estimación razonable. El catálogo de abajo lleva una etiqueta de "
+    "dificultad por ejercicio (dificultad=principiante/intermedio/avanzado) — úsala como referencia "
+    "para ese nivel intermedio-bajo que estás asumiendo."
 )
 
 FOCUS_AREA_CHOICES = [
@@ -140,18 +206,18 @@ FOCUS_AREA_CHOICES = [
 
 _FOCUS_AREA_BRIEF = {
     Task.SUBCATEGORY_UPPER_BODY: (
-        "Foco elegido por el usuario: TREN SUPERIOR. Al menos la mitad de los ejercicios elegidos "
-        "tienen que ser de tren superior (marcados «tren superior» en el catálogo), usando "
-        "distintos patrones de movimiento sin repetir variantes del mismo ejercicio. Si el "
-        "catálogo de tren superior no da para llegar solo al mínimo de ejercicios pedido más "
-        "abajo, completa con ejercicios de core (marcados «tren inferior/core») que sostengan el "
-        "trabajo de tren superior — nunca con pierna suelta ni running."
+        "Foco elegido por el usuario: TREN SUPERIOR. El catálogo de abajo ya viene filtrado a "
+        "solo tren superior (y, únicamente si ese catálogo por sí solo se queda corto, algún "
+        "ejercicio de core de apoyo — nunca pierna suelta ni running, aparezca lo que aparezca "
+        "en el catálogo). Elige de 4 a 6 objetivos de ahí, con distintos patrones de movimiento "
+        "sin repetir variantes del mismo ejercicio — por defecto apunta a la parte alta del "
+        "rango (5-6), el catálogo tiene variedad de sobra para no quedarte corto."
     ),
     Task.SUBCATEGORY_LOWER_BODY: (
-        "Foco elegido por el usuario: TREN INFERIOR / CORE. Todo el plan gira en torno a esa zona "
-        "(marcada «tren inferior/core» en el catálogo) — el catálogo da de sobra para cubrir el "
-        "mínimo de ejercicios pedido sin salir de ahí. Nada de tren superior ni running salvo que "
-        "el usuario lo haya pedido también en su frase."
+        "Foco elegido por el usuario: TREN INFERIOR / CORE. El catálogo de abajo ya viene "
+        "filtrado a solo esa zona. Elige de 4 a 6 objetivos de ahí — por defecto apunta a la "
+        "parte alta del rango (5-6), el catálogo tiene variedad de sobra — sin salir de esa zona "
+        "aunque el usuario mencione otra cosa en su frase."
     ),
     Task.SUBCATEGORY_RUNNING: (
         "Foco elegido por el usuario: RUNNING. El ejercicio 'running' es OBLIGATORIAMENTE el "
@@ -162,12 +228,12 @@ _FOCUS_AREA_BRIEF = {
     ),
 }
 _FOCUS_AREA_FULL_BODY_BRIEF = (
-    "Foco elegido por el usuario: CUERPO COMPLETO — sin restricción de zona. Si el objetivo es "
-    "genérico (\"ponerme en forma\"), reparte de verdad entre empuje (fondos/flexiones), tracción "
-    "(dominadas), pierna (sentadillas) y core/aguantes (plancha, abdominales, plancha lateral...): "
-    "un cuerpo completo de verdad, con ejercicios de TREN SUPERIOR Y de TREN INFERIOR a la vez "
-    "(no te quedes en 2-3 ejercicios sueltos de un solo lado del cuerpo — usa el rango alto de "
-    "objetivos indicado abajo para poder cubrir ambos). Añade running solo si el objetivo del "
+    "Foco elegido por el usuario: CUERPO COMPLETO — sin restricción de zona, el catálogo de "
+    "abajo trae TODO. Elige de 5 a 8 objetivos (más que un plan de una sola zona, porque aquí "
+    "hay que cubrir las dos a la vez): reparte de verdad entre empuje (fondos/flexiones), "
+    "tracción (dominadas), pierna (sentadillas) y core/aguantes (plancha, abdominales, plancha "
+    "lateral...), con ejercicios de TREN SUPERIOR Y de TREN INFERIOR a la vez — nunca te quedes "
+    "en 2-3 ejercicios sueltos de un solo lado del cuerpo. Añade running solo si el objetivo del "
     "usuario tiene algo que ver con correr o resistencia cardio."
 )
 
@@ -195,25 +261,26 @@ def _exercise_catalog_lines(exercises):
         area = {"upper_body": "tren superior", "lower_body": "tren inferior/core", "running": "cardio"}.get(
             e.body_area, e.body_area or "general"
         )
-        lines.append(f"- slug=\"{e.slug}\" · {e.name} · {area} · {medida}")
+        dificultad = _DIFFICULTY_LABEL.get(_EXERCISE_DIFFICULTY.get(e.slug))
+        etiqueta_dificultad = f" · dificultad={dificultad}" if dificultad else ""
+        lines.append(f"- slug=\"{e.slug}\" · {e.name} · {area} · {medida}{etiqueta_dificultad}")
     return "\n".join(lines) if lines else "(ninguno disponible con los filtros actuales)"
 
 
 _PLAN_TYPE_BRIEF = {
     "sport": (
-        "Deporte: el plan persigue de 4 a 6 objetivos de ejercicio del catálogo de abajo — usa "
-        "solo 3 si de verdad no da para más (sesión muy corta, foco muy estrecho); por defecto "
-        "apunta a la parte alta del rango (5-6), el catálogo de abajo tiene variedad de sobra "
-        "para no quedarte corto. Un plan de uno o dos ejercicios no es un programa de "
-        "entrenamiento serio. Exactamente UNO debe llevar is_headline=true (la medida que define "
-        "si el plan se ha conseguido, ej. \"llegar a 4x12 dominadas con 20 kg\"); el resto son "
-        "apoyo (progresan pero no deciden). Elige ejercicios que de verdad ayuden al objetivo del "
-        "usuario y cubran su cuerpo de forma equilibrada, mezclando movimientos de repeticiones "
-        "con aguantes isométricos cuando el catálogo los tenga para esa zona (dan una sesión más "
-        "completa y variada, no son un relleno) — no metas relleno ni variantes redundantes del "
-        "mismo movimiento (dominadas y dominadas anchas SÍ son la misma variante repetida; "
-        "sentadillas y plancha lateral NO lo son, son estímulos distintos y cuentan como "
-        "diversidad real)."
+        "Deporte: el plan persigue varios objetivos de ejercicio del catálogo de abajo — cuántos "
+        "exactamente depende del foco elegido por el usuario (número exacto justo junto al foco, "
+        "más abajo). Un plan de uno o dos ejercicios no es un programa de entrenamiento serio, y "
+        "el catálogo de abajo tiene variedad de sobra para no quedarte corto. Exactamente UNO "
+        "debe llevar is_headline=true (la medida que define si el plan se ha conseguido, ej. "
+        "\"llegar a 4x12 dominadas con 20 kg\"); el resto son apoyo (progresan pero no deciden). "
+        "Elige ejercicios que de verdad ayuden al objetivo del usuario y cubran su cuerpo de "
+        "forma equilibrada, mezclando movimientos de repeticiones con aguantes isométricos cuando "
+        "el catálogo los tenga para esa zona (dan una sesión más completa y variada, no son un "
+        "relleno) — no metas relleno ni variantes redundantes del mismo movimiento (dominadas y "
+        "dominadas anchas SÍ son la misma variante repetida; sentadillas y plancha lateral NO lo "
+        "son, son estímulos distintos y cuentan como diversidad real)."
     ),
     "study": (
         "Estudio: el plan persigue UN solo hábito diario (estudiar francés, leer, practicar "
@@ -345,12 +412,12 @@ def _build_prompt(
             "- Los puntos de partida deben ser alcanzables desde el primer día para alguien que "
             "empieza el plan ahora — mejor quedarse corto que proponer algo imposible.",
             "",
-            "Cobertura de ejercicios — elige entre 3 y 6 ejercicios DISTINTOS, salvo que el foco "
-            "sea running puro (ver arriba, donde el mínimo es distinto): un programa serio trabaja "
-            "el cuerpo de forma equilibrada, no un solo movimiento. NO metas varias variantes del "
-            "mismo movimiento a la vez (ej. nunca dominadas + dominadas anchas + chin ups juntas en "
-            "el mismo plan) salvo que el usuario pida explícitamente trabajar variantes — eso es "
-            "relleno, no variedad real.",
+            "Cobertura de ejercicios — respeta el número de objetivos indicado arriba junto al "
+            "foco elegido (varía según sea tren superior, tren inferior, running o cuerpo "
+            "completo): un programa serio trabaja el cuerpo de forma equilibrada, no un solo "
+            "movimiento. NO metas varias variantes del mismo movimiento a la vez (ej. nunca "
+            "dominadas + dominadas anchas + chin ups juntas en el mismo plan) salvo que el "
+            "usuario pida explícitamente trabajar variantes — eso es relleno, no variedad real.",
         ]
 
     return "\n".join(parts)
@@ -416,8 +483,18 @@ def _response_schema(plan_type, focus_area=""):
         # _FOCUS_AREA_BRIEF). Pedir aquí el mismo mínimo de 3 forzaría a la
         # IA a inflar el plan con relleno o a inventar ejercicios.
         items_schema = {"type": "ARRAY", "items": _ITEM_SPORT_SCHEMA, "minItems": 1, "maxItems": 3}
+    elif plan_type == "sport" and focus_area in (Task.SUBCATEGORY_UPPER_BODY, Task.SUBCATEGORY_LOWER_BODY):
+        # Una sola zona: el catálogo ya viene filtrado a esa zona (ver
+        # generate_plan_draft) y es más corto que el completo — pedir el
+        # mismo rango alto que cuerpo completo dejaría a la IA rellenando
+        # con relleno o variantes repetidas para llegar al mínimo.
+        items_schema = {"type": "ARRAY", "items": _ITEM_SPORT_SCHEMA, "minItems": 4, "maxItems": 6}
     elif plan_type == "sport":
-        items_schema = {"type": "ARRAY", "items": _ITEM_SPORT_SCHEMA, "minItems": 3, "maxItems": 6}
+        # Cuerpo completo (focus_area vacío): tiene que cubrir tren
+        # superior Y tren inferior a la vez, así que necesita más
+        # objetivos que un plan de una sola zona — ver
+        # _FOCUS_AREA_FULL_BODY_BRIEF (pide 1/3 más que una zona sola).
+        items_schema = {"type": "ARRAY", "items": _ITEM_SPORT_SCHEMA, "minItems": 5, "maxItems": 8}
     elif plan_type == "study":
         items_schema = {"type": "ARRAY", "items": _ITEM_STUDY_SCHEMA, "minItems": 1, "maxItems": 1}
     else:
@@ -515,7 +592,37 @@ def generate_plan_draft(
     exercises = []
     if plan_type == "sport":
         exclude = (_NEEDS_BAR_EQUIPMENT if no_bar_equipment else set()) | _PENDING_MOBILE_PORT
-        exercises = _catalog_exercises(exclude_slugs=exclude)
+        catalog = _catalog_exercises(exclude_slugs=exclude)
+
+        # Principiante: fuera del catálogo que ve la IA los ejercicios
+        # dificultad=avanzado de raíz (ver _EXERCISE_DIFFICULTY) — no basta
+        # con pedírselo por texto, un principiante de verdad no debería ni
+        # ver "dominadas lastradas" como opción posible. Intermedio/avanzado
+        # NO se filtran así a propósito (ver el comentario en
+        # _EXERCISE_DIFFICULTY): ahí es el propio texto del prompt
+        # (_LEVEL_BRIEF) el que empuja hacia arriba, sin cerrar la puerta a
+        # lo básico cuando de verdad ayuda.
+        if fitness_level == "beginner":
+            catalog = [e for e in catalog if _EXERCISE_DIFFICULTY.get(e.slug) != "advanced"]
+
+        # Foco por zona — filtro EN DURO sobre la lista que se le enseña a
+        # la IA, no solo texto de prompt: esto es lo que de verdad arregla
+        # "pido tren superior y me devuelve tren inferior", porque ahora la
+        # IA no puede elegir de una lista que ni siquiera contiene esos
+        # ejercicios.
+        if focus_area == Task.SUBCATEGORY_UPPER_BODY:
+            exercises = [e for e in catalog if e.body_area == Task.SUBCATEGORY_UPPER_BODY]
+            if len(exercises) < _FOCUSED_ZONE_MIN_ITEMS:
+                relleno = [e for e in catalog if e.slug in _CORE_SLUGS and e not in exercises]
+                exercises = exercises + relleno
+        elif focus_area == Task.SUBCATEGORY_LOWER_BODY:
+            exercises = [e for e in catalog if e.body_area == Task.SUBCATEGORY_LOWER_BODY]
+        else:
+            # Running y cuerpo completo: sin filtrar por zona — running
+            # necesita poder ofrecer 1-2 ejercicios de apoyo de otra zona
+            # (ver _FOCUS_AREA_BRIEF) y cuerpo completo por definición debe
+            # cubrir todo el catálogo.
+            exercises = catalog
 
         if focus_area in (Task.SUBCATEGORY_UPPER_BODY, Task.SUBCATEGORY_LOWER_BODY, Task.SUBCATEGORY_RUNNING):
             if not any(e.body_area == focus_area for e in exercises):
@@ -526,12 +633,17 @@ def generate_plan_draft(
                         "de dominadas ni paralelas. Marca que sí tienes barra/paralelas, o elige "
                         "otro foco corporal."
                     )
+                if fitness_level == "beginner":
+                    raise PlanAIError(
+                        f"No hay ningún ejercicio de {zona} de nivel principiante en el catálogo "
+                        "todavía. Prueba con nivel intermedio, o elige otro foco corporal."
+                    )
                 raise PlanAIError(f"No hay ningún ejercicio activo de {zona} en el catálogo todavía.")
 
         if not exercises:
             raise PlanAIError(
-                "No queda ningún ejercicio activo en el catálogo con ese equipamiento — revisa el "
-                "catálogo de ejercicios antes de generar un plan de Deporte."
+                "No queda ningún ejercicio activo en el catálogo con ese equipamiento y nivel — "
+                "revisa el catálogo de ejercicios antes de generar un plan de Deporte."
             )
 
     prompt_text = _build_prompt(
