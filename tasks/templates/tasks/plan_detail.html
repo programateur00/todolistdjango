@@ -58,6 +58,12 @@
 
 {% if not course_progress.total %}
 <p class="empty-state">Este curso todavía no tiene vídeos — algo falló al crearlo.</p>
+<div class="task-form__actions">
+    <form action="{% url 'tasks:plan_language_retry' plan.pk %}" method="post">
+        {% csrf_token %}
+        <button type="submit" class="ghost-btn">Reintentar asignar cursos del catálogo</button>
+    </form>
+</div>
 {% endif %}
 
 {% else %}
@@ -112,7 +118,7 @@
 {% endif %}
 
 <div class="task-form__actions">
-    {% if not is_language %}
+    {% if not is_language and not is_study_general %}
     <a class="primary-btn" href="{% url 'tasks:plan_item_create' plan.pk %}">+ Añadir objetivo</a>
     {% endif %}
     <a class="ghost-btn" href="{% url 'tasks:plan_edit' plan.pk %}">Editar plan</a>

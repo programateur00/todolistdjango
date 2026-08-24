@@ -1150,8 +1150,8 @@ def _apply_plan_fields(p, data):
     # Si se manda due_time vacío explícitamente, es un error (ver
     # plan_create para el "es obligatorio al crear" — aquí NO se exige
     # solo por estar creando, porque esta función también la reutilizan
-    # los borradores de IA que aún no han llegado a la pregunta de la
-    # hora, ver generate_plan_draft/generate_language_plan_draft).
+    # los borradores que aún no han llegado a la pregunta de la hora,
+    # ver build_plan_draft/build_language_plan_draft).
     if "due_time" in data:
         raw = data["due_time"]
         parsed = parse_time(raw) if isinstance(raw, str) else raw
@@ -1542,7 +1542,7 @@ def build_plan_draft(
     return {"plan_type": plan_type, "plan_fields": plan_fields, "items": items_out}, None
 
 
-# ---------------------------------------------------- IA · Estudio · Idiomas
+# ------------------------------------------------------- Estudio · Idiomas
 #
 # Distinto del resto de tipos de plan a propósito: un plan de idioma no
 # se guarda como Plan + PlanItem (un "objetivo" con progresión), sino
@@ -1551,10 +1551,17 @@ def build_plan_draft(
 # `build_plan_draft` / la aplicación de `items` de `plan_ai_form` — los
 # datos no encajan en la misma forma.
 #
-# Solo disponible desde la vista web por ahora (`views.plan_ai_form`),
-# no desde el endpoint JSON de la app móvil (`plan_generate` de abajo,
-# que sigue siendo solo Deporte/Estudio simple/General) — se añadirá
-# ahí cuando la app móvil también sepa reproducir un CourseModule.
+# Sin IA de por medio (ver docstring de ai.py): el catálogo
+# (CoursePlaylist) ya está curado a mano, así que asignar cursos es
+# solo filtrar por idioma + nivel + idioma nativo — no hay nada que una
+# IA decida mejor aquí. Se llama desde la creación manual del plan
+# (`views.plan_form` → `views.plan_language_confirm`), nunca desde el
+# flujo de "Generar con IA" (ese es solo Deporte/General).
+#
+# Solo disponible desde la vista web por ahora, no desde el endpoint
+# JSON de la app móvil (`plan_generate` de abajo, que sigue siendo solo
+# Deporte/Estudio simple/General) — se añadirá ahí cuando la app móvil
+# también sepa reproducir un CourseModule.
 
 def _apply_language_plan_fields(p, data):
     """Los campos propios de Estudio · Idiomas que _apply_plan_fields no cubre."""
@@ -1585,15 +1592,105 @@ def _apply_language_plan_fields(p, data):
             p.quiz_every_n_videos = None
 
 
+def _select_language_catalog(language, level_from, level_to, known_languages):
+    """
+    Elige, del catálogo verificado (CoursePlaylist), qué cursos cubren
+    el idioma y el rango de niveles pedidos — sin IA, sin buscar en
+    YouTube: pura consulta contra lo que ya está curado a mano.
+
+    Prioriza los explicados en el idioma nativo del usuario (el primero
+    de `known_languages`) sobre los neutros, y descarta los pensados
+    para hablantes de otro idioma nativo distinto — mismo criterio que
+    ya documentaba CoursePlaylist.native_language. Si hay varios cursos
+    buenos para el mismo nivel, se incluyen TODOS (se encadenan, ver
+    plan_language_confirm.html) en vez de quedarse con uno solo.
+
+    Devuelve (selected, missing_levels):
+      selected: una entrada por CoursePlaylist elegido, en el formato
+        que espera `expand_language_selection` (catalog_id,
+        youtube_playlist_id, weeks_allocated) más lo que enseña la
+        vista previa (title, level, level_to, channel_title).
+      missing_levels: niveles del rango pedido sin ningún curso todavía.
+    """
+    CEFR_LEVELS = Plan.CEFR_LEVELS
+
+    language = (language or "").strip()
+    if not language:
+        return [], []
+
+    requested_from = level_from if level_from in CEFR_LEVELS else CEFR_LEVELS[0]
+    requested_to = level_to if level_to in CEFR_LEVELS else CEFR_LEVELS[-1]
+    lo, hi = CEFR_LEVELS.index(requested_from), CEFR_LEVELS.index(requested_to)
+    if hi < lo:
+        lo, hi = hi, lo
+    requested_levels = CEFR_LEVELS[lo:hi + 1]
+
+    native = known_languages.split(",")[0].strip().lower() if known_languages else ""
+
+    candidates = [
+        c for c in CoursePlaylist.objects.filter(is_active=True, language__iexact=language)
+        if not c.native_language or c.native_language.strip().lower() == native
+    ]
+    candidates.sort(key=lambda c: (CEFR_LEVELS.index(c.level) if c.level in CEFR_LEVELS else 0, c.order))
+
+    selected = []
+    covered = set()
+    for c in candidates:
+        levels = set(c.levels_covered())
+        if not levels & set(requested_levels):
+            continue
+        covered |= levels
+        selected.append({
+            "catalog_id": c.pk,
+            "youtube_playlist_id": c.youtube_playlist_id,
+            "title": c.title or c.youtube_playlist_id,
+            "channel_title": c.channel_title,
+            "level": c.level,
+            "level_to": c.level_to,
+        })
+
+    missing_levels = [lvl for lvl in requested_levels if lvl not in covered]
+    return selected, missing_levels
+
+
+def _allocate_weeks(selected, weeks):
+    """
+    Reparte las semanas pedidas entre los cursos elegidos, proporcional
+    a cuántos niveles MCER cubre cada uno — un curso A1→B2 se lleva más
+    semanas que uno de un único nivel. Escribe `weeks_allocated` en
+    cada entrada de `selected`, in-place.
+    """
+    CEFR_LEVELS = Plan.CEFR_LEVELS
+
+    if not selected:
+        return
+    spans = []
+    for s in selected:
+        try:
+            span = CEFR_LEVELS.index(s["level_to"] or s["level"]) - CEFR_LEVELS.index(s["level"]) + 1
+        except ValueError:
+            span = 1
+        spans.append(max(1, span))
+    total_span = sum(spans)
+    allocated = 0
+    for s, span in zip(selected, spans):
+        s["weeks_allocated"] = max(1, round(weeks * span / total_span))
+        allocated += s["weeks_allocated"]
+    # Ajuste de redondeo: que la suma se acerque a `weeks` de verdad, en
+    # vez de quedarse corta o pasarse por culpa de los `round()` sueltos.
+    selected[-1]["weeks_allocated"] = max(1, selected[-1]["weeks_allocated"] + (weeks - allocated))
+
+
 def build_language_plan_draft(
-    *, user, weeks, custom_days, language, level_from, level_to, known_languages, prompt,
+    *, user, weeks, custom_days, language, level_from, level_to, known_languages,
     quiz_every_n_videos=None, language_daily_minutes=None,
 ):
     """
-    El núcleo de "generar plan de idioma con IA" — mismo reparto de
-    responsabilidades que `build_plan_draft`: no guarda nada, solo
-    construye y valida. Comparte el mismo tope diario de generaciones
-    (AIGenerationLog) — es la misma cuota de Gemini para toda la app.
+    El núcleo de "crear un plan de idioma a mano": asigna cursos del
+    catálogo verificado para el idioma y el rango de niveles pedidos —
+    sin IA de por medio (ver docstring de ai.py y el comentario encima
+    de este bloque). Mismo reparto de responsabilidades que
+    `build_plan_draft`: no guarda nada, solo construye y valida.
     """
     try:
         weeks = max(1, int(weeks or 12))
@@ -1603,37 +1700,35 @@ def build_language_plan_draft(
     valid_days = {k for k, _ in Task.WEEKDAYS}
     days = [str(d) for d in (custom_days or []) if str(d) in valid_days]
     custom_days = days or ["0", "2", "4"]
-    sessions_per_week = max(1, len(custom_days))
 
-    limit = getattr(settings, "AI_PLAN_DAILY_LIMIT", 15)
-    if limit and AIGenerationLog.count_today() >= limit:
+    language = (language or "").strip()
+    if not language:
+        return None, "Falta el idioma."
+    known_languages = (known_languages or "").strip()
+    if not known_languages:
+        return None, "Falta el idioma que ya sabes."
+
+    selected, missing_levels = _select_language_catalog(language, level_from, level_to, known_languages)
+    if not selected:
         return None, (
-            f"Has llegado al límite de {limit} planes generados con IA hoy — "
-            "es para no agotar la cuota gratis. Prueba mañana, o añade el curso a mano mientras tanto."
+            f"Todavía no hay ningún curso verificado de {language} en el catálogo para ese nivel. "
+            "Prueba otro nivel, o añade cursos con el comando add_course_playlist."
         )
-    AIGenerationLog.record(user=user)
+    _allocate_weeks(selected, weeks)
 
-    try:
-        raw = ai.generate_language_plan_draft(
-            prompt=prompt or "", language=language or "", level_from=level_from or "",
-            level_to=level_to or "", weeks=weeks, sessions_per_week=sessions_per_week,
-            known_languages=known_languages or "",
-        )
-    except ai.PlanAIError as e:
-        return None, str(e)
-
+    level_label = f"{level_from or 'A1'} → {level_to or 'C2'}"
     plan_fields = {
-        "name": raw["plan"]["name"],
-        "notes": raw["plan"]["notes"],
+        "name": f"{language[:1].upper()}{language[1:]} ({level_label})"[:80],
+        "notes": f"Curso de {language} armado desde el catálogo verificado, nivel {level_label}.",
         "weeks": weeks,
         "custom_days": [int(d) for d in custom_days],
         "started_on": timezone.localtime(timezone.now()).date().isoformat(),
         "is_active": True,
         "study_subtype": Plan.STUDY_SUBTYPE_LANGUAGE,
-        "language_name": (language or "").strip()[:40],
+        "language_name": language[:40],
         "level_from": level_from or "",
         "level_to": level_to or "",
-        "known_languages": (known_languages or "").strip()[:200],
+        "known_languages": known_languages[:200],
         "quiz_every_n_videos": quiz_every_n_videos,
         "language_daily_minutes": language_daily_minutes,
     }
@@ -1642,14 +1737,14 @@ def build_language_plan_draft(
     if not error:
         _apply_language_plan_fields(draft_plan, plan_fields)
     if error:
-        return None, f"La IA devolvió un plan inválido: {error}"
+        return None, f"Plan inválido: {error}"
 
     return {
         "plan_type": Plan.PLAN_TYPE_STUDY,
         "study_subtype": Plan.STUDY_SUBTYPE_LANGUAGE,
         "plan_fields": plan_fields,
-        "selected": raw["selected"],
-        "missing_levels": raw["missing_levels"],
+        "selected": selected,
+        "missing_levels": missing_levels,
     }, None
 
 

@@ -66,7 +66,8 @@
         {% else %}
         <span class="field__hint">
             Idiomas: el plan se basa en llegar a un nivel MCER de un idioma concreto — el
-            temario de vídeos se genera con IA en un segundo paso, después de crear el plan.
+            siguiente paso asigna cursos ya verificados del catálogo (sin IA) para revisarlos
+            antes de guardar el plan.
         </span>
         {% endif %}
     </label>
@@ -103,7 +104,11 @@
             <span class="field__label">Idiomas que ya sabes</span>
             <input type="text" name="known_languages" maxlength="200" value="{{ plan.known_languages|default:'' }}"
                 placeholder="Ej: español, inglés" required>
-            <span class="field__hint">Ayuda a la IA a explicar comparando con un idioma que ya conoces.</span>
+            <span class="field__hint">
+                El primero que escribas es tu idioma nativo: se usa para elegir cursos explicados
+                en ese idioma cuando los hay (nunca uno pensado para hablantes de otro idioma
+                distinto). El resto solo da contexto a las notas del plan.
+            </span>
         </label>
 
         <div class="field" id="daily-minutes-field">
@@ -164,11 +169,45 @@
         </label>
     </div>
 
+    <div id="study-video-fields">
+        <label class="field">
+            <span class="field__label">Vídeo de YouTube (opcional)</span>
+            <input type="text" name="youtube_video_id" value="{{ study_headline.youtube_video_id|default:'' }}"
+                placeholder="Pega la URL o el ID del vídeo">
+        </label>
+        <label class="field">
+            <span class="field__label">Playlist de YouTube (opcional)</span>
+            <input type="text" name="youtube_playlist_id" value="{{ study_headline.youtube_playlist_id|default:'' }}"
+                placeholder="Pega la URL o el ID de la playlist">
+            <span class="field__hint">
+                Ej: una playlist de "francés para hispanohablantes" — cada día la tarea
+                enseña el siguiente vídeo sin visto de la playlist.
+            </span>
+        </label>
+        <div class="field-row">
+            <label class="field">
+                <span class="field__label">Minutos objetivo por sesión (opcional)</span>
+                <input type="number" name="target_minutes" min="1"
+                    value="{{ study_headline.target_minutes|default:'' }}">
+            </label>
+            <label class="field">
+                <span class="field__label">Vídeos objetivo por sesión (opcional)</span>
+                <input type="number" name="target_video_count" min="1"
+                    value="{{ study_headline.target_video_count|default:'' }}">
+            </label>
+        </div>
+        <span class="field__hint">
+            En blanco = sesión libre, sin vídeo ni objetivo fijo (solo marcar hecho/no hecho
+            cada día). Con un vídeo o playlist puesto, la tarea diaria sale lista para verlo y
+            comprobar que lo has hecho — no hace falta ningún paso aparte.
+        </span>
+    </div>
+
     <p class="field__hint" id="items-next-step-hint">
-        Los objetivos (ejercicio y progresión en Deporte; vídeo o playlist en
-        Estudio) se añaden en el siguiente paso, después de crear el plan. General
-        no necesita ninguno — es solo un hábito que cumples o no cada día. Idioma
-        genera su temario con IA desde la pantalla del plan, una vez creado.
+        Deporte: el ejercicio y su progresión se añaden en el siguiente paso, después
+        de crear el plan. General no necesita ningún objetivo aparte — es solo un
+        hábito que cumples o no cada día. Idioma revisa y confirma el temario del
+        catálogo antes de guardar el plan (siguiente paso).
     </p>
 
     <div class="field-row">
@@ -234,6 +273,8 @@
     var studySubtypeSelect = document.querySelector(".study-subtype-select");
     var languageFields = document.getElementById("language-fields");
     var languageInputs = languageFields.querySelectorAll("input, select");
+    var studyVideoFields = document.getElementById("study-video-fields");
+    var studyVideoInputs = studyVideoFields.querySelectorAll("input, select");
     var planTypeRadios = document.querySelectorAll(".plan-type-radio");
 
     function selectedValue(radios) {
@@ -246,6 +287,7 @@
     function refresh() {
         var isStudy = selectedValue(planTypeRadios) === "study";
         var isLanguage = isStudy && studySubtypeSelect.value === "language";
+        var isStudyGeneral = isStudy && !isLanguage;
 
         // display, no el atributo `hidden` — con las clases .field del
         // resto de la app, `hidden` se queda sin efecto (una regla de
@@ -253,6 +295,7 @@
         // quedaba enseñándose siempre pasara lo que pasara.
         studySubtypeField.style.display = isStudy ? "block" : "none";
         languageFields.style.display = isLanguage ? "block" : "none";
+        studyVideoFields.style.display = isStudyGeneral ? "block" : "none";
         // Los inputs deshabilitados no se envían — bien cuando el campo
         // está oculto porque no aplica (plan_type ≠ study, o materia ≠
         // idiomas), pero mal si es un plan de Idiomas ya creado, donde SÍ
@@ -260,6 +303,9 @@
         // bloqueado. Por eso esto va aparte de studySubtypeSelect/plan-type-radio.
         for (var i = 0; i < languageInputs.length; i++) {
             languageInputs[i].disabled = !isLanguage;
+        }
+        for (var j = 0; j < studyVideoInputs.length; j++) {
+            studyVideoInputs[j].disabled = !isStudyGeneral;
         }
     }
 

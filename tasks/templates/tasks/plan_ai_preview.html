@@ -4,20 +4,15 @@
 
 <header class="topbar">
     <div class="topbar__title">
-        <span class="topbar__eyebrow">plan · {% if draft.study_subtype == 'language' %}borrador{% else %}IA · borrador{% endif %}</span>
+        <span class="topbar__eyebrow">plan · IA · borrador</span>
         <h1>Revisa tu plan</h1>
     </div>
     <a href="{% url 'tasks:plan_list' %}" class="stats-link">← Cancelar</a>
 </header>
 
 <p class="field__hint">
-    {% if draft.study_subtype == 'language' %}
-    Esto es lo que se ha asignado del catálogo, sin IA de por medio — puedes tocar el
-    nombre y las notas antes de confirmar, o volver atrás y cambiar el idioma o el nivel.
-    {% else %}
     Esto es lo que propone la IA. Todavía no se ha guardado nada — puedes tocar
     cualquier número antes de confirmar, o pedir otra propuesta.
-    {% endif %}
 </p>
 
 <form class="task-form" method="post" id="ai-confirm-form">
@@ -45,59 +40,11 @@
         <input type="text" name="reward" maxlength="200" placeholder="Ej: unas zapatillas nuevas">
     </label>
 
-    {% if draft.study_subtype == 'language' %}
-    <p class="field__hint">
-        ≈{{ draft.plan_fields.weeks }} semana{{ draft.plan_fields.weeks|pluralize }} estimadas a
-        {{ draft.plan_fields.custom_days|length }} día{{ draft.plan_fields.custom_days|length|pluralize }} a la semana
-        — no es una fecha límite: el curso sigue abierto hasta que termines todos los vídeos,
-        tardes más o menos de lo estimado («Cambiar la petición» para elegir otro ritmo).
-    </p>
-    {% else %}
     <p class="field__hint">
         {{ draft.plan_fields.weeks }} semanas ·
         {{ draft.plan_fields.custom_days|length }} día{{ draft.plan_fields.custom_days|length|pluralize }} a la semana
         (esto ya no se puede cambiar aquí — «Cambiar la petición» para elegir otro).
     </p>
-    {% endif %}
-
-    {% if draft.study_subtype == 'language' %}
-    <p class="field__hint">
-        Idioma: {{ draft.plan_fields.language_name }}
-        {% if draft.plan_fields.level_from or draft.plan_fields.level_to %}
-            · nivel {{ draft.plan_fields.level_from|default:"A1" }} → {{ draft.plan_fields.level_to|default:"C2" }}
-        {% endif %}
-    </p>
-
-    {% if draft.missing_levels %}
-    <p class="plan-deload">
-        Todavía no hay ningún curso verificado en el catálogo para: {{ draft.missing_levels|join:", " }}.
-        El temario se salta esos niveles por ahora — añade cursos con <code>add_course_playlist</code>
-        cuando encuentres unos buenos.
-    </p>
-    {% endif %}
-
-    <h2 class="section-title">Cursos elegidos, en orden</h2>
-    <p class="field__hint">
-        Si hay varios cursos para el mismo nivel, se encadenan todos uno tras otro — por si el
-        primero se queda corto, sigues con el siguiente sin quedarte sin vídeos.
-    </p>
-    {% for c in draft.selected %}
-    <section class="plan-item">
-        <header class="plan-item__head">
-            <h3>{{ forloop.counter }}. {{ c.title }}</h3>
-            <span class="plan-item__prog">
-                {% if c.level_to and c.level_to != c.level %}nivel {{ c.level }} → {{ c.level_to }}{% else %}nivel {{ c.level }}{% endif %}
-            </span>
-        </header>
-        <p class="field__hint">
-            Canal: {{ c.channel_title }} · {{ c.item_count }} vídeo{{ c.item_count|pluralize }}
-            · unas {{ c.weeks_allocated|default:1 }} semana{{ c.weeks_allocated|default:1|pluralize }}
-        </p>
-    </section>
-    {% empty %}
-    <p class="empty-state">No se ha asignado ningún curso — vuelve atrás y prueba otro nivel.</p>
-    {% endfor %}
-    {% else %}
 
     {% if draft.plan_type == 'general' %}
     <p class="empty-state">
@@ -230,21 +177,12 @@
         {% endif %}
     </section>
     {% endfor %}
-    {% endif %}
 
     <div class="task-form__actions">
         <button type="submit" class="primary-btn">Guardar plan</button>
     </div>
 </form>
 
-{% if draft.study_subtype == 'language' %}
-{# Sin IA de por medio, "generar otra vez" con los mismos datos saldría
-   exactamente igual — no tiene sentido ofrecerlo. Para cambiar algo
-   (idioma, nivel, idioma nativo) hay que volver al formulario. #}
-<div class="task-form__actions" style="margin-top:8px;">
-    <a class="ghost-btn" href="{% url 'tasks:plan_ai_create' %}">← Cambiar idioma o nivel</a>
-</div>
-{% else %}
 <form method="post" class="task-form__actions" style="margin-top:8px;">
     {% csrf_token %}
     <input type="hidden" name="step" value="regenerar">
@@ -264,6 +202,5 @@
     <button type="submit" class="ghost-btn">↻ Generar otra vez</button>
     <a class="ghost-btn" href="{% url 'tasks:plan_ai_create' %}">Cambiar la petición</a>
 </form>
-{% endif %}
 
 {% endblock %}

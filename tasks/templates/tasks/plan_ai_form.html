@@ -33,130 +33,12 @@
             {% endfor %}
         </div>
         <span class="field__hint">
-            Deporte: objetivos de ejercicio del catálogo, con progresión. Estudio: un
-            hábito diario (estudiar francés, leer...). General: un hábito simple de
-            cumplir o no, sin más.
+            Deporte: objetivos de ejercicio del catálogo, con progresión. General: un
+            hábito simple de cumplir o no, sin más. Estudio no está aquí — un plan de
+            idioma se crea a mano y asigna cursos del catálogo sin IA (botón «+ Nuevo
+            plan a mano»).
         </span>
     </fieldset>
-
-    <fieldset class="field" id="study-subtype-field" hidden>
-        <legend class="field__label">Subtipo de estudio</legend>
-        <div class="repeat-options">
-            {% for value, label in study_subtype_choices %}
-            <label class="repeat-option">
-                <input type="radio" name="study_subtype" value="{{ value }}" class="study-subtype-radio"
-                    {% if study_subtype == value %}checked{% endif %}>
-                <span>{{ label }}</span>
-            </label>
-            {% endfor %}
-        </div>
-        <span class="field__hint">
-            Idioma: la app arma el temario asignando cursos ya verificados del catálogo,
-            organizados por nivel MCER (A1→C2) y por tu idioma nativo — sin IA de por medio, no
-            describes el plan en una frase, rellenas estos campos. Si hay varios cursos buenos
-            para el mismo nivel, se encadenan todos (por si uno se queda corto). El objetivo es
-            terminar ese temario, no acabar en un número de semanas fijo — tú marcas el ritmo
-            (qué días estudias) y el plan sigue abierto hasta que lo termines.
-        </span>
-    </fieldset>
-
-    <div id="language-fields" hidden>
-        <label class="field">
-            <span class="field__label">Idioma que quieres aprender</span>
-            <input type="text" name="language_name" maxlength="40" value="{{ language_name }}"
-                placeholder="Ej: francés">
-        </label>
-
-        <div class="field-row">
-            <label class="field">
-                <span class="field__label">Nivel de partida</span>
-                <select name="level_from">
-                    <option value="">— sin especificar (A1) —</option>
-                    {% for value, label in cefr_level_choices %}
-                    <option value="{{ value }}" {% if level_from == value %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                </select>
-            </label>
-            <label class="field">
-                <span class="field__label">Nivel al que quieres llegar</span>
-                <select name="level_to">
-                    <option value="">— sin especificar (C2) —</option>
-                    {% for value, label in cefr_level_choices %}
-                    <option value="{{ value }}" {% if level_to == value %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                </select>
-            </label>
-        </div>
-
-        <label class="field">
-            <span class="field__label">Idiomas que ya sabes</span>
-            <input type="text" name="known_languages" maxlength="200" value="{{ known_languages }}"
-                placeholder="Ej: español, inglés" required>
-            <span class="field__hint">
-                El primero que escribas es tu idioma nativo: se usa para elegir cursos
-                explicados en ese idioma cuando los hay (nunca uno pensado para hablantes
-                de otro idioma distinto). El resto solo da contexto a las notas del plan.
-            </span>
-        </label>
-
-        <div class="field" id="daily-minutes-field">
-            <span class="field__label">Minutos de vídeo al día</span>
-            <div class="repeat-options" id="daily-minutes-presets">
-                <label class="repeat-option">
-                    <input type="radio" name="daily_minutes_preset" value="15">
-                    <span>15 min</span>
-                </label>
-                <label class="repeat-option">
-                    <input type="radio" name="daily_minutes_preset" value="30">
-                    <span>30 min</span>
-                </label>
-                <label class="repeat-option">
-                    <input type="radio" name="daily_minutes_preset" value="45">
-                    <span>45 min</span>
-                </label>
-                <label class="repeat-option">
-                    <input type="radio" name="daily_minutes_preset" value="60">
-                    <span>1 h</span>
-                </label>
-                <label class="repeat-option">
-                    <input type="radio" name="daily_minutes_preset" value="90">
-                    <span>1 h 30</span>
-                </label>
-                <label class="repeat-option">
-                    <input type="radio" name="daily_minutes_preset" value="120">
-                    <span>2 h</span>
-                </label>
-                <label class="repeat-option">
-                    <input type="radio" name="daily_minutes_preset" value="custom">
-                    <span>Personalizado</span>
-                </label>
-            </div>
-            <div class="field-row" id="daily-minutes-custom" hidden>
-                <label class="field">
-                    <span class="field__label">Horas</span>
-                    <input type="number" min="0" max="12" id="daily-minutes-hours" placeholder="0">
-                </label>
-                <label class="field">
-                    <span class="field__label">Minutos</span>
-                    <input type="number" min="0" max="59" id="daily-minutes-minutes" placeholder="0">
-                </label>
-            </div>
-            <input type="hidden" name="language_daily_minutes" id="language-daily-minutes-value"
-                value="{{ language_daily_minutes }}">
-            <p class="field__hint" id="daily-minutes-error" hidden>Elige cuántos minutos quieres ver al día.</p>
-            <span class="field__hint">
-                Si al llegar al objetivo al vídeo le queda poco (≤15 min), lo dejamos
-                terminar solo; si le queda mucho, se corta ahí.
-            </span>
-        </div>
-
-        <label class="field">
-            <span class="field__label">Test cada cuántos vídeos (opcional)</span>
-            <input type="number" name="quiz_every_n_videos" min="1" value="{{ quiz_every_n_videos }}"
-                placeholder="Ej: 1 (cada vídeo) o 5">
-            <span class="field__hint">Déjalo en blanco si de momento no quieres tests.</span>
-        </label>
-    </div>
 
     <div id="sport-fields">
         <fieldset class="field" id="fitness-level-field">
@@ -279,20 +161,12 @@
 
 <script>
 (function () {
-    var studySubtypeField = document.getElementById("study-subtype-field");
-    var languageFields = document.getElementById("language-fields");
-    var languageInputs = languageFields.querySelectorAll("input, select");
     var promptTextarea = document.getElementById("prompt-textarea");
     var promptLabel = document.getElementById("prompt-label");
     var promptHint = document.getElementById("prompt-hint");
     var planTypeRadios = document.querySelectorAll(".plan-type-radio");
-    var studySubtypeRadios = document.querySelectorAll(".study-subtype-radio");
     var sportFields = document.getElementById("sport-fields");
     var fitnessLevelRadios = document.querySelectorAll(".fitness-level-radio");
-    var weeksFieldRow = document.getElementById("weeks-field-row");
-    var weeksInput = document.getElementById("weeks-input");
-    var daysFieldLabel = document.getElementById("days-field-label");
-    var daysFieldHint = document.getElementById("days-field-hint");
 
     function selectedValue(radios) {
         for (var i = 0; i < radios.length; i++) {
@@ -303,19 +177,12 @@
 
     function refresh() {
         var isSport = selectedValue(planTypeRadios) === "sport";
-        var isStudy = selectedValue(planTypeRadios) === "study";
-        var isLanguage = isStudy && selectedValue(studySubtypeRadios) === "language";
 
         // display, no el atributo `hidden` — con las clases .field del
         // resto de la app, `hidden` se queda sin efecto (una regla de
         // display en la hoja de estilos le gana), así que el campo se
         // quedaba enseñándose siempre pasara lo que pasara.
-        studySubtypeField.style.display = isStudy ? "block" : "none";
-        languageFields.style.display = isLanguage ? "block" : "none";
-        for (var i = 0; i < languageInputs.length; i++) {
-            languageInputs[i].disabled = !isLanguage;
-        }
-
+        //
         // El cuestionario de nivel/foco/equipamiento solo tiene sentido
         // para Deporte — es lo que evita que la IA improvise esos datos
         // cuando el usuario solo escribe una frase corta como "ponerme en
@@ -326,28 +193,7 @@
             fitnessLevelRadios[k].required = isSport;
         }
 
-        // En Idiomas no se pide un número de semanas: el objetivo es
-        // terminar el temario, no encajarlo en un plazo — las semanas
-        // se estiman solas a partir de qué días eliges abajo (ver
-        // api.build_language_plan_draft). Deshabilitado además de
-        // oculto para que no se mande un valor viejo sin querer.
-        weeksFieldRow.style.display = isLanguage ? "none" : "block";
-        weeksInput.disabled = isLanguage;
-        if (isLanguage) {
-            daysFieldLabel.textContent = "Qué días estudias";
-            daysFieldHint.textContent = "Este es tu ritmo: cada día de estos avanza un vídeo del curso. " +
-                "El plan estima cuántas semanas te llevará, pero no se cierra por fecha — sigue abierto " +
-                "hasta que termines todos los vídeos asignados, aunque tardes más (o menos) de lo estimado.";
-        } else {
-            daysFieldLabel.textContent = "Qué días entrenas";
-            daysFieldHint.textContent = "Con esto calcula cuánto subir en cada escalón.";
-        }
-
-        if (isLanguage) {
-            promptTextarea.required = false;
-            promptLabel.textContent = "Contexto adicional (opcional)";
-            promptHint.textContent = "Cualquier cosa que ayude a la IA a escribir mejores notas — no cambia qué cursos elige.";
-        } else if (isSport) {
+        if (isSport) {
             // Con nivel + foco (arriba) ya hay suficiente para un plan serio —
             // el texto libre ahora es solo para precisar (marca actual,
             // una lesión concreta, un objetivo con fecha...), no obligatorio.
@@ -364,86 +210,7 @@
     for (var i = 0; i < planTypeRadios.length; i++) {
         planTypeRadios[i].addEventListener("change", refresh);
     }
-    for (var j = 0; j < studySubtypeRadios.length; j++) {
-        studySubtypeRadios[j].addEventListener("change", refresh);
-    }
     refresh();
-
-    // --------------------------------------------- minutos/día (idiomas)
-    // Escoger "120" a mano en un input de número queda raro — en vez de
-    // eso, chips con duraciones típicas + "Personalizado" (horas y
-    // minutos por separado) que rellenan un input oculto con el total
-    // en minutos, que es lo único que de verdad viaja al servidor.
-    var dailyMinutesValue = document.getElementById("language-daily-minutes-value");
-    var dailyMinutesPresets = document.querySelectorAll('input[name="daily_minutes_preset"]');
-    var dailyMinutesCustom = document.getElementById("daily-minutes-custom");
-    var dailyMinutesHours = document.getElementById("daily-minutes-hours");
-    var dailyMinutesMinutes = document.getElementById("daily-minutes-minutes");
-    var dailyMinutesError = document.getElementById("daily-minutes-error");
-
-    function isLanguagePlan() {
-        return selectedValue(planTypeRadios) === "study" && selectedValue(studySubtypeRadios) === "language";
-    }
-
-    function setDailyMinutes(minutes) {
-        dailyMinutesValue.value = minutes || "";
-        if (minutes) dailyMinutesError.hidden = true;
-    }
-
-    function updateFromCustom() {
-        var h = parseInt(dailyMinutesHours.value, 10) || 0;
-        var m = parseInt(dailyMinutesMinutes.value, 10) || 0;
-        setDailyMinutes((h * 60 + m) || "");
-    }
-
-    for (var p = 0; p < dailyMinutesPresets.length; p++) {
-        dailyMinutesPresets[p].addEventListener("change", function () {
-            if (this.value === "custom") {
-                dailyMinutesCustom.hidden = false;
-                updateFromCustom();
-            } else {
-                dailyMinutesCustom.hidden = true;
-                setDailyMinutes(parseInt(this.value, 10));
-            }
-        });
-    }
-    dailyMinutesHours.addEventListener("input", updateFromCustom);
-    dailyMinutesMinutes.addEventListener("input", updateFromCustom);
-
-    // Al volver a "generar" tras un borrador ya visto (regenerar con otros
-    // datos): selecciona el chip que corresponda al valor ya presente, o
-    // "Personalizado" con horas/minutos ya rellenos si no coincide con
-    // ningún preset (ej. 20 min).
-    (function initDailyMinutes() {
-        var current = parseInt(dailyMinutesValue.value, 10);
-        if (!current) return;
-        for (var i = 0; i < dailyMinutesPresets.length; i++) {
-            if (parseInt(dailyMinutesPresets[i].value, 10) === current) {
-                dailyMinutesPresets[i].checked = true;
-                return;
-            }
-        }
-        for (var j = 0; j < dailyMinutesPresets.length; j++) {
-            if (dailyMinutesPresets[j].value === "custom") dailyMinutesPresets[j].checked = true;
-        }
-        dailyMinutesCustom.hidden = false;
-        dailyMinutesHours.value = Math.floor(current / 60);
-        dailyMinutesMinutes.value = current % 60;
-    })();
-
-    // El input real que viaja al servidor es type=hidden — el navegador no
-    // valida "required" en campos ocultos, así que el mínimo (elegir algún
-    // valor) se comprueba a mano justo antes de enviar. Este listener se
-    // registra dentro del IIFE, antes que el de más abajo que deshabilita
-    // el botón — así, si aquí se bloquea el envío con preventDefault(), el
-    // otro listener lo detecta y no deja el botón inhabilitado sin motivo.
-    document.getElementById("ai-form").addEventListener("submit", function (e) {
-        if (isLanguagePlan() && !dailyMinutesValue.value) {
-            e.preventDefault();
-            dailyMinutesError.hidden = false;
-            dailyMinutesError.scrollIntoView({ behavior: "smooth", block: "center" });
-        }
-    });
 })();
 
 document.getElementById("ai-form").addEventListener("submit", function (e) {

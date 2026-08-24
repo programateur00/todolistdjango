@@ -1,0 +1,95 @@
+{% extends "tasks/base.html" %}
+{% block title %}Revisar curso de idioma{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">plan · idioma</span>
+        <h1>Revisa el curso</h1>
+    </div>
+    <a href="{% url 'tasks:plan_list' %}" class="stats-link">← Cancelar</a>
+</header>
+
+<p class="field__hint">
+    Esto es lo que se ha asignado del catálogo verificado, sin IA de por medio — puedes
+    tocar el nombre y las notas antes de confirmar, o volver atrás y cambiar el idioma o el nivel.
+</p>
+
+<form class="task-form" method="post">
+    {% csrf_token %}
+
+    <label class="field">
+        <span class="field__label">Nombre del plan</span>
+        <input type="text" name="name" maxlength="80" required value="{{ draft.plan_fields.name }}">
+    </label>
+
+    <label class="field">
+        <span class="field__label">Notas</span>
+        <textarea name="notes" rows="2">{{ draft.plan_fields.notes }}</textarea>
+    </label>
+
+    <label class="field">
+        <span class="field__label">Hora</span>
+        <input type="time" name="due_time" value="{{ draft.due_time|default:'' }}" required>
+        <span class="field__hint">A esta hora avisa la app y, si sigue sin hacerse, se marca sola como no hecha.</span>
+    </label>
+
+    <label class="field">
+        <span class="field__label">Recompensa al cerrar el ciclo (opcional)</span>
+        <input type="text" name="reward" maxlength="200" placeholder="Ej: unas zapatillas nuevas"
+            value="{{ draft.reward|default:'' }}">
+    </label>
+
+    <p class="field__hint">
+        ≈{{ draft.plan_fields.weeks }} semana{{ draft.plan_fields.weeks|pluralize }} estimadas a
+        {{ draft.plan_fields.custom_days|length }} día{{ draft.plan_fields.custom_days|length|pluralize }} a la semana
+        — no es una fecha límite: el curso sigue abierto hasta que termines todos los vídeos,
+        tardes más o menos de lo estimado («← Cambiar idioma o nivel» para elegir otro ritmo).
+    </p>
+
+    <p class="field__hint">
+        Idioma: {{ draft.plan_fields.language_name }}
+        {% if draft.plan_fields.level_from or draft.plan_fields.level_to %}
+            · nivel {{ draft.plan_fields.level_from|default:"A1" }} → {{ draft.plan_fields.level_to|default:"C2" }}
+        {% endif %}
+    </p>
+
+    {% if draft.missing_levels %}
+    <p class="plan-deload">
+        Todavía no hay ningún curso verificado en el catálogo para: {{ draft.missing_levels|join:", " }}.
+        El temario se salta esos niveles por ahora — añade cursos con <code>add_course_playlist</code>
+        cuando encuentres unos buenos.
+    </p>
+    {% endif %}
+
+    <h2 class="section-title">Cursos asignados, en orden</h2>
+    <p class="field__hint">
+        Si hay varios cursos para el mismo nivel, se encadenan todos uno tras otro — por si el
+        primero se queda corto, sigues con el siguiente sin quedarte sin vídeos.
+    </p>
+    {% for c in draft.selected %}
+    <section class="plan-item">
+        <header class="plan-item__head">
+            <h3>{{ forloop.counter }}. {{ c.title }}</h3>
+            <span class="plan-item__prog">
+                {% if c.level_to and c.level_to != c.level %}nivel {{ c.level }} → {{ c.level_to }}{% else %}nivel {{ c.level }}{% endif %}
+            </span>
+        </header>
+        <p class="field__hint">
+            Canal: {{ c.channel_title }} · unas {{ c.weeks_allocated|default:1 }} semana{{ c.weeks_allocated|default:1|pluralize }}
+        </p>
+    </section>
+    {% empty %}
+    <p class="empty-state">No se ha asignado ningún curso — vuelve atrás y prueba otro nivel.</p>
+    {% endfor %}
+
+    <div class="task-form__actions">
+        <button type="submit" class="primary-btn">Guardar plan</button>
+    </div>
+</form>
+
+<div class="task-form__actions" style="margin-top:8px;">
+    <a class="ghost-btn" href="{% url 'tasks:plan_create' %}">← Cambiar idioma o nivel</a>
+</div>
+
+{% endblock %}
