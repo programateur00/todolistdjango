@@ -1,40 +1,43 @@
 """
-Generación de planes con IA (Google Gemini).
+Deporte: generación de planes 100% determinista (sin IA) + test de
+repaso de Idiomas con IA (Google Gemini).
 
-Por qué Gemini: es el único de los grandes que ofrece un tier
-permanentemente gratis (sin tarjeta, sin caducidad de prueba) con
-"structured output" — le pides un JSON con un esquema exacto y te lo
-devuelve validado contra ese esquema, en vez de tener que rezar para que
-el texto libre se deje parsear. Se pide la clave gratis en
-https://aistudio.google.com/apikey y se guarda en la variable de entorno
-GEMINI_API_KEY (ver settings.py) — sin ella, esta función falla con un
-error legible en vez de reventar.
+Generación de planes de Deporte — YA NO usa IA. Hasta antes, esto le
+pedía a Gemini que inventara objetivos/progresión a partir de una frase
+libre; se quitó porque depender de una API externa (con su propia cuota
+gratis y su propia demanda) para algo tan mecánico como "elige N
+ejercicios del nivel pedido y súbeles la exigencia poco a poco" no tenía
+sentido — es exactamente el tipo de cálculo que un programa hace mejor,
+más rápido y sin límite de peticiones que un LLM. `_select_sport_exercises`
+elige los ejercicios (mismo filtro EN DURO por nivel/foco que ya existía)
+y `default_item_fields` pone el punto de partida y la meta según tablas
+fijas por categoría de ejercicio y nivel (ver más abajo) — ambas cosas
+deterministas, sin llamada de red de por medio. `apply_pacing` (que ya
+existía, reutilizada tal cual) traduce eso a los incrementos reales de
+progresión con la misma cuenta que la calculadora del formulario web/app
+(ver plan_item_form.html).
 
-Diseño: la IA NO decide los ajustes "de fontanería" del plan (semanas,
-qué días se entrena, tipo de plan) — esos los pone el usuario en el
-formulario, como en la creación manual. La IA solo decide el NOMBRE, las
-notas, y — para Deporte y Estudio — qué objetivos concretos persigue y su
-progresión (punto de partida, destino, y en cuántas semanas quiere
-llegar). El "en cuántas semanas" se traduce aquí a `sessions_per_step` y
-al incremento por escalón con la misma cuenta que ya usa la calculadora
-del formulario web/app (ver plan_item_form.html) — no se le pide a la IA
-que haga esa aritmética, que es donde un LLM más se equivoca.
-
-Nada de esto llega a la base de datos directamente: `api.plan_generate`
+Nada de esto llega a la base de datos directamente: `api.build_plan_draft`
 aplica el resultado sobre instancias de Plan/PlanItem SIN GUARDAR,
 reutilizando `_apply_plan_fields` / `_apply_plan_item_fields` (las mismas
-que usa la creación manual), así que un plan generado por IA pasa por
-exactamente la misma validación y los mismos límites que uno hecho a
-mano. El usuario revisa y confirma antes de que se guarde nada de verdad.
+que usa la creación manual), así que un plan generado automáticamente
+pasa por exactamente la misma validación que uno hecho a mano. El
+usuario revisa y confirma (y puede tocar los números) antes de que se
+guarde nada de verdad.
 
-Estudio · Idiomas YA NO pasa por aquí: la asignación de cursos del
-catálogo (CoursePlaylist → CourseModule) es puramente determinista,
-ver `api.build_language_plan_draft` — sin IA de por medio, mismo
-espíritu que este módulo pero sin necesitarlo, porque el catálogo ya
-está curado a mano. Lo único de Idiomas que SÍ usa IA es el test de
-repaso (`generate_quiz`, al final de este archivo) — preguntas de
-opción múltiple sobre lo último visto, que no decide nada del plan en
-sí, así que no comparte el resto del diseño de arriba.
+Estudio · Idiomas tampoco pasa por aquí: la asignación de cursos del
+catálogo (CoursePlaylist → CourseModule) es puramente determinista, ver
+`api.build_language_plan_draft` — sin IA de por medio, mismo espíritu
+que el resto de este módulo. Estudio · Hábito simple y General se crean
+a mano, sin nada que generar automáticamente (no hay catálogo del que
+elegir).
+
+Lo ÚNICO que sigue usando IA en toda la app es el test de repaso de
+Idiomas (`generate_quiz`, al final de este archivo) — preguntas de
+opción múltiple sobre los últimos vídeos vistos, que no decide nada de
+ningún plan, solo da un empujón a prestar atención. Por eso `_call_gemini`
+y GEMINI_API_KEY se quedan — todo lo demás de la llamada a Gemini para
+planes (prompt, schema, `generate_plan_draft`) ha desaparecido.
 """
 import json
 import urllib.error
@@ -51,19 +54,15 @@ class PlanAIError(Exception):
 
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
 
-MAX_PROMPT_CHARS = 800
 DEFAULT_TIMEOUT = 30
 
 
 # ------------------------------------------------ cuestionario estructurado
 #
-# Antes de esto, lo único que decidía el contenido del plan era una frase
-# libre ("ponerme en forma") — y ante la ambigüedad, la IA por defecto
-# tiraba a lo mínimo seguro (2 series de 10, un par de ejercicios). En vez
-# de confiar en que la IA adivine nivel/foco/equipamiento de una frase
-# corta, se le piden como campos explícitos al usuario (ver
-# plan_ai_form.html / plan-view.js) y se le dan a la IA como hechos, no
-# como algo que tenga que inferir.
+# El usuario elige nivel/foco/equipamiento como campos explícitos (ver
+# plan_ai_form.html) — son los datos que `_select_sport_exercises` y
+# `default_item_fields` usan para elegir ejercicios y sus números de
+# partida/meta, sin nada que adivinar de una frase libre.
 
 # Ejercicios que necesitan barra de dominadas o paralelas — es el único
 # "equipamiento" que de verdad cambia qué se puede proponer, porque es lo
@@ -78,24 +77,32 @@ _NEEDS_BAR_EQUIPMENT = {
 # pero todavía no se ha portado a la app móvil (mobile-app/www/js/workout.js
 # le falta processArcherPullup(); mobile-app/www/js/workout-view.js no trae
 # "wallsit" en POSTURE_COUNTERS ni a checkWallSitPosture en workout.js). Si
-# la IA los propusiera, un item de plan con ese ejercicio se quedaría
-# colgado en la pantalla de cámara del móvil sin contar nada. Se excluyen
-# aquí (para web Y para móvil por igual, ya que la API no distingue quién
-# llama) hasta que se porten — quitar de este set en cuanto workout.js de
-# la app cuente con ambos.
+# se propusieran, un item de plan con ese ejercicio se quedaría colgado en
+# la pantalla de cámara del móvil sin contar nada. Se excluyen aquí (para
+# web Y para móvil por igual, ya que la API no distingue quién llama)
+# hasta que se porten — quitar de este set en cuanto workout.js de la app
+# cuente con ambos.
 _PENDING_MOBILE_PORT = {"archer-pullup", "wall-sit"}
 
+# Bicicleta (bicycle-crunch) se excluye del todo del generador automático,
+# a petición de Alex: es tren inferior/core, nivel intermedio, y hace
+# básicamente el mismo trabajo que scissor-kick (piernas en tijera/pedaleo
+# tumbado) — con los dos en el mismo plan sobra uno. Se queda scissor-kick.
+# Sigue existiendo en el catálogo por si se crea un plan a mano.
+_EXCLUDED_FROM_AUTOGEN = {"bicycle-crunch"}
+
 # Dificultad del MOVIMIENTO en sí — no confundir con el nivel del usuario
-# (_LEVEL_BRIEF, que ajusta series/reps/peso sobre un mismo ejercicio).
-# Esto dice qué variantes tiene sentido siquiera PROPONER: un principiante
-# de verdad no debería abrir con dominadas lastradas o kneehold en barra,
-# necesita una base antes. Un avanzado, en cambio, puede seguir usando
-# ejercicios "de principiante" (sentadillas, flexiones...) sin que eso sea
-# un problema — lo que cambia para él es la exigencia (series/reps/peso),
-# no que el movimiento deje de valer. Por eso el filtro por dificultad
-# (ver generate_plan_draft) solo excluye en duro para "beginner"; para
-# intermedio/avanzado es el propio texto del prompt el que empuja hacia
-# arriba, sin cerrar la puerta a lo básico.
+# (`_EXERCISE_CATEGORY_DEFAULTS`, que ajusta series/reps/peso sobre un
+# mismo ejercicio). Esto dice qué variantes tiene sentido siquiera
+# OFRECER: un principiante de verdad no debería abrir con dominadas
+# lastradas o kneehold en barra, necesita una base antes. Un avanzado, en
+# cambio, puede seguir usando ejercicios "de principiante" (sentadillas,
+# flexiones...) sin que eso sea un problema — lo que cambia para él es la
+# exigencia (series/reps/peso), no que el movimiento deje de valer.
+#
+# El filtro por dificultad (ver `_filter_catalog_by_level` /
+# `_select_sport_exercises`) es EN DURO para los tres niveles: si un
+# ejercicio no está en la lista filtrada, directamente no se puede elegir.
 _EXERCISE_DIFFICULTY = {
     # Tren superior
     "push-up": "beginner",
@@ -113,89 +120,64 @@ _EXERCISE_DIFFICULTY = {
     "situp": "beginner",
     "crunch": "beginner",
     "plank": "beginner",
-    "wall-sit": "beginner",
     "bicycle-crunch": "intermediate",
     "leg-raise": "intermediate",
-    "double-crunch": "intermediate",
-    "scissor-kick": "intermediate",
     "side-plank": "intermediate",
+    "weighted-squat": "intermediate",
+    "wall-sit": "intermediate",
+    "double-crunch": "advanced",
+    "scissor-kick": "advanced",
     "kneehold-bar": "advanced",
 }
-_DIFFICULTY_LABEL = {"beginner": "principiante", "intermediate": "intermedio", "advanced": "avanzado"}
+_LEVEL_TIER_ORDER = ["beginner", "intermediate", "advanced"]
 
-# Ejercicios de CORE dentro de tren inferior/core — sirven de relleno de
-# un plan de TREN SUPERIOR si ese catálogo por sí solo no llega al mínimo
-# pedido (ver _FOCUS_AREA_BRIEF). A propósito NO incluye ejercicios de
-# pierna suelta (sentadillas, silla en pared): esos no pintan nada en un
-# plan de tren superior aunque anden cortos de ejercicios.
-_CORE_SLUGS = {
-    "situp", "crunch", "leg-raise", "bicycle-crunch", "side-plank",
-    "double-crunch", "scissor-kick", "plank", "kneehold-bar",
-}
 
-# Mínimo de objetivos para un plan de UNA sola zona (tren superior o
-# inferior) — ver _response_schema. Cuerpo completo usa un rango más
-# alto porque tiene que cubrir las dos zonas a la vez (ver
-# _FOCUS_AREA_FULL_BODY_BRIEF). Se usa también para decidir si hace
-# falta rellenar tren superior con apoyo de core (ver más abajo).
-_FOCUSED_ZONE_MIN_ITEMS = 4
+def _filter_catalog_by_level(catalog, fitness_level):
+    """
+    Filtro EN DURO por nivel: EXACTAMENTE la dificultad pedida, nunca
+    otra — pedir intermedio da ejercicios etiquetados intermedio, punto,
+    igual que pedir principiante da solo principiante y avanzado solo
+    avanzado. Antes intermedio/avanzado incluían también cualquier
+    dificultad más alta (para no quedarse cortos de ejercicios), y eso
+    era justo el problema que reportó Alex: pedir nivel intermedio y que
+    salieran ejercicios avanzados de verdad (dominadas lastradas,
+    kneehold en barra...) sin haberlo pedido. Si para una zona concreta
+    esto deja pocos ejercicios, se queda así — mejor un plan corto y
+    exacto al nivel pedido que uno más largo mezclando dificultades.
+
+    Sin nivel especificado: catálogo intacto. Los ejercicios sin
+    etiqueta en `_EXERCISE_DIFFICULTY` (running, que se mide distinto)
+    nunca se tocan aquí.
+    """
+    if fitness_level not in _LEVEL_TIER_ORDER:
+        return catalog
+    result = []
+    for e in catalog:
+        tier = _EXERCISE_DIFFICULTY.get(e.slug)
+        if tier is None or tier == fitness_level:
+            result.append(e)
+    return result
+
+# Máximo de objetivos para un plan de UNA sola zona (tren superior o
+# inferior) — ver `_select_sport_exercises`. Cuerpo completo usa un tope
+# más alto porque tiene que cubrir las dos zonas a la vez. Sin mínimo a
+# propósito: el catálogo de una zona/nivel puede dar menos ejercicios de
+# los que caben aquí, y eso es correcto (mejor un plan corto y exacto al
+# nivel pedido que uno relleno con otra dificultad u otra zona).
+_FOCUSED_ZONE_MAX_ITEMS = 6
+_FULL_BODY_MAX_ITEMS = 8
 
 # Tope de peso AÑADIDO por defecto (kg) para dominadas/fondos con peso —
 # la inmensa mayoría de chalecos lastrados de uso doméstico llegan hasta
 # aquí. Sin un `max_load_kg` explícito del usuario, se asume este techo
-# en vez de dejar que la IA proponga un peso que nadie puede cargar.
+# en vez de proponer un peso que nadie puede cargar.
 _DEFAULT_MAX_LOAD_KG = 20
-
-BODY_SEX_CHOICES = [
-    ("", "Prefiero no decirlo"),
-    ("female", "Mujer"),
-    ("male", "Hombre"),
-]
 
 FITNESS_LEVEL_CHOICES = [
     ("beginner", "Principiante"),
     ("intermediate", "Intermedio"),
     ("advanced", "Avanzado"),
 ]
-
-_LEVEL_BRIEF = {
-    "beginner": (
-        "Nivel de partida: PRINCIPIANTE — no entrena de forma regular todavía, o lleva muy poco "
-        "tiempo. El punto de partida tiene que ser algo que pueda cumplir desde el primer día, "
-        "pero eso no significa quedarse ahí para siempre: tiene que haber una progresión real y "
-        "visible a lo largo de las semanas, no un techo bajo mantenido de principio a fin. El "
-        "catálogo de abajo YA viene sin los ejercicios de dificultad=avanzado para este nivel (se "
-        "han quitado de raíz, ni los menciones ni los eches de menos) — elige con confianza entre "
-        "los que quedan."
-    ),
-    "intermediate": (
-        "Nivel de partida: INTERMEDIO — entrena de forma más o menos regular desde hace meses y "
-        "ya domina la técnica básica de los movimientos. Empieza más arriba que a un principiante "
-        "absoluto — no tiene sentido arrancarle en el mismo sitio que a alguien que no ha hecho "
-        "nunca el ejercicio. El catálogo de abajo lleva una etiqueta de dificultad por ejercicio "
-        "(dificultad=principiante/intermedio/avanzado): para este nivel, que la MAYORÍA de los "
-        "objetivos sean dificultad=intermedio o avanzado — los de dificultad=principiante vale "
-        "usarlos como mucho en uno de apoyo, nunca como el grueso del plan."
-    ),
-    "advanced": (
-        "Nivel de partida: AVANZADO — entrena con regularidad desde hace años y ya tiene una base "
-        "de fuerza sólida. Empieza alto de verdad (series, repeticiones y/o peso ya exigentes) y "
-        "plantea una meta ambiciosa — un plan flojo para alguien con este nivel es peor que no dar "
-        "plan. El catálogo de abajo lleva una etiqueta de dificultad por ejercicio: para este "
-        "nivel, prioriza los de dificultad=avanzado e intermedio — un ejercicio de "
-        "dificultad=principiante solo si de verdad aporta algo (p. ej. como calentamiento breve), "
-        "nunca como protagonista del plan."
-    ),
-}
-_LEVEL_UNKNOWN_BRIEF = (
-    "Nivel de partida: el usuario no lo ha especificado. Búscalo en sus propias palabras (\"ahora "
-    "mismo hago 2 dominadas\", \"llevo meses sin entrenar\"...) y ajústate a eso. Si tampoco hay "
-    "ninguna pista, parte de un nivel intermedio-bajo razonable — NUNCA del mínimo absoluto por "
-    "defecto; un entrenador de verdad nunca da un plan de mínimos solo porque no le han dado todos "
-    "los datos, hace la mejor estimación razonable. El catálogo de abajo lleva una etiqueta de "
-    "dificultad por ejercicio (dificultad=principiante/intermedio/avanzado) — úsala como referencia "
-    "para ese nivel intermedio-bajo que estás asumiendo."
-)
 
 FOCUS_AREA_CHOICES = [
     ("", "Cuerpo completo"),
@@ -204,307 +186,76 @@ FOCUS_AREA_CHOICES = [
     (Task.SUBCATEGORY_RUNNING, "Running / cardio"),
 ]
 
-_FOCUS_AREA_BRIEF = {
-    Task.SUBCATEGORY_UPPER_BODY: (
-        "Foco elegido por el usuario: TREN SUPERIOR. El catálogo de abajo ya viene filtrado a "
-        "solo tren superior (y, únicamente si ese catálogo por sí solo se queda corto, algún "
-        "ejercicio de core de apoyo — nunca pierna suelta ni running, aparezca lo que aparezca "
-        "en el catálogo). Elige de 4 a 6 objetivos de ahí, con distintos patrones de movimiento "
-        "sin repetir variantes del mismo ejercicio — por defecto apunta a la parte alta del "
-        "rango (5-6), el catálogo tiene variedad de sobra para no quedarte corto."
-    ),
-    Task.SUBCATEGORY_LOWER_BODY: (
-        "Foco elegido por el usuario: TREN INFERIOR / CORE. El catálogo de abajo ya viene "
-        "filtrado a solo esa zona. Elige de 4 a 6 objetivos de ahí — por defecto apunta a la "
-        "parte alta del rango (5-6), el catálogo tiene variedad de sobra — sin salir de esa zona "
-        "aunque el usuario mencione otra cosa en su frase."
-    ),
-    Task.SUBCATEGORY_RUNNING: (
-        "Foco elegido por el usuario: RUNNING. El ejercicio 'running' es OBLIGATORIAMENTE el "
-        "único is_headline=true y el centro absoluto del plan (progresión de distancia y ritmo, "
-        "nunca de series/repeticiones). Puedes añadir como mucho 1-2 ejercicios de apoyo (core o "
-        "pierna) si de verdad ayudan a correr mejor y a prevenir lesiones — nunca conviertas esto "
-        "en un plan de fuerza con el running de relleno, y nunca superes esos 1-2 de apoyo."
-    ),
-}
-_FOCUS_AREA_FULL_BODY_BRIEF = (
-    "Foco elegido por el usuario: CUERPO COMPLETO — sin restricción de zona, el catálogo de "
-    "abajo trae TODO. Elige de 5 a 8 objetivos (más que un plan de una sola zona, porque aquí "
-    "hay que cubrir las dos a la vez): reparte de verdad entre empuje (fondos/flexiones), "
-    "tracción (dominadas), pierna (sentadillas) y core/aguantes (plancha, abdominales, plancha "
-    "lateral...), con ejercicios de TREN SUPERIOR Y de TREN INFERIOR a la vez — nunca te quedes "
-    "en 2-3 ejercicios sueltos de un solo lado del cuerpo. Añade running solo si el objetivo del "
-    "usuario tiene algo que ver con correr o resistencia cardio."
-)
-
-
-# --------------------------------------------------------------- prompt
+# ------------------------------------------------------ selección de catálogo
 
 def _catalog_exercises(exclude_slugs=None):
     """Catálogo activo, sin los `exclude_slugs` (p. ej. porque el usuario no
     tiene el equipamiento que necesitan). Devuelve instancias de Exercise,
-    no texto — el texto para el prompt lo arma `_exercise_catalog_lines`."""
+    en el orden en que deben ofrecerse (`order`, luego nombre)."""
     exclude_slugs = exclude_slugs or set()
     qs = Exercise.objects.filter(is_active=True).order_by("order", "name")
     return [e for e in qs if e.slug not in exclude_slugs]
 
 
-def _exercise_catalog_lines(exercises):
-    lines = []
-    for e in exercises:
-        if e.mode == Exercise.MODE_DISTANCE:
-            medida = "se mide en distancia (km) y ritmo (min/km) — SIEMPRE progresión 'distance'"
-        elif e.mode == Exercise.MODE_TIMED:
-            medida = "se mide en SEGUNDOS aguantados (start_seconds/goal_seconds), no en repeticiones"
-        else:
-            medida = "se mide en REPETICIONES (start_reps/goal_reps)"
-        area = {"upper_body": "tren superior", "lower_body": "tren inferior/core", "running": "cardio"}.get(
-            e.body_area, e.body_area or "general"
-        )
-        dificultad = _DIFFICULTY_LABEL.get(_EXERCISE_DIFFICULTY.get(e.slug))
-        etiqueta_dificultad = f" · dificultad={dificultad}" if dificultad else ""
-        lines.append(f"- slug=\"{e.slug}\" · {e.name} · {area} · {medida}{etiqueta_dificultad}")
-    return "\n".join(lines) if lines else "(ninguno disponible con los filtros actuales)"
+def all_exercise_choices():
+    """
+    Todo el catálogo activo, apto para el selector manual del formulario
+    (ver plan_ai_form.html) — SIEMPRE el mismo, da igual el nivel o el
+    foco corporal que se haya marcado en el resto del formulario: el
+    usuario tiene que poder elegir cualquier ejercicio, no solo los que
+    la generación automática habría propuesto. La única exclusión es
+    técnica (`_PENDING_MOBILE_PORT`, ejercicios sin contador de cámara
+    en la app móvil todavía) — ni nivel ni equipamiento se filtran aquí.
 
-
-_PLAN_TYPE_BRIEF = {
-    "sport": (
-        "Deporte: el plan persigue varios objetivos de ejercicio del catálogo de abajo — cuántos "
-        "exactamente depende del foco elegido por el usuario (número exacto justo junto al foco, "
-        "más abajo). Un plan de uno o dos ejercicios no es un programa de entrenamiento serio, y "
-        "el catálogo de abajo tiene variedad de sobra para no quedarte corto. Exactamente UNO "
-        "debe llevar is_headline=true (la medida que define si el plan se ha conseguido, ej. "
-        "\"llegar a 4x12 dominadas con 20 kg\"); el resto son apoyo (progresan pero no deciden). "
-        "Elige ejercicios que de verdad ayuden al objetivo del usuario y cubran su cuerpo de "
-        "forma equilibrada, mezclando movimientos de repeticiones con aguantes isométricos cuando "
-        "el catálogo los tenga para esa zona (dan una sesión más completa y variada, no son un "
-        "relleno) — no metas relleno ni variantes redundantes del mismo movimiento (dominadas y "
-        "dominadas anchas SÍ son la misma variante repetida; sentadillas y plancha lateral NO lo "
-        "son, son estímulos distintos y cuentan como diversidad real)."
-    ),
-    "study": (
-        "Estudio: el plan persigue UN solo hábito diario (estudiar francés, leer, practicar "
-        "piano...). No hay ejercicios del catálogo — solo un nombre corto para ese hábito y, si "
-        "el usuario dio una duración, unos minutos objetivo por sesión."
-    ),
-    "general": (
-        "General: un hábito simple de cumplir o no cumplir cada día (ej. \"no fumar\", \"meditar\"). "
-        "No lleva objetivos — la propia tarea diaria ES el objetivo. Devuelve items como lista vacía."
-    ),
-}
-
-
-def _build_prompt(
-    user_prompt, plan_type, weeks, sessions_per_week, *,
-    exercises=None, fitness_level="", focus_area="", no_bar_equipment=False,
-    session_minutes=None, limitations="", body_weight_kg=None, height_cm=None,
-    sex="", max_load_kg=None,
-):
-    brief = _PLAN_TYPE_BRIEF.get(plan_type, _PLAN_TYPE_BRIEF["sport"])
-    parts = [
-        "Eres el mejor entrenador personal/coach posible, diseñando planes de progresión "
-        "dentro de la app de tareas \"Strive\" para un cliente real. Programas como lo haría "
-        "un profesional de verdad: sobrecarga progresiva de manual (series Y repeticiones "
-        "suben con el tiempo, no solo repeticiones sin techo hasta el infinito), variedad real "
-        "de patrones de movimiento, y objetivos que de verdad llevan al cliente a su meta — "
-        "nada de rellenar con lo primero que se te ocurra, y nunca un plan flojo o genérico solo "
-        "porque el usuario ha escrito poco en su frase (para eso están los campos de más abajo). "
-        "El usuario ya ha decidido: el TIPO de plan, cuántas SEMANAS va a durar, y CUÁNTOS DÍAS a "
-        f"la semana entrena ({sessions_per_week} días/semana). Tu trabajo es traducir su objetivo "
-        "en un plan concreto y medible — nada de vaguedades.",
-        "",
-        f"Tipo de plan: {brief}",
-        "",
-        f"Duración: {weeks} semanas.",
-        "",
-        (
-            f"Lo que pide el usuario, en sus propias palabras:\n\"{user_prompt}\""
-            if user_prompt else
-            "El usuario no ha escrito contexto adicional en texto libre — básate solo en los "
-            "campos estructurados de abajo (nivel, foco corporal, equipamiento, tiempo, "
-            "lesiones). No lo trates como una señal de que hay que dar un plan flojo: la "
-            "ausencia de frase no es lo mismo que la ausencia de nivel — usa igualmente el "
-            "nivel indicado abajo tal cual."
-        ),
+    Devuelve una lista de dicts `{slug, name, body_area, body_area_label,
+    needs_bar}` YA ORDENADA por zona (tren superior, tren inferior/core,
+    running — mismo orden que `FOCUS_AREA_CHOICES`) para poder agrupar
+    en la plantilla con `{% regroup %}` sin más (ese tag necesita que
+    las filas de un mismo grupo vengan seguidas; el catálogo en sí no
+    está ordenado por zona).
+    """
+    body_area_labels = dict(FOCUS_AREA_CHOICES)
+    zone_priority = {value: i for i, (value, _) in enumerate(FOCUS_AREA_CHOICES) if value}
+    catalog = sorted(
+        _catalog_exercises(exclude_slugs=_PENDING_MOBILE_PORT),
+        key=lambda e: zone_priority.get(e.body_area, 99),
+    )
+    return [
+        {
+            "slug": e.slug,
+            "name": e.name,
+            "body_area": e.body_area,
+            "body_area_label": body_area_labels.get(e.body_area, e.body_area),
+            "needs_bar": e.slug in _NEEDS_BAR_EQUIPMENT,
+        }
+        for e in catalog
     ]
-    if plan_type == "sport":
-        parts += ["", _LEVEL_BRIEF.get(fitness_level, _LEVEL_UNKNOWN_BRIEF)]
-        parts += ["", _FOCUS_AREA_BRIEF.get(focus_area, _FOCUS_AREA_FULL_BODY_BRIEF)]
-        if body_weight_kg or height_cm or sex:
-            datos = []
-            if body_weight_kg:
-                datos.append(f"peso corporal {body_weight_kg} kg")
-            if height_cm:
-                datos.append(f"altura {height_cm} cm")
-            if sex:
-                datos.append(dict(BODY_SEX_CHOICES).get(sex, sex).lower())
-            parts.append(
-                "Datos físicos del usuario (" + ", ".join(datos) + "). OJO: esto NO es un peso a "
-                "levantar, es su cuerpo — solo sirve para calibrar mejor la dificultad relativa. A "
-                "igualdad de repeticiones en dominadas/fondos, alguien más pesado mueve más masa "
-                "(es más fuerte de lo que parece); ajusta ligeramente start_reps y el ritmo de "
-                "progresión con esto en cuenta, sin exagerar el efecto. El sexo y la altura son "
-                "solo referencia estadística de estándares de fuerza típicos — si hay conflicto, "
-                "manda siempre el nivel de partida que ya ha dado el usuario arriba, nunca esto."
-            )
-        if max_load_kg is not None:
-            parts.append(
-                f"Peso máximo de lastre disponible: {max_load_kg} kg. En cualquier ejercicio con "
-                "progresión 'double', el goal_weight_kg NUNCA puede superar "
-                f"start_weight_kg + {max_load_kg} — no hay forma de cargar más que eso en casa."
-                + (
-                    " Con 0 kg disponibles, no uses progresión 'double' en ningún ejercicio — usa "
-                    "'reps' en su lugar, porque no hay manera de añadir peso."
-                    if max_load_kg <= 0 else ""
-                )
-            )
-        else:
-            parts.append(
-                f"Peso máximo de lastre disponible: no especificado — asume un máximo realista de "
-                f"~{_DEFAULT_MAX_LOAD_KG} kg añadidos (lo habitual en un chaleco lastrado "
-                "doméstico) para dominadas/fondos con peso, salvo que el usuario diga "
-                "explícitamente en su texto libre que tiene más (un cinturón de dominadas con "
-                "discos, por ejemplo, sí puede superar eso)."
-            )
-        if no_bar_equipment:
-            parts.append(
-                "Equipamiento: el usuario NO tiene barra de dominadas ni paralelas en casa — el "
-                "catálogo de abajo ya viene sin esos ejercicios, no los eches de menos ni los "
-                "sugieras en las notas."
-            )
-        if session_minutes:
-            parts.append(
-                f"Tiempo disponible: cada sesión tiene que caber en unos {session_minutes} "
-                "minutos — ajusta cuántos ejercicios y series metes para que el plan sea realista "
-                "en ese tiempo, no lo sobrecargues pensando que hay tiempo ilimitado."
-            )
-        if limitations:
-            parts.append(
-                f"Lesión o limitación a tener en cuenta: \"{limitations}\" — adapta o evita "
-                "cualquier ejercicio del catálogo que pueda agravarla, y menciona en las notas qué "
-                "has tenido en cuenta por esto."
-            )
-        parts += [
-            "",
-            "Catálogo de ejercicios disponibles (usa SOLO estos slugs, no inventes otros):",
-            _exercise_catalog_lines(exercises or []),
-            "",
-            "Reglas de progresión:",
-            "- 'reps' (o 'seconds' si el ejercicio se mide en segundos): sube hasta un techo y se "
-            "queda ahí. Para abdominales, plancha, resistencia.",
-            "- 'double': sube repeticiones dentro de un rango y, al llegar arriba, añade peso y "
-            "vuelve abajo. SOLO para ejercicios de fuerza medidos en repeticiones (dominadas, "
-            "fondos, sentadillas) — nunca para uno medido en segundos.",
-            "- 'completion': objetivo fijo, no sube. Para hábitos sin progresión numérica.",
-            "- El ejercicio de correr ('running') no elige progresión: siempre es 'distance', con "
-            "distancia en km y ritmo en segundos/km (más bajo = más rápido).",
-            "",
-            "Sobrecarga progresiva DE VERDAD — esto es lo que distingue a un buen entrenador de uno "
-            "vago: en 'reps' y 'double', start_sets y goal_sets TAMBIÉN tienen que subir con las "
-            "semanas, no solo las repeticiones o el peso. El punto de partida (series y "
-            "repeticiones) tiene que encajar con el NIVEL DE PARTIDA de arriba — ni tan bajo que "
-            "sea insultante para alguien con experiencia, ni tan alto que sea imposible para quien "
-            "empieza. goal_sets nunca debe quedarse igual que start_sets salvo que el usuario pida "
-            "explícitamente mantener el volumen fijo — una progresión que solo mueve las "
-            "repeticiones para siempre no es realista (nadie llega a 40 dominadas seguidas).",
-            "- 'weeks_to_goal' es en cuántas semanas quiere llegar al destino desde el punto de "
-            "partida — sé realista (una progresión de fuerza razonable sube poco a poco).",
-            "- Los puntos de partida deben ser alcanzables desde el primer día para alguien que "
-            "empieza el plan ahora — mejor quedarse corto que proponer algo imposible.",
-            "",
-            "Cobertura de ejercicios — respeta el número de objetivos indicado arriba junto al "
-            "foco elegido (varía según sea tren superior, tren inferior, running o cuerpo "
-            "completo): un programa serio trabaja el cuerpo de forma equilibrada, no un solo "
-            "movimiento. NO metas varias variantes del mismo movimiento a la vez (ej. nunca "
-            "dominadas + dominadas anchas + chin ups juntas en el mismo plan) salvo que el "
-            "usuario pida explícitamente trabajar variantes — eso es relleno, no variedad real.",
-        ]
-
-    return "\n".join(parts)
 
 
-# --------------------------------------------------------------- schema
+def _select_exercises_from_slugs(slugs, no_bar_equipment, max_load_kg=None):
+    """
+    Selección MANUAL: el usuario elige exactamente qué ejercicios quiere
+    en el plan (ver selector en plan_ai_form.html) — a propósito SIN
+    filtro de nivel ni de zona (eso es cosa de `_filter_catalog_by_level`,
+    que aquí no se llama): si lo ha marcado a mano, da igual su
+    dificultad o a qué zona pertenezca, entra tal cual. Solo se respetan
+    las exclusiones TÉCNICAS/de equipamiento de siempre: barra que no
+    tiene (`no_bar_equipment`), peso extra que no tiene
+    (`max_load_kg == 0` — ver `_select_sport_exercises`) y ejercicios sin
+    contador en la app móvil todavía (`_PENDING_MOBILE_PORT`).
 
-_ITEM_SPORT_SCHEMA = {
-    "type": "OBJECT",
-    "properties": {
-        "exercise_slug": {"type": "STRING", "description": "Slug exacto del catálogo."},
-        "label": {"type": "STRING", "description": "Nombre corto opcional; vacío para usar el del ejercicio."},
-        "is_headline": {"type": "BOOLEAN"},
-        "progression": {"type": "STRING", "enum": ["reps", "double", "completion"]},
-        "start_sets": {"type": "INTEGER"},
-        "goal_sets": {"type": "INTEGER", "description": "Series al llegar al destino. Debe ser mayor que start_sets salvo que el volumen se mantenga fijo a propósito."},
-        "start_reps": {"type": "INTEGER"},
-        "start_seconds": {"type": "INTEGER"},
-        "start_weight_kg": {"type": "NUMBER"},
-        "goal_reps": {"type": "INTEGER"},
-        "goal_seconds": {"type": "INTEGER"},
-        "goal_weight_kg": {"type": "NUMBER"},
-        "start_distance_km": {"type": "NUMBER"},
-        "start_pace_seconds_per_km": {"type": "INTEGER"},
-        "goal_distance_km": {"type": "NUMBER"},
-        "goal_pace_seconds_per_km": {"type": "INTEGER"},
-        "weeks_to_goal": {"type": "INTEGER"},
-        "sessions_per_step": {"type": "INTEGER"},
-    },
-    "required": [
-        "exercise_slug", "is_headline", "progression",
-        "start_sets", "goal_sets", "start_reps", "start_seconds", "start_weight_kg",
-        "goal_reps", "goal_seconds", "goal_weight_kg",
-        "start_distance_km", "start_pace_seconds_per_km",
-        "goal_distance_km", "goal_pace_seconds_per_km",
-        "weeks_to_goal", "sessions_per_step",
-    ],
-}
-
-_ITEM_STUDY_SCHEMA = {
-    "type": "OBJECT",
-    "properties": {
-        "label": {"type": "STRING"},
-        "target_minutes": {"type": "INTEGER", "description": "0 si no aplica un objetivo en minutos."},
-    },
-    "required": ["label", "target_minutes"],
-}
-
-
-def _response_schema(plan_type, focus_area=""):
-    plan_schema = {
-        "type": "OBJECT",
-        "properties": {
-            "name": {"type": "STRING", "description": "Título general del plan, corto. Ej: \"Ponerme en forma\"."},
-            "notes": {"type": "STRING", "description": "1-2 frases de contexto/ánimo sobre el plan."},
-        },
-        "required": ["name", "notes"],
-    }
-    if plan_type == "sport" and focus_area == Task.SUBCATEGORY_RUNNING:
-        # Un plan de running puro no tiene 3-6 movimientos distintos entre
-        # los que elegir — el catálogo solo tiene UN ejercicio de running.
-        # El propio "running" es el plan; como mucho 1-2 de apoyo (ver
-        # _FOCUS_AREA_BRIEF). Pedir aquí el mismo mínimo de 3 forzaría a la
-        # IA a inflar el plan con relleno o a inventar ejercicios.
-        items_schema = {"type": "ARRAY", "items": _ITEM_SPORT_SCHEMA, "minItems": 1, "maxItems": 3}
-    elif plan_type == "sport" and focus_area in (Task.SUBCATEGORY_UPPER_BODY, Task.SUBCATEGORY_LOWER_BODY):
-        # Una sola zona: el catálogo ya viene filtrado a esa zona (ver
-        # generate_plan_draft) y es más corto que el completo — pedir el
-        # mismo rango alto que cuerpo completo dejaría a la IA rellenando
-        # con relleno o variantes repetidas para llegar al mínimo.
-        items_schema = {"type": "ARRAY", "items": _ITEM_SPORT_SCHEMA, "minItems": 4, "maxItems": 6}
-    elif plan_type == "sport":
-        # Cuerpo completo (focus_area vacío): tiene que cubrir tren
-        # superior Y tren inferior a la vez, así que necesita más
-        # objetivos que un plan de una sola zona — ver
-        # _FOCUS_AREA_FULL_BODY_BRIEF (pide 1/3 más que una zona sola).
-        items_schema = {"type": "ARRAY", "items": _ITEM_SPORT_SCHEMA, "minItems": 5, "maxItems": 8}
-    elif plan_type == "study":
-        items_schema = {"type": "ARRAY", "items": _ITEM_STUDY_SCHEMA, "minItems": 1, "maxItems": 1}
-    else:
-        items_schema = {"type": "ARRAY", "items": {"type": "OBJECT", "properties": {}}, "maxItems": 0}
-
-    return {
-        "type": "OBJECT",
-        "properties": {"plan": plan_schema, "items": items_schema},
-        "required": ["plan", "items"],
-    }
+    Devuelve los ejercicios en el mismo orden en que se marcaron (sin
+    duplicados), ignorando cualquier slug que no exista o no esté
+    disponible con ese equipamiento.
+    """
+    exclude = (
+        (_NEEDS_BAR_EQUIPMENT if no_bar_equipment else set())
+        | (_WEIGHTED_SLUGS if max_load_kg == 0 else set())
+        | _PENDING_MOBILE_PORT
+    )
+    catalog = {e.slug: e for e in _catalog_exercises(exclude_slugs=exclude)}
+    ordered_unique_slugs = list(dict.fromkeys(slugs or []))
+    return [catalog[s] for s in ordered_unique_slugs if s in catalog]
 
 
 # ----------------------------------------------------------------- API
@@ -560,103 +311,278 @@ def _call_gemini(prompt_text, schema):
         raise PlanAIError("La IA devolvió algo que no se pudo interpretar. Prueba a generar de nuevo.") from e
 
 
-def generate_plan_draft(
-    *, prompt, plan_type, weeks, sessions_per_week,
-    fitness_level="", focus_area="", no_bar_equipment=False,
-    session_minutes=None, limitations="", body_weight_kg=None, height_cm=None,
-    sex="", max_load_kg=None,
-):
+def _select_sport_exercises(fitness_level, focus_area, no_bar_equipment, selected_slugs=None, max_load_kg=None):
     """
-    Llama a Gemini y devuelve el dict crudo `{"plan": {...}, "items": [...]}`
-    tal como lo mandó la IA — sin aplicar todavía sobre el modelo. La
-    validación/clamping de verdad la hace `api.plan_generate` reutilizando
-    `_apply_plan_fields` / `_apply_plan_item_fields`.
+    Elige qué ejercicios del catálogo entran en un plan de Deporte.
 
-    `fitness_level` / `focus_area` / `no_bar_equipment` / `session_minutes` /
-    `limitations` / `body_weight_kg` / `height_cm` / `sex` / `max_load_kg` son
-    el cuestionario estructurado que rellena el usuario antes de generar (ver
-    plan_ai_form.html / plan-view.js): se le dan a la IA como hechos
-    concretos en vez de esperar que los adivine de una frase libre — que es
-    justo lo que producía planes de mínimos ("2 series de 10") cuando el
-    usuario escribía algo tan vago como "ponerme en forma".
+    Si el usuario ha marcado ejercicios a mano en el selector del
+    formulario (`selected_slugs`), son esos y solo esos — nivel y foco
+    corporal se ignoran para elegir el catálogo (siguen usándose para
+    calcular series/repeticiones/peso de partida y meta, ver
+    `default_item_fields`). Ver `_select_exercises_from_slugs`.
+
+    Sin selección manual, la elección es automática, determinista (sin
+    IA) según nivel + foco corporal + equipamiento — filtro EN DURO por
+    nivel/zona (`_filter_catalog_by_level`): EXACTAMENTE el nivel pedido
+    y EXACTAMENTE la(s) zona(s) pedida(s), sin mezclar ni rellenar con
+    otra dificultad ni otra zona aunque el catálogo se quede corto.
+
+    `max_load_kg == 0` (el campo del formulario es obligatorio — ver
+    plan_ai_form.html — así que 0 es como el usuario dice "no tengo
+    nada de peso extra en casa") descarta del todo los ejercicios con
+    lastre (`_WEIGHTED_SLUGS`: dominadas/fondos/sentadillas con peso) —
+    proponerlos sin nada con qué lastrar no tiene sentido. Con
+    `max_load_kg` sin especificar (None) o mayor que 0, esos ejercicios
+    siguen pudiendo salir con normalidad (el número en sí solo pone tope
+    a la meta de peso, eso lo hace `apply_pacing`).
+
+    Devuelve la lista de ejercicios en el orden en que deben entrar en
+    el plan (el primero es el candidato natural a `is_headline`, salvo
+    en running — ver `build_sport_plan_draft`). Lanza `PlanAIError` si
+    no hay ningún ejercicio disponible para lo pedido (equipamiento,
+    nivel o foco imposibles con el catálogo actual, o ningún ejercicio
+    marcado a mano que siga disponible).
     """
-    user_prompt = (prompt or "").strip()[:MAX_PROMPT_CHARS]
-    # Estudio y General no tienen cuestionario estructurado — la frase libre
-    # es su ÚNICA fuente de información (ni siquiera el nombre del plan sale
-    # de otro sitio), así que ahí sigue siendo obligatoria. Deporte sí tiene
-    # nivel/foco/equipamiento como campos propios, así que puede generar un
-    # plan serio aunque el usuario no escriba nada más.
-    if not user_prompt and plan_type != "sport":
-        raise PlanAIError("Cuéntame qué quieres conseguir con este plan.")
-
-    exercises = []
-    if plan_type == "sport":
-        exclude = (_NEEDS_BAR_EQUIPMENT if no_bar_equipment else set()) | _PENDING_MOBILE_PORT
-        catalog = _catalog_exercises(exclude_slugs=exclude)
-
-        # Principiante: fuera del catálogo que ve la IA los ejercicios
-        # dificultad=avanzado de raíz (ver _EXERCISE_DIFFICULTY) — no basta
-        # con pedírselo por texto, un principiante de verdad no debería ni
-        # ver "dominadas lastradas" como opción posible. Intermedio/avanzado
-        # NO se filtran así a propósito (ver el comentario en
-        # _EXERCISE_DIFFICULTY): ahí es el propio texto del prompt
-        # (_LEVEL_BRIEF) el que empuja hacia arriba, sin cerrar la puerta a
-        # lo básico cuando de verdad ayuda.
-        if fitness_level == "beginner":
-            catalog = [e for e in catalog if _EXERCISE_DIFFICULTY.get(e.slug) != "advanced"]
-
-        # Foco por zona — filtro EN DURO sobre la lista que se le enseña a
-        # la IA, no solo texto de prompt: esto es lo que de verdad arregla
-        # "pido tren superior y me devuelve tren inferior", porque ahora la
-        # IA no puede elegir de una lista que ni siquiera contiene esos
-        # ejercicios.
-        if focus_area == Task.SUBCATEGORY_UPPER_BODY:
-            exercises = [e for e in catalog if e.body_area == Task.SUBCATEGORY_UPPER_BODY]
-            if len(exercises) < _FOCUSED_ZONE_MIN_ITEMS:
-                relleno = [e for e in catalog if e.slug in _CORE_SLUGS and e not in exercises]
-                exercises = exercises + relleno
-        elif focus_area == Task.SUBCATEGORY_LOWER_BODY:
-            exercises = [e for e in catalog if e.body_area == Task.SUBCATEGORY_LOWER_BODY]
-        else:
-            # Running y cuerpo completo: sin filtrar por zona — running
-            # necesita poder ofrecer 1-2 ejercicios de apoyo de otra zona
-            # (ver _FOCUS_AREA_BRIEF) y cuerpo completo por definición debe
-            # cubrir todo el catálogo.
-            exercises = catalog
-
-        if focus_area in (Task.SUBCATEGORY_UPPER_BODY, Task.SUBCATEGORY_LOWER_BODY, Task.SUBCATEGORY_RUNNING):
-            if not any(e.body_area == focus_area for e in exercises):
-                zona = dict(FOCUS_AREA_CHOICES).get(focus_area, focus_area).lower()
-                if no_bar_equipment:
-                    raise PlanAIError(
-                        f"No hay ningún ejercicio de {zona} en el catálogo que no necesite barra "
-                        "de dominadas ni paralelas. Marca que sí tienes barra/paralelas, o elige "
-                        "otro foco corporal."
-                    )
-                if fitness_level == "beginner":
-                    raise PlanAIError(
-                        f"No hay ningún ejercicio de {zona} de nivel principiante en el catálogo "
-                        "todavía. Prueba con nivel intermedio, o elige otro foco corporal."
-                    )
-                raise PlanAIError(f"No hay ningún ejercicio activo de {zona} en el catálogo todavía.")
-
+    if selected_slugs:
+        exercises = _select_exercises_from_slugs(selected_slugs, no_bar_equipment, max_load_kg=max_load_kg)
         if not exercises:
             raise PlanAIError(
-                "No queda ningún ejercicio activo en el catálogo con ese equipamiento y nivel — "
-                "revisa el catálogo de ejercicios antes de generar un plan de Deporte."
+                "Ninguno de los ejercicios marcados está disponible con ese equipamiento — "
+                "revisa la selección."
             )
+        return exercises
 
-    prompt_text = _build_prompt(
-        user_prompt, plan_type, weeks, sessions_per_week, exercises=exercises,
-        fitness_level=fitness_level, focus_area=focus_area, no_bar_equipment=no_bar_equipment,
-        session_minutes=session_minutes, limitations=limitations, body_weight_kg=body_weight_kg,
-        height_cm=height_cm, sex=sex, max_load_kg=max_load_kg,
+    exclude = (
+        (_NEEDS_BAR_EQUIPMENT if no_bar_equipment else set())
+        | (_WEIGHTED_SLUGS if max_load_kg == 0 else set())
+        | _PENDING_MOBILE_PORT
+        | _EXCLUDED_FROM_AUTOGEN
     )
-    schema = _response_schema(plan_type, focus_area=focus_area)
-    draft = _call_gemini(prompt_text, schema)
-    if not isinstance(draft, dict) or "plan" not in draft:
-        raise PlanAIError("La IA devolvió un plan con un formato inesperado. Prueba a generar de nuevo.")
-    return draft
+    catalog = _filter_catalog_by_level(_catalog_exercises(exclude_slugs=exclude), fitness_level)
+
+    if focus_area == Task.SUBCATEGORY_UPPER_BODY:
+        # Solo tren superior, solo del nivel pedido — a propósito SIN
+        # relleno de ningún tipo (ni de core, ni de otra dificultad): si
+        # el catálogo de esa zona/nivel se queda corto, el plan sale con
+        # menos ejercicios, nunca con ejercicios de otra zona o de otro
+        # nivel que no se ha pedido.
+        exercises = [e for e in catalog if e.body_area == Task.SUBCATEGORY_UPPER_BODY]
+        exercises = exercises[:_FOCUSED_ZONE_MAX_ITEMS]
+    elif focus_area == Task.SUBCATEGORY_LOWER_BODY:
+        exercises = [e for e in catalog if e.body_area == Task.SUBCATEGORY_LOWER_BODY]
+        exercises = exercises[:_FOCUSED_ZONE_MAX_ITEMS]
+    elif focus_area == Task.SUBCATEGORY_RUNNING:
+        # El propio "running" es el plan — nada de otra zona (antes se
+        # añadía algún ejercicio de core como "apoyo", pero eso ya no es
+        # running: si se pide running, sale running y punto).
+        exercises = [e for e in catalog if e.body_area == Task.SUBCATEGORY_RUNNING]
+    else:
+        # Cuerpo completo (focus_area vacío): tren superior + tren
+        # inferior + running, EN BLOQUES — todo el tren superior seguido,
+        # LUEGO todo el tren inferior, luego running al final. A
+        # propósito NO se intercalan (antes sí, para "repartir" entre las
+        # dos zonas, pero eso significaba saltar de sentadillas a
+        # dominadas a abdominales a flexiones sin parar — nadie entrena
+        # así de verdad, mejor terminar una zona antes de pasar a la
+        # siguiente). El tope de ejercicios solo se aplica a tren
+        # superior + inferior — running siempre entra, no cuenta contra
+        # ese tope (si no, en algunos niveles se quedaba fuera).
+        upper = [e for e in catalog if e.body_area == Task.SUBCATEGORY_UPPER_BODY]
+        lower = [e for e in catalog if e.body_area == Task.SUBCATEGORY_LOWER_BODY]
+        running = [e for e in catalog if e.body_area == Task.SUBCATEGORY_RUNNING]
+        exercises = (upper + lower)[:_FULL_BODY_MAX_ITEMS] + running
+
+    if focus_area in (Task.SUBCATEGORY_UPPER_BODY, Task.SUBCATEGORY_LOWER_BODY, Task.SUBCATEGORY_RUNNING):
+        if not any(e.body_area == focus_area for e in exercises):
+            zona = dict(FOCUS_AREA_CHOICES).get(focus_area, focus_area).lower()
+            if no_bar_equipment:
+                raise PlanAIError(
+                    f"No hay ningún ejercicio de {zona} en el catálogo que no necesite barra "
+                    "de dominadas ni paralelas. Marca que sí tienes barra/paralelas, o elige "
+                    "otro foco corporal."
+                )
+            if max_load_kg == 0:
+                raise PlanAIError(
+                    f"No hay ningún ejercicio de {zona} en el catálogo sin peso añadido para ese "
+                    "nivel. Pon cuánto peso extra tienes disponible, o elige otro foco corporal."
+                )
+            if fitness_level == "beginner":
+                raise PlanAIError(
+                    f"No hay ningún ejercicio de {zona} de nivel principiante en el catálogo "
+                    "todavía. Prueba con nivel intermedio, o elige otro foco corporal."
+                )
+            raise PlanAIError(f"No hay ningún ejercicio activo de {zona} en el catálogo todavía.")
+
+    if not exercises:
+        raise PlanAIError(
+            "No queda ningún ejercicio activo en el catálogo con ese equipamiento y nivel — "
+            "revisa el catálogo de ejercicios antes de generar un plan de Deporte."
+        )
+
+    return exercises
+
+
+# ------------------------------------------------ números de partida y meta
+#
+# Lo que antes decidía la IA "a ojo" (con qué series/repeticiones/segundos
+# empezar, hasta dónde llegar) ahora sale de estas tablas fijas — una por
+# categoría de ejercicio (según cómo se mide y cuánto exige de verdad:
+# dominadas/fondos a pulso no empiezan por los mismos números que
+# sentadillas o flexiones) y nivel. `default_item_fields` deja el
+# resultado listo para `apply_pacing`, que es quien calcula el
+# incremento real por escalón a partir de `weeks_to_goal`.
+
+# Dominadas/fondos a peso corporal — más duros por repetición que el
+# resto del catálogo pose (sentadillas, flexiones...), empiezan más bajo.
+_LOW_REP_STRENGTH_SLUGS = {"pullup", "wide-pullup", "chinup", "dips"}
+# Variantes con lastre — llevan progresión 'double' (reps dentro de un
+# rango y, al llegar arriba, más peso), el resto de pose usa 'reps'.
+# Tracción/empuje a pulso (dominadas, fondos) y pierna (sentadillas) no
+# aguantan ni suben el mismo peso ni las mismas repeticiones — de ahí
+# `_WEIGHTED_CATEGORY_BY_SLUG`, que dice con qué tabla de
+# `_EXERCISE_CATEGORY_DEFAULTS` calcular cada una (ver más abajo).
+_WEIGHTED_SLUGS = {"weighted-pullup", "weighted-dips", "weighted-squat"}
+_WEIGHTED_CATEGORY_BY_SLUG = {
+    "weighted-pullup": "weighted_pull",
+    "weighted-dips": "weighted_pull",
+    "weighted-squat": "weighted_legs",
+}
+
+_EXERCISE_CATEGORY_DEFAULTS = {
+    # pose/timed: en vez de una meta fija, `rate` es cuánto sube CADA
+    # ESCALÓN (`sessions_per_step` sesiones) — así la meta se recalcula
+    # según cuántas semanas pida el usuario (ver comentario grande más
+    # abajo) en vez de quedarse corta para un plan largo. `max_goal` es
+    # el techo realista de un entrenador de verdad (nadie llega a 200
+    # dominadas), por si el plan es muy largo.
+    "high_rep": {  # pose, peso corporal, series largas (sentadillas, flexiones, abdominales...)
+        "beginner":     {"sets": 2, "start": 8,  "rate": 1, "sessions_per_step": 2, "max_goal": 35},
+        "intermediate": {"sets": 3, "start": 12, "rate": 1, "sessions_per_step": 2, "max_goal": 45},
+        "advanced":     {"sets": 4, "start": 15, "rate": 1, "sessions_per_step": 2, "max_goal": 55},
+    },
+    "low_rep": {  # pose, tracción/empuje a pulso (dominadas, fondos) — sube más despacio
+        "beginner":     {"sets": 2, "start": 3, "rate": 1, "sessions_per_step": 4, "max_goal": 14},
+        "intermediate": {"sets": 3, "start": 4, "rate": 1, "sessions_per_step": 4, "max_goal": 18},
+        "advanced":     {"sets": 4, "start": 6, "rate": 1, "sessions_per_step": 4, "max_goal": 22},
+    },
+    "timed": {  # aguantes (plancha, dead hang...) — sube en segundos, no en repeticiones
+        "beginner":     {"sets": 2, "start": 20, "rate": 2, "sessions_per_step": 2, "max_goal": 100},
+        "intermediate": {"sets": 3, "start": 30, "rate": 2, "sessions_per_step": 2, "max_goal": 140},
+        "advanced":     {"sets": 4, "start": 40, "rate": 3, "sessions_per_step": 2, "max_goal": 210},
+    },
+    "weighted_pull": {  # dominadas/fondos con lastre — progresión 'double'
+        "beginner":     {"sets": 2, "low": 3, "top": 6,  "weight_goal": 10},
+        "intermediate": {"sets": 3, "low": 4, "top": 8,  "weight_goal": 15},
+        "advanced":     {"sets": 4, "low": 5, "top": 10, "weight_goal": 20},
+    },
+    "weighted_legs": {  # sentadillas con lastre — progresión 'double'. La
+        # pierna aguanta muchas más repeticiones por serie que un tirón/
+        # empuje a pulso (dominadas/fondos), de ahí el rango de reps más
+        # alto con el mismo tope de peso (`_DEFAULT_MAX_LOAD_KG`/lo que
+        # diga el usuario — mismo chaleco lastrado, no hay otro dato de
+        # equipamiento en el formulario).
+        "beginner":     {"sets": 2, "low": 6,  "top": 10, "weight_goal": 10},
+        "intermediate": {"sets": 3, "low": 8,  "top": 12, "weight_goal": 15},
+        "advanced":     {"sets": 4, "low": 10, "top": 15, "weight_goal": 20},
+    },
+    "running": {
+        "beginner":     {"start_km": 1.0, "goal_km": 3.0, "start_pace": 420, "goal_pace": 360},
+        "intermediate": {"start_km": 2.0, "goal_km": 5.0, "start_pace": 360, "goal_pace": 300},
+        "advanced":     {"start_km": 3.0, "goal_km": 8.0, "start_pace": 300, "goal_pace": 240},
+    },
+}
+
+
+def _rate_based_goal(start, weeks, sessions_per_week, sessions_per_step, rate, max_goal):
+    """
+    Mete cuánto va a subir `apply_pacing` en el sitio: en vez de una
+    meta fija (que un plan de pocas semanas nunca alcanza y uno de
+    muchas remata a las pocas semanas — el bug que reportó Alex: pedir
+    12 semanas y que la tabla de progreso solo llegue a la 4 o 5,
+    porque `apply_pacing` calcula el incremento como
+    `round(meta - inicio) / escalones)` y con una meta pequeña y muchos
+    escalones eso sale por debajo de 1 y se redondea para arriba a 1,
+    o sea que en la práctica sube MÁS rápido de lo pensado y se llega a
+    la meta mucho antes de agotar las semanas), la meta se calcula para
+    que encaje EXACTO con el número de escalones de esas semanas: así
+    `apply_pacing` recupera un incremento de `rate` unidades por
+    escalón y el plan usa las semanas enteras que se han pedido, ni más
+    ni menos. `max_goal` evita que un plan muy largo dispare la meta a
+    algo irreal (nadie llega a 40+ dominadas).
+    """
+    steps = _steps_for_weeks(max(1, int(weeks or 1)), sessions_per_week, sessions_per_step)
+    return min(max_goal, start + rate * steps)
+
+
+def default_item_fields(exercise, fitness_level, weeks, sessions_per_week):
+    """
+    Punto de partida + meta predeterminados para `exercise`, según nivel
+    (ver `_EXERCISE_CATEGORY_DEFAULTS`) — esto es lo que sustituye a la
+    IA: en vez de pedirle a un modelo que invente series/repeticiones
+    razonables, se usan tablas fijas por categoría de ejercicio y nivel.
+    `weeks_to_goal` es siempre la duración completa del plan — sin IA no
+    hay quien decida "en cuántas semanas" salvo el propio usuario, y ya
+    lo ha dicho al elegir cuántas semanas dura el plan. La META en
+    reps/segundos (no así en running ni en dominadas/fondos con peso,
+    ver `_rate_based_goal`) se calcula a partir de esas semanas para que
+    la progresión encaje con la duración pedida en vez de rematarse a
+    las pocas semanas o quedarse corta.
+
+    Devuelve un dict listo para pasar a `apply_pacing`, que es quien
+    calcula los incrementos reales de progresión a partir de estos
+    start_*/goal_* (misma función que ya usaba el camino con IA).
+    """
+    level = fitness_level if fitness_level in _LEVEL_TIER_ORDER else "intermediate"
+    weeks = max(1, int(weeks or 1))
+    sessions_per_week = max(1, int(sessions_per_week or 1))
+    fields = {"weeks_to_goal": weeks}
+
+    if exercise.mode == Exercise.MODE_DISTANCE:
+        d = _EXERCISE_CATEGORY_DEFAULTS["running"][level]
+        fields.update(
+            sessions_per_step=2,
+            progression=PlanItem.PROG_DISTANCE,
+            start_distance_km=d["start_km"], goal_distance_km=d["goal_km"],
+            start_pace_seconds_per_km=d["start_pace"], goal_pace_seconds_per_km=d["goal_pace"],
+        )
+        return fields
+
+    if exercise.mode == Exercise.MODE_TIMED:
+        d = _EXERCISE_CATEGORY_DEFAULTS["timed"][level]
+        goal = _rate_based_goal(
+            d["start"], weeks, sessions_per_week, d["sessions_per_step"], d["rate"], d["max_goal"]
+        )
+        fields.update(
+            sessions_per_step=d["sessions_per_step"],
+            progression=PlanItem.PROG_REPS,
+            start_sets=d["sets"], goal_sets=d["sets"] + 2,
+            start_seconds=d["start"], goal_seconds=goal,
+        )
+        return fields
+
+    if exercise.slug in _WEIGHTED_SLUGS:
+        d = _EXERCISE_CATEGORY_DEFAULTS[_WEIGHTED_CATEGORY_BY_SLUG[exercise.slug]][level]
+        fields.update(
+            sessions_per_step=2,
+            progression=PlanItem.PROG_DOUBLE,
+            start_sets=d["sets"], goal_sets=d["sets"] + 2,
+            start_reps=d["low"], rep_range_low=d["low"], goal_reps=d["top"],
+            start_weight_kg=0, goal_weight_kg=d["weight_goal"],
+        )
+        return fields
+
+    category = "low_rep" if exercise.slug in _LOW_REP_STRENGTH_SLUGS else "high_rep"
+    d = _EXERCISE_CATEGORY_DEFAULTS[category][level]
+    goal = _rate_based_goal(
+        d["start"], weeks, sessions_per_week, d["sessions_per_step"], d["rate"], d["max_goal"]
+    )
+    fields.update(
+        sessions_per_step=d["sessions_per_step"],
+        progression=PlanItem.PROG_REPS,
+        start_sets=d["sets"], goal_sets=d["sets"] + 2,
+        start_reps=d["start"], goal_reps=goal,
+    )
+    return fields
 
 
 # ------------------------------------------------------- ritmo → escalón
@@ -670,9 +596,10 @@ def _steps_for_weeks(weeks_to_goal, sessions_per_week, sessions_per_step):
 def _sanitize_sets(item_fields):
     """
     Red de seguridad: fuerza que las series también progresen (no solo
-    reps/peso), incluso si la IA no ha seguido la instrucción del prompt.
-    Un entrenador de verdad sube series poco a poco (2-3 -> 3-5), nunca
-    las deja fijas para siempre ni las dispara a un número absurdo.
+    reps/peso), incluso si el usuario ha tocado los números a mano en la
+    vista previa antes de confirmar. Un entrenador de verdad sube series
+    poco a poco (2-3 -> 3-5), nunca las deja fijas para siempre ni las
+    dispara a un número absurdo.
     """
     try:
         start_sets = max(1, int(item_fields.get("start_sets") or 3))
@@ -691,12 +618,12 @@ def _sanitize_sets(item_fields):
 
 def apply_pacing(item_fields, *, exercise, sessions_per_week, max_load_kg=None):
     """
-    Traduce `weeks_to_goal` (lo que decidió la IA) a `reps_increment` /
-    `weight_increment_kg` / `distance_increment_km` / `pace_decrement_seconds`
-    (lo que de verdad entiende PlanItem), con la misma fórmula que la
-    calculadora del formulario. También sanea combinaciones que la IA
-    podría proponer mal (progresión 'double' en un ejercicio cronometrado,
-    progresión que no sea 'distance' en running).
+    Traduce `weeks_to_goal` a `reps_increment` / `weight_increment_kg` /
+    `distance_increment_km` / `pace_decrement_seconds` (lo que de verdad
+    entiende PlanItem), con la misma fórmula que la calculadora del
+    formulario. También sanea combinaciones inválidas (progresión
+    'double' en un ejercicio cronometrado, progresión que no sea
+    'distance' en running).
 
     `max_load_kg` es el tope de peso AÑADIDO (chaleco lastrado, cinturón
     con discos...) que el usuario tiene disponible de verdad — sin esto
@@ -739,20 +666,19 @@ def apply_pacing(item_fields, *, exercise, sessions_per_week, max_load_kg=None):
         # parte el usuario de verdad, no un valor inventado — si no, el
         # primer escalón del plan le manda "bajar" a un número que no
         # tiene nada que ver con lo que puede hacer ya el primer día (el
-        # bug que reportó Alex: pasar de 3x12 a 4x6 sin sentido). La IA
-        # nunca manda `rep_range_low` (no está en el schema — no hace
-        # falta que la IA haga esta cuenta), así que se deriva de
-        # `start_reps`, que sí manda siempre.
+        # bug que reportó Alex: pasar de 3x12 a 4x6 sin sentido). Si no
+        # llega `rep_range_low` explícito, se deriva de `start_reps`, que
+        # sí manda siempre.
         low = int(item_fields.get("rep_range_low") or item_fields.get("start_reps") or 6)
         top = int(item_fields.get("goal_reps") or (low + 6))
         if top <= low:
-            top = low + 6  # techo inválido propuesto por la IA — evita un rango de 0 o negativo
+            top = low + 6  # rango inválido (ej. editado a mano en la vista previa) — evita 0 o negativo
         span = max(1, top - low + 1)
         cycles = max(1, round(steps / span))
 
         # Tope de peso añadido realista: la mayoría de chalecos lastrados
-        # domésticos llegan hasta ~20 kg — sin esto la IA puede proponer
-        # un goal_weight_kg que nadie tiene forma de cargar en casa.
+        # domésticos llegan hasta ~20 kg — sin esto se podría proponer un
+        # goal_weight_kg que nadie tiene forma de cargar en casa.
         start_weight = float(item_fields.get("start_weight_kg") or 0)
         cap = start_weight + (max_load_kg if max_load_kg is not None else _DEFAULT_MAX_LOAD_KG)
         goal_weight = min(float(item_fields.get("goal_weight_kg") or 0), cap)

@@ -16,10 +16,11 @@ van con @csrf_exempt porque la API no usa cookies de sesión — la
 protección CSRF existe para ataques basados en cookies, y aquí no aplica.
 """
 import json
+import re
+import unicodedata
 import uuid
 from functools import wraps
 
-from django.conf import settings
 from django.db.models import Q, Sum
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404
@@ -31,7 +32,7 @@ from django.views.decorators.http import require_http_methods
 
 from . import ai
 from .models import (
-    AIGenerationLog, CourseModule, CoursePlaylist, Exercise, Occurrence, Plan, PlanItem, Routine,
+    CourseModule, CoursePlaylist, Exercise, Occurrence, Plan, PlanItem, Routine,
     RoutineItem, SavedVideo, Task, TimerSession, WorkoutSession,
 )
 from .utils import get_current_user, read_mobile_release, resolve_plan_target as _plan_context
@@ -1365,24 +1366,34 @@ def plan_item_detail(request, uuid, item_id):
 
 
 def build_plan_draft(
-    *, user, plan_type, weeks, custom_days, prompt,
-    fitness_level=None, focus_area=None, no_bar_equipment=None,
-    session_minutes=None, limitations=None, body_weight_kg=None, height_cm=None,
-    sex=None, max_load_kg=None,
+    *, user, weeks, custom_days,
+    fitness_level=None, focus_area=None, no_bar_equipment=None, max_load_kg=None,
+    selected_exercises=None,
 ):
     """
-    El núcleo de "generar plan con IA", compartido por el endpoint JSON
-    (`plan_generate`, para la app móvil) y la vista web (`views.plan_ai_form`)
-    — así un plan de IA se construye y se valida exactamente igual venga
-    de donde venga, en vez de mantener la lógica duplicada en dos sitios.
+    El núcleo de "generar automáticamente" un plan de Deporte — compartido
+    por el endpoint JSON (`plan_generate`, para la app móvil) y la vista
+    web (`views.plan_ai_form`). 100% determinista, sin IA ni llamada de
+    red de por medio (ver docstring de tasks/ai.py): `ai._select_sport_exercises`
+    elige los ejercicios según nivel + foco + equipamiento (mismo filtro en
+    duro de siempre) — salvo que `selected_exercises` traiga algo, en cuyo
+    caso son esos ejercicios y solo esos (selector manual del formulario,
+    ver `ai._select_exercises_from_slugs`: da igual nivel o foco corporal
+    para ELEGIR el catálogo, aunque nivel se sigue usando para calcular
+    los números de partida/meta) — y `ai.default_item_fields` +
+    `ai.apply_pacing` ponen el punto de partida, la meta y el incremento
+    por escalón según tablas fijas por nivel — nada que decidir por IA,
+    ni cuota que gastar, ni límite de peticiones.
 
-    `fitness_level` / `focus_area` / `no_bar_equipment` / `session_minutes` /
-    `limitations` / `body_weight_kg` / `height_cm` / `sex` / `max_load_kg` son
-    el cuestionario estructurado de Deporte (nivel, foco corporal,
-    equipamiento, minutos por sesión, lesiones, datos físicos) — se validan
-    aquí contra los choices de `ai` y se sanean antes de pasarlos a la IA,
-    igual que el resto de campos de este formulario. Ignorados para
-    Estudio/General.
+    `max_load_kg == 0` (campo obligatorio en el formulario web — el
+    usuario dice explícitamente "no tengo nada de peso extra en casa")
+    descarta también los ejercicios con lastre (dominadas/fondos/
+    sentadillas con peso), igual que `no_bar_equipment` descarta los que
+    necesitan barra — ver `ai._select_sport_exercises`.
+
+    Solo Deporte: General y Estudio no tienen catálogo de ejercicios del
+    que elegir, así que no hay nada que autogenerar — se crean a mano
+    (ver `views.plan_form`).
 
     No guarda nada: construye Plan/PlanItem SIN GUARDAR y les aplica
     `_apply_plan_fields` / `_apply_plan_item_fields` — las mismas que usa
@@ -1390,48 +1401,17 @@ def build_plan_draft(
 
     Devuelve `(draft_dict, None)` o `(None, mensaje_de_error)`.
     """
-    valid_types = {k for k, _ in Plan.PLAN_TYPE_CHOICES}
-    plan_type = plan_type if plan_type in valid_types else Plan.PLAN_TYPE_SPORT
-
     valid_levels = {k for k, _ in ai.FITNESS_LEVEL_CHOICES}
-    fitness_level = fitness_level if fitness_level in valid_levels else ""
+    if fitness_level not in valid_levels:
+        return None, "Elige tu nivel físico de partida."
 
     valid_focus = {k for k, _ in ai.FOCUS_AREA_CHOICES}
     focus_area = focus_area if focus_area in valid_focus else ""
-
-    valid_sexes = {k for k, _ in ai.BODY_SEX_CHOICES}
-    sex = sex if sex in valid_sexes else ""
 
     if isinstance(no_bar_equipment, bool):
         no_bar_equipment = no_bar_equipment
     else:
         no_bar_equipment = str(no_bar_equipment or "").strip().lower() in ("1", "true", "on", "yes", "si", "sí")
-
-    try:
-        session_minutes = int(session_minutes) if session_minutes not in (None, "") else None
-        if session_minutes is not None:
-            session_minutes = max(5, min(180, session_minutes))
-    except (TypeError, ValueError):
-        session_minutes = None
-
-    limitations = (limitations or "").strip()[:200]
-
-    # Datos físicos — opcionales, con límites amplios pero sanos para no
-    # dejar pasar basura (un 0 o un texto no numérico se descartan en vez
-    # de fallar, igual que el resto de este formulario).
-    try:
-        body_weight_kg = float(body_weight_kg) if body_weight_kg not in (None, "") else None
-        if body_weight_kg is not None:
-            body_weight_kg = max(20.0, min(300.0, body_weight_kg))
-    except (TypeError, ValueError):
-        body_weight_kg = None
-
-    try:
-        height_cm = int(height_cm) if height_cm not in (None, "") else None
-        if height_cm is not None:
-            height_cm = max(100, min(250, height_cm))
-    except (TypeError, ValueError):
-        height_cm = None
 
     try:
         max_load_kg = float(max_load_kg) if max_load_kg not in (None, "") else None
@@ -1450,96 +1430,103 @@ def build_plan_draft(
     custom_days = days or ["0", "2", "4"]
     sessions_per_week = max(1, len(custom_days))
 
-    # Tope diario, contado global (hoy la app va con una sola clave de
-    # Gemini compartida) — se cuenta el intento en sí, no solo los que
-    # salen bien: una llamada que falla también ha gastado cuota gratis.
-    limit = getattr(settings, "AI_PLAN_DAILY_LIMIT", 15)
-    if limit and AIGenerationLog.count_today() >= limit:
-        return None, (
-            f"Has llegado al límite de {limit} planes generados con IA hoy — "
-            "es para no agotar la cuota gratis. Prueba mañana, o crea el plan a mano mientras tanto."
-        )
-    AIGenerationLog.record(user=user)
+    # Selector manual (ver plan_ai_form.html): si el usuario ha marcado
+    # ejercicios concretos, se guarda tal cual se pidió (sin validar
+    # todavía contra el catálogo/equipamiento — eso lo hace
+    # `ai._select_sport_exercises`) para poder reflejarlo en el
+    # borrador y en "generar otra vez" aunque algún slug ya no esté
+    # disponible.
+    selected_exercises = [s for s in (selected_exercises or []) if s]
 
     try:
-        raw = ai.generate_plan_draft(
-            prompt=prompt or "", plan_type=plan_type,
-            weeks=weeks, sessions_per_week=sessions_per_week,
-            fitness_level=fitness_level, focus_area=focus_area,
-            no_bar_equipment=no_bar_equipment, session_minutes=session_minutes,
-            limitations=limitations, body_weight_kg=body_weight_kg, height_cm=height_cm,
-            sex=sex, max_load_kg=max_load_kg,
+        exercises = ai._select_sport_exercises(
+            fitness_level, focus_area, no_bar_equipment,
+            selected_slugs=selected_exercises, max_load_kg=max_load_kg,
         )
     except ai.PlanAIError as e:
         return None, str(e)
 
+    nivel_label = dict(ai.FITNESS_LEVEL_CHOICES).get(fitness_level, "")
+    if selected_exercises:
+        zona_label = "Selección manual"
+    else:
+        zona_label = dict(ai.FOCUS_AREA_CHOICES).get(focus_area) or "Cuerpo completo"
     plan_fields = {
-        "name": (raw.get("plan") or {}).get("name") or "",
-        "notes": (raw.get("plan") or {}).get("notes") or "",
+        "name": f"{zona_label} · {nivel_label}"[:80],
+        "notes": (
+            f"Plan generado automáticamente: {len(exercises)} ejercicio"
+            f"{'s' if len(exercises) != 1 else ''}, subiendo la exigencia poco a poco "
+            f"a lo largo de {weeks} semanas."
+        ),
         "weeks": weeks,
         "custom_days": [int(d) for d in custom_days],
         "started_on": timezone.localtime(timezone.now()).date().isoformat(),
         "is_active": True,
     }
-    draft_plan = Plan(user=user, plan_type=plan_type)
+    draft_plan = Plan(user=user, plan_type=Plan.PLAN_TYPE_SPORT)
     error = _apply_plan_fields(draft_plan, plan_fields)
     if error:
-        return None, f"La IA devolvió un plan inválido: {error}"
+        return None, f"Plan inválido: {error}"
 
     items_out = []
-    if plan_type != Plan.PLAN_TYPE_GENERAL:
-        for raw_item in (raw.get("items") or []):
-            if not isinstance(raw_item, dict):
-                continue
-            if plan_type == Plan.PLAN_TYPE_STUDY:
-                item_fields = {
-                    "label": (raw_item.get("label") or "").strip()[:80],
-                    "target_minutes": raw_item.get("target_minutes") or None,
-                }
-                exercise = None
-            else:
-                exercise = Exercise.objects.filter(slug=raw_item.get("exercise_slug") or "").first()
-                item_fields = dict(raw_item)
-                item_fields.pop("exercise_slug", None)
-                item_fields["exercise"] = exercise.slug if exercise else ""
-                item_fields["sport_mode"] = PlanItem.SPORT_MODE_CIRCUIT
-                ai.apply_pacing(
-                    item_fields, exercise=exercise, sessions_per_week=sessions_per_week,
-                    max_load_kg=max_load_kg,
-                )
+    for idx, exercise in enumerate(exercises):
+        item_fields = ai.default_item_fields(exercise, fitness_level, weeks, sessions_per_week)
+        item_fields["exercise"] = exercise.slug
+        item_fields["sport_mode"] = PlanItem.SPORT_MODE_CIRCUIT
+        # La medida principal: en un plan de running siempre es el propio
+        # running (progresión de distancia/ritmo); en cualquier otro foco,
+        # el primer ejercicio de la lista (ya viene en el orden pensado
+        # para eso, ver `ai._select_sport_exercises`).
+        item_fields["is_headline"] = (
+            exercise.mode == Exercise.MODE_DISTANCE if focus_area == Task.SUBCATEGORY_RUNNING
+            else idx == 0
+        )
+        ai.apply_pacing(
+            item_fields, exercise=exercise, sessions_per_week=sessions_per_week,
+            max_load_kg=max_load_kg,
+        )
 
-            draft_item = PlanItem(plan=draft_plan)
-            item_error = _apply_plan_item_fields(draft_item, draft_plan, item_fields)
-            if item_error:
-                continue  # se descarta el objetivo inválido en vez de tirar todo el plan
-            items_out.append({
-                "fields": item_fields,
-                "preview": {
-                    "display_name": draft_item.display_name,
-                    "is_headline": bool(draft_item.is_headline),
-                    "progression": draft_item.progression,
-                    "is_timed": bool(exercise and exercise.mode == Exercise.MODE_TIMED),
-                    "is_running": bool(exercise and exercise.mode == Exercise.MODE_DISTANCE),
-                    "exercise_name": exercise.name if exercise else "",
-                    "weekly": draft_item.weekly_schedule(weeks, sessions_per_week),
-                },
-            })
+        draft_item = PlanItem(plan=draft_plan)
+        item_error = _apply_plan_item_fields(draft_item, draft_plan, item_fields)
+        if item_error:
+            continue  # se descarta el objetivo inválido en vez de tirar todo el plan
+        items_out.append({
+            "fields": item_fields,
+            "preview": {
+                "display_name": draft_item.display_name,
+                "is_headline": bool(draft_item.is_headline),
+                "progression": draft_item.progression,
+                "is_timed": bool(exercise.mode == Exercise.MODE_TIMED),
+                "is_running": bool(exercise.mode == Exercise.MODE_DISTANCE),
+                "exercise_name": exercise.name,
+                "weekly": draft_item.weekly_schedule(weeks, sessions_per_week),
+            },
+        })
 
-        # Exactamente una medida principal — si la IA no marcó ninguna (o
-        # marcó varias), se decide aquí en vez de dejarlo a medias.
-        headline_idxs = [i for i, it in enumerate(items_out) if it["fields"].get("is_headline")]
-        if items_out and not headline_idxs:
-            items_out[0]["fields"]["is_headline"] = True
-            items_out[0]["preview"]["is_headline"] = True
-        elif len(headline_idxs) > 1:
-            for i in headline_idxs[1:]:
-                items_out[i]["fields"]["is_headline"] = False
-                items_out[i]["preview"]["is_headline"] = False
+    # Exactamente una medida principal — por si el candidato a headline se
+    # descartó por error de validación, se decide aquí en vez de dejarlo
+    # sin ninguna (o con varias).
+    headline_idxs = [i for i, it in enumerate(items_out) if it["fields"].get("is_headline")]
+    if items_out and not headline_idxs:
+        items_out[0]["fields"]["is_headline"] = True
+        items_out[0]["preview"]["is_headline"] = True
+    elif len(headline_idxs) > 1:
+        for i in headline_idxs[1:]:
+            items_out[i]["fields"]["is_headline"] = False
+            items_out[i]["preview"]["is_headline"] = False
 
-        if not items_out:
-            return None, "La IA no propuso ningún objetivo válido. Prueba a describir el objetivo de otra forma."
+    if not items_out:
+        return None, (
+            "No se pudo generar ningún objetivo válido con esos filtros — prueba con otro "
+            "nivel o foco corporal."
+        )
 
-    return {"plan_type": plan_type, "plan_fields": plan_fields, "items": items_out}, None
+    return {
+        "plan_type": Plan.PLAN_TYPE_SPORT, "plan_fields": plan_fields, "items": items_out,
+        # Para que "generar otra vez" (ver plan_ai_preview.html) reenvíe
+        # la misma selección manual en vez de perderla.
+        "selected_exercises": selected_exercises,
+    }, None
 
 
 # ------------------------------------------------------- Estudio · Idiomas
@@ -1592,18 +1579,62 @@ def _apply_language_plan_fields(p, data):
             p.quiz_every_n_videos = None
 
 
+def _normalize_language(text):
+    """
+    "frances" y "francés" (o "espanol" y "español") tienen que contar
+    como el mismo idioma — el desplegable de idiomas conocidos y el
+    campo libre de `language` no obligan a escribir tildes, y
+    `add_course_playlist` tampoco. Quita acentos/diacríticos, pasa a
+    minúsculas y recorta espacios, así la comparación no depende de la
+    grafía exacta con la que se guardó cada lado.
+    """
+    text = unicodedata.normalize("NFKD", (text or "").strip().lower())
+    return "".join(ch for ch in text if not unicodedata.combining(ch))
+
+
+def _language_matches(catalog_text, requested_text):
+    """
+    ¿"francés" (guardado en el catálogo) es el idioma que se ha pedido?
+
+    Exige coincidencia exacta (tras `_normalize_language`) SALVO que el
+    texto pedido traiga más palabras alrededor — "curso de francés",
+    "quiero aprender francés", "francés e inglés" — algo muy fácil de
+    escribir en un campo libre como `language_name` o "Idiomas que ya
+    sabes". En ese caso basta con que "francés" aparezca como palabra
+    suelta dentro de lo escrito; así no hace falta que el usuario borre
+    todo lo demás para que encuentre su curso.
+    """
+    catalog_norm = _normalize_language(catalog_text)
+    requested_norm = _normalize_language(requested_text)
+    if not catalog_norm or not requested_norm:
+        return False
+    if catalog_norm == requested_norm:
+        return True
+    requested_words = set(re.findall(r"[a-z]+", requested_norm))
+    return catalog_norm in requested_words
+
+
 def _select_language_catalog(language, level_from, level_to, known_languages):
     """
     Elige, del catálogo verificado (CoursePlaylist), qué cursos cubren
     el idioma y el rango de niveles pedidos — sin IA, sin buscar en
     YouTube: pura consulta contra lo que ya está curado a mano.
 
-    Prioriza los explicados en el idioma nativo del usuario (el primero
-    de `known_languages`) sobre los neutros, y descarta los pensados
-    para hablantes de otro idioma nativo distinto — mismo criterio que
-    ya documentaba CoursePlaylist.native_language. Si hay varios cursos
-    buenos para el mismo nivel, se incluyen TODOS (se encadenan, ver
+    Incluye los cursos explicados en CUALQUIERA de los idiomas que el
+    usuario ya dice saber (`known_languages`, en el orden que sea — no
+    hace falta que el primero de la lista sea el que coincide), además
+    de los neutros, y descarta los pensados para un idioma nativo que
+    el usuario no ha dicho que sepa — mismo criterio que ya documentaba
+    CoursePlaylist.native_language. Si hay varios cursos buenos para el
+    mismo nivel, se incluyen TODOS (se encadenan, ver
     plan_language_confirm.html) en vez de quedarse con uno solo.
+
+    La comparación de idioma y de idioma nativo (`_language_matches`)
+    ignora acentos y mayúsculas, y tolera texto de más alrededor de la
+    palabra clave — "frances", "curso de francés" o "FRANCÉS" cuentan
+    igual que "francés" a secas. Sin esto, cualquier variación mínima
+    en cómo se escribe el idioma (o el idioma nativo) dejaría el plan
+    vacío aunque el curso SÍ exista en el catálogo.
 
     Devuelve (selected, missing_levels):
       selected: una entrada por CoursePlaylist elegido, en el formato
@@ -1625,11 +1656,12 @@ def _select_language_catalog(language, level_from, level_to, known_languages):
         lo, hi = hi, lo
     requested_levels = CEFR_LEVELS[lo:hi + 1]
 
-    native = known_languages.split(",")[0].strip().lower() if known_languages else ""
+    known_languages = known_languages or ""
 
     candidates = [
-        c for c in CoursePlaylist.objects.filter(is_active=True, language__iexact=language)
-        if not c.native_language or c.native_language.strip().lower() == native
+        c for c in CoursePlaylist.objects.filter(is_active=True)
+        if _language_matches(c.language, language)
+        and (not c.native_language or _language_matches(c.native_language, known_languages))
     ]
     candidates.sort(key=lambda c: (CEFR_LEVELS.index(c.level) if c.level in CEFR_LEVELS else 0, c.order))
 
@@ -1810,19 +1842,18 @@ def expand_language_selection(selected):
 @api("POST")
 def plan_generate(request):
     """
-    Genera un BORRADOR de plan con IA a partir de un prompt en texto
-    libre — no guarda nada. El usuario lo revisa en la app y, si le vale,
-    lo confirma llamando a los mismos `plan_create` / `plan_item_create`
-    de siempre con los campos de `draft.plan_fields` / `draft.items[].fields`.
+    Genera automáticamente un BORRADOR de plan de Deporte (nivel + foco +
+    equipamiento, sin IA — ver docstring de `build_plan_draft`) — no
+    guarda nada. El usuario lo revisa en la app y, si le vale, lo
+    confirma llamando a los mismos `plan_create` / `plan_item_create` de
+    siempre con los campos de `draft.plan_fields` / `draft.items[].fields`.
     """
     data = body(request)
     draft, error = build_plan_draft(
-        user=_user(), plan_type=data.get("plan_type"), weeks=data.get("weeks"),
-        custom_days=data.get("custom_days"), prompt=data.get("prompt"),
+        user=_user(), weeks=data.get("weeks"), custom_days=data.get("custom_days"),
         fitness_level=data.get("fitness_level"), focus_area=data.get("focus_area"),
-        no_bar_equipment=data.get("no_bar_equipment"), session_minutes=data.get("session_minutes"),
-        limitations=data.get("limitations"), body_weight_kg=data.get("body_weight_kg"),
-        height_cm=data.get("height_cm"), sex=data.get("sex"), max_load_kg=data.get("max_load_kg"),
+        no_bar_equipment=data.get("no_bar_equipment"), max_load_kg=data.get("max_load_kg"),
+        selected_exercises=data.get("selected_exercises"),
     )
     if error:
         return JsonResponse({"ok": False, "error": error}, status=502)

@@ -23,28 +23,39 @@ convertirse después en mobile-friendly / PWA.
   con fechas — para tener accountability real de tus hábitos.
 - Listado separado de tareas pendientes y hechas, con tachado.
 - Eliminar tareas.
-- **Planes** con progresión (deporte, estudio o un hábito general) y, dentro
-  de un plan, **generar un plan con IA** describiéndolo en una frase — la IA
-  propone objetivos medibles (ej. "3×8 dominadas la semana 1, 3×9 la semana
-  2...") a partir del catálogo de ejercicios y de cuántas semanas/días
-  elijas tú; siempre se enseña un borrador para revisar antes de guardar
-  nada. Ver "IA para generar planes" más abajo.
-- **Cursos de idioma**: un subtipo de plan de Estudio con vídeos reales de
-  YouTube, del catálogo curado y filtrados por tu idioma nativo — sin IA de
-  por medio, ver "Cursos de idiomas · YouTube" más abajo. Cada cierto número
-  de vídeos (a elegir) sale un **test de repaso** corto, generado con IA, con
-  su propia racha — no bloquea el curso, es un empujón aparte para prestar
-  atención de verdad.
+- **Planes** con progresión: Deporte, Estudio (con dos subtipos, ver abajo)
+  o General (un hábito simple sin catálogo detrás). Los de Deporte se
+  pueden crear a mano o **generar automáticamente**: eliges nivel físico,
+  foco corporal, equipamiento y cuántas semanas/días entrenas, y la app
+  elige los ejercicios que tocan para ese nivel y calcula la progresión
+  (ej. "3×8 dominadas la semana 1, 3×9 la semana 2...") con matemáticas
+  fijas — sin IA, sin llamada de red, sin límite de peticiones. Siempre se
+  enseña un borrador para revisar (y tocar cualquier número) antes de
+  guardar nada. Ver "Generar plan automáticamente" más abajo.
+- **Estudio** tiene dos subtipos, y ninguno de los dos usa IA para
+  crearse: "Hábito simple" (una tarea diaria comprobable, con vídeo,
+  playlist o minutos objetivo si los rellenas — ya quedan puestos desde el
+  momento en que creas el plan, sin ningún paso aparte) y **"Idioma"**
+  (vídeos reales de YouTube del catálogo curado, filtrados por tu idioma
+  nativo — ver "Cursos de idiomas · YouTube" más abajo). Para el subtipo
+  Idioma, cada cierto número de vídeos (a elegir) sale un **test de
+  repaso** corto, generado con IA, con su propia racha — no bloquea el
+  curso, es un empujón aparte para prestar atención de verdad.
 
 ## Cómo ejecutarlo
 
 ```bash
-pip install django
+pip install -r requirements.txt
 python3 manage.py migrate
 python3 manage.py runserver
 ```
 
 Abre http://127.0.0.1:8000/ en el navegador.
+
+Para las claves de IA/YouTube (opcional, ver más abajo), copia
+`.env.example` como `.env` y rellénalo — `settings.py` lo carga solo
+con tenerlo ahí, no hace falta tocar variables de entorno de Windows/Mac
+a mano ni reiniciar nada cada vez que cambias una clave.
 
 (Opcional) Para gestionar tareas desde el panel de admin de Django:
 ```bash
@@ -95,26 +106,60 @@ perder la cuenta entera, porque la copia queda en el mismo disco. Si algún
 día hay datos que de verdad importe no perder, conviene bajarse `backups/`
 de vez en cuando a otro sitio.
 
-## IA para generar planes
+## Generar plan automáticamente
 
-El botón "✨ Generar con IA" de la pantalla de Planes usa **Google Gemini**
-(modelos Flash/Flash-Lite, gratis sin tarjeta) para proponer un plan a
-partir de una frase. Sin configurar nada, ese botón simplemente falla con
-un aviso legible — el resto de la app funciona igual.
+El botón "⚡ Generar automáticamente" de la pantalla de Planes crea un
+plan de **Deporte** sin IA de por medio y sin llamada de red — solo
+matemáticas fijas, así que no depende de ninguna cuota gratis ni tiene
+límite de peticiones. Rellenas un cuestionario corto (nivel físico, foco
+corporal, equipamiento, peso máximo de lastre disponible, semanas y
+días de entreno) y la app:
 
+1. Elige los ejercicios del catálogo que tocan para ese nivel y foco —
+   mismo filtro EN DURO de siempre (`ai._filter_catalog_by_level`,
+   `ai._backfill_lower_tier`): un principiante nunca ve dominadas
+   lastradas, un avanzado no se queda solo con flexiones.
+2. Pone el punto de partida y la meta de cada ejercicio según tablas
+   fijas por nivel (`ai._EXERCISE_CATEGORY_DEFAULTS` en `tasks/ai.py`) —
+   dominadas/fondos a pulso empiezan más bajo que sentadillas o
+   flexiones, que se hacen en tandas más largas.
+3. Calcula el incremento real por escalón con `ai.apply_pacing` (la
+   misma cuenta que ya usaba la calculadora del formulario manual) para
+   que la exigencia suba de verdad a lo largo de las semanas elegidas.
+
+Como siempre, antes de guardar nada se enseña un borrador
+(`plan_ai_preview.html`) donde puedes tocar cualquier número o pedir
+otra propuesta con los mismos filtros.
+
+Los planes de Estudio (sus dos subtipos, Hábito simple e Idioma) y los
+de General nunca pasan por aquí: no tienen catálogo de ejercicios del
+que autogenerar nada, así que se crean siempre a mano, desde "+ Nuevo
+plan a mano" — ver "Cursos de idiomas · YouTube" más abajo para el
+subtipo Idioma.
+
+Lo ÚNICO que sigue usando IA (**Google Gemini**, modelos Flash/Flash-Lite,
+gratis sin tarjeta) en toda la app es el test de repaso corto de Estudio
+· Idiomas, sobre los últimos vídeos vistos — ver la siguiente sección.
 Para activarlo:
 1. Pide una clave gratis en https://aistudio.google.com/apikey.
-2. Defínela como variable de entorno antes de arrancar el servidor:
+2. Dásela a la app. Más fácil: copia `.env.example` como `.env` y pon
+   `GEMINI_API_KEY=tu-clave-aqui` ahí — `settings.py` lo carga solo, sin
+   tocar nada más (ver "Cómo ejecutarlo" más arriba). También puedes
+   definirla como variable de entorno de toda la vida si lo prefieres:
    ```bash
-   export GEMINI_API_KEY="tu-clave-aqui"
+   export GEMINI_API_KEY="tu-clave-aqui"    # macOS/Linux, solo esa terminal
    python3 manage.py runserver
    ```
-   (En el hosting, añádela en la sección de variables de entorno de siempre,
-   junto a `DJANGO_SECRET_KEY` etc.)
-
-No añade ninguna dependencia nueva: `tasks/ai.py` habla con la API de
-Gemini con `urllib` (ya viene en Python), así que `requirements.txt` no
-cambia y el proyecto se sigue pudiendo alojar gratis.
+   En Windows PowerShell, `$env:GEMINI_API_KEY="tu-clave-aqui"` solo dura
+   esa ventana; `setx GEMINI_API_KEY "tu-clave-aqui"` la deja fija pero
+   solo la ven las terminales que abras DESPUÉS (y solo si además cierras
+   y vuelves a abrir del todo VS Code — una pestaña de terminal nueva
+   dentro de un VS Code que ya estaba abierto sigue viendo el entorno
+   viejo). El `.env` de arriba se salta todo este lío.
+   (En el hosting, sigue yendo por variables de entorno de verdad — ver
+   "Cómo cargar esto en PythonAnywhere" en `.env.example`.)
+   Sin esto, solo falla el test de repaso — el resto de la app (incluido
+   "Generar automáticamente") funciona igual, no lo necesita.
 
 ## Cursos de idiomas · YouTube
 
@@ -122,14 +167,22 @@ Los planes de Estudio tienen un subtipo "Idiomas": en vez de un hábito
 diario con siempre el mismo vídeo, un curso de verdad con vídeos reales
 de YouTube ordenados de nivel MCER más bajo a más alto (ver
 `Plan.study_subtype` y el modelo `CourseModule` en `tasks/models.py`).
-El flujo está implementado de punta a punta: desde "Planes" → "✨
-Generar con IA" eliges idioma, nivel de partida y de llegada, y **la
-propia app asigna, SIN IA**, qué cursos del catálogo verificado de
-abajo tocan — es una decisión mecánica entre opciones ya curadas a
-mano, no algo que necesite un LLM (ver `api.build_language_plan_draft`
-en `tasks/api.py`). Se previsualiza y se confirma igual que un plan
-con IA, y el plan queda con el curso programado y una barra de
-progreso en su pantalla de detalle.
+El flujo está implementado de punta a punta y es **siempre manual, sin
+botón de IA de por medio**: desde "Planes" → "+ Nuevo plan a mano"
+eliges Estudio → Idioma (curso con vídeos por nivel), rellenas idioma,
+nivel de partida y de llegada, e idiomas que ya sabes, y **la propia
+app asigna, SIN IA**, qué cursos del catálogo verificado de abajo tocan
+— es una decisión mecánica entre opciones ya curadas a mano, no algo
+que necesite un LLM (ver `api.build_language_plan_draft` y
+`api._select_language_catalog` en `tasks/api.py`). Antes de guardar
+nada se enseña una pantalla de revisión (`plan_language_confirm.html`)
+con qué cursos y en qué orden se van a encadenar, para confirmar o
+volver atrás a cambiar idioma/nivel; al confirmar, el plan queda con el
+curso programado y una barra de progreso en su pantalla de detalle. Si
+por lo que sea un plan se queda sin ningún vídeo asignado (por ejemplo,
+un fallo puntual de la YouTube Data API al confirmar), su pantalla de
+detalle ofrece un botón para "Reintentar asignar cursos del catálogo"
+sin tener que borrar el plan y volver a crearlo.
 
 **El objetivo es terminar el temario, no acabar en un número de
 semanas fijo**: al crear el plan no se pide "cuántas semanas dura"
@@ -144,32 +197,42 @@ seguir enseñándotelo hasta que pasen las semanas que sobraban (ver
 nivel hay varias playlists verificadas en el catálogo, se **encadenan
 todas** en vez de asignar solo una — así, si la primera se queda
 corta, ya tienes la siguiente esperando en ese mismo nivel (ver
-`api._catalog_entries_for_language`).
+`api._select_language_catalog`).
 
 **Filtrado por idioma nativo**: cada `CoursePlaylist` del catálogo
 lleva un `native_language` (en qué idioma están las explicaciones —
 ej. un curso de francés "para hispanohablantes" lleva
 `native_language="español"`) o se deja en blanco si es neutro (vale
-para cualquiera). Al crear el plan, el PRIMER idioma que escribas en
-"Idiomas que ya sabes" decide qué cursos se ofrecen: los explicados en
-ese idioma tienen prioridad, luego los neutros, y los pensados para un
-idioma nativo distinto quedan excluidos del todo — nunca un curso
-genérico para cualquiera si hay uno mejor pensado para ti.
+para cualquiera). Al crear el plan, se ofrecen los cursos explicados en
+CUALQUIERA de los idiomas que escribas en "Idiomas que ya sabes" (no
+hace falta que sea el primero de la lista) más los neutros; los
+pensados para un idioma nativo que no hayas dicho que sabes quedan
+excluidos del todo — nunca un curso genérico para cualquiera si hay
+uno mejor pensado para ti.
 
 **Lo único que hace falta antes de poder usarlo es poblar el catálogo**
 (ver los dos comandos más abajo) — sin ninguna `CoursePlaylist`
 verificada para el idioma (e idioma nativo) que pidas, la asignación
 falla con un aviso legible en vez de inventarse un curso.
 
-Dos límites a tener en cuenta mientras tanto:
-- El idioma se escribe como texto libre y la búsqueda en el catálogo
-  ignora mayúsculas pero NO ignora acentos — usa siempre la misma
-  grafía con la que lo guardaste con `add_course_playlist` (ej.
-  siempre "francés", nunca a veces "frances"). Lo mismo aplica al
-  idioma nativo.
+Un límite a tener en cuenta mientras tanto:
 - Por ahora este flujo solo está disponible desde la web; la app móvil
   todavía no sabe generar ni reproducir un curso de idioma — un plan
   creado en la web se vería vacío si lo abres en el móvil.
+
+El idioma (y el idioma nativo) se escriben como texto libre, tanto al
+crear el plan como al añadir playlists con `add_course_playlist` — la
+búsqueda en el catálogo (`api._language_matches`, usada por
+`_select_language_catalog`) ignora mayúsculas y acentos, así que
+"frances"/"Francés"/"FRANCÉS" cuentan como el mismo idioma que lo que
+hayas guardado. También tolera texto de más alrededor: "curso de
+francés" o "quiero aprender francés" encuentran igual el catálogo
+guardado como "francés", y "Idiomas que ya sabes" puede llevar varios
+("español, inglés" o "hablo español e inglés") — cualquiera de ellos
+que coincida con el `native_language` de un curso cuenta. Lo que sí
+tiene que coincidir es la palabra en sí: si guardaste el catálogo como
+"francés" no lo vas a encontrar escribiendo "French", y "castellano" no
+cuenta como lo mismo que "español" si el catálogo usa esa palabra.
 
 Ni Gemini ni ningún LLM navega YouTube ni comprueba que un vídeo
 existe — así que la búsqueda de vídeos reales la hace la propia
@@ -219,8 +282,9 @@ Dos comandos, pensados para usarse en este orden:
 
 Los planes de idioma se arman solo de este catálogo, nunca de una
 búsqueda sin revisar — por eso, si el catálogo está vacío para el
-idioma/nivel/idioma nativo que pidas, "Generar con IA" falla con un
-aviso claro en vez de devolver algo inventado.
+idioma/nivel/idioma nativo que pidas, crear el plan falla con un aviso
+claro ("Todavía no hay ningún curso verificado de... en el catálogo
+para ese nivel") en vez de devolver algo inventado.
 
 ### Tests de repaso
 
@@ -265,11 +329,15 @@ la API igual que `tasks/ai.py` habla con Gemini, con `urllib`.
   También `Plan`/`PlanItem` (planes con progresión).
 - `tasks/views.py` — vistas para listar, crear, editar, eliminar y
   marcar tareas, y las dos vistas de estadísticas.
-- `tasks/ai.py` — el cliente de Gemini: la traducción de "en cuántas
-  semanas quiero llegar" a la progresión escalón a escalón de un
-  `PlanItem` (Deporte/Estudio general), y `generate_quiz` para los
-  tests de repaso de idioma. La asignación de cursos de idioma en sí
-  (`tasks/api.py`) NO pasa por aquí — es determinista, sin IA.
+- `tasks/ai.py` — dos cosas sin relación entre sí, que comparten archivo
+  por tamaño (no por diseño): la generación 100% determinista de un plan
+  de Deporte (`_select_sport_exercises`, `default_item_fields`,
+  `apply_pacing` — sin IA, sin llamada de red), y el cliente de Gemini
+  que usa solo `generate_quiz`, para los tests de repaso de idioma. La
+  asignación de cursos de idioma y la creación a mano de un plan de
+  Estudio·Hábito simple (`tasks/api.py`/`tasks/views.py`) tampoco pasan
+  por IA — todo el módulo de planes es determinista salvo el propio test
+  de repaso.
 - `tasks/youtube_search.py` — cliente de la YouTube Data API v3 (ver
   sección de arriba). `CoursePlaylist` en `models.py` es el catálogo
   curado a mano (con su `native_language`); `CourseModule` es el
@@ -279,8 +347,11 @@ la API igual que `tasks/ai.py` habla con Gemini, con `urllib`.
   cada test de repaso generado, con su racha (`Plan.quiz_streak_stats`).
 - `tasks/templates/tasks/` — plantillas de tareas, planes (incluidos
   los de idioma), circuitos y entrenos. `task_list.html` es la vista
-  principal; `plan_detail.html`/`plan_ai_form.html`/`plan_ai_preview.html`
-  cubren el flujo de planes con y sin IA.
+  principal; `plan_form.html` cubre la creación/edición a mano de
+  cualquier tipo (Deporte, Estudio y General); `plan_ai_form.html`/
+  `plan_ai_preview.html` cubren la generación automática (solo Deporte);
+  `plan_language_confirm.html` es la pantalla de revisión antes de
+  guardar un plan de idioma (ver "Cursos de idiomas · YouTube").
 - `static/css/styles.css` — toda la identidad visual ("libreta" cálida,
   tonos crema/coral/sage/mostaza).
 

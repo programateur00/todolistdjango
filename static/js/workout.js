@@ -4,11 +4,13 @@
    salen de aquí (reps, duración de cada rep, avisos de descanso).
    ============================================================ */
 
-// Exportados: circuit.js los reutiliza para la comprobación de postura
-// de plancha/plancha lateral, sin duplicar la URL del modelo.
-export const MEDIAPIPE_VERSION = "0.10.14";
-export const MODEL_URL =
-  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
+// De dónde sale MediaPipe (versión vendorizada + rutas a los ficheros
+// locales en static/vendor/mediapipe/) se decide en UN ÚNICO fichero,
+// static/js/mediapipe-vendor.js — nunca aquí. Así, si algún día hay
+// que revendorizar una versión nueva o volver a un CDN externo, solo
+// hace falta tocar ese fichero pequeño, no bucear por todo workout.js.
+// Ver static/vendor/mediapipe/README.md para el paso a paso.
+import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./mediapipe-vendor.js";
 
 // Umbral de movimiento (proporcional al ancho de hombros) para
 // considerar que hay un cambio de estado real y no ruido de la cámara.
@@ -1681,12 +1683,8 @@ class WorkoutSession {
 
     this.setStatus("Cargando el modelo de seguimiento…");
     try {
-      const { FilesetResolver, PoseLandmarker } = await import(
-        `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}`
-      );
-      const vision = await FilesetResolver.forVisionTasks(
-        `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`
-      );
+      const { FilesetResolver, PoseLandmarker } = await import(MEDIAPIPE_BUNDLE_URL);
+      const vision = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_BASE_URL);
       this.poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
         baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
         runningMode: "VIDEO",

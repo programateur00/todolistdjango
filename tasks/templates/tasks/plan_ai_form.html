@@ -1,137 +1,99 @@
 {% extends "tasks/base.html" %}
-{% block title %}Generar plan con IA{% endblock %}
+{% block title %}Generar plan automáticamente{% endblock %}
 {% block content %}
 
 <header class="topbar">
     <div class="topbar__title">
-        <span class="topbar__eyebrow">plan · IA</span>
-        <h1>Generar plan con IA</h1>
+        <span class="topbar__eyebrow">plan · Deporte</span>
+        <h1>Generar plan automáticamente</h1>
     </div>
     <a href="{% url 'tasks:plan_list' %}" class="stats-link">← Volver</a>
 </header>
 
 <p class="field__hint">
-    Describe qué quieres conseguir y la IA propone un plan con objetivos medibles
-    y su progresión semana a semana. Tú decides el tipo de plan, cuántas semanas
-    dura y qué días entrenas — eso no lo toca la IA. Antes de guardarse nada,
-    verás el borrador completo para revisarlo o pedir otro.
+    Elige tu nivel, el foco corporal y cuántos días entrenas — la app elige los
+    ejercicios que tocan para ese nivel y calcula la progresión (series, repeticiones
+    y peso) con matemáticas fijas, sin depender de ningún servicio externo. Antes de
+    guardarse nada, verás el borrador completo para revisarlo o pedir otro.
 </p>
 
 <form class="task-form" method="post" id="ai-form">
     {% csrf_token %}
     <input type="hidden" name="step" value="generar">
 
-    <fieldset class="field" id="plan-type-field">
-        <legend class="field__label">Tipo de plan</legend>
+    <fieldset class="field" id="fitness-level-field">
+        <legend class="field__label">Nivel físico de partida</legend>
         <div class="repeat-options">
-            {% for value, label in plan_type_choices %}
+            {% for value, label in fitness_level_choices %}
             <label class="repeat-option">
-                <input type="radio" name="plan_type" value="{{ value }}" class="plan-type-radio"
-                    {% if plan_type == value %}checked{% endif %}>
+                <input type="radio" name="fitness_level" value="{{ value }}" required
+                    {% if fitness_level == value %}checked{% endif %}>
                 <span>{{ label }}</span>
             </label>
             {% endfor %}
         </div>
         <span class="field__hint">
-            Deporte: objetivos de ejercicio del catálogo, con progresión. General: un
-            hábito simple de cumplir o no, sin más. Estudio no está aquí — un plan de
-            idioma se crea a mano y asigna cursos del catálogo sin IA (botón «+ Nuevo
-            plan a mano»).
+            Decide con qué ejercicios y con qué series/repeticiones/peso de partida
+            empieza el plan — y hasta dónde llega la progresión.
         </span>
     </fieldset>
 
-    <div id="sport-fields">
-        <fieldset class="field" id="fitness-level-field">
-            <legend class="field__label">Nivel físico de partida</legend>
-            <div class="repeat-options">
-                {% for value, label in fitness_level_choices %}
-                <label class="repeat-option">
-                    <input type="radio" name="fitness_level" value="{{ value }}" class="fitness-level-radio"
-                        {% if fitness_level == value %}checked{% endif %}>
-                    <span>{{ label }}</span>
-                </label>
-                {% endfor %}
-            </div>
-            <span class="field__hint">
-                Sin esto, la IA tira a lo mínimo seguro para no pasarse — con tu nivel real puede
-                empezar (y exigir) mucho más.
-            </span>
-        </fieldset>
-
-        <fieldset class="field" id="focus-area-field">
-            <legend class="field__label">Foco corporal</legend>
-            <div class="repeat-options">
-                {% for value, label in focus_area_choices %}
-                <label class="repeat-option">
-                    <input type="radio" name="focus_area" value="{{ value }}"
-                        {% if focus_area == value %}checked{% endif %}>
-                    <span>{{ label }}</span>
-                </label>
-                {% endfor %}
-            </div>
-            <span class="field__hint">Tren superior, tren inferior/core, running, o cuerpo completo.</span>
-        </fieldset>
-
-        <fieldset class="field" id="body-stats-field">
-            <legend class="field__label">Datos físicos (opcional, pero ayudan)</legend>
-            <div class="field-row">
-                <label class="field">
-                    <span class="field__label">Peso corporal (kg)</span>
-                    <input type="number" name="body_weight_kg" min="20" max="300" step="0.5"
-                        value="{{ body_weight_kg }}" placeholder="Ej: 75">
-                </label>
-                <label class="field">
-                    <span class="field__label">Altura (cm)</span>
-                    <input type="number" name="height_cm" min="100" max="250" value="{{ height_cm }}"
-                        placeholder="Ej: 178">
-                </label>
-            </div>
-            <div class="repeat-options">
-                {% for value, label in body_sex_choices %}
-                <label class="repeat-option">
-                    <input type="radio" name="sex" value="{{ value }}" {% if sex == value %}checked{% endif %}>
-                    <span>{{ label }}</span>
-                </label>
-                {% endfor %}
-            </div>
-            <span class="field__hint">
-                Un entrenador de verdad los tiene en cuenta: a igualdad de repeticiones en
-                dominadas o fondos, alguien más pesado mueve más masa. No cambian tu nivel — solo
-                afinan el punto de partida.
-            </span>
-        </fieldset>
-
-        <label class="field field--inline">
-            <input type="checkbox" name="no_bar_equipment" {% if no_bar_equipment %}checked{% endif %}>
-            <span class="field__label">No tengo barra de dominadas ni paralelas en casa</span>
-        </label>
-
-        <div class="field-row">
-            <label class="field">
-                <span class="field__label">Minutos por sesión (opcional)</span>
-                <input type="number" name="session_minutes" min="5" max="180" value="{{ session_minutes }}"
-                    placeholder="Ej: 30">
+    <fieldset class="field" id="focus-area-field">
+        <legend class="field__label">Foco corporal</legend>
+        <div class="repeat-options">
+            {% for value, label in focus_area_choices %}
+            <label class="repeat-option">
+                <input type="radio" name="focus_area" value="{{ value }}"
+                    {% if focus_area == value %}checked{% endif %}>
+                <span>{{ label }}</span>
             </label>
-            <label class="field">
-                <span class="field__label">Peso máximo de lastre disponible en kg (opcional)</span>
-                <input type="number" name="max_load_kg" min="0" max="100" step="0.5"
-                    value="{{ max_load_kg }}" placeholder="Por defecto se asume ~20 (chaleco lastrado)">
-            </label>
+            {% endfor %}
         </div>
+        <span class="field__hint">Tren superior, tren inferior/core, running, o cuerpo completo.</span>
+    </fieldset>
 
-        <label class="field">
-            <span class="field__label">Lesión o limitación a tener en cuenta (opcional)</span>
-            <input type="text" name="limitations" maxlength="200" value="{{ limitations }}"
-                placeholder="Ej: molestia en la rodilla derecha">
-        </label>
-    </div>
-
-    <label class="field" id="prompt-field">
-        <span class="field__label" id="prompt-label">¿Qué quieres conseguir?</span>
-        <textarea name="prompt" rows="4" maxlength="800" id="prompt-textarea"
-            placeholder="Ej: quiero ponerme fuerte de tren superior, ahora mismo hago 2 dominadas. También quiero aguantar más la plancha.">{{ prompt }}</textarea>
-        <span class="field__hint" id="prompt-hint">Cuanto más concreto, mejor plan sale — di de dónde partes si lo sabes.</span>
+    <label class="field field--inline">
+        <input type="checkbox" name="no_bar_equipment" {% if no_bar_equipment %}checked{% endif %}>
+        <span class="field__label">No tengo barra de dominadas ni paralelas en casa</span>
     </label>
+
+    <label class="field">
+        <span class="field__label">Peso máximo de lastre disponible en kg</span>
+        <input type="number" name="max_load_kg" min="0" max="100" step="0.5" required
+            value="{{ max_load_kg }}">
+        <span class="field__hint">
+            Pon 0 si no tienes nada de peso extra en casa (chaleco lastrado, discos...) — con 0,
+            no se te van a proponer dominadas, fondos ni sentadillas con peso. Con un número, se
+            usa como tope de la meta si el plan incluye alguno de esos ejercicios.
+        </span>
+    </label>
+
+    <fieldset class="field" id="exercises-field">
+        <legend class="field__label">Ejercicios concretos (opcional)</legend>
+        <span class="field__hint">
+            Se filtra solo según el foco corporal de arriba: tren superior enseña
+            solo tren superior, tren inferior/core solo eso, running solo running —
+            cuerpo completo los enseña todos. Marca lo que quieras hacer y el plan
+            se hace SOLO con eso (el nivel sigue usándose para calcular con qué
+            series/repeticiones/peso empezar y hasta dónde llegar). Déjalo vacío
+            para que la app elija por ti dentro de esa misma zona.
+        </span>
+        {% regroup exercise_choices by body_area as exercise_groups %}
+        {% for group in exercise_groups %}
+        <div class="exercise-group" data-body-area="{{ group.grouper }}">
+            <p class="field__label" style="margin-top:10px;">{{ group.list.0.body_area_label }}</p>
+            <div class="repeat-options">
+                {% for ex in group.list %}
+                <label class="repeat-option">
+                    <input type="checkbox" name="exercises" value="{{ ex.slug }}"
+                        {% if ex.slug in selected_exercises %}checked{% endif %}>
+                    <span>{{ ex.name }}{% if ex.needs_bar %} (barra/paralelas){% endif %}</span>
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </fieldset>
 
     <div class="field-row" id="weeks-field-row">
         <label class="field">
@@ -155,70 +117,44 @@
     </fieldset>
 
     <div class="task-form__actions">
-        <button type="submit" class="primary-btn" id="ai-submit-btn">✨ Generar plan</button>
+        <button type="submit" class="primary-btn" id="ai-submit-btn">⚡ Generar plan</button>
     </div>
 </form>
 
 <script>
+// Filtra el selector de ejercicios según el foco corporal marcado arriba:
+// tren superior enseña solo tren superior, tren inferior/core solo eso,
+// running solo running — "cuerpo completo" (radio vacío) los enseña
+// todos. Los grupos que se ocultan se DESACTIVAN (no solo se esconden)
+// para que, si tenías algo marcado ahí, no se envíe igualmente al
+// cambiar de foco corporal sin querer — pero sigue marcado por si
+// vuelves a esa zona, no se pierde la selección.
 (function () {
-    var promptTextarea = document.getElementById("prompt-textarea");
-    var promptLabel = document.getElementById("prompt-label");
-    var promptHint = document.getElementById("prompt-hint");
-    var planTypeRadios = document.querySelectorAll(".plan-type-radio");
-    var sportFields = document.getElementById("sport-fields");
-    var fitnessLevelRadios = document.querySelectorAll(".fitness-level-radio");
+    var form = document.getElementById('ai-form');
+    if (!form) return;
+    var groups = form.querySelectorAll('.exercise-group');
 
-    function selectedValue(radios) {
-        for (var i = 0; i < radios.length; i++) {
-            if (radios[i].checked) return radios[i].value;
-        }
-        return "";
+    function currentFocusArea() {
+        var checked = form.querySelector('input[name="focus_area"]:checked');
+        return checked ? checked.value : '';
     }
 
-    function refresh() {
-        var isSport = selectedValue(planTypeRadios) === "sport";
-
-        // display, no el atributo `hidden` — con las clases .field del
-        // resto de la app, `hidden` se queda sin efecto (una regla de
-        // display en la hoja de estilos le gana), así que el campo se
-        // quedaba enseñándose siempre pasara lo que pasara.
-        //
-        // El cuestionario de nivel/foco/equipamiento solo tiene sentido
-        // para Deporte — es lo que evita que la IA improvise esos datos
-        // cuando el usuario solo escribe una frase corta como "ponerme en
-        // forma". Se exige nivel y foco (radios sin opción en blanco) para
-        // forzar una respuesta concreta en vez de dejarlo a la suerte.
-        sportFields.style.display = isSport ? "block" : "none";
-        for (var k = 0; k < fitnessLevelRadios.length; k++) {
-            fitnessLevelRadios[k].required = isSport;
-        }
-
-        if (isSport) {
-            // Con nivel + foco (arriba) ya hay suficiente para un plan serio —
-            // el texto libre ahora es solo para precisar (marca actual,
-            // una lesión concreta, un objetivo con fecha...), no obligatorio.
-            promptTextarea.required = false;
-            promptLabel.textContent = "¿Algo más que contarle a la IA? (opcional)";
-            promptHint.textContent = "Con el nivel y el foco de arriba ya alcanza para un buen plan — añade esto solo si quieres precisar más (tu marca actual, un objetivo con fecha...).";
-        } else {
-            promptTextarea.required = true;
-            promptLabel.textContent = "¿Qué quieres conseguir?";
-            promptHint.textContent = "Cuanto más concreto, mejor plan sale — di de dónde partes si lo sabes.";
-        }
+    function applyFilter() {
+        var focus = currentFocusArea();
+        groups.forEach(function (group) {
+            var show = !focus || group.dataset.bodyArea === focus;
+            group.style.display = show ? '' : 'none';
+            group.querySelectorAll('input[type="checkbox"]').forEach(function (cb) {
+                cb.disabled = !show;
+            });
+        });
     }
 
-    for (var i = 0; i < planTypeRadios.length; i++) {
-        planTypeRadios[i].addEventListener("change", refresh);
-    }
-    refresh();
+    form.querySelectorAll('input[name="focus_area"]').forEach(function (radio) {
+        radio.addEventListener('change', applyFilter);
+    });
+    applyFilter();
 })();
-
-document.getElementById("ai-form").addEventListener("submit", function (e) {
-    if (e.defaultPrevented) return;
-    var btn = document.getElementById("ai-submit-btn");
-    btn.disabled = true;
-    btn.textContent = "Generando… (puede tardar unos segundos)";
-});
 </script>
 
 {% endblock %}

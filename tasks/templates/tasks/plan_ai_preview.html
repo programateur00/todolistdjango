@@ -4,15 +4,16 @@
 
 <header class="topbar">
     <div class="topbar__title">
-        <span class="topbar__eyebrow">plan · IA · borrador</span>
+        <span class="topbar__eyebrow">plan · Deporte · borrador</span>
         <h1>Revisa tu plan</h1>
     </div>
     <a href="{% url 'tasks:plan_list' %}" class="stats-link">← Cancelar</a>
 </header>
 
 <p class="field__hint">
-    Esto es lo que propone la IA. Todavía no se ha guardado nada — puedes tocar
-    cualquier número antes de confirmar, o pedir otra propuesta.
+    Esto es lo que se ha generado automáticamente para tu nivel y foco. Todavía no
+    se ha guardado nada — puedes tocar cualquier número antes de confirmar, o pedir
+    otra propuesta.
 </p>
 
 <form class="task-form" method="post" id="ai-confirm-form">
@@ -46,25 +47,16 @@
         (esto ya no se puede cambiar aquí — «Cambiar la petición» para elegir otro).
     </p>
 
-    {% if draft.plan_type == 'general' %}
-    <p class="empty-state">
-        Un plan General no lleva objetivos aparte — la propia tarea diaria («{{ draft.plan_fields.name }}»)
-        es el hábito que cumples o no cada día.
-    </p>
-    {% endif %}
-
     {% for it in draft.items %}
     <section class="plan-item">
         <header class="plan-item__head">
             <h3>
-                {% if draft.plan_type == 'sport' %}{{ it.preview.exercise_name }}{% else %}Objetivo{% endif %}
+                {{ it.preview.exercise_name }}
                 {% if it.preview.is_headline %} ★{% endif %}
             </h3>
-            {% if draft.plan_type == 'sport' %}
             <span class="plan-item__prog">
                 {% if it.preview.is_running %}distancia{% elif it.preview.progression == 'double' %}doble progresión{% elif it.preview.progression == 'completion' %}cumplimiento{% else %}repeticiones{% endif %}
             </span>
-            {% endif %}
         </header>
 
         <label class="field">
@@ -72,7 +64,6 @@
             <input type="text" name="items-{{ forloop.counter0 }}-label" maxlength="80" value="{{ it.fields.label|default:'' }}">
         </label>
 
-        {% if draft.plan_type == 'sport' %}
         <label class="field field--inline">
             <input type="checkbox" name="items-{{ forloop.counter0 }}-is_headline" {% if it.preview.is_headline %}checked{% endif %}>
             <span class="field__label">Es la medida del plan</span>
@@ -145,14 +136,6 @@
         </div>
         {% endif %}
         {% endif %}
-        {% else %}
-        {# Estudio #}
-        <label class="field">
-            <span class="field__label">Minutos objetivo por sesión (opcional)</span>
-            <input type="number" min="1" name="items-{{ forloop.counter0 }}-target_minutes" value="{{ it.fields.target_minutes|default:'' }}">
-            <span class="field__hint">En blanco = sesión libre con temporizador manual, sin objetivo fijo.</span>
-        </label>
-        {% endif %}
 
         {% if it.preview.weekly %}
         <details class="plan-details">
@@ -186,21 +169,15 @@
 <form method="post" class="task-form__actions" style="margin-top:8px;">
     {% csrf_token %}
     <input type="hidden" name="step" value="regenerar">
-    <input type="hidden" name="plan_type" value="{{ draft.plan_type }}">
     <input type="hidden" name="weeks" value="{{ draft.plan_fields.weeks }}">
     {% for d in draft.plan_fields.custom_days %}<input type="hidden" name="custom_days" value="{{ d }}">{% endfor %}
-    <input type="hidden" name="prompt" value="{{ prompt }}">
     <input type="hidden" name="fitness_level" value="{{ fitness_level }}">
     <input type="hidden" name="focus_area" value="{{ focus_area }}">
     {% if no_bar_equipment %}<input type="hidden" name="no_bar_equipment" value="on">{% endif %}
-    <input type="hidden" name="session_minutes" value="{{ session_minutes }}">
-    <input type="hidden" name="limitations" value="{{ limitations }}">
-    <input type="hidden" name="body_weight_kg" value="{{ body_weight_kg }}">
-    <input type="hidden" name="height_cm" value="{{ height_cm }}">
-    <input type="hidden" name="sex" value="{{ sex }}">
     <input type="hidden" name="max_load_kg" value="{{ max_load_kg }}">
+    {% for slug in draft.selected_exercises %}<input type="hidden" name="exercises" value="{{ slug }}">{% endfor %}
     <button type="submit" class="ghost-btn">↻ Generar otra vez</button>
-    <a class="ghost-btn" href="{% url 'tasks:plan_ai_create' %}">Cambiar la petición</a>
+    <a class="ghost-btn" href="{% url 'tasks:plan_ai_create' %}">Cambiar los filtros</a>
 </form>
 
 {% endblock %}

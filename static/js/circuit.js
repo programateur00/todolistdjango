@@ -17,9 +17,13 @@
  */
 import {
   NOSE, L_SHOULDER, R_SHOULDER, L_HIP, R_HIP, L_ANKLE, R_ANKLE, L_WRIST, R_WRIST,
-  angle, MEDIAPIPE_VERSION, MODEL_URL, checkPlankPosture, checkSidePlankPosture, checkWallSitPosture,
+  angle,
+  checkPlankPosture, checkSidePlankPosture, checkWallSitPosture,
   checkKneeHoldBarPosture, checkDeadHangPosture,
 } from "./workout.js";
+// De dónde sale MediaPipe (versión + rutas a los ficheros locales)
+// vive en un único sitio — ver static/js/mediapipe-vendor.js.
+import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./mediapipe-vendor.js";
 
 (function () {
   "use strict";
@@ -258,12 +262,8 @@ import {
       canvas.height = video.videoHeight || 480;
 
       try {
-        const { FilesetResolver, PoseLandmarker } = await import(
-          `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}`
-        );
-        const vision = await FilesetResolver.forVisionTasks(
-          `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`
-        );
+        const { FilesetResolver, PoseLandmarker } = await import(MEDIAPIPE_BUNDLE_URL);
+        const vision = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_BASE_URL);
         poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
           baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
           runningMode: "VIDEO", numPoses: 1,

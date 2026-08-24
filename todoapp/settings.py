@@ -16,6 +16,20 @@ from pathlib import Path
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Carga un `.env` en la raíz del proyecto (si existe) ANTES de leer
+# ninguna variable de entorno de abajo — así en local basta con tener el
+# archivo, sin `setx` ni `$env:` ni reiniciar nada a mano cada vez que
+# cambias una clave. Si `python-dotenv` no está instalado, o no hay
+# `.env`, esto no hace nada y las variables de entorno "de verdad" (las
+# que ya tuvieras puestas con setx, o las del hosting en producción)
+# siguen funcionando exactamente igual que antes — nunca las pisa
+# (`override=False` es el comportamiento por defecto de load_dotenv).
+try:
+    from dotenv import load_dotenv
+    load_dotenv(BASE_DIR / ".env")
+except ImportError:
+    pass
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
@@ -128,22 +142,23 @@ CSRF_COOKIE_HTTPONLY = True
 
 
 # --------------------------------------------------------------
-# IA para generar planes (ver tasks/ai.py) — Google Gemini, porque tiene
-# tier gratis permanente (sin tarjeta) con salida en JSON estructurado.
-# Clave gratis en https://aistudio.google.com/apikey. Sin ella definida,
-# el botón de "generar con IA" falla con un aviso legible en vez de
-# reventar — el resto de la app funciona igual.
+# IA (ver tasks/ai.py) — Google Gemini, porque tiene tier gratis
+# permanente (sin tarjeta) con salida en JSON estructurado. Clave gratis
+# en https://aistudio.google.com/apikey.
+#
+# Lo ÚNICO que usa esto hoy es el test de repaso de Estudio · Idiomas
+# (unas preguntas cortas sobre los últimos vídeos vistos) — los planes de
+# Deporte ya NO se generan con IA, salen de matemáticas deterministas
+# (ver `api.build_plan_draft`), así que no hay cuota que proteger ni
+# límite de peticiones del que preocuparse. Sin GEMINI_API_KEY definida,
+# el test de repaso falla con un aviso legible en vez de reventar — el
+# resto de la app funciona igual.
 # --------------------------------------------------------------
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 # "gemini-2.5-flash" dejó de estar disponible para claves nuevas (Google
 # empuja hacia la generación 3) — si en el futuro cambian otra vez el
 # nombre del modelo gratis, se arregla aquí sin tocar código.
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
-
-# Tope diario de generaciones (ver AIGenerationLog en models.py) — protege
-# la cuota gratis de GEMINI_API_KEY, que hoy es una sola clave compartida
-# por toda la app. Ajustable sin tocar código si algún día hace falta.
-AI_PLAN_DAILY_LIMIT = int(os.environ.get("AI_PLAN_DAILY_LIMIT", "15"))
 
 # --------------------------------------------------------------
 # Búsqueda de cursos reales en YouTube (ver tasks/youtube_search.py) —

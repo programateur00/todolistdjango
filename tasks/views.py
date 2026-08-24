@@ -1196,97 +1196,74 @@ def quiz_result(request, quiz_uuid):
 
 def plan_ai_form(request):
     """
-    Crear un plan de Deporte (o General) describiéndolo en una frase en
-    vez de rellenando el formulario objetivo a objetivo. Dos pasos, sin
-    guardar nada hasta el final:
+    Crear un plan de Deporte generándolo automáticamente en vez de
+    rellenar el formulario objetivo a objetivo — 100% determinista, sin
+    IA de por medio (ver docstring de `api.build_plan_draft`): tú eliges
+    nivel físico, foco corporal, equipamiento, semanas y días, y la app
+    elige los ejercicios del catálogo que tocan para ese nivel/foco y
+    calcula la progresión con matemáticas fijas, no con un modelo de
+    lenguaje. Dos pasos, sin guardar nada hasta el final:
 
-      1. El usuario elige tipo de plan / semanas / días (igual que en la
-         creación manual) y escribe qué quiere conseguir. Al enviarlo se
-         llama a la IA (`api.build_plan_draft`, compartida con el
-         endpoint de la app móvil) y se enseña un borrador.
+      1. El usuario rellena el cuestionario. Al enviarlo se genera el
+         borrador (`api.build_plan_draft`, compartida con el endpoint de
+         la app móvil) y se enseña para revisar.
       2. El usuario revisa el borrador — puede tocar los números — y lo
-         confirma, o pide "generar otra vez" con el mismo prompt.
+         confirma, o pide "generar otra vez" con los mismos filtros.
 
-    Estudio no pasa por aquí: "Estudio · Idiomas" asigna cursos del
-    catálogo sin IA (ver `views.plan_form` → `plan_language_confirm`), y
-    generar con IA un hábito simple ("estudiar", "no fumar"...) no
-    aportaba nada que el usuario no supiera ya escribir él mismo — el
-    tipo de plan aquí se limita a Deporte y General, mismo criterio que
-    ya aplicaba la app móvil (ver AI_PLAN_TYPES en plan-view.js).
+    Solo Deporte: Estudio y General no pasan por aquí — "Estudio ·
+    Idiomas" asigna cursos del catálogo sin IA por su propio camino (ver
+    `views.plan_form` → `plan_language_confirm`), y General no tiene
+    ningún catálogo del que elegir, así que no hay nada que autogenerar
+    — ambos se crean a mano («+ Nuevo plan a mano»).
 
     El borrador vive en la sesión entre los dos pasos, para que tocar un
-    número y confirmar no obligue a volver a llamar a la IA.
+    número y confirmar no obligue a recalcular nada.
     """
-    ai_plan_type_choices = [c for c in Plan.PLAN_TYPE_CHOICES if c[0] != Plan.PLAN_TYPE_STUDY]
     step = request.POST.get("step")
 
     if request.method == "POST" and step in ("generar", "regenerar"):
-        plan_type = request.POST.get("plan_type", "")
-        if plan_type == Plan.PLAN_TYPE_STUDY:
-            # Defensivo: el formulario ya no ofrece Estudio, pero por si
-            # llega una petición vieja o manipulada, se trata como
-            # Deporte en vez de reventar.
-            plan_type = Plan.PLAN_TYPE_SPORT
         weeks = request.POST.get("weeks")
         custom_days = request.POST.getlist("custom_days")
-        prompt_text = request.POST.get("prompt", "")
 
-        # Cuestionario estructurado de Deporte — nivel, foco corporal,
-        # equipamiento, minutos por sesión, lesiones. Se le pasan a la IA
-        # como hechos explícitos en vez de esperar que los adivine de la
-        # frase libre (ver docstring de ai.generate_plan_draft): es lo que
-        # evita que "ponerme en forma" a secas salga como un plan de mínimos.
+        # Cuestionario — nivel físico, foco corporal, equipamiento, tope
+        # de lastre. Con esto la app elige el catálogo (ver
+        # `ai._select_sport_exercises`) y los números de partida/meta
+        # (ver `ai.default_item_fields`); no hace falta nada más.
         fitness_level = request.POST.get("fitness_level", "")
         focus_area = request.POST.get("focus_area", "")
         no_bar_equipment = request.POST.get("no_bar_equipment") == "on"
-        session_minutes = request.POST.get("session_minutes", "").strip()
-        limitations = request.POST.get("limitations", "").strip()
-        # Datos físicos (opcionales) — calibran la dificultad relativa
-        # (peso/sexo/altura) y el tope realista de peso añadido en
-        # ejercicios con lastre (la mayoría de chalecos son de 20 kg).
-        body_weight_kg = request.POST.get("body_weight_kg", "").strip()
-        height_cm = request.POST.get("height_cm", "").strip()
-        sex = request.POST.get("sex", "")
         max_load_kg = request.POST.get("max_load_kg", "").strip()
+        # Selector manual de ejercicios (ver plan_ai_form.html) — siempre
+        # visible, da igual nivel/foco: si el usuario marca algo aquí,
+        # sustituye del todo a la elección automática por nivel/zona.
+        selected_exercises = request.POST.getlist("exercises")
 
         draft, error = api.build_plan_draft(
-            user=get_current_user(), plan_type=plan_type, weeks=weeks,
-            custom_days=custom_days, prompt=prompt_text,
+            user=get_current_user(), weeks=weeks, custom_days=custom_days,
             fitness_level=fitness_level, focus_area=focus_area,
-            no_bar_equipment=no_bar_equipment, session_minutes=session_minutes,
-            limitations=limitations, body_weight_kg=body_weight_kg, height_cm=height_cm,
-            sex=sex, max_load_kg=max_load_kg,
+            no_bar_equipment=no_bar_equipment, max_load_kg=max_load_kg,
+            selected_exercises=selected_exercises,
         )
         if error:
             messages.error(request, error)
             return render(request, "tasks/plan_ai_form.html", {
-                "plan_type_choices": ai_plan_type_choices,
                 "fitness_level_choices": ai.FITNESS_LEVEL_CHOICES,
                 "focus_area_choices": ai.FOCUS_AREA_CHOICES,
-                "body_sex_choices": ai.BODY_SEX_CHOICES,
+                "exercise_choices": ai.all_exercise_choices(),
                 "weekdays": Task.WEEKDAYS,
                 "selected_days": custom_days or ["0", "2", "4"],
-                "prompt": prompt_text,
                 "weeks": weeks or 12,
-                "plan_type": plan_type or Plan.PLAN_TYPE_SPORT,
                 "fitness_level": fitness_level,
                 "focus_area": focus_area,
                 "no_bar_equipment": no_bar_equipment,
-                "session_minutes": session_minutes,
-                "limitations": limitations,
-                "body_weight_kg": body_weight_kg,
-                "height_cm": height_cm,
-                "sex": sex,
                 "max_load_kg": max_load_kg,
+                "selected_exercises": selected_exercises,
             })
         request.session["plan_ai_draft"] = draft
-        request.session["plan_ai_prompt"] = prompt_text
         return render(request, "tasks/plan_ai_preview.html", {
-            "draft": draft, "prompt": prompt_text,
+            "draft": draft,
             "fitness_level": fitness_level, "focus_area": focus_area,
-            "no_bar_equipment": no_bar_equipment, "session_minutes": session_minutes,
-            "limitations": limitations, "body_weight_kg": body_weight_kg,
-            "height_cm": height_cm, "sex": sex, "max_load_kg": max_load_kg,
+            "no_bar_equipment": no_bar_equipment, "max_load_kg": max_load_kg,
         })
 
     if request.method == "POST" and step == "confirmar":
@@ -1297,15 +1274,13 @@ def plan_ai_form(request):
 
         # Igual que en la creación manual: sin hora no hay a qué hora
         # avisar ni cuándo cerrar el día solo (ver Task.expire_overdue).
-        # La IA no la propone — es una decisión del usuario, no algo que
-        # se pueda adivinar de la petición — así que se pide aquí, en la
-        # vista previa, antes de guardar nada.
+        # Es una decisión del usuario, no algo que la generación
+        # automática pueda adivinar — así que se pide aquí, en la vista
+        # previa, antes de guardar nada.
         due_time = request.POST.get("due_time") or None
         if not due_time:
             messages.error(request, "Ponle una hora — la notificación y el cierre automático del día la necesitan.")
-            return render(request, "tasks/plan_ai_preview.html", {
-                "draft": draft, "prompt": request.session.get("plan_ai_prompt", ""),
-            })
+            return render(request, "tasks/plan_ai_preview.html", {"draft": draft})
 
         plan_data = {
             "name": request.POST.get("name", "").strip(),
@@ -1330,8 +1305,8 @@ def plan_ai_form(request):
             item_data = dict(item["fields"])
             # Solo estos números son editables en la vista previa — el
             # resto (ejercicio, modo, incrementos ya calculados a partir
-            # de "en cuántas semanas quieres llegar"...) se queda tal
-            # como lo propuso la IA.
+            # de las tablas por nivel...) se queda tal como lo propuso la
+            # generación automática.
             item_data["is_headline"] = bool(request.POST.get(prefix + "is_headline"))
             for key in (
                 "label", "start_sets", "start_reps", "start_seconds", "start_weight_kg",
@@ -1355,30 +1330,27 @@ def plan_ai_form(request):
 
         plan.sync_task()
         request.session.pop("plan_ai_draft", None)
-        request.session.pop("plan_ai_prompt", None)
-        messages.success(request, f"Plan «{plan.name}» creado con IA.")
+        messages.success(request, f"Plan «{plan.name}» creado automáticamente.")
         return redirect(reverse("tasks:plan_detail", args=[plan.pk]))
 
     # GET, o "volver" desde la vista previa sin confirmar.
     return render(request, "tasks/plan_ai_form.html", {
-        "plan_type_choices": ai_plan_type_choices,
         "fitness_level_choices": ai.FITNESS_LEVEL_CHOICES,
         "focus_area_choices": ai.FOCUS_AREA_CHOICES,
-        "body_sex_choices": ai.BODY_SEX_CHOICES,
+        "exercise_choices": ai.all_exercise_choices(),
         "weekdays": Task.WEEKDAYS,
         "selected_days": ["0", "2", "4"],
-        "prompt": request.session.get("plan_ai_prompt", ""),
         "weeks": 12,
-        "plan_type": Plan.PLAN_TYPE_SPORT,
         "fitness_level": "",
         "focus_area": "",
         "no_bar_equipment": False,
-        "session_minutes": "",
-        "limitations": "",
-        "body_weight_kg": "",
-        "height_cm": "",
-        "sex": "",
-        "max_load_kg": "",
+        # Precargado con un valor por defecto razonable (chaleco lastrado
+        # doméstico típico — mismo número que `ai._DEFAULT_MAX_LOAD_KG`)
+        # ya que el campo es obligatorio: así el usuario ve un número con
+        # sentido en vez de una casilla vacía, y solo tiene que cambiarlo
+        # a 0 si de verdad no tiene nada de peso extra.
+        "max_load_kg": 20,
+        "selected_exercises": [],
     })
 
 
