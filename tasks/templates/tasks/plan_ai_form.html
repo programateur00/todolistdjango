@@ -76,7 +76,9 @@
             cuerpo completo los enseña todos. Marca lo que quieras hacer y el plan
             se hace SOLO con eso (el nivel sigue usándose para calcular con qué
             series/repeticiones/peso empezar y hasta dónde llegar). Déjalo vacío
-            para que la app elija por ti dentro de esa misma zona.
+            para que la app elija por ti dentro de esa misma zona. El número que
+            aparece al marcar uno es el orden en el que entrará en el plan —
+            usa las flechitas para reordenarlos sin tener que desmarcar nada.
         </span>
         {% regroup exercise_choices by body_area as exercise_groups %}
         {% for group in exercise_groups %}
@@ -84,15 +86,21 @@
             <p class="field__label" style="margin-top:10px;">{{ group.list.0.body_area_label }}</p>
             <div class="repeat-options">
                 {% for ex in group.list %}
-                <label class="repeat-option">
+                <label class="repeat-option exercise-toggle">
                     <input type="checkbox" name="exercises" value="{{ ex.slug }}"
                         {% if ex.slug in selected_exercises %}checked{% endif %}>
                     <span>{{ ex.name }}{% if ex.needs_bar %} (barra/paralelas){% endif %}</span>
+                    <span class="exercise-toggle__order" hidden></span>
+                    <span class="exercise-toggle__move" hidden>
+                        <button type="button" class="exercise-toggle__move-btn" data-move="-1" aria-label="Subir en el orden">↑</button>
+                        <button type="button" class="exercise-toggle__move-btn" data-move="1" aria-label="Bajar en el orden">↓</button>
+                    </span>
                 </label>
                 {% endfor %}
             </div>
         </div>
         {% endfor %}
+        <input type="hidden" name="exercises_order" id="exercises-order-input" value="">
     </fieldset>
 
     <div class="field-row" id="weeks-field-row">
@@ -154,6 +162,78 @@
         radio.addEventListener('change', applyFilter);
     });
     applyFilter();
+})();
+
+// Numera y permite reordenar los ejercicios marcados arriba A LA VEZ que se
+// van marcando, en vez de ser un paso aparte (como "Tu circuito, en orden"
+// en routine_form.html). El servidor solo mira exercises_order para decidir
+// el orden final del plan (ver _select_exercises_from_slugs en ai.py) — el
+// orden de los checkboxes en el HTML es fijo (agrupados por zona), así que
+// sin esto el plan siempre salía en ese mismo orden de catálogo, nunca en
+// el orden real en que se habían marcado.
+(function () {
+    var field = document.getElementById('exercises-field');
+    if (!field) return;
+    var checkboxes = Array.prototype.slice.call(field.querySelectorAll('input[name="exercises"]'));
+    var orderInput = document.getElementById('exercises-order-input');
+    var order = [];
+
+    // Semilla: si el formulario vuelve con algo ya marcado (p. ej. tras un
+    // error de validación), no hay forma de recuperar el orden real de
+    // clics de antes de recargar — se parte del orden en que aparecen en
+    // el DOM, y a partir de aquí ya se sigue bien con cada clic.
+    checkboxes.forEach(function (cb) {
+        if (cb.checked) order.push(cb.value);
+    });
+
+    function partsFor(cb) {
+        var label = cb.closest('label');
+        return {
+            badge: label.querySelector('.exercise-toggle__order'),
+            move: label.querySelector('.exercise-toggle__move'),
+        };
+    }
+
+    function render() {
+        checkboxes.forEach(function (cb) {
+            var idx = order.indexOf(cb.value);
+            var parts = partsFor(cb);
+            var on = idx !== -1;
+            parts.badge.hidden = !on;
+            parts.move.hidden = !on;
+            if (on) parts.badge.textContent = idx + 1;
+        });
+        orderInput.value = order.join(',');
+    }
+
+    function move(slug, dir) {
+        var idx = order.indexOf(slug);
+        var target = idx + dir;
+        if (idx === -1 || target < 0 || target >= order.length) return;
+        var tmp = order[idx]; order[idx] = order[target]; order[target] = tmp;
+        render();
+    }
+
+    checkboxes.forEach(function (cb) {
+        cb.addEventListener('change', function () {
+            var idx = order.indexOf(cb.value);
+            if (cb.checked && idx === -1) order.push(cb.value);
+            else if (!cb.checked && idx !== -1) order.splice(idx, 1);
+            render();
+        });
+        // Los botones ↑/↓ viven DENTRO del <label> (para quedar pegados al
+        // ejercicio) — sin frenar el evento aquí, el navegador reenviaría
+        // el clic al checkbox del label y lo desmarcaría sin querer.
+        partsFor(cb).move.querySelectorAll('[data-move]').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                move(cb.value, parseInt(btn.dataset.move, 10));
+            });
+        });
+    });
+
+    render();
 })();
 </script>
 

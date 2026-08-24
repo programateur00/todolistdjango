@@ -18,6 +18,7 @@
      data-counter-key="{{ exercise.counter_key|default:'pullup' }}"
      data-target-sets="{{ target.target_sets|default:'' }}"
      data-target-reps="{{ target.target_reps|default:'' }}"
+     data-target-seconds="{{ target.target_seconds|default:'' }}"
      class="workout">
     {% csrf_token %}
 
@@ -29,7 +30,7 @@
     <p id="workout-status" class="workout__status">Iniciando…</p>
     <p id="workout-goal-banner" class="workout__goal-banner" hidden></p>
     <p id="workout-debug" class="workout__debug"></p>
-    {% if exercise.counter_key == "scissor" or exercise.counter_key == "plank" or exercise.counter_key == "sideplank" or exercise.counter_key == "wallsit" or exercise.counter_key == "kneeholdbar" or exercise.counter_key == "deadhang" %}
+    {% if exercise.counter_key == "scissor" or exercise.counter_key == "plank" or exercise.counter_key == "sideplank" or exercise.counter_key == "wallsit" or exercise.counter_key == "kneeholdbar" or exercise.counter_key == "handstand" %}
     <button type="button" id="workout-debug-export" class="workout__btn workout__btn--ghost">
         📋 Copiar registro de depuración
     </button>

@@ -19,7 +19,8 @@ import {
   NOSE, L_SHOULDER, R_SHOULDER, L_HIP, R_HIP, L_ANKLE, R_ANKLE, L_WRIST, R_WRIST,
   angle,
   checkPlankPosture, checkSidePlankPosture, checkWallSitPosture,
-  checkKneeHoldBarPosture, checkDeadHangPosture,
+  checkKneeHoldBarPosture, checkHandstandPosture,
+  speakOut, numeroEnPalabras, isVoiceEnabled,
 } from "./workout.js";
 // De dónde sale MediaPipe (versión + rutas a los ficheros locales)
 // vive en un único sitio — ver static/js/mediapipe-vendor.js.
@@ -104,8 +105,8 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   // Ejercicios cronometrados que además llevan cámara: comprueban
   // postura en vez de contar repeticiones. Ver checkPlankPosture /
   // checkSidePlankPosture / checkWallSitPosture / checkKneeHoldBarPosture /
-  // checkDeadHangPosture más abajo.
-  const POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "deadhang"]);
+  // checkHandstandPosture más abajo.
+  const POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "handstand"]);
 
   function runCurrent() {
     const item = current();
@@ -175,12 +176,11 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   // --------------------------------------- cronómetro + postura (plancha)
 
   // checkPlankPosture / checkSidePlankPosture / checkWallSitPosture /
-  // checkKneeHoldBarPosture / checkDeadHangPosture viven ahora en
+  // checkKneeHoldBarPosture / checkHandstandPosture viven ahora en
   // workout.js (importadas arriba) — se comparten con el entreno suelto
   // de una tarea (plancha, plancha lateral, silla en pared, kneehold en
-  // barra y dead hang ya no dependen solo de estar dentro de un
-  // circuito), en vez de mantener la misma comprobación duplicada en dos
-  // sitios.
+  // barra y pino ya no dependen solo de estar dentro de un circuito), en
+  // vez de mantener la misma comprobación duplicada en dos sitios.
 
   async function runTimerWithPosture(item) {
     const checker =
@@ -190,8 +190,8 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         ? checkWallSitPosture
         : item.counter_key === "kneeholdbar"
         ? checkKneeHoldBarPosture
-        : item.counter_key === "deadhang"
-        ? checkDeadHangPosture
+        : item.counter_key === "handstand"
+        ? checkHandstandPosture
         : checkPlankPosture;
 
     playerHost.innerHTML = `
@@ -204,23 +204,34 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
           <canvas id="posture-canvas" class="workout__canvas"></canvas>
         </div>
         <p id="posture-status" class="workout__status">Preparando la cámara…</p>
+        <p id="run-goal-banner" class="workout__goal-banner" hidden></p>
         <div class="circuit__timer" id="run-timer">${fmt(item.work)}</div>
         <p class="circuit__next">${hasNext() ? `Siguiente: ${esc(sequence[index + 1].name)}` : "¡Último ejercicio!"}</p>
         <div class="circuit__controls">
           <button type="button" class="workout__btn workout__btn--ghost" id="run-skip">Saltar ▸</button>
           <button type="button" class="workout__btn workout__btn--ghost" id="run-quit">Terminar antes</button>
         </div>
-        <p class="workout__note">La cuenta atrás se pausa sola mientras la postura no sea correcta.</p>
+        <p class="workout__note">La cuenta atrás se pausa sola mientras la postura no sea correcta. Si sigues después del objetivo, sigue sumando por encima del 100%.</p>
       </div>`;
 
-    let remaining = item.work;
+    // OJO: a diferencia de antes, llegar a item.work YA NO cierra el
+    // ejercicio solo — antes remaining llegaba a 0 y se cerraba la serie
+    // de golpe, así que nunca se podía aguantar más del objetivo (ni
+    // aunque quisieras). Ahora, igual que en dominadas/fondos (sigue
+    // contando por encima del 100% si quieres, se guarda tal cual), el
+    // cronómetro pasa a contar hacia ADELANTE los segundos de propina y
+    // eres tú quien decide cuándo parar con "Saltar"/"Terminar antes".
     let elapsed = 0;
     let postureOk = false;
+    let goalReached = false;
+    let lastSpokenNumber = null; // último entero (cuenta atrás o adelante) ya dicho, para no repetirlo en el mismo segundo
     let running = true;
     let stream = null;
     let poseLandmarker = null;
     const timerEl = document.getElementById("run-timer");
     const statusEl = document.getElementById("posture-status");
+    const goalBannerEl = document.getElementById("run-goal-banner");
+    const skipBtn = document.getElementById("run-skip");
     const video = document.getElementById("posture-video");
     const canvas = document.getElementById("posture-canvas");
 
@@ -236,7 +247,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       record({ exercise: item.slug, seconds: secondsHeld });
     }
 
-    document.getElementById("run-skip").addEventListener("click", () => {
+    skipBtn.addEventListener("click", () => {
       finishThis(elapsed);
       advance();
     });
@@ -248,7 +259,10 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: 640, height: 480 }, audio: false,
+        // Misma resolución que workout.js (ver ahí el porqué): 1280x720
+        // en vez de 640x480, para que el seguimiento no se degrade a
+        // cierta distancia de la cámara.
+        video: { facingMode: "user", width: 1280, height: 720 }, audio: false,
       });
     } catch (err) {
       statusEl.textContent = "No se pudo acceder a la cámara — revisa los permisos del navegador. La cuenta atrás sigue sin comprobar la postura.";
@@ -295,16 +309,53 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     clearInterval(timerId);
     timerId = setInterval(() => {
       if (!postureOk) return; // pausado mientras la postura no sea válida
-      remaining -= 1;
       elapsed += 1;
-      if (remaining <= 0) {
-        finishThis(item.work);
-        beep(880, 0.2);
-        advance();
+
+      if (!goalReached && elapsed < item.work) {
+        // Cuenta atrás normal hacia el objetivo — igual que antes, pero
+        // ahora además dicha en voz alta cada segundo (como cada
+        // repetición en dominadas/fondos), para poder seguir sin mirar
+        // la pantalla.
+        const remaining = item.work - elapsed;
+        timerEl.textContent = fmt(remaining);
+        if (remaining <= 3) beep(660, 0.1);
+        if (isVoiceEnabled() && remaining !== lastSpokenNumber) {
+          lastSpokenNumber = remaining;
+          speakOut(numeroEnPalabras(remaining));
+        }
         return;
       }
-      if (remaining <= 3) beep(660, 0.1);
-      timerEl.textContent = fmt(remaining);
+
+      if (!goalReached) {
+        // Objetivo alcanzado justo este segundo — un aviso, una sola vez,
+        // y sin cortar nada (el ejercicio sigue: ya no se cierra solo).
+        goalReached = true;
+        lastSpokenNumber = 0;
+        beep(880, 0.2);
+        if (isVoiceEnabled()) speakOut("¡Objetivo cumplido!", { flush: false });
+        if (goalBannerEl) {
+          goalBannerEl.hidden = false;
+          goalBannerEl.textContent = `🎯 ¡Objetivo cumplido! (${fmt(item.work)}) Sigue si quieres, o termina cuando acabes.`;
+        }
+        // "Saltar" ya no describe bien lo que hace este botón una vez
+        // cumplido el objetivo (no se está saltando nada) — mismo texto
+        // que usa workout.js para el botón equivalente en reps.
+        skipBtn.textContent = hasNext() ? "Siguiente ▸" : "Terminar";
+        timerEl.textContent = "+0";
+        return;
+      }
+
+      // Por encima del objetivo: cuenta hacia ADELANTE los segundos de
+      // propina, igual que seguir oyendo "9", "10" al pasarte de un
+      // objetivo de 8 dominadas — así se nota de oído que vas por encima
+      // del 100% (y se guarda tal cual: ver finish(), el % de logro ya
+      // sabe compararlo contra item.work).
+      const over = elapsed - item.work;
+      timerEl.textContent = `+${fmt(over)}`;
+      if (isVoiceEnabled() && over !== lastSpokenNumber) {
+        lastSpokenNumber = over;
+        speakOut(numeroEnPalabras(over));
+      }
     }, 1000);
   }
 
@@ -438,10 +489,21 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
             .map((b) => {
               const item = sequence.find((i) => i.slug === b.exercise);
               const detail = b.reps ? `${b.reps} reps en ${b.sets} serie(s)` : `${b.seconds}s`;
+              // Porcentaje conseguido sobre el objetivo, si lo había. Para
+              // reps es sobre el volumen total (sets × reps); para
+              // cronometrados (plancha, plancha lateral…) es sobre el
+              // objetivo de ESE tramo (item.work) — aquí no hay "series"
+              // que sumar, cada aparición en el circuito es un aguante
+              // suelto, y ahora puede superar el objetivo (ver
+              // runTimerWithPosture, ya no se corta solo al llegar).
               let pct = "";
               if (item?.target_sets && item?.target_reps && b.reps) {
                 const meta = item.target_sets * item.target_reps;
                 const logro = Math.round((100 * b.reps) / meta);
+                const clase = logro >= 100 ? "run-pct--full" : "run-pct--partial";
+                pct = `<span class="run-pct ${clase}">${logro}%</span>`;
+              } else if (item?.work && b.seconds) {
+                const logro = Math.round((100 * b.seconds) / item.work);
                 const clase = logro >= 100 ? "run-pct--full" : "run-pct--partial";
                 pct = `<span class="run-pct ${clase}">${logro}%</span>`;
               }

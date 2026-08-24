@@ -106,7 +106,6 @@ _EXCLUDED_FROM_AUTOGEN = {"bicycle-crunch"}
 _EXERCISE_DIFFICULTY = {
     # Tren superior
     "push-up": "beginner",
-    "dead-hang": "beginner",
     "jumping-pullup": "beginner",
     "dips": "intermediate",
     "pullup": "intermediate",
@@ -115,6 +114,11 @@ _EXERCISE_DIFFICULTY = {
     "weighted-pullup": "advanced",
     "weighted-dips": "advanced",
     "archer-pullup": "advanced",
+    # El pino exige equilibrio invertido y estabilidad de hombro que un
+    # principiante de verdad no suele tener todavía, aunque se use apoyo
+    # en la pared — más cerca de kneehold-bar (también "advanced") que de
+    # dead-hang (que quitó su sitio aquí: solo pedía agarre y aguantar).
+    "handstand": "advanced",
     # Tren inferior / core
     "squat": "beginner",
     "situp": "beginner",
@@ -465,7 +469,7 @@ _EXERCISE_CATEGORY_DEFAULTS = {
         "intermediate": {"sets": 3, "start": 4, "rate": 1, "sessions_per_step": 4, "max_goal": 18},
         "advanced":     {"sets": 4, "start": 6, "rate": 1, "sessions_per_step": 4, "max_goal": 22},
     },
-    "timed": {  # aguantes (plancha, dead hang...) — sube en segundos, no en repeticiones
+    "timed": {  # aguantes (plancha, pino...) — sube en segundos, no en repeticiones
         "beginner":     {"sets": 2, "start": 20, "rate": 2, "sessions_per_step": 2, "max_goal": 100},
         "intermediate": {"sets": 3, "start": 30, "rate": 2, "sessions_per_step": 2, "max_goal": 140},
         "advanced":     {"sets": 4, "start": 40, "rate": 3, "sessions_per_step": 2, "max_goal": 210},

@@ -1030,11 +1030,11 @@ COUNTERS = {"pullup", "dip", "pushup", "squat", "crunch", "legraise", "situp", "
 
 # Ejercicios "timed" (se aguantan, no se cuentan en repeticiones) que
 # workout.js sabe seguir con cámara comprobando la postura — plancha,
-# plancha lateral, silla en pared, kneehold en barra y dead hang. Ver
+# plancha lateral, silla en pared, kneehold en barra y pino. Ver
 # task_workout: a estos, a diferencia del resto de "timed" (bicicleta…),
 # sí se les deja entrar en el entreno individual de una tarea con cámara
 # encendida, no solo dentro de un circuito.
-POSTURE_COUNTERS = {"plank", "sideplank", "wallsit", "kneeholdbar", "deadhang"}
+POSTURE_COUNTERS = {"plank", "sideplank", "wallsit", "kneeholdbar", "handstand"}
 
 
 def _plans_qs():
@@ -1238,6 +1238,23 @@ def plan_ai_form(request):
         # visible, da igual nivel/foco: si el usuario marca algo aquí,
         # sustituye del todo a la elección automática por nivel/zona.
         selected_exercises = request.POST.getlist("exercises")
+        # El orden de los checkboxes en el HTML es fijo (agrupados por
+        # zona corporal), así que NO refleja el orden real en que se han
+        # ido marcando — exercises_order sí lo lleva (lo mantiene el JS del
+        # propio formulario, actualizado con cada clic). Se reordena
+        # selected_exercises con eso: se filtra por si acaso a lo que sigue
+        # marcado de verdad (por si un ejercicio se desactivó al cambiar de
+        # foco corporal) y se añade al final cualquier marcado que faltara
+        # ahí (JS desactivado, etc.), para no perder ninguna selección
+        # aunque en ese caso el orden no sea exacto.
+        exercises_order_raw = request.POST.get("exercises_order", "")
+        if exercises_order_raw:
+            checked = set(selected_exercises)
+            ordered = list(dict.fromkeys(
+                s for s in exercises_order_raw.split(",") if s in checked
+            ))
+            missing = [s for s in selected_exercises if s not in ordered]
+            selected_exercises = ordered + missing
 
         draft, error = api.build_plan_draft(
             user=get_current_user(), weeks=weeks, custom_days=custom_days,

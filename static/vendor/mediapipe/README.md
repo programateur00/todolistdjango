@@ -27,10 +27,37 @@ registro de npm — sha1 `16c5ddc513408f2a416ccc6ce8ccc797ee02da3b`):
   `storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task`
   (el entorno donde se preparó el resto de este cambio no tenía salida
   a ese dominio, solo a un puñado de registros de paquetes — este
-  fichero sí se pudo bajar desde un ordenador normal).
+  fichero sí se pudo bajar desde un ordenador normal). **Ya no se usa**
+  (ver aviso `models/pose_landmarker_full.task` más abajo) — se deja
+  aquí sin borrar por si hiciera falta volver atrás.
 
-Todo vendorizado del todo: no se pide nada a jsdelivr ni a Google en
-ninguna sesión de entreno.
+⚠️ **PENDIENTE (2026-08-24): `models/pose_landmarker_full.task` NO
+está todavía.** `mediapipe-vendor.js` ya apunta a
+`models/pose_landmarker_full.task` (cambio hecho para arreglar que las
+dominadas no contaban a cierta distancia — el modelo lite pierde
+precisión de landmark antes que el full, y ese ruido se come el margen
+de los umbrales de `workout.js`), pero el entorno donde se hizo el
+cambio de código no tiene salida a `storage.googleapis.com` (mismo
+motivo que el lite de arriba), así que el fichero en sí no se pudo
+bajar. Hasta que alguien lo coloque aquí, la web fallará al cargar el
+modelo ("No se pudo cargar el modelo de seguimiento").
+
+Para completarlo, desde un ordenador normal con internet:
+
+```
+curl -L -o models/pose_landmarker_full.task \
+  https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task
+```
+
+(o abrir esa URL en el navegador y guardar el fichero descargado en
+esta carpeta con ese nombre) y hacer commit/deploy del fichero nuevo
+junto al resto de `static/`. Son unos 9-10 MB. La app móvil no necesita
+este paso: descarga el modelo full sola la primera vez que se usa la
+cámara (ver `MODEL_REMOTE`/`MODEL_LOCAL` en `mobile-app/www/js/workout.js`)
+y lo cachea, porque ya estaba montado así desde antes.
+
+Todo vendorizado del todo (una vez puesto el fichero de arriba): no se
+pide nada a jsdelivr ni a Google en ninguna sesión de entreno.
 
 ## Único sitio donde se decide de dónde sale todo esto
 

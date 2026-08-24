@@ -6,11 +6,25 @@
  * en la web) y el guardado es un fetch normal con CSRF, no el cliente
  * de API de la app.
  *
- *   - mode "timed"  (plancha, crunch)   -> cuenta atrás
+ *   - mode "timed", sin counter_key de postura -> cuenta atrás a secas
+ *   - mode "timed", con counter_key de postura (plancha, plancha
+ *     lateral…) -> cuenta atrás + cámara verificando la postura, igual
+ *     que circuit.js (ver runTimerWithPosture) — antes esto no existía
+ *     aquí y una plancha dentro de un plan se jugaba como un cronómetro
+ *     ciego, sin comprobar nada con la cámara, a diferencia de un
+ *     circuito suelto o de la app móvil (session-runner.js), que sí lo
+ *     hacían. Se ha traído la misma función.
  *   - mode "pose"   (dominadas, fondos) -> cámara contando reps
  *     (el conteo de verdad lo sigue haciendo workout.js sin tocarlo;
  *     aquí solo se le engancha vía window.__workoutSubmit)
  */
+import {
+  checkPlankPosture, checkSidePlankPosture, checkWallSitPosture,
+  checkKneeHoldBarPosture, checkHandstandPosture,
+  speakOut, numeroEnPalabras, isVoiceEnabled,
+} from "./workout.js";
+import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./mediapipe-vendor.js";
+
 (function () {
   "use strict";
 
@@ -90,10 +104,15 @@
     breakdown.push(entry);
   }
 
+  // Ver checkPlankPosture/etc. importadas arriba — mismo set que
+  // circuit.js.
+  const POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "handstand"]);
+
   function runCurrent() {
     const item = current();
     if (!item) return finish();
     if (item.mode === "pose") runCamera(item);
+    else if (POSTURE_COUNTERS.has(item.counter_key)) runTimerWithPosture(item);
     else runTimer(item);
   }
 
@@ -152,6 +171,171 @@
       if (elapsed > 0) record({ exercise: item.slug, seconds: elapsed });
       finish();
     });
+  }
+
+  // ------------------------------------------------- cronómetro + postura
+  //
+  // Igual que circuit.js (ver ahí el porqué de cada cosa): plancha,
+  // plancha lateral, sentado en pared, kneehold en barra y pino
+  // llevan cámara comprobando la postura, no un cronómetro ciego. Y
+  // llegar a item.work YA NO cierra el ejercicio solo — sigue contando
+  // hacia ADELANTE por encima del objetivo (con voz), igual que
+  // dominadas/fondos pueden seguir sumando reps por encima del 100%.
+
+  async function runTimerWithPosture(item) {
+    const checker =
+      item.counter_key === "sideplank"
+        ? checkSidePlankPosture
+        : item.counter_key === "wallsit"
+        ? checkWallSitPosture
+        : item.counter_key === "kneeholdbar"
+        ? checkKneeHoldBarPosture
+        : item.counter_key === "handstand"
+        ? checkHandstandPosture
+        : checkPlankPosture;
+
+    playerHost.innerHTML = `
+      <div class="circuit">
+        <p class="circuit__progress">${esc(progressLabel())}</p>
+        <h2 class="circuit__exercise-name">${esc(item.name)}</h2>
+        <p class="circuit__phase circuit__phase--work">Trabajo</p>
+        <div class="workout__camera">
+          <video id="posture-video" playsinline muted class="workout__video"></video>
+          <canvas id="posture-canvas" class="workout__canvas"></canvas>
+        </div>
+        <p id="posture-status" class="workout__status">Preparando la cámara…</p>
+        <p id="run-goal-banner" class="workout__goal-banner" hidden></p>
+        <div class="circuit__timer" id="run-timer">${fmt(item.work)}</div>
+        <p class="circuit__next">${hasNext() ? `Siguiente: ${esc(sequence[index + 1].name)}` : "¡Último!"}</p>
+        <div class="circuit__controls">
+          <button type="button" class="workout__btn workout__btn--ghost" id="run-skip">Saltar ▸</button>
+          <button type="button" class="workout__btn workout__btn--ghost" id="run-quit">Terminar antes</button>
+        </div>
+        <p class="workout__note">La cuenta atrás se pausa sola mientras la postura no sea correcta. Si sigues después del objetivo, sigue sumando por encima del 100%.</p>
+      </div>`;
+
+    let elapsed = 0;
+    let postureOk = false;
+    let goalReached = false;
+    let lastSpokenNumber = null; // último entero (cuenta atrás o adelante) ya dicho, para no repetirlo en el mismo segundo
+    let running = true;
+    let stream = null;
+    let poseLandmarker = null;
+    const timerEl = document.getElementById("run-timer");
+    const statusEl = document.getElementById("posture-status");
+    const goalBannerEl = document.getElementById("run-goal-banner");
+    const skipBtn = document.getElementById("run-skip");
+    const video = document.getElementById("posture-video");
+    const canvas = document.getElementById("posture-canvas");
+
+    function stopCamera() {
+      running = false;
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+      if (poseLandmarker) poseLandmarker.close();
+    }
+
+    function finishThis(secondsHeld) {
+      clearInterval(timerId);
+      stopCamera();
+      record({ exercise: item.slug, seconds: secondsHeld });
+    }
+
+    skipBtn.addEventListener("click", () => {
+      finishThis(elapsed);
+      advance();
+    });
+    document.getElementById("run-quit").addEventListener("click", () => {
+      if (!confirm("¿Terminar la sesión ahora? Se guarda lo hecho hasta aquí.")) return;
+      finishThis(elapsed);
+      finish();
+    });
+
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        // Misma resolución que workout.js (ver ahí el porqué): 1280x720
+        // en vez de 640x480, para que el seguimiento no se degrade a
+        // cierta distancia de la cámara.
+        video: { facingMode: "user", width: 1280, height: 720 }, audio: false,
+      });
+    } catch (err) {
+      statusEl.textContent = "No se pudo acceder a la cámara — revisa los permisos del navegador. La cuenta atrás sigue sin comprobar la postura.";
+      postureOk = true; // sin cámara, no bloquea el ejercicio — degrada a cronómetro normal
+    }
+
+    if (stream) {
+      video.srcObject = stream;
+      await video.play();
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+
+      try {
+        const { FilesetResolver, PoseLandmarker } = await import(MEDIAPIPE_BUNDLE_URL);
+        const vision = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_BASE_URL);
+        poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
+          runningMode: "VIDEO", numPoses: 1,
+        });
+      } catch (err) {
+        statusEl.textContent = "No se pudo cargar el seguimiento de postura. La cuenta atrás sigue sin comprobarla.";
+        postureOk = true;
+        console.error(err);
+      }
+
+      if (poseLandmarker) {
+        const loop = () => {
+          if (!running) return;
+          const result = poseLandmarker.detectForVideo(video, performance.now());
+          if (result.landmarks && result.landmarks.length) {
+            const check = checker(result.landmarks[0]);
+            postureOk = check.ok;
+            statusEl.textContent = check.ok ? "Postura correcta — aguanta." : `⚠️ ${check.reason}`;
+          } else {
+            postureOk = false;
+            statusEl.textContent = "No se te ve — sal en el encuadre.";
+          }
+          requestAnimationFrame(loop);
+        };
+        loop();
+      }
+    }
+
+    clearInterval(timerId);
+    timerId = setInterval(() => {
+      if (!postureOk) return; // pausado mientras la postura no sea válida
+      elapsed += 1;
+
+      if (!goalReached && elapsed < item.work) {
+        const remaining = item.work - elapsed;
+        timerEl.textContent = fmt(remaining);
+        if (remaining <= 3) beep(660, 0.1);
+        if (isVoiceEnabled() && remaining !== lastSpokenNumber) {
+          lastSpokenNumber = remaining;
+          speakOut(numeroEnPalabras(remaining));
+        }
+        return;
+      }
+
+      if (!goalReached) {
+        goalReached = true;
+        lastSpokenNumber = 0;
+        beep(880, 0.2);
+        if (isVoiceEnabled()) speakOut("¡Objetivo cumplido!", { flush: false });
+        if (goalBannerEl) {
+          goalBannerEl.hidden = false;
+          goalBannerEl.textContent = `🎯 ¡Objetivo cumplido! (${fmt(item.work)}) Sigue si quieres, o termina cuando acabes.`;
+        }
+        skipBtn.textContent = hasNext() ? "Siguiente ▸" : "Terminar";
+        timerEl.textContent = "+0";
+        return;
+      }
+
+      const over = elapsed - item.work;
+      timerEl.textContent = `+${fmt(over)}`;
+      if (isVoiceEnabled() && over !== lastSpokenNumber) {
+        lastSpokenNumber = over;
+        speakOut(numeroEnPalabras(over));
+      }
+    }, 1000);
   }
 
   // -------------------------------------------------------------- cámara
@@ -288,10 +472,20 @@
             .map((b) => {
               const item = sequence.find((i) => i.slug === b.exercise);
               const detail = b.reps ? `${b.reps} reps en ${b.sets} serie(s)` : `${b.seconds}s`;
+              // Porcentaje conseguido sobre el objetivo, si lo había. Para
+              // reps es sobre el volumen total (sets × reps); para
+              // cronometrados (plancha, plancha lateral…) es sobre el
+              // objetivo de ESE tramo (item.work) — ahora puede superar
+              // el objetivo (ver runTimerWithPosture, ya no se corta
+              // solo al llegar).
               let pct = "";
               if (item?.target_sets && item?.target_reps && b.reps) {
                 const meta = item.target_sets * item.target_reps;
                 const logro = Math.round((100 * b.reps) / meta);
+                const clase = logro >= 100 ? "run-pct--full" : "run-pct--partial";
+                pct = `<span class="run-pct ${clase}">${logro}%</span>`;
+              } else if (item?.work && b.seconds) {
+                const logro = Math.round((100 * b.seconds) / item.work);
                 const clase = logro >= 100 ? "run-pct--full" : "run-pct--partial";
                 pct = `<span class="run-pct ${clase}">${logro}%</span>`;
               }

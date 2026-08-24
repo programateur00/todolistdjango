@@ -362,6 +362,17 @@ button { font-family:var(--font-b); cursor:pointer; }
 .repeat-option input { accent-color:var(--ember); }
 .repeat-option:has(input:checked) { border-color:var(--ember); background:var(--ember-soft); }
 
+/* Numeración/reorden inline del selector de ejercicios (plan_ai_form.html):
+   el orden en el que se han ido marcando, visible y corregible sin tener
+   que desmarcar nada — ver el JS al final de esa plantilla. */
+.exercise-toggle__order { display:inline-flex; align-items:center; justify-content:center;
+  min-width:18px; height:18px; padding:0 4px; border-radius:999px;
+  background:var(--ember); color:var(--paper); font-size:11px; font-weight:700; }
+.exercise-toggle__move { display:inline-flex; gap:3px; }
+.exercise-toggle__move-btn { width:20px; height:20px; border-radius:6px; border:1px solid var(--line);
+  background:var(--paper); font-size:11px; line-height:1; padding:0; cursor:pointer; }
+.exercise-toggle__move-btn:hover { border-color:var(--ember); }
+
 .custom-days-field, .interval-field, .subcategory-field, .avoid-fields { display:none; }
 .interval-row  { display:flex; align-items:center; gap:8px; font-size:14px; }
 .interval-input{ width:60px; font-family:var(--font-b); font-size:15px; padding:8px 10px;

@@ -27,7 +27,7 @@ AVAILABLE = {
 
 # Isométricos: no hay dos posturas, así que se enseña una y se indica
 # que hay que aguantar, en vez de fingir un movimiento.
-STATIC = {"plank", "side-plank", "wall-sit", "kneehold-bar", "dead-hang"}
+STATIC = {"plank", "side-plank", "wall-sit", "kneehold-bar"}
 
 # Variantes que comparten dibujo: el movimiento es el mismo y solo cambia
 # el agarre (ancho, supino) o si añades peso o impulso. Repetir la
@@ -51,16 +51,17 @@ STATIC = {"plank", "side-plank", "wall-sit", "kneehold-bar", "dead-hang"}
 #     postura de partida que las dominadas (pullup), solo que en vez de
 #     subir y bajar se suben las rodillas y se aguantan; reutiliza esa
 #     silueta.
-#   - dead-hang: colgado de la barra con los brazos estirados, sin más —
-#     exactamente la postura de partida de las dominadas (pullup, misma
-#     silueta que kneehold-bar), solo que aquí no se sube nada, se
-#     aguanta tal cual.
 #   - archer-pullup: misma postura de partida (colgado de la barra) y el
 #     mismo gesto de subir tirando con los brazos que una dominada
 #     normal — lo único que cambia es que un brazo se dobla más que el
 #     otro al llegar arriba, algo que esta silueta de dos posturas no
 #     distingue de todas formas, así que reutiliza la de pullup en vez
 #     de dejar el hueco discreto.
+#
+# handstand (el pino) NO tiene alias: ninguna silueta de Everkinetic que
+# tenemos (todas de pie o tumbadas) se parece a un cuerpo invertido, así
+# que cae al hueco discreto de solo texto en vez de tomar prestado un
+# dibujo que confundiría más de lo que ayuda.
 ALIAS = {
     "wide-pullup": "pullup",
     "chinup": "pullup",
@@ -71,7 +72,6 @@ ALIAS = {
     "scissor-kick": "leg-raise",
     "wall-sit": "squat",
     "kneehold-bar": "pullup",
-    "dead-hang": "pullup",
     "archer-pullup": "pullup",
 }
 
@@ -83,7 +83,7 @@ LABELS = {
     "dips": "Fondos", "lunge": "Zancadas", "weighted-dips": "Fondos con peso",
     "double-crunch": "Doble crunch", "scissor-kick": "Scissor Kicks",
     "wall-sit": "Silla en pared", "kneehold-bar": "Kneehold Bar",
-    "dead-hang": "Dead Hang", "archer-pullup": "Dominadas de arquero",
+    "handstand": "Handstand", "archer-pullup": "Dominadas de arquero",
 }
 
 
