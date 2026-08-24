@@ -715,6 +715,7 @@ def task_video(request, pk):
         "playlist_id": "" if override_video_id else task.youtube_playlist_id,
         "target_minutes": None if override_video_id else task.target_minutes,
         "target_video_count": None if override_video_id else task.target_video_count,
+        "playlist_start_index": None if override_video_id else task.playlist_start_index,
         # Un vídeo elegido al vuelo siempre es de YouTube, suelto — el
         # "solo local, sin YouTube" solo puede venir de la propia tarea.
         "has_local_video": False if override_video_id else task.has_local_video,
@@ -1504,7 +1505,26 @@ def plan_form(request, pk=None):
                             item.target_video_count = max(1, int(raw_count)) if raw_count else None
                         except (TypeError, ValueError):
                             item.target_video_count = None
+                        # Con playlist, uno de los dos es obligatorio: sin
+                        # ninguno, el seguimiento de progreso
+                        # (Plan._study_playlist_progress) se quedaría
+                        # siempre en el primer vídeo y no avanzaría nunca.
+                        # Un hábito sin vídeo ni playlist (temporizador
+                        # manual, tipo Enfoque) no necesita esto.
+                        if item.youtube_playlist_id and not (item.target_minutes or item.target_video_count):
+                            messages.error(
+                                request,
+                                "Con una playlist, pon minutos al día o número de vídeos al día — "
+                                "hace falta uno de los dos.",
+                            )
+                            return redirect(reverse("tasks:plan_edit", args=[plan.pk]))
                         item.save()
+                        # Playlist con seguimiento de progreso: se refresca
+                        # la caché de vídeos justo al guardar (nunca desde
+                        # sync_task, que se llama en cada carga de la lista
+                        # de tareas y sería demasiado caro/lento llamar ahí
+                        # a la API de YouTube).
+                        item.sync_playlist_videos()
                         # La tarea ya se creó/actualizó arriba sin el vídeo
                         # (no existía el objetivo todavía) — se sincroniza
                         # otra vez para que recoja lo que se acaba de poner.
@@ -1747,7 +1767,23 @@ def plan_item_form(request, plan_pk, pk=None):
             item.target_minutes = max(1, _int("target_minutes", 0)) if raw_minutes else None
             raw_count = request.POST.get("target_video_count", "").strip()
             item.target_video_count = max(1, _int("target_video_count", 0)) if raw_count else None
+            # Con playlist, uno de los dos es obligatorio: sin ninguno, el
+            # seguimiento de progreso (Plan._study_playlist_progress) se
+            # quedaría siempre en el primer vídeo y no avanzaría nunca. Un
+            # hábito sin vídeo ni playlist (temporizador manual, tipo
+            # Enfoque) no necesita esto.
+            if item.youtube_playlist_id and not (item.target_minutes or item.target_video_count):
+                messages.error(
+                    request,
+                    "Con una playlist, pon minutos al día o número de vídeos al día — "
+                    "hace falta uno de los dos.",
+                )
+                return redirect(request.path)
             item.save()
+            # Se refresca la caché de vídeos justo al guardar (nunca desde
+            # sync_task, que se llama en cada carga de la lista de tareas
+            # y sería demasiado caro/lento llamar ahí a la API de YouTube).
+            item.sync_playlist_videos()
             plan.sync_task()
             messages.success(request, "Objetivo guardado.")
             return redirect(reverse("tasks:plan_detail", args=[plan.pk]))

@@ -178,28 +178,29 @@
         <label class="field">
             <span class="field__label">Playlist de YouTube (opcional)</span>
             <input type="text" name="youtube_playlist_id" value="{{ study_headline.youtube_playlist_id|default:'' }}"
-                placeholder="Pega la URL o el ID de la playlist">
+                placeholder="Pega la URL o el ID de la playlist — cualquiera, no hace falta que sea de idiomas">
             <span class="field__hint">
-                Ej: una playlist de "francés para hispanohablantes" — cada día la tarea
-                enseña el siguiente vídeo sin visto de la playlist.
+                Cualquier playlist vale (un curso de ajedrez, tu lista de "ver más tarde"...):
+                cada día la tarea enseña el siguiente vídeo sin visto, sin volver siempre al
+                principio — para eso hace falta poner minutos o vídeos al día, aquí abajo.
             </span>
         </label>
         <div class="field-row">
             <label class="field">
-                <span class="field__label">Minutos objetivo por sesión (opcional)</span>
+                <span class="field__label">Minutos al día</span>
                 <input type="number" name="target_minutes" min="1"
                     value="{{ study_headline.target_minutes|default:'' }}">
             </label>
             <label class="field">
-                <span class="field__label">Vídeos objetivo por sesión (opcional)</span>
+                <span class="field__label">…o vídeos al día</span>
                 <input type="number" name="target_video_count" min="1"
                     value="{{ study_headline.target_video_count|default:'' }}">
             </label>
         </div>
         <span class="field__hint">
-            En blanco = sesión libre, sin vídeo ni objetivo fijo (solo marcar hecho/no hecho
-            cada día). Con un vídeo o playlist puesto, la tarea diaria sale lista para verlo y
-            comprobar que lo has hecho — no hace falta ningún paso aparte.
+            Con playlist puesta, pon uno de los dos — si pones vídeos al día, ese manda sobre
+            los minutos. Sin vídeo ni playlist, en blanco = sesión libre sin objetivo fijo (solo
+            marcar hecho/no hecho cada día, como Enfoque).
         </span>
     </div>
 

@@ -196,6 +196,15 @@ class Task(models.Model):
                    "para dar la tarea por hecha (ej. 5). Si no se pone y tampoco hay "
                    "target_minutes, se da por hecha al terminar 1 vídeo de la lista.",
     )
+    playlist_start_index = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Solo con youtube_playlist_id, en un objetivo de Estudio · Hábito simple "
+                   "con seguimiento de progreso (ver PlanItem.playlist_videos_cache): en qué "
+                   "posición de la lista (0 = el primero) hay que empezar a reproducir hoy, "
+                   "para no volver siempre al principio de la playlist. En blanco = empezar "
+                   "por el principio, como antes de que existiera esto (playlist sin "
+                   "seguimiento, o un vídeo/playlist sueltos fuera de un plan).",
+    )
     # Cómo se completa una tarea de Deporte. Se elige al crearla, no cada
     # vez que se entrena: es una decisión de "qué es esta tarea", no de
     # "qué me apetece hoy". Qué modos valen depende del subtipo — el
@@ -1268,6 +1277,14 @@ class Plan(models.Model):
         estimado (playlist corta), se cierra en cuanto se ve el último
         vídeo en vez de seguir repitiéndolo hasta que pasen las
         semanas que sobran.
+
+        Estudio · Hábito simple con una playlist SEGUIDA (con caché de
+        vídeos, ver PlanItem.playlist_videos_cache /
+        Plan._study_playlist_progress): mismo criterio que Idiomas —
+        se cierra al terminar la playlist entera, no al cumplir
+        `weeks`. Sin playlist, o con un vídeo suelto/temporizador
+        (sin seguimiento posible), sigue siendo un hábito que se repite
+        y se cierra por semanas, como toda la vida.
         """
         today = timezone.localtime(timezone.now()).date()
         qs = cls.objects.filter(deleted_at__isnull=True, closed_at__isnull=True, is_active=True)
@@ -1277,9 +1294,16 @@ class Plan(models.Model):
             is_language = (
                 plan.plan_type == cls.PLAN_TYPE_STUDY and plan.study_subtype == cls.STUDY_SUBTYPE_LANGUAGE
             )
+            head = plan.headline if plan.plan_type == cls.PLAN_TYPE_STUDY else None
+            has_tracked_playlist = bool(
+                head and not is_language and head.youtube_playlist_id and head.playlist_videos_cache
+            )
             if is_language:
                 progress = plan.course_progress()
                 finished = progress["total"] > 0 and progress["pct"] >= 100
+            elif has_tracked_playlist:
+                progress = plan._study_playlist_progress(head)
+                finished = progress["total"] > 0 and progress["finished"]
             else:
                 finished = today >= plan.ends_on
             if finished:
@@ -1335,6 +1359,64 @@ class Plan(models.Model):
             )
         return fields
 
+    def _study_playlist_progress(self, head):
+        """
+        Por dónde vas en la playlist de un objetivo de Estudio · Hábito
+        simple con caché (head.playlist_videos_cache) — usado tanto por
+        `_study_target_fields` (qué vídeo toca hoy) como por
+        `auto_close_expired` (si ya se acabó la lista entera).
+
+        Se mide siempre en VÍDEOS COMPLETOS consumidos, tanto si el
+        objetivo es "N vídeos al día" como si es "N minutos al día":
+          - con target_video_count: cada día cumplido consume esa
+            cantidad de vídeos (mismo criterio que
+            `_language_completed_count`, contando Occurrence, pero
+            multiplicado por cuántos vídeos tocan por sesión).
+          - con target_minutes (y sin target_video_count): se suman los
+            minutos REALES vistos (Occurrence.minutes_watched, no un
+            cálculo teórico) desde que se sincronizó la playlist, y se
+            recorre la lista de vídeos acumulando su duración hasta
+            gastar esos minutos — un vídeo cuenta como "consumido" solo
+            si su duración entera ya cupo en lo visto hasta ahora. No
+            se reanuda a mitad de vídeo (decisión explícita): el
+            siguiente día siempre empieza el próximo vídeo sin ver
+            desde el principio, aunque eso signifique pasarse un poco
+            de los minutos exactos algunos días.
+
+        `since` (desde cuándo cuentan las Occurrence) es
+        `playlist_synced_at` si existe — así cambiar de playlist
+        reinicia el avance solo, sin guardar un índice aparte — y si no,
+        `started_on` del plan (compatibilidad con cachés antiguas).
+        """
+        videos = head.playlist_videos_cache or []
+        total = len(videos)
+        if not total:
+            return {"total": 0, "index": 0, "finished": False}
+
+        since = (
+            timezone.localtime(head.playlist_synced_at).date()
+            if head.playlist_synced_at else self.started_on
+        )
+        done_occurrences = Occurrence.objects.filter(
+            series_id=self.task_series_id, result=Occurrence.RESULT_DONE,
+            deleted_at__isnull=True, recorded_at__date__gte=since,
+        ) if self.task_series_id else Occurrence.objects.none()
+
+        if head.target_video_count:
+            consumed = done_occurrences.count() * head.target_video_count
+        else:
+            watched_seconds = sum((o.minutes_watched or 0) for o in done_occurrences) * 60
+            consumed = 0
+            cumulative = 0
+            for v in videos:
+                cumulative += (v.get("duration_seconds") or 0)
+                if cumulative > watched_seconds:
+                    break
+                consumed += 1
+
+        finished = consumed >= total
+        return {"total": total, "index": min(consumed, total - 1), "finished": finished}
+
     def _study_target_fields(self):
         """
         Si el plan es de Estudio, los campos de vídeo/playlist/temporizador
@@ -1343,16 +1425,33 @@ class Plan(models.Model):
         viven en el objetivo de un plan de Deporte. Sin objetivo puesto
         todavía, la tarea diaria sale como Estudio simple, sin vídeo —
         no como un error, solo como "todavía no configurado".
+
+        Con una playlist ya sincronizada (head.playlist_videos_cache,
+        ver PlanItem.sync_playlist_videos), la tarea sigue embebiendo la
+        PLAYLIST ENTERA (no un vídeo suelto) pero indicándole al
+        reproductor por dónde empezar hoy (`playlist_start_index`, ver
+        task_video.html) — así un objetivo de "2 vídeos al día" sigue
+        pudiendo ver varios seguidos en la misma sesión, solo que ya no
+        vuelve a repetir desde el vídeo 1 cada vez. Sin caché todavía
+        (playlist recién puesta y sin guardar aún, o la sincronización
+        con YouTube falló), cae al comportamiento de siempre: la
+        playlist entera, siempre desde el principio.
         """
         head = self.headline
         if not head:
             return {}
-        return {
+        fields = {
             "youtube_video_id": head.youtube_video_id,
             "youtube_playlist_id": head.youtube_playlist_id,
             "target_minutes": head.target_minutes,
             "target_video_count": head.target_video_count,
+            "playlist_start_index": None,
         }
+        if head.youtube_playlist_id and head.playlist_videos_cache:
+            progress = self._study_playlist_progress(head)
+            if progress["total"]:
+                fields["playlist_start_index"] = progress["index"]
+        return fields
 
     def _language_completed_count(self):
         """
@@ -1519,6 +1618,7 @@ class Plan(models.Model):
             youtube_playlist_id="",
             target_minutes=None,
             target_video_count=None,
+            playlist_start_index=None,
             target_distance_km=None,
             max_pace_seconds_per_km=None,
             language_name="",
@@ -1814,6 +1914,27 @@ class PlanItem(models.Model):
     target_minutes = models.PositiveIntegerField(null=True, blank=True)
     target_video_count = models.PositiveIntegerField(null=True, blank=True)
 
+    # Caché de la playlist de arriba (solo Estudio · Hábito simple, con
+    # youtube_playlist_id puesto): la lista ORDENADA de vídeos que tenía
+    # la playlist la última vez que se sincronizó, con su duración —
+    # [{"video_id": "...", "duration_seconds": 933}, ...]. Se rellena en
+    # sync_playlist_videos(), llamado SOLO al guardar el objetivo (vista
+    # o API) -- NUNCA desde Plan.sync_task()/_study_target_fields(), que
+    # se ejecuta en cada carga de la lista de tareas y sería demasiado
+    # caro/lento si llamara a la API de YouTube ahí. Es lo que permite
+    # que la tarea diaria sepa qué vídeo concreto toca hoy (ver
+    # Plan._study_playlist_progress) en vez de reiniciar la playlist
+    # entera cada día. Sin caché (playlist recién puesta y aún sin
+    # guardar, o la API de YouTube falló al sincronizar), el plan cae al
+    # comportamiento de siempre: la playlist entera, sin seguimiento.
+    playlist_videos_cache = models.JSONField(default=list, blank=True)
+    # Cuándo se sincronizó la caché de arriba por última vez -- también
+    # marca desde cuándo cuentan las Occurrence para calcular el avance
+    # (Plan._study_playlist_progress): cambiar de playlist reinicia el
+    # progreso sin más estado que mantener, porque el conteo simplemente
+    # empieza a contar desde esta fecha en vez de desde el inicio del plan.
+    playlist_synced_at = models.DateTimeField(null=True, blank=True)
+
     # Cómo avanza
     sessions_per_step = models.PositiveIntegerField(
         default=2, help_text="Cada cuántas sesiones cumplidas se sube un escalón.",
@@ -1860,6 +1981,51 @@ class PlanItem(models.Model):
             m = _YOUTUBE_PLAYLIST_ID_RE.search(raw_pl)
             self.youtube_playlist_id = m.group(1) if m else raw_pl
         super().save(*args, **kwargs)
+
+    def sync_playlist_videos(self):
+        """
+        Refresca playlist_videos_cache desde la API de YouTube — se llama
+        SOLO al guardar el objetivo (vista o API), nunca desde
+        Plan.sync_task()/_study_target_fields() (eso se ejecuta en cada
+        carga de la lista de tareas, y una llamada a la API ahí sería
+        demasiado cara/lenta). Cambiar de playlist reinicia el avance
+        sin más estado que mantener: playlist_synced_at pasa a ahora, y
+        Plan._study_playlist_progress() solo cuenta lo hecho desde esa
+        fecha en adelante.
+
+        Sin youtube_playlist_id, limpia la caché (por si el objetivo
+        tenía una playlist antes y se ha quitado). Si la API de YouTube
+        falla (sin YOUTUBE_API_KEY, cuota agotada, sin conexión...), se
+        deja la caché tal cual estaba — _study_target_fields ya sabe
+        caer al comportamiento de siempre (playlist entera, sin
+        seguimiento) cuando no hay caché.
+        """
+        from .youtube_search import YouTubeSearchError, get_videos_details, list_playlist_items
+
+        if not self.youtube_playlist_id:
+            if self.playlist_videos_cache or self.playlist_synced_at:
+                self.playlist_videos_cache = []
+                self.playlist_synced_at = None
+                self.save(update_fields=["playlist_videos_cache", "playlist_synced_at"])
+            return
+
+        try:
+            items = list_playlist_items(self.youtube_playlist_id, max_results=500)
+            video_ids = [it["video_id"] for it in items if it.get("video_id")]
+            details = get_videos_details(video_ids) if video_ids else {}
+        except YouTubeSearchError:
+            return
+
+        cache = []
+        for vid in video_ids:
+            d = details.get(vid) or {}
+            if d.get("embeddable") is False:
+                continue  # no se podría incrustar en la tarea — se salta, como en los cursos de idioma
+            cache.append({"video_id": vid, "duration_seconds": d.get("duration_seconds")})
+
+        self.playlist_videos_cache = cache
+        self.playlist_synced_at = timezone.now()
+        self.save(update_fields=["playlist_videos_cache", "playlist_synced_at"])
 
     def __str__(self):
         marca = " ★" if self.is_headline else ""

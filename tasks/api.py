@@ -104,6 +104,11 @@ def task_json(t):
         "youtube_video_id": t.youtube_video_id,
         "youtube_playlist_id": t.youtube_playlist_id,
         "target_video_count": t.target_video_count,
+        # Solo con youtube_playlist_id, y solo si el objetivo de Estudio
+        # tiene seguimiento de progreso (ver Plan._study_playlist_progress):
+        # en qué posición de la playlist hay que empezar hoy. None = desde
+        # el principio, como siempre.
+        "playlist_start_index": t.playlist_start_index,
         "has_local_video": t.has_local_video,
         "sport_mode": t.sport_mode,
         "target_steps": t.target_steps,
@@ -1246,6 +1251,19 @@ def _apply_plan_item_fields(item, plan, data):
         if "label" in data:
             item.label = (data.get("label") or "").strip()[:80]
         _apply_video_fields(item, data)
+        # Solo Hábito simple con PLAYLIST (Idiomas no usa estos campos —
+        # su objetivo sale de CourseModule/language_daily_minutes, no de
+        # un vídeo o playlist sueltos aquí; y un hábito sin vídeo ni
+        # playlist, con temporizador manual tipo Enfoque, tampoco
+        # necesita esto). Con playlist, uno de los dos es obligatorio:
+        # sin ninguno, Plan._study_playlist_progress se queda siempre en
+        # el primer vídeo y el seguimiento de progreso no avanza nunca.
+        if (
+            plan.study_subtype != Plan.STUDY_SUBTYPE_LANGUAGE
+            and item.youtube_playlist_id
+            and not (item.target_minutes or item.target_video_count)
+        ):
+            return "Con una playlist, pon minutos al día o número de vídeos al día — hace falta uno de los dos."
         return None
 
     # Deporte, a partir de aquí.
@@ -1329,6 +1347,19 @@ def _apply_plan_item_fields(item, plan, data):
     return None
 
 
+def _maybe_sync_study_playlist(plan, item):
+    """
+    Refresca la caché de la playlist (ver PlanItem.sync_playlist_videos)
+    justo después de guardar un objetivo de Estudio · Hábito simple —
+    nunca para Idiomas (usa CourseModule, no esto) ni para Deporte
+    (aunque un objetivo de sport_mode='video' pueda llevar una playlist,
+    ahí no hay seguimiento de progreso por posición, así que no merece
+    la pena gastar la llamada a la API en cada guardado).
+    """
+    if plan.plan_type == Plan.PLAN_TYPE_STUDY and plan.study_subtype != Plan.STUDY_SUBTYPE_LANGUAGE:
+        item.sync_playlist_videos()
+
+
 @api("POST")
 def plan_item_create(request, uuid):
     plan = get_object_or_404(plans_qs(), uuid=uuid)
@@ -1341,6 +1372,7 @@ def plan_item_create(request, uuid):
     item.save()
     if item.is_headline:
         plan.items.exclude(pk=item.pk).update(is_headline=False)
+    _maybe_sync_study_playlist(plan, item)
     plan.sync_task()
     return JsonResponse({"ok": True, "plan": plan_json(plan, detail=True)}, status=201)
 
@@ -1361,6 +1393,7 @@ def plan_item_detail(request, uuid, item_id):
     item.save()
     if item.is_headline:
         plan.items.exclude(pk=item.pk).update(is_headline=False)
+    _maybe_sync_study_playlist(plan, item)
     plan.sync_task()
     return JsonResponse({"ok": True, "plan": plan_json(plan, detail=True)})
 

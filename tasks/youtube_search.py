@@ -185,25 +185,37 @@ def get_playlists_details(playlist_ids):
 
 def list_playlist_items(playlist_id, max_results=50):
     """
-    Vídeos de una playlist, en orden. `max_results` tiene un tope de 50
-    (límite por página de la API) — de sobra para lo que necesitamos
-    (unas pocas semanas de curso por playlist).
+    Vídeos de una playlist, en orden. La API solo da 50 por página —
+    para los cursos de idioma curados (unas pocas semanas) con eso
+    siempre bastaba, pero una playlist cualquiera que pegue un usuario
+    (una lista de "ver más tarde", un curso largo de YouTube...) puede
+    tener cientos. Por eso esto pagina solo con `nextPageToken` hasta
+    llegar a `max_results` o hasta que la playlist se acabe, en vez de
+    quedarse solo con los primeros 50 en silencio.
     """
-    data = _get(
-        "playlistItems", part="snippet,contentDetails",
-        playlistId=playlist_id, maxResults=min(max_results, 50),
-    )
     out = []
-    for item in data.get("items", []):
-        video_id = (item.get("contentDetails") or {}).get("videoId")
-        if not video_id:
-            continue
-        snippet = item.get("snippet", {})
-        out.append({
-            "video_id": video_id,
-            "title": snippet.get("title", ""),
-            "position": snippet.get("position", 0),
-        })
+    page_token = None
+    while len(out) < max_results:
+        params = dict(
+            part="snippet,contentDetails", playlistId=playlist_id,
+            maxResults=min(50, max_results - len(out)),
+        )
+        if page_token:
+            params["pageToken"] = page_token
+        data = _get("playlistItems", **params)
+        for item in data.get("items", []):
+            video_id = (item.get("contentDetails") or {}).get("videoId")
+            if not video_id:
+                continue
+            snippet = item.get("snippet", {})
+            out.append({
+                "video_id": video_id,
+                "title": snippet.get("title", ""),
+                "position": snippet.get("position", 0),
+            })
+        page_token = data.get("nextPageToken")
+        if not page_token:
+            break
     return out
 
 

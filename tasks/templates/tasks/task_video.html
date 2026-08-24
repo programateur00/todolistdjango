@@ -40,6 +40,10 @@
 
     var videoId = "{{ video_id }}";
     var playlistId = "{{ playlist_id }}";
+    // Solo con un objetivo de Estudio con seguimiento de progreso (ver
+    // Plan._study_playlist_progress) — en qué posición de la playlist
+    // hay que empezar hoy, para no volver siempre al vídeo 1.
+    var playlistStartIndex = {{ playlist_start_index|default_if_none:"null" }};
     var targetMinutes = {{ target_minutes|default_if_none:"null" }};
     var targetVideoCount = {{ target_video_count|default_if_none:"null" }} || (playlistId && !targetMinutes ? 1 : null);
     var saveUrl = "{% url 'tasks:task_video_save' task.pk %}";
@@ -138,6 +142,7 @@
             if (playlistId) {
                 playerVars.listType = 'playlist';
                 playerVars.list = playlistId;
+                if (playlistStartIndex !== null) playerVars.index = playlistStartIndex;
             } else {
                 config.videoId = videoId;
             }

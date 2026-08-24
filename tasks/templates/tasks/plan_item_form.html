@@ -34,21 +34,27 @@
         <span class="field__label">…o playlist (alternativa al vídeo suelto)</span>
         <input type="text" name="youtube_playlist_id" placeholder="https://youtube.com/playlist?list=…"
                value="{{ item.youtube_playlist_id|default:'' }}">
-        <span class="field__hint">Si pones esto, se ignora el vídeo de arriba.</span>
-    </label>
-
-    <label class="field">
-        <span class="field__label">Objetivo en minutos (opcional)</span>
-        <input type="number" name="target_minutes" min="1" max="6000"
-               placeholder="Ej: 20" value="{{ item.target_minutes|default:'' }}">
         <span class="field__hint">
-            Se da por hecho el día al acumular ese tiempo, aunque el vídeo o la lista
-            sigan. En blanco = hay que verlo/verla entero.
+            Si pones esto, se ignora el vídeo de arriba. Cualquier playlist vale — un curso de
+            ajedrez, tu lista de "ver más tarde"... — y la tarea diaria enseña el siguiente
+            vídeo sin visto cada vez, sin volver siempre al principio (para eso hace falta
+            poner minutos o vídeos al día, aquí abajo).
         </span>
     </label>
 
     <label class="field">
-        <span class="field__label">…o número de vídeos de la playlist (opcional)</span>
+        <span class="field__label">Minutos al día{% if not item.youtube_playlist_id %} (opcional){% endif %}</span>
+        <input type="number" name="target_minutes" min="1" max="6000"
+               placeholder="Ej: 20" value="{{ item.target_minutes|default:'' }}">
+        <span class="field__hint">
+            Se da por hecho el día al acumular ese tiempo, aunque el vídeo o la lista
+            sigan. Con una playlist puesta, pon esto o el número de vídeos (el de abajo) —
+            hace falta uno de los dos para saber qué toca cada día.
+        </span>
+    </label>
+
+    <label class="field">
+        <span class="field__label">…o vídeos al día{% if not item.youtube_playlist_id %} (opcional){% endif %}</span>
         <input type="number" name="target_video_count" min="1" max="500"
                placeholder="Ej: 5" value="{{ item.target_video_count|default:'' }}">
         <span class="field__hint">Solo con playlist. Si rellenas esto, gana sobre el objetivo en minutos.</span>
