@@ -1375,6 +1375,47 @@ class ExerciseCatalogTests(TestCase):
         from tasks.views import COUNTERS
         self.assertIn("archerpullup", COUNTERS)
 
+    def test_incline_push_up_is_a_camera_exercise(self):
+        """Flexiones inclinadas: mismo gesto de brazo que push-up, pero
+        con su PROPIO counter_key ("inclinepushup", no "pushup") porque el
+        contador de cámara tiene que aceptar cualquier inclinación de pies
+        sin techo (ver processInclinePushup en workout.js y el porqué en
+        0023_add_incline_push_up) — a diferencia de weighted-squat, que sí
+        reutiliza el counter_key de squat porque ahí no cambia nada del
+        gesto que MediaPipe mide."""
+        incline_push_up = Exercise.objects.get(slug="incline-push-up")
+        self.assertEqual(incline_push_up.mode, Exercise.MODE_POSE)
+        self.assertEqual(incline_push_up.counter_key, "inclinepushup")
+        self.assertEqual(incline_push_up.body_area, "upper_body")
+
+    def test_incline_push_up_counter_key_is_registered_as_supported(self):
+        """Igual que test_archer_pullup_counter_key_is_registered_as_supported:
+        sin "inclinepushup" en views.COUNTERS, task_workout trataría el
+        ejercicio como no soportado por cámara aunque exista en el
+        catálogo."""
+        from tasks.views import COUNTERS
+        self.assertIn("inclinepushup", COUNTERS)
+
+    def test_dumbbell_curl_is_a_camera_exercise(self):
+        """Curl con mancuernas (0024_add_dumbbell_curl): counter_key propio
+        ("dumbbellcurl") porque el contador mide el ángulo de codo de
+        FRENTE a la cámara (como dominadas), no de perfil como push-up/
+        squat/dip, y necesita comprobar que el codo se queda pegado al
+        costado y la muñeca no sube a la altura de la cara — ver
+        processDumbbellCurl en workout.js y el porqué en la migración."""
+        curl = Exercise.objects.get(slug="dumbbell-curl")
+        self.assertEqual(curl.mode, Exercise.MODE_POSE)
+        self.assertEqual(curl.counter_key, "dumbbellcurl")
+        self.assertEqual(curl.body_area, "upper_body")
+
+    def test_dumbbell_curl_counter_key_is_registered_as_supported(self):
+        """Igual que test_archer_pullup_counter_key_is_registered_as_supported:
+        sin "dumbbellcurl" en views.COUNTERS, task_workout trataría el
+        ejercicio como no soportado por cámara aunque exista en el
+        catálogo."""
+        from tasks.views import COUNTERS
+        self.assertIn("dumbbellcurl", COUNTERS)
+
 
 class WebCircuitBuilderTests(TestCase):
     """

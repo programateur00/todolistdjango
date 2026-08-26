@@ -1026,7 +1026,7 @@ def stats_detail(request, series_id):
 # ─────────────────────────────────────────────────────────────────────
 
 # Contadores que existen de verdad en workout.js.
-COUNTERS = {"pullup", "dip", "pushup", "squat", "crunch", "legraise", "situp", "doublecrunch", "scissor", "archerpullup"}
+COUNTERS = {"pullup", "dip", "pushup", "squat", "crunch", "legraise", "situp", "doublecrunch", "scissor", "archerpullup", "inclinepushup", "dumbbellcurl"}
 
 # Ejercicios "timed" (se aguantan, no se cuentan en repeticiones) que
 # workout.js sabe seguir con cámara comprobando la postura — plancha,

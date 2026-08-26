@@ -58,6 +58,11 @@ STATIC = {"plank", "side-plank", "wall-sit", "kneehold-bar"}
 #     distingue de todas formas, así que reutiliza la de pullup en vez
 #     de dejar el hueco discreto.
 #
+#   - incline-push-up: mismo gesto de flexión de brazo que push-up, solo
+#     que con los pies apoyados en alto (silla, escalón, banco) en vez de
+#     en el suelo — la silueta no distingue la altura de apoyo de los
+#     pies, así que reutiliza esa silueta.
+#
 # handstand (el pino) NO tiene alias: ninguna silueta de Everkinetic que
 # tenemos (todas de pie o tumbadas) se parece a un cuerpo invertido, así
 # que cae al hueco discreto de solo texto en vez de tomar prestado un
@@ -73,6 +78,7 @@ ALIAS = {
     "wall-sit": "squat",
     "kneehold-bar": "pullup",
     "archer-pullup": "pullup",
+    "incline-push-up": "push-up",
 }
 
 LABELS = {
@@ -84,6 +90,8 @@ LABELS = {
     "double-crunch": "Doble crunch", "scissor-kick": "Scissor Kicks",
     "wall-sit": "Silla en pared", "kneehold-bar": "Kneehold Bar",
     "handstand": "Handstand", "archer-pullup": "Dominadas de arquero",
+    "incline-push-up": "Flexiones inclinadas",
+    "dumbbell-curl": "Curl con mancuernas",
 }
 
 

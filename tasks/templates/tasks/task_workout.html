@@ -30,7 +30,7 @@
     <p id="workout-status" class="workout__status">Iniciando…</p>
     <p id="workout-goal-banner" class="workout__goal-banner" hidden></p>
     <p id="workout-debug" class="workout__debug"></p>
-    {% if exercise.counter_key == "scissor" or exercise.counter_key == "plank" or exercise.counter_key == "sideplank" or exercise.counter_key == "wallsit" or exercise.counter_key == "kneeholdbar" or exercise.counter_key == "handstand" %}
+    {% if exercise.counter_key == "scissor" or exercise.counter_key == "plank" or exercise.counter_key == "sideplank" or exercise.counter_key == "wallsit" or exercise.counter_key == "kneeholdbar" or exercise.counter_key == "handstand" or exercise.counter_key == "dip" or exercise.counter_key == "dumbbellcurl" %}
     <button type="button" id="workout-debug-export" class="workout__btn workout__btn--ghost">
         📋 Copiar registro de depuración
     </button>
@@ -148,6 +148,20 @@
         Aquí no se cuentan repeticiones: es una postura que hay que <strong>aguantar</strong>. El contador de arriba
         muestra los segundos aguantados. Si sueltas la barra o sales del encuadre un par de segundos, la serie se
         cierra sola y empieza la siguiente.
+    </p>
+    {% elif exercise.counter_key == "dumbbellcurl" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti, como en flexiones o
+        fondos), no de frente — así se ve bien cuánto doblas el codo. Encuadra el brazo entero, del hombro a la
+        mano. Ponte de pie, de perfil, con <strong>una mancuerna en la mano del lado que mira a la cámara</strong>,
+        <strong>brazo estirado</strong> y <strong>codo pegado al cuerpo</strong>, para empezar.
+    </p>
+    <p class="workout__note">
+        Solo cuenta como repetición si el codo se mantiene pegado al costado durante todo el movimiento (sin
+        subir el brazo entero) y la muñeca no pasa de la altura de la cara — así no cuenta una repetición falsa
+        si levantas las manos por otro motivo o miras el móvil a media serie. Si te quedas con el brazo
+        doblado sin bajar, aparece un aviso de cuánto llevas aguantando: eso no cuenta como repetición hasta que
+        vuelvas a estirar el brazo del todo.
     </p>
     {% elif exercise.counter_key == "pullup" %}
     <p class="workout__note">

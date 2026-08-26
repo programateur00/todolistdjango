@@ -45,4 +45,5 @@ urlpatterns = [
     path("tasks/<uuid:uuid>/plan/<uuid:plan_uuid>/save/", api.plan_session_save, name="plan_session_save"),
 
     path("stats/", api.stats_list, name="stats_list"),
+    path("stats/<uuid:series_id>/", api.stats_detail, name="stats_detail"),
 ]

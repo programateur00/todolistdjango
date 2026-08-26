@@ -301,6 +301,49 @@ def stats_list(request):
     })
 
 
+@api("GET")
+def stats_detail(request, series_id):
+    """
+    Historial completo de una serie — el equivalente en API de
+    stats_detail (tasks/views.py) para que la app pueda ofrecer el mismo
+    detalle al tocar una tarjeta de /stats: cada ocurrencia con su fecha
+    y resultado, no solo el resumen agregado que ya da stats_list.
+    """
+    occurrences = Occurrence.objects.filter(
+        series_id=series_id, user=_user()
+    ).order_by("-recorded_at")
+    if not occurrences.exists():
+        return JsonResponse({"ok": False, "error": "No hay estadísticas para esa tarea."}, status=404)
+
+    title = occurrences.first().title
+    done_count = occurrences.filter(result=Occurrence.RESULT_DONE).count()
+    not_done_count = occurrences.filter(result=Occurrence.RESULT_NOT_DONE).count()
+    total = done_count + not_done_count
+    streaks = Occurrence.streak_stats(series_id)
+
+    return JsonResponse({
+        "title": title,
+        "series_id": str(series_id),
+        "done_count": done_count,
+        "not_done_count": not_done_count,
+        "success_rate": round((done_count / total) * 100) if total else 0,
+        "current_streak": streaks["current_streak"],
+        "max_streak": streaks["max_streak"],
+        "occurrences": [
+            {
+                "uuid": str(occ.uuid),
+                "result": occ.result,
+                "result_display": occ.get_result_display(),
+                "due_date": occ.due_date.isoformat() if occ.due_date else None,
+                "recorded_at": occ.recorded_at.isoformat(),
+                "auto_expired": occ.auto_expired,
+                "minutes_watched": occ.minutes_watched,
+            }
+            for occ in occurrences
+        ],
+    })
+
+
 # ------------------------------------------------------- escritura
 
 def _apply_task_fields(t, data):

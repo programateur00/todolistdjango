@@ -107,6 +107,8 @@ _EXERCISE_DIFFICULTY = {
     # Tren superior
     "push-up": "beginner",
     "jumping-pullup": "beginner",
+    "incline-push-up": "beginner",
+    "dumbbell-curl": "beginner",
     "dips": "intermediate",
     "pullup": "intermediate",
     "chinup": "intermediate",
