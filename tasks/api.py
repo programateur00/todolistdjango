@@ -32,8 +32,8 @@ from django.views.decorators.http import require_http_methods
 
 from . import ai
 from .models import (
-    CourseModule, CoursePlaylist, Exercise, Occurrence, Plan, PlanItem, Routine,
-    RoutineItem, SavedVideo, Task, TimerSession, WorkoutSession,
+    CourseModule, CoursePlaylist, CourseQuiz, Exercise, Occurrence, Plan, PlanItem, Routine,
+    RoutineItem, SavedVideo, Task, TimerSession, WarmupStatus, WorkoutSession,
 )
 from .utils import get_current_user, read_mobile_release, resolve_plan_target as _plan_context
 from .youtube_search import YouTubeSearchError, get_videos_details, list_playlist_items
@@ -664,6 +664,14 @@ def video_save(request, uuid):
     data = body(request)
     raw_minutes = data.get("minutes")
     minutes_watched = max(0, int(raw_minutes)) if isinstance(raw_minutes, (int, float)) else None
+
+    # Un vídeo de Deporte (seguir una rutina en YouTube) no se marca
+    # hecho aquí: falta el enfriamiento obligatorio (ver warmup-view.js
+    # + api.markTask desde la app), que es quien la cierra de verdad. El
+    # resto de vídeos (Estudio, Enfoque...) sigue exactamente igual.
+    if t.category == Task.CATEGORY_SPORT:
+        return JsonResponse({"ok": True, "needs_cooldown": True, "task": task_json(t)})
+
     t.mark_done(minutes_watched=minutes_watched)
     return JsonResponse({"ok": True, "task": task_json(t)})
 
@@ -744,6 +752,21 @@ def focus_save(request, uuid):
     if ts.target_met:
         t.mark_done()
     return JsonResponse({"ok": True, "session_uuid": str(ts.uuid), "task": task_json(t)})
+
+
+@api("GET", "POST")
+def warmup(request):
+    """
+    Calentamiento obligatorio (ver WarmupStatus, y su equivalente web
+    _require_warmup/task_warmup en tasks/views.py): GET dice si hace
+    falta calentar todavía (`fresh`), POST apunta que se acaba de hacer.
+    Un solo estado por usuario, compartido entre la app y la web —
+    calentar en una cuenta como haberlo hecho en la otra.
+    """
+    if request.method == "POST":
+        WarmupStatus.mark_done(_user())
+        return JsonResponse({"ok": True})
+    return JsonResponse({"ok": True, "fresh": WarmupStatus.is_fresh(_user())})
 
 
 # ------------------------------------------------------ entrenamientos
@@ -1963,6 +1986,56 @@ def expand_language_selection(selected):
     if not modules:
         return None, "Ninguno de los cursos elegidos tenía vídeos que se pudieran incrustar. Genera el plan otra vez."
     return modules, None
+
+
+def maybe_trigger_quiz(plan):
+    """
+    Si el plan es de idioma y tiene `quiz_every_n_videos` puesto, y los
+    vídeos vistos hasta ahora completan un tramo nuevo (uno que ningún
+    CourseQuiz anterior ya cubriera), genera con IA un test corto sobre
+    los temas de esos últimos vídeos y lo guarda — o devuelve None si
+    todavía no toca, si el tramo ya tiene test, o si la IA falla (ver
+    CourseQuiz: esto nunca bloquea nada, el vídeo ya cuenta como visto
+    pase lo que pase aquí).
+
+    Se llama desde views.task_video_save justo después de
+    Plan.mark_current_module_watched(), así que `_language_completed_count()`
+    ya incluye el/los vídeo(s) recién vistos en esta sesión.
+    """
+    n_every = plan.quiz_every_n_videos
+    if not n_every:
+        return None
+
+    modules = list(plan.course_modules.all())
+    if not modules:
+        return None
+
+    completed = plan.course_progress()["watched"]
+    if completed <= 0 or completed % n_every != 0:
+        return None
+
+    last_module = modules[completed - 1]
+    if plan.quizzes.filter(up_to_order=last_module.order).exists():
+        return None  # ya se generó un test para este mismo tramo
+
+    covered = modules[max(0, completed - n_every):completed]
+    topics = [(m.topic or m.title or "").strip() for m in covered]
+    topics = [t for t in topics if t]
+    if not topics:
+        return None
+
+    try:
+        result = ai.generate_quiz(
+            language=plan.language_name, level=last_module.level,
+            topics=topics, known_languages=plan.known_languages,
+        )
+    except ai.PlanAIError:
+        return None
+
+    return CourseQuiz.objects.create(
+        plan=plan, up_to_order=last_module.order,
+        topics=topics, questions=result.get("questions") or [],
+    )
 
 
 @api("POST")

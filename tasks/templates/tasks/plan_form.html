@@ -231,9 +231,9 @@
             <span class="field__label">Empieza el</span>
             <input type="date" name="started_on" value="{{ plan.started_on|date:'Y-m-d' }}">
         </label>
-        <label class="field">
+        <label class="field" id="weeks-field">
             <span class="field__label">Semanas</span>
-            <input type="number" name="weeks" min="1" value="{{ plan.weeks|default:12 }}">
+            <input type="number" name="weeks" id="weeks-input" min="1" value="{{ plan.weeks|default:12 }}">
             <span class="field__hint">12 por defecto.</span>
         </label>
     </div>
@@ -292,6 +292,12 @@
     var studyVideoFields = document.getElementById("study-video-fields");
     var studyVideoInputs = studyVideoFields.querySelectorAll("input, select");
     var planTypeRadios = document.querySelectorAll(".plan-type-radio");
+    // Semanas: sale para Deporte y Estudio · Hábito simple (ahí sí es un
+    // plazo real), pero no para Estudio · Idiomas -- el curso termina al
+    // acabar el temario, no por calendario (ver Plan.auto_close_expired),
+    // así que pedir un número de semanas ahí solo confunde.
+    var weeksField = document.getElementById("weeks-field");
+    var weeksInput = document.getElementById("weeks-input");
 
     function selectedValue(radios) {
         for (var i = 0; i < radios.length; i++) {
@@ -323,6 +329,8 @@
         for (var j = 0; j < studyVideoInputs.length; j++) {
             studyVideoInputs[j].disabled = !isStudyGeneral;
         }
+        weeksField.style.display = isLanguage ? "none" : "block";
+        weeksInput.disabled = isLanguage;
     }
 
     for (var i = 0; i < planTypeRadios.length; i++) {

@@ -15,9 +15,38 @@ from django.utils import timezone
 from . import ai, api
 from .models import (
     CourseQuiz, Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, SavedVideo, Task,
-    TimerSession, WorkoutSession,
+    TimerSession, WarmupStatus, WorkoutSession,
 )
 from .utils import get_current_user, read_mobile_release, resolve_plan_target
+from urllib.parse import quote
+
+
+# Vídeos fijos de calentamiento/enfriamiento — obligatorios en toda
+# sesión de Deporte (ver _require_warmup, task_warmup y task_cooldown).
+# Cambiar el ID aquí para usar otro vídeo, sin tocar nada de lógica.
+WARMUP_VIDEO_ID = "1YY0xyCgITc"
+COOLDOWN_VIDEO_ID = "r5QG2Lq1oUo"
+
+
+def _require_warmup(request, task):
+    """
+    Punto de entrada común a task_workout, routine_play y plan_session
+    (las tres formas de empezar a entrenar): si la tarea es de Deporte
+    y no se ha calentado hace poco (WarmupStatus.FRESH_WINDOW), corta
+    el paso y manda al vídeo de calentamiento, con ?next= para volver
+    exactamente a donde se iba. Devuelve None si se puede seguir tal cual.
+    """
+    if task.category != Task.CATEGORY_SPORT:
+        return None
+    if task.subcategory == Task.SUBCATEGORY_RUNNING:
+        # Running no se cuenta con la cámara ni con un circuito: la
+        # sesión ya queda validada por datos reales (distancia/tiempo,
+        # Health Connect...), así que no hace falta el vídeo.
+        return None
+    if WarmupStatus.is_fresh(get_current_user()):
+        return None
+    warmup_url = reverse("tasks:task_warmup", args=[task.pk])
+    return redirect(f"{warmup_url}?next={quote(request.get_full_path())}")
 
 
 def _read_category(request, default=Task.CATEGORY_GENERAL):
@@ -369,6 +398,9 @@ def task_workout(request, pk):
        Con ?video=<id>: va directo al vídeo, sin pasar por lo demás.
     """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    gate = _require_warmup(request, task)
+    if gate:
+        return gate
     exercise_slug = request.GET.get("exercise")
     video_id = request.GET.get("video")
 
@@ -504,18 +536,21 @@ def task_workout_save(request, pk):
     # si se llegó a él. Si se quedó corta, se queda pendiente con el
     # porcentaje ya guardado en la sesión, para poder retomarla el mismo
     # día. Sin objetivo (entreno libre), se completa como siempre.
-    if ws.target_met:
-        task.mark_done()
-
     resumen = f"Sesión guardada: {total_reps} {exercise_label} en {total_sets} serie(s)"
     if avg_rep_seconds:
         resumen += f", ritmo medio {avg_rep_seconds}s/rep."
     else:
         resumen += "."
-    if not ws.target_met:
+
+    if ws.target_met:
+        # La tarea no se marca hecha aquí — falta el enfriamiento
+        # obligatorio (ver task_cooldown), que es quien la cierra de verdad.
+        redirect_url = reverse("tasks:task_cooldown", args=[task.pk])
+    else:
         resumen += f" Te has quedado en el {ws.achievement_pct}% del objetivo — la tarea sigue pendiente."
+        redirect_url = reverse("tasks:task_list")
     messages.success(request, resumen)
-    return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
+    return JsonResponse({"ok": True, "redirect_url": redirect_url})
 
 
 @require_POST
@@ -568,8 +603,6 @@ def task_workout_save_manual(request, pk):
         steps=steps,
     )
 
-    task.mark_done()
-
     bits = []
     if distance_km:
         bits.append(f"{distance_km}km")
@@ -577,8 +610,49 @@ def task_workout_save_manual(request, pk):
         bits.append(f"{duration_minutes:.0f} min")
     if steps:
         bits.append(f"{steps} pasos")
+    # A diferencia del resto de Deporte, running no pasa por el
+    # enfriamiento obligatorio: la sesión ya viene de un dato real
+    # (distancia/tiempo, Health Connect...), no hace falta el vídeo.
+    task.mark_done()
     messages.success(request, "Sesión de running guardada: " + ", ".join(bits) + ".")
     return redirect(reverse("tasks:task_list"))
+
+
+def task_warmup(request, pk):
+    """
+    Calentamiento obligatorio antes de entrenar (ver _require_warmup):
+    un vídeo fijo que hay que ver entero — el botón de continuar
+    permanece bloqueado hasta el evento ENDED de YouTube (ver
+    tasks/task_warmup.html). Al terminar, se apunta la hora
+    (WarmupStatus) y se vuelve a donde se iba (?next=), que ya no lo
+    volverá a pedir mientras siga "fresco".
+    """
+    task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    next_url = request.GET.get("next") or reverse("tasks:task_workout", args=[task.pk])
+    if request.method == "POST":
+        WarmupStatus.mark_done(get_current_user())
+        return redirect(next_url)
+    return render(request, "tasks/task_warmup.html", {
+        "task": task, "next": next_url, "video_id": WARMUP_VIDEO_ID,
+    })
+
+
+def task_cooldown(request, pk):
+    """
+    Enfriamiento obligatorio al terminar de entrenar: mismo mecanismo
+    que task_warmup pero al revés. Se llega aquí DESPUÉS de guardar ya
+    los números de la sesión (task_workout_save, .._save_manual,
+    routine_save, plan_session_save, task_video_save) — hasta que no se
+    ve el vídeo entero, la tarea no se marca hecha de verdad.
+    """
+    task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    if request.method == "POST":
+        task.mark_done()
+        messages.success(request, "Sesión completada.")
+        return redirect(reverse("tasks:task_list"))
+    return render(request, "tasks/task_cooldown.html", {
+        "task": task, "video_id": COOLDOWN_VIDEO_ID,
+    })
 
 
 # ------------------------------------------------------------- enfoque
@@ -705,10 +779,23 @@ def task_video(request, pk):
     task.youtube_playlist_id / target_minutes / target_video_count solo
     aplican al vídeo fijado en la tarea, no al elegido al vuelo (ese
     siempre es un vídeo suelto, sin objetivo por cuenta ni por minutos).
+
+    Un curso de idioma (Plan.STUDY_SUBTYPE_LANGUAGE) asigna UN vídeo por
+    día, que suele durar mucho menos que el objetivo diario en minutos
+    — sin más, la tarea se marcaría hecha en cuanto acabara ese primer
+    vídeo corto, sin llegar ni de lejos al objetivo. `course_queue` lleva
+    los siguientes vídeos del temario para que task_video.html los
+    encadene solo, en la misma sesión, hasta llenar el objetivo (ver
+    Plan.upcoming_course_queue).
     """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
     override_video_id = request.GET.get("video")
     video_id = override_video_id or task.youtube_video_id
+    plan = None if override_video_id else task.plan
+    is_language_session = bool(
+        plan and plan.plan_type == Plan.PLAN_TYPE_STUDY and plan.study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE
+    )
+    course_queue = plan.upcoming_course_queue() if is_language_session else []
     return render(request, "tasks/task_video.html", {
         "task": task,
         "video_id": video_id,
@@ -719,6 +806,7 @@ def task_video(request, pk):
         # Un vídeo elegido al vuelo siempre es de YouTube, suelto — el
         # "solo local, sin YouTube" solo puede venir de la propia tarea.
         "has_local_video": False if override_video_id else task.has_local_video,
+        "course_queue_json": json.dumps(course_queue),
     })
 
 
@@ -748,13 +836,28 @@ def task_video_save(request, pk):
         data = {}
     raw_minutes = data.get("minutes")
     minutes_watched = max(0, int(raw_minutes)) if isinstance(raw_minutes, (int, float)) else None
+    # Cuántos vídeos del temario se completaron ENTEROS en esta sesión —
+    # una sesión de idioma puede encadenar varios vídeos cortos seguidos
+    # hasta llenar el objetivo diario en minutos (ver task_video.html);
+    # sin dato (cliente viejo, o tarea que no es de idioma) se asume 1,
+    # ver Plan.mark_current_module_watched.
+    raw_videos = data.get("videos_watched")
+    videos_watched = max(0, int(raw_videos)) if isinstance(raw_videos, (int, float)) else None
     plan = task.plan
+
+    # Un vídeo de Deporte (seguir una rutina en YouTube) no se marca
+    # hecho aquí: falta el enfriamiento obligatorio (task_cooldown), que
+    # es quien la cierra de verdad. El resto (Estudio, idiomas…) sigue
+    # exactamente como antes.
+    if task.category == Task.CATEGORY_SPORT:
+        return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_cooldown", args=[task.pk])})
+
     task.mark_done(minutes_watched=minutes_watched)
     messages.success(request, "Vídeo visto — tarea completada.")
 
     redirect_url = reverse("tasks:task_list")
     if plan and plan.plan_type == Plan.PLAN_TYPE_STUDY and plan.study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE:
-        plan.mark_current_module_watched()
+        plan.mark_current_module_watched(count=videos_watched)
         quiz = api.maybe_trigger_quiz(plan)
         if quiz:
             redirect_url = reverse("tasks:quiz_take", args=[quiz.uuid])
@@ -871,6 +974,9 @@ def routine_play(request, pk, routine_pk):
     activo siguiéndolo.
     """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    gate = _require_warmup(request, task)
+    if gate:
+        return gate
     routine = get_object_or_404(Routine, pk=routine_pk, user=get_current_user())
     items = list(routine.items.select_related("exercise"))
 
@@ -956,14 +1062,14 @@ def routine_save(request, pk, routine_pk):
             session_duration_seconds=e["seconds"],
         ))
 
-    task.mark_done()
-
     cortas = [w for w in created if not w.target_met]
     resumen = f"Circuito «{routine.name}» completado: {len(created)} ejercicio(s), {total_seconds}s."
     if cortas:
         resumen += " " + ", ".join(f"{w.exercise_name} al {w.achievement_pct}%" for w in cortas) + "."
     messages.success(request, resumen)
-    return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
+    # La tarea se marca hecha en task_cooldown — falta el enfriamiento
+    # obligatorio.
+    return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_cooldown", args=[task.pk])})
 
 
 def stats_list(request):
@@ -1451,10 +1557,20 @@ def plan_form(request, pk=None):
                         plan.started_on = plan.started_on or _dt.date.today()
                 else:
                     plan.started_on = plan.started_on or _dt.date.today()
-                try:
-                    plan.weeks = max(1, int(request.POST.get("weeks", 12)))
-                except (TypeError, ValueError):
-                    plan.weeks = 12
+                # Semanas: campo oculto para planes de Idiomas (ver
+                # language-fields en plan_form.html -- ahí el ritmo real
+                # lo decide lo que se cumple de verdad, no el calendario,
+                # ver Plan.auto_close_expired). Si no viene en el POST
+                # (input deshabilitado por el toggle) se deja tal cual
+                # estaba -- 12 si es un plan nuevo (default del modelo),
+                # o lo que ya tuviera si se está editando -- en vez de
+                # resetearlo a 12 cada vez que se guarda el plan.
+                raw_weeks = request.POST.get("weeks")
+                if raw_weeks:
+                    try:
+                        plan.weeks = max(1, int(raw_weeks))
+                    except (TypeError, ValueError):
+                        pass
                 plan.is_active = bool(request.POST.get("is_active"))
                 plan.reward = request.POST.get("reward", "").strip()[:200]
                 plan.repeat = request.POST.get("repeat", "custom")
@@ -1943,6 +2059,9 @@ def plan_session(request, pk, plan_pk):
     con el objetivo que toca. Sin elegir nada — el plan ya lo decidió.
     """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    gate = _require_warmup(request, task)
+    if gate:
+        return gate
     plan = get_object_or_404(_plans_qs(), pk=plan_pk)
     items = plan.session_items()
     if not items:
@@ -1996,9 +2115,10 @@ def plan_session_save(request, pk, plan_pk):
     if not created:
         return JsonResponse({"ok": False, "error": "Sin datos que guardar"}, status=400)
 
-    task.mark_done()
     messages.success(request, f"Sesión de «{plan.name}» guardada.")
-    return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
+    # La tarea se marca hecha en task_cooldown — falta el enfriamiento
+    # obligatorio.
+    return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_cooldown", args=[task.pk])})
 
 
 # ---------------------------------------------------- app móvil: updates

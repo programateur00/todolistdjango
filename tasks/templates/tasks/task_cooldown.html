@@ -1,0 +1,58 @@
+{% extends "tasks/base.html" %}
+{% block title %}Enfriamiento — {{ task.title }}{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">enfriamiento</span>
+        <h1>{{ task.title }}</h1>
+    </div>
+</header>
+
+<p class="exercise-picker__hint">
+    Ya está todo guardado — un último vídeo de vuelta a la calma para cerrar la sesión.
+    Mira el vídeo entero para poder continuar.
+</p>
+
+<div class="video-embed" id="video-embed">
+    <div id="video-player" class="video-embed__player"></div>
+    <p class="field__hint" id="video-hint">Cargando…</p>
+</div>
+
+<form method="post" action="{% url 'tasks:task_cooldown' task.pk %}">
+    {% csrf_token %}
+    <div class="task-form__actions">
+        <button type="submit" class="primary-btn" id="continue-btn" disabled>Terminar sesión</button>
+    </div>
+</form>
+
+<script src="https://www.youtube.com/iframe_api"></script>
+<script>
+(function () {
+    var hint = document.getElementById('video-hint');
+    var continueBtn = document.getElementById('continue-btn');
+    var videoId = "{{ video_id }}";
+    var player = null;
+
+    window.onYouTubeIframeAPIReady = function () {
+        hint.textContent = 'Mira el vídeo entero — el botón se activa al terminar.';
+        player = new YT.Player('video-player', {
+            videoId: videoId,
+            playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1 },
+            events: {
+                onStateChange: function (e) {
+                    if (e.data === YT.PlayerState.ENDED) {
+                        hint.textContent = 'Sesión lista — ya puedes terminar.';
+                        continueBtn.disabled = false;
+                    }
+                },
+                onError: function () {
+                    hint.textContent = 'Este vídeo no se pudo cargar — recarga la página para reintentarlo.';
+                },
+            },
+        });
+    };
+    if (window.YT && window.YT.Player) window.onYouTubeIframeAPIReady();
+})();
+</script>
+{% endblock %}

@@ -10,13 +10,17 @@
     <a href="{% url 'tasks:task_list' %}" class="stats-link">← Volver</a>
 </header>
 
-<div class="video-embed">
+<div class="video-embed" id="video-embed" data-course-queue='{{ course_queue_json|default:"[]" }}'>
     <div id="video-player" class="video-embed__player"></div>
     <video id="local-video-player" class="video-embed__player" playsinline controls hidden></video>
     {% if target_minutes or target_video_count %}
     <div class="stats-bar"><div class="stats-bar__done" id="video-progress" style="width:0%"></div></div>
     {% endif %}
     <p class="field__hint" id="video-hint">Cargando…</p>
+    <p class="workout__goal-banner" id="video-goal-banner" hidden></p>
+    <div class="task-form__actions" id="video-goal-actions" hidden>
+        <button type="button" class="primary-btn" id="video-finish-btn">Terminar sesión</button>
+    </div>
     <div class="task-form__actions" id="video-permission-prompt" hidden>
         <button type="button" class="primary-btn" id="video-permission-btn">Dar permiso y reproducir</button>
         <button type="button" class="ghost-btn" id="video-reselect-btn" hidden>Volver a elegir el archivo</button>
@@ -48,12 +52,25 @@
     var targetVideoCount = {{ target_video_count|default_if_none:"null" }} || (playlistId && !targetMinutes ? 1 : null);
     var saveUrl = "{% url 'tasks:task_video_save' task.pk %}";
     var csrfToken = "{{ csrf_token }}";
-    // Margen para no cortar el vídeo justo al llegar al objetivo en
-    // minutos: si al vídeo le quedan pocos minutos, lo dejamos terminar
-    // solo (el objetivo se pasa un poco, pero no se corta a media frase);
-    // si le queda mucho (un directo de 2h con objetivo de 1h), se corta
-    // en seco al llegar al objetivo. Ver saveDone()/shouldCutAtTarget().
-    var OVERSHOOT_BUFFER_SECONDS = 15 * 60;
+    // Próximos vídeos del temario de un curso de idioma (ver
+    // Plan.upcoming_course_queue) — courseQueue[0] es SIEMPRE el vídeo
+    // que ya se está reproduciendo (videoId de arriba). Sin esto (tarea
+    // que no es de idioma), queda vacío y todo se comporta como antes.
+    var courseQueue = [];
+    try {
+        courseQueue = JSON.parse(document.getElementById('video-embed').dataset.courseQueue || '[]');
+    } catch (e) { courseQueue = []; }
+    var queueIndex = 0;
+    // Al llegar al objetivo en minutos ya NO se corta el vídeo solo —
+    // mismo criterio que con los ejercicios (ver workout.js/circuit.js:
+    // "objetivo cumplido, sigue si quieres o termina"): se avisa con
+    // goalBannerEl/goalFinishBtn y se deja decidir; la sesión sigue
+    // hasta que el usuario pulse "Terminar sesión" o no quede más vídeo
+    // que ver. Ver announceGoalReached() más abajo.
+    var goalBannerEl = document.getElementById('video-goal-banner');
+    var goalActionsEl = document.getElementById('video-goal-actions');
+    var goalFinishBtn = document.getElementById('video-finish-btn');
+    var goalReached = false;
     // Un vídeo local guardado en ESTE navegador para esta tarea, además
     // del de YouTube — solo tiene sentido en Deporte/Enfoque (vídeos
     // cortos); Estudio ya usa playlists/vídeos largos de YouTube.
@@ -70,6 +87,15 @@
     var pollId = null;
     var player = null;      // reproductor de YouTube
     var usingLocal = false;
+    // Cuántos vídeos tiene la playlist real de YouTube — cacheado en
+    // cuanto se puede leer (ver el sondeo de onReady más abajo), porque
+    // player.getPlaylist() puede devolver un array VACÍO todavía justo
+    // en el instante en que el primer vídeo (a veces corto) ya ha
+    // terminado — la metadata de la lista tarda un poco más en cargar
+    // que el vídeo en sí. Sin este caché, isLastInPlaylist() confundía
+    // "todavía no sé cuántos hay" con "no hay ninguno más" y daba la
+    // tarea por hecha nada más ver el primero. null = aún sin dato.
+    var knownPlaylistLength = null;
 
     function fmtMin(s) {
         return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
@@ -93,7 +119,11 @@
         fetch(saveUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-            body: JSON.stringify({ minutes: Math.round(elapsedSeconds / 60) }),
+            // videosWatched: cuántos vídeos se vieron ENTEROS en esta sesión
+            // (0 si se cortó a media reproducción por llegar al objetivo en
+            // minutos) — lo usa Plan.mark_current_module_watched en tareas
+            // de curso de idioma; el resto de tareas lo ignoran.
+            body: JSON.stringify({ minutes: Math.round(elapsedSeconds / 60), videos_watched: videosWatched }),
         })
             .then(function (r) { return r.json(); })
             .then(function (data) {
@@ -105,29 +135,45 @@
             });
     }
 
-    /**
-     * Al llegar al objetivo en minutos, decide si cortar ya o dejar que
-     * el vídeo termine solo. `duration`/`currentTime` en segundos —
-     * mismos nombres que dan tanto el reproductor de YouTube como
-     * <video> local, así que sirve para los dos casos.
-     *
-     * Sin duración fiable (getDuration() puede devolver 0 en directos o
-     * antes de cargar del todo), se corta por seguridad: mejor un corte
-     * de más que un vídeo que nunca se sabe cuándo termina.
-     */
-    function shouldCutAtTarget(duration, currentTime) {
-        if (!duration) return true;
-        var remaining = duration - currentTime;
-        return remaining > OVERSHOOT_BUFFER_SECONDS;
+    if (goalFinishBtn) goalFinishBtn.addEventListener('click', saveDone);
+
+    /** Al llegar al objetivo en minutos: avisa (una sola vez) y deja
+     *  decidir — no corta nada por su cuenta. `label` es el texto del
+     *  objetivo ya cumplido (p. ej. "60 min"). */
+    function announceGoalReached(label) {
+        if (goalReached) return;
+        goalReached = true;
+        if (goalBannerEl) {
+            goalBannerEl.hidden = false;
+            goalBannerEl.textContent = '🎯 ¡Objetivo cumplido! (' + label + ') Sigue viendo si quieres, o termina la sesión cuando acabes.';
+        }
+        if (goalActionsEl) goalActionsEl.hidden = false;
     }
 
     /** Si el vídeo/playlist se acaba antes de llegar al objetivo, no hay
-     *  más que dar — se cuenta como hecho igual. */
+     *  más que dar — se cuenta como hecho igual.
+     *
+     *  OJO con getPlaylist(): justo en el instante ENDED puede que
+     *  todavía no haya cargado y devuelva []. Por eso se prioriza
+     *  knownPlaylistLength (cacheado con calma durante la reproducción,
+     *  ver el sondeo de onReady) sobre una lectura en vivo que puede
+     *  pillarlo a medio cargar. Sin longitud fiable de ninguna de las
+     *  dos formas, se asume que SÍ queda más por delante (no se corta
+     *  la tarea): es mucho más barato comprobarlo otra vez en el
+     *  siguiente ENDED que dar la tarea por hecha de más. */
     function isLastInPlaylist() {
         if (!playlistId || !player || typeof player.getPlaylist !== 'function') return true;
         var list = player.getPlaylist() || [];
+        var length = knownPlaylistLength || list.length;
+        if (!length) return false;
         var idx = player.getPlaylistIndex();
-        return !list.length || idx < 0 || idx + 1 >= list.length;
+        return idx < 0 || idx + 1 >= length;
+    }
+
+    /** ¿Queda otro vídeo en la cola del curso de idioma después del
+     *  actual? (ver courseQueue arriba). */
+    function hasNextInQueue() {
+        return courseQueue.length > 0 && queueIndex + 1 < courseQueue.length;
     }
 
     function startYouTube() {
@@ -151,16 +197,24 @@
                 onReady: function () {
                     pollId = setInterval(function () {
                         if (!player || typeof player.getPlayerState !== 'function') return;
+                        // Se aprovecha cada segundo de sondeo (con la
+                        // reproducción ya en marcha, la metadata de la
+                        // lista ha tenido tiempo de sobra para cargar) para
+                        // cachear cuántos vídeos tiene la playlist — ver
+                        // knownPlaylistLength / isLastInPlaylist arriba.
+                        if (playlistId && !knownPlaylistLength && typeof player.getPlaylist === 'function') {
+                            var currentList = player.getPlaylist() || [];
+                            if (currentList.length) knownPlaylistLength = currentList.length;
+                        }
                         if (player.getPlayerState() === YT.PlayerState.PLAYING) {
                             elapsedSeconds += 1;
                             if (targetMinutes) {
                                 updateProgressLabel();
                                 if (elapsedSeconds >= targetMinutes * 60) {
-                                    var duration = typeof player.getDuration === 'function' ? player.getDuration() : 0;
-                                    var current = typeof player.getCurrentTime === 'function' ? player.getCurrentTime() : 0;
-                                    if (shouldCutAtTarget(duration, current)) saveDone();
-                                    // si no, se deja seguir: el evento ENDED de abajo se
-                                    // encarga de guardar en cuanto el vídeo termine solo.
+                                    announceGoalReached(targetMinutes + ' min');
+                                    // ya no se corta aquí — sigue reproduciendo
+                                    // hasta que el usuario pulse "Terminar
+                                    // sesión" o no quede más vídeo que ver.
                                 }
                             }
                         }
@@ -174,9 +228,21 @@
                             saveDone();
                         } else if (!targetVideoCount && !targetMinutes) {
                             saveDone(); // vídeo suelto sin objetivo: verlo entero basta
+                        } else if (hasNextInQueue()) {
+                            // Curso de idioma: sigue con el siguiente vídeo del
+                            // temario — llegar al objetivo en minutos ya no
+                            // corta la sesión sola (ver announceGoalReached
+                            // arriba), así que esto sigue encadenando pase lo
+                            // que pase hasta que el usuario pulse "Terminar
+                            // sesión" o se acabe el temario.
+                            queueIndex += 1;
+                            player.loadVideoById(courseQueue[queueIndex].video_id);
                         } else if (isLastInPlaylist()) {
-                            saveDone(); // se acabó la lista antes de llegar al objetivo
+                            saveDone(); // no queda nada más que ver
                         }
+                        // si no, era una playlist real de YouTube con más
+                        // vídeos por delante: YT sigue solo, no hay que hacer
+                        // nada aquí.
                     }
                 },
                 onError: function () {
@@ -260,8 +326,10 @@
                 if (targetMinutes) {
                     updateProgressLabel();
                     if (elapsedSeconds >= targetMinutes * 60) {
-                        if (shouldCutAtTarget(localVideoEl.duration, localVideoEl.currentTime)) saveDone();
-                        // si no, se deja seguir: el evento 'ended' de abajo guarda al terminar.
+                        announceGoalReached(targetMinutes + ' min');
+                        // ya no se corta aquí — el evento 'ended' de abajo
+                        // guarda al terminar el vídeo solo, o el usuario
+                        // pulsa "Terminar sesión" cuando quiera.
                     }
                 }
             }

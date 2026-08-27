@@ -1369,9 +1369,10 @@ class Plan(models.Model):
         Se mide siempre en VÍDEOS COMPLETOS consumidos, tanto si el
         objetivo es "N vídeos al día" como si es "N minutos al día":
           - con target_video_count: cada día cumplido consume esa
-            cantidad de vídeos (mismo criterio que
-            `_language_completed_count`, contando Occurrence, pero
-            multiplicado por cuántos vídeos tocan por sesión).
+            cantidad de vídeos (mismo tipo de conteo que
+            `_language_completed_count`, pero contando Occurrence en vez
+            de CourseModule.watched_at, y multiplicado por cuántos
+            vídeos tocan por sesión).
           - con target_minutes (y sin target_video_count): se suman los
             minutos REALES vistos (Occurrence.minutes_watched, no un
             cálculo teórico) desde que se sincronizó la playlist, y se
@@ -1455,22 +1456,17 @@ class Plan(models.Model):
 
     def _language_completed_count(self):
         """
-        Cuántas sesiones de este curso se han CUMPLIDO desde que empezó
-        el plan — mismo conteo que PlanItem.successes_and_streak() usa
-        para Deporte, aplicado aquí a la serie de tarea del plan. Es lo
-        que decide qué CourseModule toca hoy: avanza con lo que de
-        verdad has visto, no con los días que han pasado en el
-        calendario — si te saltas un día no te "come" un vídeo sin
-        verlo, y no hace falta que coincida con la semana en la que la
-        IA lo programó al crear el curso (esa semana es solo orientativa,
-        ver CourseModule.scheduled_week).
+        Cuántos vídeos del temario se han visto de verdad hasta ahora —
+        decide qué CourseModule toca a continuación. La fuente real es
+        CourseModule.watched_at (lo pone `mark_current_module_watched`,
+        llamado justo después de guardar la Occurrence del día — ver
+        views.task_video_save), NO el número de días/Occurrence: una
+        sola sesión de estudio puede encadenar varios vídeos cortos
+        seguidos hasta llenar el objetivo diario en minutos (ver
+        task_video.html), así que el curso puede avanzar más de un
+        vídeo por día.
         """
-        if not self.task_series_id:
-            return 0
-        return Occurrence.objects.filter(
-            series_id=self.task_series_id, result=Occurrence.RESULT_DONE,
-            deleted_at__isnull=True, recorded_at__date__gte=self.started_on,
-        ).count()
+        return self.course_modules.filter(watched_at__isnull=False).count()
 
     def _language_target_fields(self):
         """
@@ -1526,24 +1522,47 @@ class Plan(models.Model):
             "next": modules[min(watched, total - 1)],
         }
 
-    def mark_current_module_watched(self):
+    def upcoming_course_queue(self, max_videos=40):
         """
-        Apunta `CourseModule.watched_at` en el vídeo que se acaba de dar
-        por visto — solo para poder revisarlo (auditoría, depurar un
-        test raro). El avance real del curso sigue siendo
-        `_language_completed_count()` sobre Occurrence, no esto: se
-        llama DESPUÉS de guardar la Occurrence del día, así que el
-        índice ya incluye el vídeo recién visto.
+        Vídeos del temario a partir de HOY (el que toca, incluido) para
+        que task_video.html pueda encadenarlos en la misma sesión sin
+        volver al servidor — hasta llenar el objetivo diario en minutos
+        (Task.target_minutes) o hasta que se acabe el curso. `max_videos`
+        es solo un tope de sensatez: ninguna sesión real encadena tantos.
         """
         modules = list(self.course_modules.all())
-        completed = self._language_completed_count()
-        if not modules or completed <= 0:
+        if not modules:
+            return []
+        index = min(self._language_completed_count(), len(modules) - 1)
+        return [
+            {"video_id": m.youtube_video_id, "duration_seconds": m.duration_seconds}
+            for m in modules[index:index + max_videos] if m.youtube_video_id
+        ]
+
+    def mark_current_module_watched(self, count=None):
+        """
+        Marca como vistos los próximos `count` módulos del temario que
+        todavía no lo estaban — llamada justo después de guardar la
+        Occurrence del día (ver views.task_video_save). `count` es
+        cuántos vídeos se completaron de verdad en esa sesión: una
+        sesión de idioma puede encadenar varios vídeos cortos seguidos
+        hasta llenar el objetivo diario en minutos (ver task_video.html),
+        así que no siempre es 1. Sin dato (None, cliente antiguo sin
+        este contador) se asume 1, el comportamiento de siempre; con 0
+        (la sesión se cortó antes de terminar ningún vídeo del todo) no
+        se avanza nada — no hay que "comerse" un vídeo a medias.
+        """
+        if count is None:
+            count = 1
+        elif count <= 0:
             return None
-        module = modules[min(completed, len(modules)) - 1]
-        if not module.watched_at:
-            module.watched_at = timezone.now()
-            module.save(update_fields=["watched_at"])
-        return module
+        modules = list(
+            self.course_modules.filter(watched_at__isnull=True).order_by("order")[:count]
+        )
+        if not modules:
+            return None
+        CourseModule.objects.filter(pk__in=[m.pk for m in modules]).update(watched_at=timezone.now())
+        return modules[-1]
 
     def quiz_streak_stats(self):
         """
@@ -2553,6 +2572,41 @@ class TimerSession(models.Model):
         return f"{self.subcategory_label} — {self.minutes} min ({self.recorded_at:%Y-%m-%d %H:%M})"
 
 
+class WarmupStatus(models.Model):
+    """
+    Cuándo calentó el usuario por última vez. Un solo registro por
+    usuario (no un historial): antes de cualquier tarea de Deporte se
+    exige un vídeo de calentamiento (ver views.task_workout / .routine_play
+    / .plan_session, a través de views._require_warmup) salvo que ya se
+    haya hecho dentro de las últimas FRESH_WINDOW horas — así dos
+    sesiones seguidas el mismo día (tren superior + tren inferior, por
+    ejemplo) no piden calentar dos veces.
+    """
+    FRESH_WINDOW = timedelta(hours=2)
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="warmup_status",
+    )
+    last_warmup_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Calentamiento de {self.user} — {self.last_warmup_at or 'nunca'}"
+
+    @classmethod
+    def is_fresh(cls, user):
+        """True si no hace falta volver a calentar todavía."""
+        status = cls.objects.filter(user=user).first()
+        if not status or not status.last_warmup_at:
+            return False
+        return timezone.now() - status.last_warmup_at < cls.FRESH_WINDOW
+
+    @classmethod
+    def mark_done(cls, user):
+        status, _ = cls.objects.get_or_create(user=user)
+        status.last_warmup_at = timezone.now()
+        status.save(update_fields=["last_warmup_at"])
+
+
 class CoursePlaylist(models.Model):
     """
     Un curso de idioma verificado A MANO: una playlist real de YouTube
@@ -2703,11 +2757,13 @@ class CourseModule(models.Model):
     # `title` — ver CourseQuiz para el test que se genera con esto.
     topic = models.CharField(max_length=200, blank=True)
 
-    # Cuándo se vio de verdad, para poder revisarlo — el avance real
-    # (qué vídeo toca hoy) sigue basándose en Occurrence, no en esto
-    # (ver Plan._language_completed_count). Lo pone
-    # Plan.mark_current_module_watched(), llamado justo después de
-    # guardar la Occurrence del día (ver views.task_video_save).
+    # Cuándo se vio de verdad — esta es la fuente real del avance del
+    # curso (ver Plan._language_completed_count), no un dato solo de
+    # auditoría: lo pone Plan.mark_current_module_watched(), llamada
+    # justo después de guardar la Occurrence del día (ver
+    # views.task_video_save) con cuántos vídeos se completaron en esa
+    # sesión — puede ser más de uno si se encadenaron varios vídeos
+    # cortos seguidos para llenar el objetivo diario en minutos.
     watched_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
