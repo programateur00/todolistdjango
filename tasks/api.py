@@ -1690,6 +1690,56 @@ def _language_matches(catalog_text, requested_text):
     return catalog_norm in requested_words
 
 
+def catalog_language_options():
+    """
+    Idiomas objetivo con al menos un curso ACTIVO en el catalogo, para
+    el desplegable "Idioma" del formulario -- antes era un campo libre
+    y un acento de mas (o de menos) dejaba el plan sin cursos aunque el
+    catalogo si tuviera el idioma (ver _language_matches). Al salir de
+    aqui, lo que el usuario elige coincide EXACTO con lo guardado -- no
+    hace falta ya tolerar tildes distintas para este campo.
+
+    Deduplica por forma normalizada (ver _normalize_language): dos
+    cursos guardados como "frances" y "Francés" no deben dar dos
+    opciones iguales a la vista -- se queda con la primera grafia con
+    la que se guardo cada uno. Se actualiza solo con anadir cursos
+    nuevos via add_course_playlist, sin tocar el formulario.
+    """
+    seen = {}
+    qs = CoursePlaylist.objects.filter(is_active=True).order_by("language").values_list("language", flat=True)
+    for lang in qs:
+        lang = (lang or "").strip()
+        if not lang:
+            continue
+        key = _normalize_language(lang)
+        seen.setdefault(key, lang)
+    return sorted(seen.values(), key=_normalize_language)
+
+
+def catalog_native_language_options():
+    """
+    Idiomas nativos ("idiomas que ya sabes") con al menos un curso
+    activo pensado para ellos -- mismo criterio y mismo motivo que
+    catalog_language_options. Los cursos NEUTROS (native_language en
+    blanco, ver CoursePlaylist.native_language) no necesitan aparecer
+    aqui: se ofrecen siempre, sin importar que marque el usuario.
+    """
+    seen = {}
+    qs = (
+        CoursePlaylist.objects.filter(is_active=True)
+        .exclude(native_language="")
+        .order_by("native_language")
+        .values_list("native_language", flat=True)
+    )
+    for lang in qs:
+        lang = (lang or "").strip()
+        if not lang:
+            continue
+        key = _normalize_language(lang)
+        seen.setdefault(key, lang)
+    return sorted(seen.values(), key=_normalize_language)
+
+
 def _select_language_catalog(language, level_from, level_to, known_languages):
     """
     Elige, del catálogo verificado (CoursePlaylist), qué cursos cubren

@@ -1421,7 +1421,8 @@ def plan_form(request, pk=None):
                     "language_name": request.POST.get("language_name", ""),
                     "level_from": request.POST.get("level_from", ""),
                     "level_to": request.POST.get("level_to", ""),
-                    "known_languages": request.POST.get("known_languages", ""),
+                    # Checkboxes: puede venir mas de un idioma ya sabido.
+                    "known_languages": ", ".join(request.POST.getlist("known_languages")),
                     "language_daily_minutes": request.POST.get("language_daily_minutes", ""),
                     "quiz_every_n_videos": request.POST.get("quiz_every_n_videos", ""),
                 })
@@ -1565,6 +1566,22 @@ def plan_form(request, pk=None):
         and display_plan.study_subtype != Plan.STUDY_SUBTYPE_LANGUAGE
         else None
     )
+    # Desplegables de idioma: solo los que ya tienen curso verificado en
+    # el catalogo (ver api.catalog_language_options) -- si el plan que
+    # se edita quedo con un idioma que luego se desactivo/desaparecio
+    # del catalogo, se anade igual para no perder el valor guardado.
+    language_choices = api.catalog_language_options()
+    if display_plan and display_plan.language_name and display_plan.language_name not in language_choices:
+        language_choices = language_choices + [display_plan.language_name]
+    native_language_choices = api.catalog_native_language_options()
+    known_languages_selected = [
+        s.strip() for s in (display_plan.known_languages.split(",") if display_plan and display_plan.known_languages else [])
+        if s.strip()
+    ]
+    for lang in known_languages_selected:
+        if lang not in native_language_choices:
+            native_language_choices.append(lang)
+
     return render(request, "tasks/plan_form.html", {
         "plan": display_plan,
         "weekdays": Task.WEEKDAYS,
@@ -1573,6 +1590,9 @@ def plan_form(request, pk=None):
         "study_subtype_choices": Plan.STUDY_SUBTYPE_CHOICES,
         "cefr_level_choices": Plan.CEFR_LEVEL_CHOICES,
         "study_headline": study_headline,
+        "language_choices": language_choices,
+        "native_language_choices": native_language_choices,
+        "known_languages_selected": known_languages_selected,
     })
 
 

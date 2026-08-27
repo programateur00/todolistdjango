@@ -75,8 +75,16 @@
     <div id="language-fields">
         <label class="field">
             <span class="field__label">Idioma</span>
-            <input type="text" name="language_name" maxlength="40" value="{{ plan.language_name|default:'' }}"
-                placeholder="Ej: francés">
+            <select name="language_name">
+                <option value="">— elige un idioma —</option>
+                {% for lang in language_choices %}
+                <option value="{{ lang }}" {% if plan.language_name == lang %}selected{% endif %}>{{ lang|capfirst }}</option>
+                {% endfor %}
+            </select>
+            <span class="field__hint">
+                Solo salen los idiomas con algún curso ya verificado en el catálogo —
+                añade más con <code>add_course_playlist</code> y aparecerán aquí solos.
+            </span>
         </label>
 
         <div class="field-row">
@@ -100,16 +108,23 @@
             </label>
         </div>
 
-        <label class="field">
-            <span class="field__label">Idiomas que ya sabes</span>
-            <input type="text" name="known_languages" maxlength="200" value="{{ plan.known_languages|default:'' }}"
-                placeholder="Ej: español, inglés" required>
+        <fieldset class="field">
+            <legend class="field__label">Idiomas que ya sabes</legend>
+            <div class="repeat-options">
+                {% for lang in native_language_choices %}
+                <label class="repeat-option">
+                    <input type="checkbox" name="known_languages" value="{{ lang }}"
+                        {% if lang in known_languages_selected %}checked{% endif %}>
+                    <span>{{ lang|capfirst }}</span>
+                </label>
+                {% endfor %}
+            </div>
             <span class="field__hint">
-                Se ofrecen los cursos explicados en cualquiera de estos idiomas (no hace falta
-                que sea el primero de la lista), más los neutros — nunca uno pensado para
-                hablantes de un idioma distinto a los que pongas aquí.
+                Marca todos los que sepas — se ofrecen los cursos explicados en cualquiera de
+                ellos, más los neutros (nunca uno pensado para hablantes de un idioma distinto
+                a los que marques aquí). Solo salen los idiomas nativos que ya usa algún curso.
             </span>
-        </label>
+        </fieldset>
 
         <div class="field" id="daily-minutes-field">
             <span class="field__label">Minutos de vídeo al día</span>
