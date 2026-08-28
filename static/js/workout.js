@@ -36,6 +36,14 @@ const HANG_STABLE_MS = 500;   // cuanto tiempo seguido con los brazos en alto pa
 const ARMS_DOWN_STABLE_MS = 400; // cuanto tiempo seguido con los brazos abajo para dar la serie por terminada (evita falsos positivos por un frame ruidoso)
 const CALIBRATION_MS = 1200;  // tiempo colgado quieto que se usa como referencia
 const REST_ALERT_SECONDS = 90;
+// Descanso obligatorio entre series: mientras no haya pasado esto desde
+// que se cerró la serie anterior, countRep()/notePostureOk() no cuentan
+// nada aunque vuelvas a colocarte y te muevas antes de tiempo — antes
+// se contaban repeticiones calladas en pleno descanso si probabas a
+// moverte (pedido explícitamente, ver announceRestBlocked). Mismo
+// número que REST_ALERT_SECONDS a propósito: es el mismo "90 segundos"
+// del que se avisa al usuario al cerrar la serie.
+const MIN_REST_MS = REST_ALERT_SECONDS * 1000;
 // Comprobación de distancia a la cámara (ver checkFraming), solo para
 // dominadas/dominadas de arquero — es donde de verdad falla contar mal
 // si te alejas demasiado. Basada en el ancho de hombros como proporción
@@ -1639,7 +1647,31 @@ class WorkoutSession {
     this.canvas = el("workout-canvas");
     this.ctx = this.canvas.getContext("2d");
 
-    this.statusEl = el("workout-status");
+    // this.statusEl Y this.debugEl van los dos al mismo sitio: ningún
+    // aviso, ni texto, ni "movimiento" bajo la cámara — pedido
+    // explícito, ni siquiera un aviso fijo tipo "Preparando cámara…",
+    // porque estorba al probar la app "in real life". En vez de
+    // elementos reales del DOM, son objetos con un setter de
+    // "textContent" que redirige TODO (avisos de estado normales,
+    // avisos de fin de serie, descanso obligatorio, calibración, y
+    // el texto de depuración de cada ejercicio) al registro exportable
+    // (this.scissorLog, ver logScissor / exportScissorLog) en vez de a
+    // la pantalla. Los ~40 sitios que hacen "this.statusEl.textContent
+    // = ..." (directamente o vía setStatus/announceStatus/
+    // announceSetComplete/announceRestBlocked) y los ~60 que hacen
+    // "this.debugEl.textContent = ..." siguen funcionando tal cual, sin
+    // tocar ni un sitio más. La VOZ no se toca — sigue hablando igual
+    // que antes (speak()/speakOut no dependen de statusEl ni debugEl) —
+    // solo se quita el texto visual bajo la cámara.
+    // Cuando la app esté validada del todo y ya no haga falta
+    // depurarla, quitar este shim (y el botón/registro entero) deja el
+    // código donde estaba antes, sin más cambios que deshacer.
+    const self = this;
+    this.statusEl = {
+      set textContent(text) {
+        self.logScissor(`[status] ${text}`);
+      },
+    };
     this.goalBannerEl = el("workout-goal-banner");
     this.repsEl = el("workout-reps");
     this.setsEl = el("workout-sets");
@@ -1647,7 +1679,11 @@ class WorkoutSession {
     this.restEl = el("workout-rest");
     this.finishBtn = el("workout-finish");
     this.cancelBtn = el("workout-cancel");
-    this.debugEl = el("workout-debug");
+    this.debugEl = {
+      set textContent(text) {
+        self.logScissor(text);
+      },
+    };
     this.debugExportBtn = el("workout-debug-export");
     this.debugExportStatusEl = el("workout-debug-export-status");
 
@@ -1763,6 +1799,7 @@ class WorkoutSession {
 
     this.sessionStart = null;
     this.lastRepTime = null;
+    this.setClosedAt = null; // performance.now() de cuándo se cerró la última serie (con reps o con tiempo aguantado) — para el descanso obligatorio (ver MIN_REST_MS, countRep, notePostureOk, announceRestBlocked)
     this.restAlerted = false;
     // Silencia CUALQUIER voz (avisos, consejos, "te veo"/"no te veo",
     // "¡listo!"...) desde que termina una serie hasta que el reloj de
@@ -1815,11 +1852,14 @@ class WorkoutSession {
    * .txt) el registro de depuración acumulado en this.scissorLog — para
    * poder mandarlo tal cual sin tener que leer nada en la pantalla
    * mientras estás haciendo el ejercicio, tumbado y lejos de la cámara.
-   * A pesar del nombre (nació con las tijeretas), este registro y el
-   * botón que lo exporta (#workout-debug-export) se reutilizan tal
-   * cual para la plancha (ver logScissor en processPosture) — en el
-   * resto de ejercicios this.scissorLog se queda vacío y no pasa nada
-   * si esto no se llega a llamar nunca.
+   * A pesar del nombre (nació con las tijeretas), este registro cubre
+   * TODOS los ejercicios de cámara por igual: this.debugEl ya no es un
+   * elemento real del DOM, es un shim cuyo setter de "textContent"
+   * mete la línea aquí (ver el constructor) — así que cualquier sitio
+   * del fichero que hiciera "if (this.debugEl) this.debugEl.textContent
+   * = ..." (uno por ejercicio) ya queda registrado sin haber tenido que
+   * tocar ese código. El botón que lo exporta (#workout-debug-export)
+   * sale siempre, para cualquier ejercicio.
    */
   async exportScissorLog() {
     if (!this.debugExportStatusEl) return;
@@ -1932,7 +1972,13 @@ class WorkoutSession {
    * de ahí solo se dice "Serie de N terminada.", corto y al grano.
    */
   announceSetComplete(prefix, waitingMessage) {
-    const fullText = `${prefix} terminada. ${waitingMessage}`;
+    // Descanso obligatorio: se dice SIEMPRE (no solo la primera vez, a
+    // diferencia del resto de este aviso) — es la regla de "no cuento
+    // nada hasta que no pasen los 90s" (ver MIN_REST_MS, countRep,
+    // notePostureOk), hace falta que quede claro en cada serie, no solo
+    // en la primera de la sesión.
+    const restNote = `Descanso obligatorio: mínimo ${Math.round(MIN_REST_MS / 1000)} segundos.`;
+    const fullText = `${prefix} terminada. ${restNote} ${waitingMessage}`;
     this.setStatus(fullText);
     if (!this.voiceEnabled) return;
     const isFirst = this.setsCompletedVoiceCount === 0;
@@ -1941,11 +1987,42 @@ class WorkoutSession {
     const anyGap = this.lastSpokenStatusAt === null ? Infinity : now - this.lastSpokenStatusAt;
     if (anyGap < STATUS_VOICE_MIN_GAP_MS) return;
     this.lastSpokenStatusAt = now;
-    this.speak(isFirst ? fullText : `${prefix} terminada.`, { flush: false });
+    this.speak(isFirst ? fullText : `${prefix} terminada. ${restNote}`, { flush: false });
+  }
+
+  /**
+   * Has intentado contar algo (una repetición, o arrancar un tramo de
+   * postura) mientras todavía dura el descanso obligatorio (MIN_REST_MS
+   * desde que se cerró la serie anterior) — no se cuenta, pero SÍ hay
+   * que decírtelo: a diferencia de announceStatus()/speak(), pasa por
+   * alto restVoiceQuiet a propósito (igual que speakRep(), ver su
+   * comentario) porque si esto se llama es justo porque has intentado
+   * hacer algo en pleno descanso — quedarte callado ahí sería confuso,
+   * parecería que la app no funciona o que no te ha visto.
+   */
+  announceRestBlocked(now) {
+    const remaining = Math.max(0, Math.ceil((MIN_REST_MS - (now - this.setClosedAt)) / 1000));
+    const text = `Todavía en descanso obligatorio — quedan ${remaining}s. No se cuenta nada hasta entonces.`;
+    this.setStatus(text);
+    if (!this.voiceEnabled) return;
+    const key = "rest_blocked";
+    const lastForKey = this.lastSpokenAtByKey.get(key) ?? null;
+    const keyGap = lastForKey === null ? Infinity : now - lastForKey;
+    if (keyGap < STATUS_VOICE_REPEAT_GAP_MS) return;
+    const anyGap = this.lastSpokenStatusAt === null ? Infinity : now - this.lastSpokenStatusAt;
+    if (anyGap < STATUS_VOICE_MIN_GAP_MS) return;
+    this.lastSpokenStatusAt = now;
+    this.lastSpokenAtByKey.set(key, now);
+    speakOut(text, { flush: false });
   }
 
   async start() {
-    this.setStatus("Pidiendo acceso a la cámara…");
+    // "Pidiendo acceso a la cámara…" / "Cargando el modelo…" son ruido
+    // técnico y mecánico, no guía útil — y ahora, con this.statusEl
+    // convertido en shim (ver constructor), da igual usar setStatus()
+    // o logScissor() directamente: los dos acaban en el mismo sitio,
+    // el registro de depuración, sin pintar nada en pantalla.
+    this.logScissor("Pidiendo acceso a la cámara…");
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({
         // 1280x720, no 640x480: con poca resolución, a cierta distancia
@@ -1971,7 +2048,7 @@ class WorkoutSession {
     this.canvas.width = this.video.videoWidth || 640;
     this.canvas.height = this.video.videoHeight || 480;
 
-    this.setStatus("Cargando el modelo de seguimiento…");
+    this.logScissor("Cargando el modelo de seguimiento…");
     try {
       const { FilesetResolver, PoseLandmarker } = await import(MEDIAPIPE_BUNDLE_URL);
       const vision = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_BASE_URL);
@@ -2027,12 +2104,30 @@ class WorkoutSession {
     if (candidate === this.framingState) return; // ya estábamos ahí, nada nuevo que decir
 
     this.framingState = candidate;
+    // Dominadas/dominadas de arquero solo trackean nariz, hombros, codos
+    // y muñecas (ver processArcherPullup/processResult) — nunca cadera,
+    // rodilla ni tobillo. Pedir "que se te vea de las manos a los pies"
+    // era pedir algo que el propio contador ni comprueba ni necesita
+    // (reportado: la app decía "perfecto" sin que se vieran los pies,
+    // porque de hecho no hacen falta) — el aviso tiene que pedir
+    // exactamente lo que se mide: hombros y brazos enteros, hasta las
+    // manos.
     if (candidate === "far") {
-      this.announceStatus("Te veo muy lejos, acércate un poco a la cámara.", "framing_far");
+      this.announceStatus(
+        "No se te ve con suficiente detalle. Colócate de forma que se te vean los hombros y los brazos " +
+        "enteros, hasta las manos — no hace falta que se vean las piernas. Ajusta tú la distancia con la " +
+        "cámara hasta que se cumpla eso.",
+        "framing_far"
+      );
     } else if (candidate === "close") {
-      this.announceStatus("Te veo muy cerca, aléjate un poco de la cámara.", "framing_close");
+      this.announceStatus(
+        "Ocupas demasiado sitio en la imagen — no caben tus hombros y brazos enteros. Colócate de forma " +
+        "que se te vean los hombros y los brazos enteros, hasta las manos. Ajusta tú la distancia con la " +
+        "cámara hasta que se cumpla eso.",
+        "framing_close"
+      );
     } else {
-      this.announceStatus("Así, perfecto.", "framing_good");
+      this.announceStatus("Así, perfecto: se te ven los hombros y los brazos enteros.", "framing_good");
     }
   }
 
@@ -2048,6 +2143,7 @@ class WorkoutSession {
       this.currentSetReps = 0;
       this.currentSetDurations = [];
       this.updateSetDisplay();
+      this.setClosedAt = performance.now();
     }
     // Plancha / plancha lateral: el equivalente de lo de arriba pero para
     // un tramo de tiempo aguantado en vez de repeticiones (ver
@@ -2426,6 +2522,13 @@ class WorkoutSession {
 
   countRep(duration, now, label) {
     if (duration < MIN_REP_SECONDS) return false;   // ruido, no cuenta
+    if (this.currentSetReps === 0 && this.setClosedAt !== null && now - this.setClosedAt < MIN_REST_MS) {
+      // Descanso obligatorio en curso: aunque te coloques y te muevas
+      // antes de tiempo, esto NO cuenta como repetición — antes sí se
+      // contaba en silencio si probabas a moverte en pleno descanso.
+      this.announceRestBlocked(now);
+      return false;
+    }
     const d = Math.round(duration * 100) / 100;
     this.reps += 1;
     this.repDurations.push(d);
@@ -3650,8 +3753,11 @@ class WorkoutSession {
       this.currentSetDurations = [];
       this.updateSetDisplay();
       if (this.repsEl) this.repsEl.textContent = "0";
-      this.restVoiceQuiet = true;
+      this.setClosedAt = performance.now();
+      // El aviso de descanso obligatorio SÍ tiene que oírse — por eso va
+      // antes de silenciar la voz (restVoiceQuiet), no después.
       this.announceSetComplete(`Serie de ${closedReps}`, waitingMessage);
+      this.restVoiceQuiet = true;
     } else {
       this.setStatus(waitingMessage);
     }
@@ -3702,6 +3808,14 @@ class WorkoutSession {
    */
   notePostureOk(now) {
     this.postureInvalidSince = null;
+
+    if (this.postureValidSince === null && this.setClosedAt !== null && now - this.setClosedAt < MIN_REST_MS) {
+      // Mismo descanso obligatorio que countRep() (ver MIN_REST_MS): no
+      // arranca el cronómetro de aguante hasta que pase, aunque vuelvas
+      // a colocarte en postura antes de tiempo.
+      this.announceRestBlocked(now);
+      return;
+    }
 
     if (!this.startupVoiceGiven) {
       this.startupVoiceGiven = true;
@@ -3874,8 +3988,9 @@ class WorkoutSession {
     this.postureGoalAnnouncedThisHold = false;
 
     if (held > 0) {
-      this.restVoiceQuiet = true;
+      this.setClosedAt = performance.now();
       this.announceSetComplete(`Serie de ${formatHoldSeconds(held)}`, this.postureWaitingMessage());
+      this.restVoiceQuiet = true;
     } else {
       this.setStatus(this.postureWaitingMessage());
     }
@@ -4915,6 +5030,7 @@ class WorkoutSession {
         this.lastRepTime = now;
         this.restAlerted = false;
         this.updateSetDisplay();
+        this.logScissor(`[CALIBRADO] barra_y=${this.barY.toFixed(3)} hombros=${this.shoulderWidth.toFixed(3)}`);
         this.announceStatus(
           "¡Listo! Empieza a hacer dominadas de arquero: al subir, lleva un brazo a 90° y estira el otro, alternando de lado en cada repetición."
         );
@@ -4928,6 +5044,10 @@ class WorkoutSession {
     const scaleOk = scaleChange < SCALE_TOLERANCE;
 
     if (!armsUpNow || !scaleOk) {
+      this.logScissor(
+        `[frame descartado] brazos_arriba=${armsUpNow} escala_ok=${scaleOk} cambio_escala=${scaleChange.toFixed(2)}(máx ${SCALE_TOLERANCE}) ` +
+        `estado=${this.state} reps_serie=${this.currentSetReps}`
+      );
       this.localBottomY = null;
       this.localTopY = null;
       this.liftoffTime = null;
@@ -4941,8 +5061,12 @@ class WorkoutSession {
         if (now - this.armsDownSince >= ARMS_DOWN_STABLE_MS && this.currentSetReps > 0) {
           const closedReps = this.currentSetReps;
           this.armsDownSince = null;
-          this.restVoiceQuiet = true;
+          // El aviso de descanso obligatorio SÍ tiene que oírse — por eso
+          // va antes de silenciar la voz (restVoiceQuiet), no después.
+          // setClosedAt lo marca beginPrep() justo debajo (currentSetReps
+          // todavía es > 0 en este punto).
           this.announceSetComplete(`Serie de ${closedReps}`, "Cuélgate otra vez para empezar la siguiente.");
+          this.restVoiceQuiet = true;
           this.beginPrep();
           return;
         }
@@ -5016,6 +5140,11 @@ class WorkoutSession {
       if (fallenFromTop > moveThresh) {
         // ha vuelto a bajar lo suficiente -> repetición completa
         const side = this.archerDetectSide(this.archerPeakLeftAngle, this.archerPeakRightAngle);
+        this.logScissor(
+          `[REP intentada] duración=${((now - this.repStartTime) / 1000).toFixed(2)}s lado=${side ?? "?"} ` +
+          `pico_izq=${this.archerPeakLeftAngle === null ? "-" : this.archerPeakLeftAngle.toFixed(0) + "°"} ` +
+          `pico_der=${this.archerPeakRightAngle === null ? "-" : this.archerPeakRightAngle.toFixed(0) + "°"}`
+        );
         this.countRep((now - this.repStartTime) / 1000, now, "Dominada de arquero");
         if (side !== null) {
           if (this.archerLastSide !== null && this.archerLastSide === side) {
@@ -5039,6 +5168,11 @@ class WorkoutSession {
         `estado: ${this.state} | nariz-barra: ${((y - this.barY) / this.shoulderWidth).toFixed(2)} ` +
         `(umbral ${BAR_MARGIN_FACTOR}) | codo izq: ${fmt(leftAngle)} | codo der: ${fmt(rightAngle)} | último lado: ${this.archerLastSide ?? "-"}`;
     }
+    this.logScissor(
+      `estado=${this.state} nariz_y=${y.toFixed(3)} barra_y=${this.barY.toFixed(3)} dist_barra=${((y - this.barY) / this.shoulderWidth).toFixed(2)}(umbral ${BAR_MARGIN_FACTOR}) ` +
+      `hombros=${this.shoulderWidth.toFixed(3)} abajo_ref=${this.localBottomY === null ? "-" : this.localBottomY.toFixed(3)} arriba_ref=${this.localTopY === null ? "-" : this.localTopY.toFixed(3)} ` +
+      `despegue=${this.liftoffTime === null ? "no" : "sí"}`
+    );
   }
 
   /**
@@ -5510,6 +5644,7 @@ class WorkoutSession {
         this.lastRepTime = now;
         this.restAlerted = false;
         this.updateSetDisplay();
+        this.logScissor(`[CALIBRADO] barra_y=${this.barY.toFixed(3)} hombros=${this.shoulderWidth.toFixed(3)}`);
         this.announceStatus("¡Listo! Empieza a hacer dominadas.");
       }
       return;
@@ -5524,6 +5659,10 @@ class WorkoutSession {
       // No pareces estar colgado de la barra (o te has acercado/alejado de
       // la cámara) — no cuentes nada de lo que pase ahora mismo, y cuando
       // vuelvas a agarrar la barra, empieza a medir desde cero otra vez.
+      this.logScissor(
+        `[frame descartado] brazos_arriba=${armsUpNow} escala_ok=${scaleOk} cambio_escala=${scaleChange.toFixed(2)}(máx ${SCALE_TOLERANCE}) ` +
+        `estado=${this.state} reps_serie=${this.currentSetReps}`
+      );
       this.localBottomY = null;
       this.localTopY = null;
       this.liftoffTime = null;
@@ -5538,8 +5677,12 @@ class WorkoutSession {
         if (now - this.armsDownSince >= ARMS_DOWN_STABLE_MS && this.currentSetReps > 0) {
           const closedReps = this.currentSetReps;
           this.armsDownSince = null;
-          this.restVoiceQuiet = true;
+          // El aviso de descanso obligatorio SÍ tiene que oírse — por eso
+          // va antes de silenciar la voz (restVoiceQuiet), no después.
+          // setClosedAt lo marca beginPrep() justo debajo (currentSetReps
+          // todavía es > 0 en este punto).
           this.announceSetComplete(`Serie de ${closedReps}`, "Cuélgate otra vez para empezar la siguiente.");
+          this.restVoiceQuiet = true;
           this.beginPrep();
           return;
         }
@@ -5590,6 +5733,7 @@ class WorkoutSession {
       const fallenFromTop = y - this.localTopY;
       if (fallenFromTop > moveThresh) {
         // ha vuelto a bajar lo suficiente -> repetición completa
+        this.logScissor(`[REP intentada] duración=${((now - this.repStartTime) / 1000).toFixed(2)}s`);
         this.countRep((now - this.repStartTime) / 1000, now, "Dominada");
         this.state = "down";
         this.localBottomY = y;
@@ -5601,6 +5745,11 @@ class WorkoutSession {
         `estado: ${this.state} | nariz-barra: ${((y - this.barY) / this.shoulderWidth).toFixed(2)} ` +
         `(umbral ${BAR_MARGIN_FACTOR}) | hombros: ${this.shoulderWidth.toFixed(3)}`;
     }
+    this.logScissor(
+      `estado=${this.state} nariz_y=${y.toFixed(3)} barra_y=${this.barY.toFixed(3)} dist_barra=${((y - this.barY) / this.shoulderWidth).toFixed(2)}(umbral ${BAR_MARGIN_FACTOR}) ` +
+      `hombros=${this.shoulderWidth.toFixed(3)} abajo_ref=${this.localBottomY === null ? "-" : this.localBottomY.toFixed(3)} arriba_ref=${this.localTopY === null ? "-" : this.localTopY.toFixed(3)} ` +
+      `despegue=${this.liftoffTime === null ? "no" : "sí"}`
+    );
   }
 
   tickRestTimer() {

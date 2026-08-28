@@ -757,11 +757,12 @@ def focus_save(request, uuid):
 @api("GET", "POST")
 def warmup(request):
     """
-    Calentamiento obligatorio (ver WarmupStatus, y su equivalente web
-    _require_warmup/task_warmup en tasks/views.py): GET dice si hace
-    falta calentar todavía (`fresh`), POST apunta que se acaba de hacer.
-    Un solo estado por usuario, compartido entre la app y la web —
-    calentar en una cuenta como haberlo hecho en la otra.
+    Calentamiento recomendado, no obligatorio (ver WarmupStatus, y su
+    equivalente web _require_warmup/task_warmup en tasks/views.py): GET
+    dice si hace falta preguntar todavía (`fresh`), POST apunta que se
+    acaba de calentar (dijiste que sí, o viste/saltaste el vídeo — da
+    igual cuál). Un solo estado por usuario, compartido entre la app y
+    la web — calentar en una cuenta como haberlo hecho en la otra.
     """
     if request.method == "POST":
         WarmupStatus.mark_done(_user())

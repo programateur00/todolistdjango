@@ -358,9 +358,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
           <video id="workout-video" playsinline muted class="workout__video"></video>
           <canvas id="workout-canvas" class="workout__canvas"></canvas>
         </div>
-        <p id="workout-status" class="workout__status">Iniciando…</p>
         <p id="workout-goal-banner" class="workout__goal-banner" hidden></p>
-        <p id="workout-debug" class="workout__debug"></p>
         <div class="workout__stats">
           <div class="workout__stat"><span class="workout__stat-value" id="workout-reps">0</span><span class="workout__stat-label">reps</span></div>
           <div class="workout__stat"><span class="workout__stat-value" id="workout-sets">1</span><span class="workout__stat-label">serie</span></div>

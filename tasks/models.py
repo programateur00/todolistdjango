@@ -2576,11 +2576,13 @@ class WarmupStatus(models.Model):
     """
     Cuándo calentó el usuario por última vez. Un solo registro por
     usuario (no un historial): antes de cualquier tarea de Deporte se
-    exige un vídeo de calentamiento (ver views.task_workout / .routine_play
-    / .plan_session, a través de views._require_warmup) salvo que ya se
-    haya hecho dentro de las últimas FRESH_WINDOW horas — así dos
-    sesiones seguidas el mismo día (tren superior + tren inferior, por
-    ejemplo) no piden calentar dos veces.
+    pregunta si ya ha calentado (ver views.task_workout / .routine_play
+    / .plan_session, a través de views._require_warmup) — RECOMENDADO,
+    no obligatorio: el vídeo que se ofrece si dice que no es opcional y
+    se puede saltar — salvo que ya se haya calentado (dicho que sí, o
+    pasado por el vídeo) dentro de las últimas FRESH_WINDOW horas — así
+    dos sesiones seguidas el mismo día (tren superior + tren inferior,
+    por ejemplo) no preguntan dos veces.
     """
     FRESH_WINDOW = timedelta(hours=2)
 

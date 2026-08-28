@@ -21,8 +21,11 @@ from .utils import get_current_user, read_mobile_release, resolve_plan_target
 from urllib.parse import quote
 
 
-# Vídeos fijos de calentamiento/enfriamiento — obligatorios en toda
-# sesión de Deporte (ver _require_warmup, task_warmup y task_cooldown).
+# Vídeos fijos de calentamiento/enfriamiento — RECOMENDADOS (no
+# obligatorios) en toda sesión de Deporte (ver _require_warmup,
+# task_warmup y task_cooldown): se pregunta primero si ya has
+# calentado/quieres estirar, y el vídeo, si se pide, se puede saltar en
+# cualquier momento — no hace falta verlo entero.
 # Cambiar el ID aquí para usar otro vídeo, sin tocar nada de lógica.
 WARMUP_VIDEO_ID = "1YY0xyCgITc"
 COOLDOWN_VIDEO_ID = "r5QG2Lq1oUo"
@@ -31,10 +34,12 @@ COOLDOWN_VIDEO_ID = "r5QG2Lq1oUo"
 def _require_warmup(request, task):
     """
     Punto de entrada común a task_workout, routine_play y plan_session
-    (las tres formas de empezar a entrenar): si la tarea es de Deporte
-    y no se ha calentado hace poco (WarmupStatus.FRESH_WINDOW), corta
-    el paso y manda al vídeo de calentamiento, con ?next= para volver
-    exactamente a donde se iba. Devuelve None si se puede seguir tal cual.
+    (las tres formas de empezar a entrenar): si la tarea es de Deporte y
+    no se ha calentado hace poco (WarmupStatus.FRESH_WINDOW), manda a
+    preguntar si ya has calentado (task_warmup, con ?next= para volver
+    exactamente a donde se iba) — RECOMENDADO, no un bloqueo: desde ahí
+    se puede decir que sí y seguir al momento, o ver el vídeo (opcional,
+    saltable). Devuelve None si se puede seguir tal cual.
     """
     if task.category != Task.CATEGORY_SPORT:
         return None
@@ -620,12 +625,12 @@ def task_workout_save_manual(request, pk):
 
 def task_warmup(request, pk):
     """
-    Calentamiento obligatorio antes de entrenar (ver _require_warmup):
-    un vídeo fijo que hay que ver entero — el botón de continuar
-    permanece bloqueado hasta el evento ENDED de YouTube (ver
-    tasks/task_warmup.html). Al terminar, se apunta la hora
-    (WarmupStatus) y se vuelve a donde se iba (?next=), que ya no lo
-    volverá a pedir mientras siga "fresco".
+    Calentamiento recomendado antes de entrenar (ver _require_warmup):
+    se pregunta primero si ya has calentado — si dices que sí, o ves el
+    vídeo (opcional, se puede saltar en cualquier momento, ver
+    tasks/task_warmup.html), el POST apunta la hora (WarmupStatus) y se
+    vuelve a donde se iba (?next=), que ya no lo volverá a pedir mientras
+    siga "fresco".
     """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
     next_url = request.GET.get("next") or reverse("tasks:task_workout", args=[task.pk])
@@ -639,11 +644,13 @@ def task_warmup(request, pk):
 
 def task_cooldown(request, pk):
     """
-    Enfriamiento obligatorio al terminar de entrenar: mismo mecanismo
-    que task_warmup pero al revés. Se llega aquí DESPUÉS de guardar ya
-    los números de la sesión (task_workout_save, .._save_manual,
-    routine_save, plan_session_save, task_video_save) — hasta que no se
-    ve el vídeo entero, la tarea no se marca hecha de verdad.
+    Enfriamiento/estiramiento recomendado al terminar de entrenar: mismo
+    mecanismo que task_warmup pero al revés (se pregunta si quieres
+    estirar; el vídeo, si se pide, es opcional y se puede saltar). Se
+    llega aquí DESPUÉS de guardar ya los números de la sesión
+    (task_workout_save, .._save_manual, routine_save, plan_session_save,
+    task_video_save) — la tarea se marca hecha de verdad al pasar por
+    aquí (con o sin estiramiento), sea cual sea la elección.
     """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
     if request.method == "POST":

@@ -27,15 +27,11 @@
         <canvas id="workout-canvas" class="workout__canvas"></canvas>
     </div>
 
-    <p id="workout-status" class="workout__status">Iniciando…</p>
     <p id="workout-goal-banner" class="workout__goal-banner" hidden></p>
-    <p id="workout-debug" class="workout__debug"></p>
-    {% if exercise.counter_key == "scissor" or exercise.counter_key == "plank" or exercise.counter_key == "sideplank" or exercise.counter_key == "wallsit" or exercise.counter_key == "kneeholdbar" or exercise.counter_key == "handstand" or exercise.counter_key == "dip" or exercise.counter_key == "dumbbellcurl" %}
     <button type="button" id="workout-debug-export" class="workout__btn workout__btn--ghost">
         📋 Copiar registro de depuración
     </button>
     <p id="workout-debug-export-status" class="workout__debug"></p>
-    {% endif %}
 
     <div class="workout__stats">
         <div class="workout__stat">
@@ -83,15 +79,27 @@
     <p class="workout__note">
         Si pasan más de 1:30 sin contar ninguna repetición (un descanso), la serie se cierra sola y empieza la siguiente.
     </p>
-    {% elif exercise.counter_key == "crunch" or exercise.counter_key == "legraise" or exercise.counter_key == "situp" %}
+    {% elif exercise.counter_key == "crunch" %}
     <p class="workout__note">
         🛏️ Túmbate boca arriba y coloca el móvil o el portátil <strong>a un lado</strong> (de perfil respecto a ti) —
-        así se ve bien cuánto se levantan los hombros o las piernas del suelo. Encuadra el cuerpo entero.
+        así se ve bien cuánto se levantan los hombros del suelo. Encuadra el hombro, la cadera y la rodilla —
+        no hace falta que se vean los pies.
+    </p>
+    {% elif exercise.counter_key == "legraise" %}
+    <p class="workout__note">
+        🛏️ Túmbate boca arriba y coloca el móvil o el portátil <strong>a un lado</strong> (de perfil respecto a ti) —
+        así se ve bien cuánto suben las piernas. Encuadra el cuerpo entero, de los hombros a los tobillos.
+    </p>
+    {% elif exercise.counter_key == "situp" %}
+    <p class="workout__note">
+        🛏️ Túmbate boca arriba y coloca el móvil o el portátil <strong>a un lado</strong> (de perfil respecto a ti) —
+        así se ve bien cuánto te incorporas. Encuadra el hombro y la cadera — no hace falta que se vean ni las
+        piernas ni los pies.
     </p>
     {% elif exercise.counter_key == "doublecrunch" %}
     <p class="workout__note">
         🛏️ Túmbate boca arriba y coloca el móvil o el portátil <strong>a un lado</strong> (de perfil respecto a ti) —
-        así se ve bien el movimiento. Encuadra el cuerpo entero.
+        así se ve bien el movimiento. Encuadra el hombro, la cadera y la rodilla — no hace falta que se vean los pies.
     </p>
     <p class="workout__note">
         El torso se queda levantado en una postura intermedia (ni tumbado del todo ni sentado) durante todo el
@@ -141,7 +149,7 @@
     {% elif exercise.counter_key == "kneeholdbar" %}
     <p class="workout__note">
         📐 Coloca el móvil o el portátil <strong>de frente</strong> a ti, algo alejado, para que quepa todo el cuerpo
-        colgado en el encuadre, de las manos a los pies. Agárrate a la barra con los brazos estirados y dobla las
+        colgado en el encuadre, de las manos a las rodillas. Agárrate a la barra con los brazos estirados y dobla las
         rodillas, subiéndolas hasta dejarlas más o menos a la altura de la cadera.
     </p>
     <p class="workout__note">
@@ -153,8 +161,9 @@
     <p class="workout__note">
         📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti, como en flexiones o
         fondos), no de frente — así se ve bien cuánto doblas el codo. Encuadra el brazo entero, del hombro a la
-        mano. Ponte de pie, de perfil, con <strong>una mancuerna en la mano del lado que mira a la cámara</strong>,
-        <strong>brazo estirado</strong> y <strong>codo pegado al cuerpo</strong>, para empezar.
+        mano, y también la cadera del lado que mira a la cámara (se usa como referencia para saber si te
+        balanceas). Ponte de pie, de perfil, con <strong>una mancuerna en la mano del lado que mira a la
+        cámara</strong>, <strong>brazo estirado</strong> y <strong>codo pegado al cuerpo</strong>, para empezar.
     </p>
     <p class="workout__note">
         Solo cuenta como repetición si el codo se mantiene pegado al costado durante todo el movimiento (sin
@@ -165,8 +174,32 @@
     </p>
     {% elif exercise.counter_key == "pullup" %}
     <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de frente</strong> a ti, algo alejado, para que se vean los
+        hombros y los brazos enteros, hasta las manos, colgando de la barra — no hace falta que se vean las
+        piernas ni los pies (solo se sigue la nariz, los hombros, los codos y las muñecas). Agárrate a la barra
+        con los brazos estirados, para empezar.
+    </p>
+    <p class="workout__note">
         <span style="color:var(--amber);">━</span> línea amarilla = altura de la barra (medida por tus muñecas al calibrar).
         Si no coincide con tu barra real, pulsa «Recalibrar» estando ya colgado.
+    </p>
+    {% elif exercise.counter_key == "archerpullup" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de frente</strong> a ti, algo alejado, para que se vean los
+        hombros y los brazos enteros, hasta las manos, colgando de la barra — no hace falta que se vean las
+        piernas ni los pies (solo se sigue la nariz, los hombros, los codos y las muñecas). Agárrate a la barra
+        con los brazos estirados; al subir, lleva un brazo a 90° y estira el otro, alternando de lado en cada
+        repetición.
+    </p>
+    <p class="workout__note">
+        <span style="color:var(--amber);">━</span> línea amarilla = altura de la barra (medida por tus muñecas al calibrar).
+        Si no coincide con tu barra real, pulsa «Recalibrar» estando ya colgado.
+    </p>
+    {% elif exercise.counter_key == "dip" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti) y encuadra el hombro,
+        el codo y la muñeca del lado que mira a la cámara — no hace falta que se vean las piernas ni los pies.
+        Agárrate a las paralelas con los brazos estirados, para empezar.
     </p>
     {% endif %}
     <p class="workout__note">
