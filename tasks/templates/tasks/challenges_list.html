@@ -1,0 +1,33 @@
+{% extends "tasks/base.html" %}
+{% block title %}Retos{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">un solo tirón</span>
+        <h1>Retos</h1>
+    </div>
+    <a href="{% url 'tasks:plan_list' %}" class="stats-link">← Planes</a>
+</header>
+
+<p class="workout__note" style="text-align:left">
+    Retos de un solo intento, sin progresión semanal — para eso están los Planes. Todavía no se
+    guardan en tu histórico, solo se recuerda tu mejor marca en este navegador.
+</p>
+
+<ul class="plan-list">
+    <li class="plan-card">
+        <a href="{% url 'tasks:challenge_sally_pushups' %}">
+            <p class="plan-card__name">🤸 Bring Sally Up — Flexiones</p>
+            <p class="plan-card__meta">Guiado por voz: aguanta arriba y abajo a un ritmo cada vez más duro. Sin música con copyright.</p>
+        </a>
+    </li>
+    <li class="plan-card">
+        <a href="{% url 'tasks:challenge_pullups_100' %}">
+            <p class="plan-card__name">💪 100 dominadas</p>
+            <p class="plan-card__meta">Llega a 100 reps en las series que quieras, con 1 min de descanso obligatorio entre serie y serie.</p>
+        </a>
+    </li>
+</ul>
+
+{% endblock %}

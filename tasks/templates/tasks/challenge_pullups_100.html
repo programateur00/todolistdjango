@@ -1,0 +1,21 @@
+{% extends "tasks/base.html" %}
+{% load static %}
+{% block title %}100 dominadas{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">reto</span>
+        <h1>100 dominadas</h1>
+    </div>
+    <a href="{% url 'tasks:challenges_list' %}" class="stats-link">← Retos</a>
+</header>
+
+<div id="pullups-challenge-root"></div>
+
+<script>
+    window.__LIBRETA_EMBEDDED__ = true;
+</script>
+<script type="module" src="{% static 'js/challenges.js' %}"></script>
+
+{% endblock %}

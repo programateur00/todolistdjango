@@ -1002,6 +1002,87 @@ export function checkPlankPosture(lm) {
   return { ok: true, debug };
 }
 
+/**
+ * Bring Sally Up (reto de flexiones, ver static/js/challenges.js) —
+ * aguante isométrico ARRIBA o ABAJO, no repeticiones. Reutiliza
+ * EXACTAMENTE los mismos umbrales que el contador de flexiones normal
+ * (PUSHUP_UP_ANGLE_DEG / PUSHUP_DOWN_ANGLE_DEG / PUSHUP_LINE_MIN_DEG /
+ * PUSHUP_MIN_VISIBILITY / ON_GROUND_MAX_TILT_DEG, ver processPushup más
+ * abajo) para que "postura correcta" signifique lo mismo en el reto que
+ * en una flexión contada de verdad — la única diferencia es qué se
+ * pide: aquí no hay repetición que contar, hay que MANTENER el ángulo
+ * de codo pedido (recto o doblado) el tiempo que dure ese tramo del
+ * guion, igual que checkPlankPosture/checkKneeHoldBarPosture con el
+ * suyo. Copia exacta de la misma función en la app móvil (ver
+ * mobile-app/www/js/workout.js) — mismo criterio en las dos partes.
+ */
+function checkPushupHoldPosture(lm, holdTop) {
+  const lShoulder = lm[L_SHOULDER], rShoulder = lm[R_SHOULDER];
+  const lElbow = lm[L_ELBOW], rElbow = lm[R_ELBOW];
+  const lWrist = lm[L_WRIST], rWrist = lm[R_WRIST];
+  const lHip = lm[L_HIP], rHip = lm[R_HIP];
+  const lAnkle = lm[L_ANKLE], rAnkle = lm[R_ANKLE];
+
+  const leftVis = (
+    (lShoulder.visibility ?? 1) + (lElbow.visibility ?? 1) + (lWrist.visibility ?? 1) +
+    (lHip.visibility ?? 1) + (lAnkle.visibility ?? 1)
+  ) / 5;
+  const rightVis = (
+    (rShoulder.visibility ?? 1) + (rElbow.visibility ?? 1) + (rWrist.visibility ?? 1) +
+    (rHip.visibility ?? 1) + (rAnkle.visibility ?? 1)
+  ) / 5;
+  const useLeft = leftVis >= rightVis;
+  const vis = useLeft ? leftVis : rightVis;
+
+  if (vis < PUSHUP_MIN_VISIBILITY) {
+    return {
+      ok: false,
+      reason: "No se te ven bien el hombro, el codo, la muñeca, la cadera y el tobillo. Ponte de perfil a la cámara.",
+      debug: { fail: "vis" },
+    };
+  }
+
+  const shoulder = useLeft ? lShoulder : rShoulder;
+  const elbow = useLeft ? lElbow : rElbow;
+  const wrist = useLeft ? lWrist : rWrist;
+  const hip = useLeft ? lHip : rHip;
+  const ankle = useLeft ? lAnkle : rAnkle;
+
+  const elbowAngle = angle(shoulder, elbow, wrist);
+  const lineAngle = angle(shoulder, hip, ankle);
+  const tilt = tiltFromHorizontal(shoulder, hip);
+  if (elbowAngle === null || lineAngle === null || tilt === null) {
+    return { ok: false, reason: "No se te ve bien de perfil.", debug: { fail: "angle" } };
+  }
+
+  const debug = { elbowAngle: elbowAngle.toFixed(0), lineAngle: lineAngle.toFixed(0), tilt: tilt.toFixed(0) };
+
+  if (tilt > ON_GROUND_MAX_TILT_DEG) {
+    return { ok: false, reason: "Túmbate boca abajo, de perfil a la cámara.", debug };
+  }
+  if (lineAngle < PUSHUP_LINE_MIN_DEG) {
+    return { ok: false, reason: "Estira el cuerpo — de los hombros a los tobillos en línea recta, sin encoger la cadera.", debug };
+  }
+  if (holdTop) {
+    if (elbowAngle < PUSHUP_UP_ANGLE_DEG) {
+      return { ok: false, reason: "Estira los brazos del todo — posición de arriba.", debug };
+    }
+  } else if (elbowAngle > PUSHUP_DOWN_ANGLE_DEG) {
+    return { ok: false, reason: "Dobla los codos hasta abajo — pecho cerca del suelo.", debug };
+  }
+  return { ok: true, debug };
+}
+
+/** Aguante arriba (brazos estirados) — fase "Sube y aguanta" del reto. */
+export function checkPushupTopHoldPosture(lm) {
+  return checkPushupHoldPosture(lm, true);
+}
+
+/** Aguante abajo (codos doblados) — fase "Baja y aguanta" del reto. */
+export function checkPushupBottomHoldPosture(lm) {
+  return checkPushupHoldPosture(lm, false);
+}
+
 export function checkSidePlankPosture(lm, downSideHint = null) {
   const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
   const lE = lm[L_ELBOW], rE = lm[R_ELBOW];

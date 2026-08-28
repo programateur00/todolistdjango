@@ -1,0 +1,29 @@
+{% extends "tasks/base.html" %}
+{% load static %}
+{% block title %}Bring Sally Up — Flexiones{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">reto</span>
+        <h1>Bring Sally Up — Flexiones</h1>
+    </div>
+    <a href="{% url 'tasks:challenges_list' %}" class="stats-link">← Retos</a>
+</header>
+
+<!-- Todo lo pinta challenges.js dentro de este contenedor — nada de
+     #workout-root en el HTML servido por Django: así el auto-arranque
+     del final de workout.js (ver ahí __LIBRETA_EMBEDDED__) no encuentra
+     nada al cargar la página y no hace nada, y es este script el que
+     decide cuándo y cuántas veces se arranca la cámara. -->
+<div id="sally-challenge-root"></div>
+
+<script>
+    // Puesto ANTES de cargar el módulo: evita que workout.js se
+    // autoarranque solo al cargarse (ver el propio archivo, al final) —
+    // mismo mecanismo que ya usan circuit.js y plan-session.js.
+    window.__LIBRETA_EMBEDDED__ = true;
+</script>
+<script type="module" src="{% static 'js/challenges.js' %}"></script>
+
+{% endblock %}

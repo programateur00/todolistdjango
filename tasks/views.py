@@ -1173,6 +1173,39 @@ def plan_list(request):
     return render(request, "tasks/plan_list.html", {"plans": plans, "closed_plans": closed_plans})
 
 
+def challenges_list(request):
+    """
+    Retos de un solo intento (Bring Sally Up, 100 dominadas...) — sin
+    progresión semanal detrás, a diferencia de un Plan (ver plan_list).
+    Viven colgados de Planes (un enlace más en plan_list.html) para no
+    meter una entrada nueva en el menú principal.
+
+    v1: todo se juega en el navegador — nada se guarda en el backend
+    todavía (solo la mejor marca en localStorage de este navegador, ver
+    static/js/challenges.js). Si esto cuaja, el siguiente paso natural
+    es un endpoint de guardado como routine_save/plan_session_save, para
+    que aparezca también en el histórico real de la cuenta.
+    """
+    return render(request, "tasks/challenges_list.html")
+
+
+def challenge_sally_pushups(request):
+    """
+    Réplica del reto viral "Bring Sally Up" con flexiones, SIN la
+    canción real de Moby (derechos de autor) — una voz propia marca
+    "Sube y aguanta" / "Baja y aguanta" con un guion de cadencia propio
+    (ver SALLY_* en challenges.js). Toda la lógica de cámara/postura
+    vive en ese archivo; esta vista solo pone la página.
+    """
+    return render(request, "tasks/challenge_sally_pushups.html")
+
+
+def challenge_pullups_100(request):
+    """100 dominadas acumuladas, en las series que quieras, con
+    descanso obligatorio entre serie y serie — ver challenges.js."""
+    return render(request, "tasks/challenge_pullups_100.html")
+
+
 def weekly_review(request):
     """
     La revisión semanal del 12 Week Year: cómo ha ido la semana en
