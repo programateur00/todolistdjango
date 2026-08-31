@@ -21,7 +21,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-08-25-curl-cierre-serie-por-descanso";
+const WORKOUT_JS_BUILD = "2026-08-31-dominadas-fin-serie-y-sin-distancia";
 
 // Umbral de movimiento (proporcional al ancho de hombros) para
 // considerar que hay un cambio de estado real y no ruido de la cámara.
@@ -30,6 +30,18 @@ const LIFTOFF_FACTOR = 0.04; // primer indicio de movimiento real (para medir bi
 const BAR_MARGIN_FACTOR = 0.25; // cuanto por debajo de la barra ya cuenta como "llegaste arriba"
 const BAR_OFFSET_FACTOR = 0.05; // empuja la linea de la barra hacia arriba respecto a la muñeca (~2cm en un adulto medio, ver nota abajo)
 const HANG_MARGIN_FACTOR = 0.08; // cuanto tienen que estar las munecas por encima de los hombros para considerar que estas colgado
+// Umbral, bastante mas generoso que HANG_MARGIN_FACTOR, para decidir que
+// de verdad te has SOLTADO de la barra a mitad de serie (no solo que
+// hayas dejado de estar "colgado" segun el margen fino de arriba). En lo
+// mas alto de una dominada los hombros suben tanto que casi tocan la
+// altura de las munecas -siguen agarradas a la barra- asi que con el
+// margen fino de HANG_MARGIN_FACTOR una dominada aguantada arriba se
+// tomaba por "te has soltado" y cerraba la serie sola (reportado: "he
+// aguantado un poco arriba y me ha contado como el principio de una
+// serie nueva"). Aqui se exige que la muneca haya bajado CLARAMENTE por
+// debajo del hombro -senal inequivoca de brazos ya extendidos hacia
+// abajo- antes de dar la serie por terminada.
+const RELEASE_MARGIN_FACTOR = 0.15;
 const SCALE_TOLERANCE = 0.3; // cuanto puede variar el ancho de hombros (te acercas/alejas) antes de desconfiar del frame
 const MIN_REP_SECONDS = 0.3; // por debajo de esto, se descarta como ruido
 const HANG_STABLE_MS = 500;   // cuanto tiempo seguido con los brazos en alto para empezar a calibrar
@@ -44,23 +56,6 @@ const REST_ALERT_SECONDS = 90;
 // número que REST_ALERT_SECONDS a propósito: es el mismo "90 segundos"
 // del que se avisa al usuario al cerrar la serie.
 const MIN_REST_MS = REST_ALERT_SECONDS * 1000;
-// Comprobación de distancia a la cámara (ver checkFraming), solo para
-// dominadas/dominadas de arquero — es donde de verdad falla contar mal
-// si te alejas demasiado. Basada en el ancho de hombros como proporción
-// del ANCHO DEL ENCUADRE (el mismo shoulderWidth que ya se usa para
-// normalizar todo lo demás, que sale de coordenadas 0–1 de MediaPipe,
-// así que ya es una fracción del encuadre — no hace falta convertir a
-// píxeles). Deliberadamente NO es un número de "pasos" hasta la barra:
-// eso depende del campo de visión de cada cámara y de tu propia altura,
-// así que un valor fijo en metros no vale para todo el mundo. Esto en
-// cambio se mide en la propia imagen, es igual de válido en cualquier
-// dispositivo.
-// Valores de partida — no hay forma de afinarlos sin probarlo en una
-// cámara real, así que si en el uso real quedan cortos o largos,
-// tocarlos aquí (y solo aquí).
-const FRAMING_MIN_SHOULDER_FRAC = 0.12; // por debajo -> demasiado lejos
-const FRAMING_MAX_SHOULDER_FRAC = 0.45; // por encima -> demasiado cerca
-const FRAMING_STABLE_MS = 900; // cuanto tiene que aguantar el mismo estado antes de avisar (evita parpadeos de un frame suelto)
 // Dominadas de arquero: mismo criterio de barra/subida-bajada que las
 // dominadas normales (ver processArcherPullup), con un añadido — en el
 // punto más alto de cada repetición, un brazo tiene que estar doblado
@@ -1776,14 +1771,7 @@ class WorkoutSession {
     this.prepping = false;
     this.prepStartTs = null;
     this.hangStableSince = null;
-    // Comprobación de distancia a la cámara en dominadas (ver
-    // checkFraming): estado confirmado ("far"/"close"/"good"/null),
-    // candidato mientras se confirma que aguanta estable, y desde
-    // cuándo lleva ese candidato.
-    this.framingState = null;
-    this.framingCandidateState = null;
-    this.framingCandidateSince = null;
-    this.armsDownSince = null; // desde cuándo llevas los brazos abajo seguido (para no cerrar la serie por un frame ruidoso)
+    this.armsDownSince = null; // desde cuándo llevas los brazos abajo seguido, de verdad soltado (ver RELEASE_MARGIN_FACTOR) — para no cerrar la serie por un frame ruidoso
     this.groundStableSince = null; // crunch/legraise/situp: desde cuándo llevas tumbado y quieto seguido (para armar el contador, como hangStableSince en dominadas)
     this.offGroundSince = null;    // crunch/legraise/situp: desde cuándo llevas "de pie" seguido (para cerrar la serie, como armsDownSince en fondos)
     this.outOfFrameSince = null;   // sentadillas y abdominales tumbado: desde cuándo no se te detecta en el encuadre (para cerrar la serie, ver noteAbsence)
@@ -1993,7 +1981,7 @@ class WorkoutSession {
     // ni avisos, ni consejos, ni "te veo"/"no te veo" — nada de voz. El
     // descanso es de verdad de los 90s (REST_ALERT_SECONDS), cámara
     // colocada una vez al principio de la sesión incluido — así que
-    // esto no necesita excepciones, ni siquiera para checkFraming.
+    // esto no necesita excepciones.
     if (this.restVoiceQuiet) return;
     // El motor de verdad (Web Speech API) vive en speakOut(), suelto más
     // arriba en este mismo fichero — así circuit.js/plan-session.js
@@ -2152,66 +2140,6 @@ class WorkoutSession {
     this.loop();
   }
 
-  /**
-   * Comprueba si estás a una distancia razonable de la cámara — solo
-   * en dominadas/dominadas de arquero, y solo mientras estás en
-   * "prepping" (antes de colgarte), para que te enteres con los pies
-   * en el suelo y no a media dominada. Se basa en shoulderWidth, que
-   * ya viene como fracción del ancho del encuadre (coordenadas 0–1 de
-   * MediaPipe) — así que vale igual en cualquier cámara, sin depender
-   * de "pasos" hasta la barra ni de lo alto/a que seas.
-   *
-   * Solo habla al CAMBIAR de estado, nunca en bucle: si te quedas
-   * quieto mal colocado, announceStatus() ya evita repetir el mismo
-   * aviso antes de STATUS_VOICE_REPEAT_GAP_MS. Y antes de anunciar
-   * nada, el estado nuevo tiene que aguantar FRAMING_STABLE_MS
-   * seguidos — así un solo frame ruidoso (un parpadeo de la detección
-   * de hombros) no dispara un aviso de más.
-   */
-  checkFraming(shoulderWidth, lShoulder, rShoulder, now) {
-    const shoulderVis = ((lShoulder.visibility ?? 1) + (rShoulder.visibility ?? 1)) / 2;
-    if (shoulderVis < 0.4) return; // no se te ven bien los hombros — sin dato fiable, no digas nada todavía
-
-    const candidate =
-      shoulderWidth < FRAMING_MIN_SHOULDER_FRAC ? "far"
-      : shoulderWidth > FRAMING_MAX_SHOULDER_FRAC ? "close"
-      : "good";
-
-    if (candidate !== this.framingCandidateState) {
-      this.framingCandidateState = candidate;
-      this.framingCandidateSince = now;
-    }
-    if (now - this.framingCandidateSince < FRAMING_STABLE_MS) return;
-    if (candidate === this.framingState) return; // ya estábamos ahí, nada nuevo que decir
-
-    this.framingState = candidate;
-    // Dominadas/dominadas de arquero solo trackean nariz, hombros, codos
-    // y muñecas (ver processArcherPullup/processResult) — nunca cadera,
-    // rodilla ni tobillo. Pedir "que se te vea de las manos a los pies"
-    // era pedir algo que el propio contador ni comprueba ni necesita
-    // (reportado: la app decía "perfecto" sin que se vieran los pies,
-    // porque de hecho no hacen falta) — el aviso tiene que pedir
-    // exactamente lo que se mide: hombros y brazos enteros, hasta las
-    // manos.
-    if (candidate === "far") {
-      this.announceStatus(
-        "No se te ve con suficiente detalle. Colócate de forma que se te vean los hombros y los brazos " +
-        "enteros, hasta las manos — no hace falta que se vean las piernas. Ajusta tú la distancia con la " +
-        "cámara hasta que se cumpla eso.",
-        "framing_far"
-      );
-    } else if (candidate === "close") {
-      this.announceStatus(
-        "Ocupas demasiado sitio en la imagen — no caben tus hombros y brazos enteros. Colócate de forma " +
-        "que se te vean los hombros y los brazos enteros, hasta las manos. Ajusta tú la distancia con la " +
-        "cámara hasta que se cumpla eso.",
-        "framing_close"
-      );
-    } else {
-      this.announceStatus("Así, perfecto: se te ven los hombros y los brazos enteros.", "framing_good");
-    }
-  }
-
   beginPrep() {
     // Cuenta atrás para darte tiempo a llegar a la barra y colgarte
     // ANTES de que se tome ninguna medida (esto es lo que fallaba:
@@ -2241,9 +2169,6 @@ class WorkoutSession {
     this.calibrating = false;
     this.prepStartTs = performance.now();
     this.hangStableSince = null;
-    this.framingState = null;
-    this.framingCandidateState = null;
-    this.framingCandidateSince = null;
     this.armsDownSince = null;
     this.groundStableSince = null;
     this.offGroundSince = null;
@@ -4111,7 +4036,7 @@ class WorkoutSession {
       // quedaba en texto en pantalla nada más, sin decirse en voz alta.
       if (isKneeHoldStep1 && flat.visible && !this.startupVoiceGiven) {
         this.startupVoiceGiven = true;
-        this.announceStatus("Te veo. ¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready");
+        this.announceStatus("¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready");
       }
       if (flat.ok) {
         if (this.postureGroundSince === null) this.postureGroundSince = now;
@@ -5050,14 +4975,17 @@ class WorkoutSession {
     const armsUpNow = wristVisible
       ? wristMidY < shoulderMidYRaw - HANG_MARGIN_FACTOR * shoulderWidth
       : elbowVisible && elbowMidY < shoulderMidYRaw - HANG_MARGIN_FACTOR * shoulderWidth;
+    // Distinto de armsUpNow (ver RELEASE_MARGIN_FACTOR): solo esto cuenta
+    // como "te has soltado de la barra de verdad" para cerrar la serie.
+    const armsClearlyReleased = wristVisible
+      ? wristMidY > shoulderMidYRaw + RELEASE_MARGIN_FACTOR * shoulderWidth
+      : elbowVisible && elbowMidY > shoulderMidYRaw + RELEASE_MARGIN_FACTOR * shoulderWidth;
 
     if (this.prepping) {
       const waitedSeconds = Math.floor((now - this.prepStartTs) / 1000);
-      this.checkFraming(shoulderWidth, lShoulder, rShoulder, now);
-
       if ((wristVisible || elbowVisible) && !this.startupVoiceGiven) {
         this.startupVoiceGiven = true;
-        this.announceStatus("Te veo. ¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready");
+        this.announceStatus("¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready");
       }
 
       if (armsUpNow) {
@@ -5137,7 +5065,7 @@ class WorkoutSession {
       this.archerLiveLeftAngle = null;
       this.archerLiveRightAngle = null;
 
-      if (!armsUpNow) {
+      if (armsClearlyReleased) {
         if (this.armsDownSince === null) this.armsDownSince = now;
         if (now - this.armsDownSince >= ARMS_DOWN_STABLE_MS && this.currentSetReps > 0) {
           const closedReps = this.currentSetReps;
@@ -5152,6 +5080,8 @@ class WorkoutSession {
           return;
         }
       } else {
+        // Zona ambigua (aguantando arriba) o solo falló el cambio de
+        // escala: no cuenta como que te has soltado de verdad.
         this.armsDownSince = null;
       }
 
@@ -5646,18 +5576,21 @@ class WorkoutSession {
     const armsUpNow = wristVisible
       ? wristMidY < shoulderMidYRaw - HANG_MARGIN_FACTOR * shoulderWidth
       : elbowVisible && elbowMidY < shoulderMidYRaw - HANG_MARGIN_FACTOR * shoulderWidth;
+    // Distinto de armsUpNow (ver RELEASE_MARGIN_FACTOR): solo esto cuenta
+    // como "te has soltado de la barra de verdad" para cerrar la serie.
+    const armsClearlyReleased = wristVisible
+      ? wristMidY > shoulderMidYRaw + RELEASE_MARGIN_FACTOR * shoulderWidth
+      : elbowVisible && elbowMidY > shoulderMidYRaw + RELEASE_MARGIN_FACTOR * shoulderWidth;
 
     if (this.prepping) {
       const waitedSeconds = Math.floor((now - this.prepStartTs) / 1000);
-      this.checkFraming(shoulderWidth, lShoulder, rShoulder, now);
-
       // La primera vez en toda la sesión que se te ve lo bastante (muñeca
       // o codo visibles) para intentar detectarte, un aviso de que ya
       // puedes empezar — en las siguientes series no hace falta
       // repetirlo, ya sabes cómo colocarte.
       if ((wristVisible || elbowVisible) && !this.startupVoiceGiven) {
         this.startupVoiceGiven = true;
-        this.announceStatus("Te veo. ¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready");
+        this.announceStatus("¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready");
       }
 
       if (armsUpNow) {
@@ -5748,11 +5681,12 @@ class WorkoutSession {
       this.localTopY = null;
       this.liftoffTime = null;
 
-      if (!armsUpNow) {
+      if (armsClearlyReleased) {
         // Te has soltado de la barra de verdad (bajaste los brazos, no es
-        // solo que te acercaras/alejaras de la cámara): esto es el final de
-        // la serie en curso. Pero solo lo damos por bueno si se mantiene
-        // un ratito seguido — un solo frame ruidoso (oclusión, ángulo raro
+        // solo que te acercaras/alejaras de la cámara ni que estés
+        // aguantando arriba a media dominada): esto es el final de la
+        // serie en curso. Pero solo lo damos por bueno si se mantiene un
+        // ratito seguido — un solo frame ruidoso (oclusión, ángulo raro
         // agarrando la barra) no debe cerrar la serie por error.
         if (this.armsDownSince === null) this.armsDownSince = now;
         if (now - this.armsDownSince >= ARMS_DOWN_STABLE_MS && this.currentSetReps > 0) {
@@ -5768,8 +5702,10 @@ class WorkoutSession {
           return;
         }
       } else {
-        // scaleOk falló pero los brazos siguen arriba: no cuenta como que
-        // te soltaste, reinicia el contador de "brazos abajo".
+        // Sin señal clara de que te hayas soltado (scaleOk falló con los
+        // brazos arriba, o estás en la zona ambigua de "aguantando arriba":
+        // ni armsUpNow ni armsClearlyReleased) — no cuenta como fin de
+        // serie, reinicia el contador de "brazos abajo".
         this.armsDownSince = null;
       }
 
