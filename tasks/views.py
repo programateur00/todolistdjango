@@ -1134,6 +1134,24 @@ def stats_detail(request, series_id):
     })
 
 
+@require_POST
+def stats_delete_all(request):
+    """Borra TODAS las estadísticas (todas las Occurrence) del usuario —
+    botón "Borrar todas las estadísticas" en stats_list.html."""
+    Occurrence.objects.filter(user=get_current_user()).delete()
+    messages.success(request, "Estadísticas eliminadas.")
+    return redirect(reverse("tasks:stats_list"))
+
+
+@require_POST
+def stats_delete_series(request, series_id):
+    """Borra las estadísticas de una sola tarea/serie — botón "Borrar
+    estas estadísticas" en stats_detail.html."""
+    Occurrence.objects.filter(series_id=series_id, user=get_current_user()).delete()
+    messages.success(request, "Estadísticas de la tarea eliminadas.")
+    return redirect(reverse("tasks:stats_list"))
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Planes de progresión
 # ─────────────────────────────────────────────────────────────────────

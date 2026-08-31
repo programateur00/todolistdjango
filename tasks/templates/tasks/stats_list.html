@@ -51,6 +51,13 @@
     </li>
     {% endfor %}
 </ul>
+<div class="task-form__actions">
+    <form action="{% url 'tasks:stats_delete_all' %}" method="post" class="inline-delete"
+          onsubmit="return confirm('¿Borrar TODAS las estadísticas? Se perderá el historial de todas las tareas. Esto no se puede deshacer.');">
+        {% csrf_token %}
+        <button type="submit" class="ghost-btn ghost-btn--danger">Borrar todas las estadísticas</button>
+    </form>
+</div>
 {% else %}
 <p class="empty-state">Todavía no hay historial. Marca tareas como hechas o no hechas para ver tus estadísticas aquí.</p>
 {% endif %}

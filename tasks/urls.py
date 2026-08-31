@@ -50,5 +50,7 @@ urlpatterns = [
     path("circuitos/<int:pk>/editar/", views.routine_edit, name="routine_edit"),
     path("circuitos/<int:pk>/eliminar/", views.routine_delete, name="routine_delete"),
     path("estadisticas/", views.stats_list, name="stats_list"),
+    path("estadisticas/borrar/", views.stats_delete_all, name="stats_delete_all"),
     path("estadisticas/<uuid:series_id>/", views.stats_detail, name="stats_detail"),
+    path("estadisticas/<uuid:series_id>/borrar/", views.stats_delete_series, name="stats_delete_series"),
 ]

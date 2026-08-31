@@ -344,6 +344,23 @@ def stats_detail(request, series_id):
     })
 
 
+@api("DELETE")
+def stats_delete_all(request):
+    """Borra TODAS las estadísticas del usuario — botón "Borrar todas
+    las estadísticas" en Rachas (mismo criterio que stats_delete_all en
+    tasks/views.py, la vista equivalente de la web)."""
+    Occurrence.objects.filter(user=_user()).delete()
+    return JsonResponse({"ok": True})
+
+
+@api("DELETE")
+def stats_delete_series(request, series_id):
+    """Borra las estadísticas de una sola serie — botón "Borrar estas
+    estadísticas" en el detalle de una tarea dentro de Rachas."""
+    Occurrence.objects.filter(series_id=series_id, user=_user()).delete()
+    return JsonResponse({"ok": True})
+
+
 # ------------------------------------------------------- escritura
 
 def _apply_task_fields(t, data):

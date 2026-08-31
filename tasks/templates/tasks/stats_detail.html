@@ -53,4 +53,12 @@
     </ul>
 </section>
 
+<div class="task-form__actions">
+    <form action="{% url 'tasks:stats_delete_series' series_id %}" method="post" class="inline-delete"
+          onsubmit="return confirm('¿Eliminar las estadísticas de «{{ title|escapejs }}»? Esto no se puede deshacer.');">
+        {% csrf_token %}
+        <button type="submit" class="ghost-btn ghost-btn--danger">Borrar estas estadísticas</button>
+    </form>
+</div>
+
 {% endblock %}
