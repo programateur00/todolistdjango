@@ -109,10 +109,10 @@ _EXERCISE_DIFFICULTY = {
     "jumping-pullup": "beginner",
     "incline-push-up": "beginner",
     "dumbbell-curl": "beginner",
+    "chinup": "beginner",       # dominadas supinas — agarre más asistido por el bíceps
     "dips": "intermediate",
     "pullup": "intermediate",
-    "chinup": "intermediate",
-    "wide-pullup": "advanced",
+    "wide-pullup": "intermediate",  # dominadas anchas — mismo nivel que pullup, agarre más exigente
     "weighted-pullup": "advanced",
     "weighted-dips": "advanced",
     "archer-pullup": "advanced",

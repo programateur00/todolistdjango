@@ -18,7 +18,10 @@
 
 <form class="task-form" method="post" id="ai-confirm-form">
     {% csrf_token %}
-    <input type="hidden" name="step" value="confirmar">
+    <input type="hidden" name="fitness_level" value="{{ fitness_level }}">
+    <input type="hidden" name="focus_area" value="{{ focus_area }}">
+    {% if no_bar_equipment %}<input type="hidden" name="no_bar_equipment" value="on">{% endif %}
+    <input type="hidden" name="max_load_kg" value="{{ max_load_kg }}">
 
     <label class="field">
         <span class="field__label">Nombre del plan</span>
@@ -32,13 +35,13 @@
 
     <label class="field">
         <span class="field__label">Hora</span>
-        <input type="time" name="due_time" value="{{ draft.plan_fields.due_time|default:'' }}" required>
+        <input type="time" name="due_time" value="{{ draft.ui_due_time|default:'' }}" required>
         <span class="field__hint">A esta hora avisa la app y, si sigue sin hacerse, se marca sola como no hecha.</span>
     </label>
 
     <label class="field">
         <span class="field__label">Recompensa al cerrar el ciclo (opcional)</span>
-        <input type="text" name="reward" maxlength="200" placeholder="Ej: unas zapatillas nuevas">
+        <input type="text" name="reward" maxlength="200" placeholder="Ej: unas zapatillas nuevas" value="{{ draft.ui_reward|default:'' }}">
     </label>
 
     <p class="field__hint">
@@ -162,9 +165,17 @@
     {% endfor %}
 
     <div class="task-form__actions">
-        <button type="submit" class="primary-btn">Guardar plan</button>
+        <button type="submit" name="step" value="confirmar" class="primary-btn">Guardar plan</button>
+        <button type="submit" name="step" value="recalcular" formnovalidate class="ghost-btn">
+            ↻ Actualizar tabla
+        </button>
     </div>
 </form>
+<p class="field__hint">
+    Si cambias una meta (reps, segundos, peso, distancia o ritmo de destino), pulsa
+    "Actualizar tabla" para ver la progresión semana a semana con el número nuevo —
+    los campos de arriba no la recalculan solos.
+</p>
 
 <form method="post" class="task-form__actions" style="margin-top:8px;">
     {% csrf_token %}

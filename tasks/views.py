@@ -1430,6 +1430,96 @@ def plan_ai_form(request):
             "no_bar_equipment": no_bar_equipment, "max_load_kg": max_load_kg,
         })
 
+    if request.method == "POST" and step == "recalcular":
+        # Recalcula la tabla de progresion de la vista previa sin guardar
+        # nada: si el usuario cambia una meta (p.ej. reps de destino de 7
+        # a 12) los inputs se actualizan solos pero la tabla "semana a
+        # semana" seguia mostrando la que salio de la generacion inicial,
+        # porque esa tabla se calculo una sola vez en build_plan_draft y
+        # no se volvia a tocar hasta guardar. Aqui se reconstruye cada
+        # PlanItem del borrador con los numeros que hay ahora mismo en el
+        # formulario, se le pide a ai.apply_pacing (la MISMA funcion que
+        # usa la generacion automatica, no una copia en JS que se pudiera
+        # desincronizar) que recalcule el incremento por escalon para la
+        # nueva meta, y se vuelve a pintar la vista previa con la tabla
+        # puesta al dia. El borrador en sesion se sustituye por esta
+        # version para que "Guardar plan" y "Generar otra vez" sigan
+        # partiendo de los numeros que se acaban de ver.
+        draft = request.session.get("plan_ai_draft")
+        if not draft:
+            messages.error(request, "El borrador ha caducado — genera el plan otra vez.")
+            return redirect(reverse("tasks:plan_ai_create"))
+
+        fitness_level = request.POST.get("fitness_level", "")
+        focus_area = request.POST.get("focus_area", "")
+        no_bar_equipment = request.POST.get("no_bar_equipment") == "on"
+        max_load_kg_raw = request.POST.get("max_load_kg", "").strip()
+        try:
+            max_load_kg = float(max_load_kg_raw) if max_load_kg_raw != "" else None
+        except (TypeError, ValueError):
+            max_load_kg = None
+
+        weeks = draft["plan_fields"].get("weeks") or 12
+        sessions_per_week = max(1, len(draft["plan_fields"].get("custom_days") or []))
+
+        # Nombre/notas se conservan tal cual esten en el formulario — que
+        # recalcular la tabla no borre lo que ya se habia escrito ahi.
+        draft["plan_fields"]["name"] = request.POST.get("name", draft["plan_fields"].get("name", ""))
+        draft["plan_fields"]["notes"] = request.POST.get("notes", draft["plan_fields"].get("notes", ""))
+        # Hora y recompensa no forman parte de plan_fields (solo se piden
+        # aqui, no las decide la generacion automatica) — se guardan
+        # aparte en el borrador solo para que la vista previa no los
+        # vacie al recalcular.
+        draft["ui_due_time"] = request.POST.get("due_time", draft.get("ui_due_time", ""))
+        draft["ui_reward"] = request.POST.get("reward", draft.get("ui_reward", ""))
+
+        draft_plan = Plan(user=get_current_user(), plan_type=draft["plan_type"])
+
+        for idx, item in enumerate(draft.get("items") or []):
+            prefix = f"items-{idx}-"
+            # Parte de los campos ya calculados (exercise, sessions_per_step,
+            # rep_range_low...) y solo pisa los que la vista previa deja
+            # tocar — igual que hace "confirmar" al guardar de verdad.
+            item_fields = dict(item["fields"])
+            item_fields["is_headline"] = bool(request.POST.get(prefix + "is_headline"))
+            for key in (
+                "label", "start_sets", "start_reps", "start_seconds", "start_weight_kg",
+                "goal_reps", "goal_seconds", "goal_weight_kg", "start_distance_km",
+                "start_pace_seconds_per_km", "goal_distance_km", "goal_pace_seconds_per_km",
+            ):
+                field_name = prefix + key
+                if field_name not in request.POST:
+                    continue
+                raw = request.POST.get(field_name, "").strip()
+                item_fields[key] = raw if (raw != "" or key == "label") else None
+
+            exercise = Exercise.objects.filter(slug=item_fields.get("exercise")).first()
+            if not exercise:
+                continue
+
+            ai.apply_pacing(
+                item_fields, exercise=exercise, sessions_per_week=sessions_per_week,
+                max_load_kg=max_load_kg,
+            )
+
+            draft_item = PlanItem(plan=draft_plan)
+            item_error = api._apply_plan_item_fields(draft_item, draft_plan, item_fields)
+            if item_error:
+                continue  # se deja el objetivo tal como estaba antes de tocarlo
+
+            item["fields"] = item_fields
+            item["preview"]["is_headline"] = bool(item_fields.get("is_headline"))
+            item["preview"]["progression"] = draft_item.progression
+            item["preview"]["weekly"] = draft_item.weekly_schedule(weeks, sessions_per_week)
+
+        request.session["plan_ai_draft"] = draft
+        request.session.modified = True
+        return render(request, "tasks/plan_ai_preview.html", {
+            "draft": draft,
+            "fitness_level": fitness_level, "focus_area": focus_area,
+            "no_bar_equipment": no_bar_equipment, "max_load_kg": max_load_kg,
+        })
+
     if request.method == "POST" and step == "confirmar":
         draft = request.session.get("plan_ai_draft")
         if not draft:
