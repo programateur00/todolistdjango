@@ -192,6 +192,13 @@ button { font-family:var(--font-b); cursor:pointer; }
 .done-summary::before { content:"▸ "; font-size:12px; }
 .done-details[open] > .done-summary::before { content:"▾ "; }
 .done-details[open] > .done-summary { margin-bottom:12px; }
+/* Fix del desplegable "Hechas": .task-list lleva display:flex, y en
+   algunos navegadores (sobre todo WebKit/Safari) un display:flex en el
+   hijo directo de <details> gana a la regla nativa que lo oculta cuando
+   el <details> está cerrado — así que la lista de tareas hechas se
+   quedaba visible aunque el desplegable estuviera "cerrado". Se fuerza
+   aquí explícitamente en vez de confiar en el comportamiento nativo. */
+.done-details:not([open]) > .task-list { display:none; }
 .empty-state { color:var(--bone-faded); font-size:14px; padding:20px 4px; font-style:italic; }
 
 /* ── Task cards ─────────────────────────────────────────────────────── */

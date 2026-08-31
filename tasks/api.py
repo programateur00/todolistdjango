@@ -673,6 +673,21 @@ def video_save(request, uuid):
         return JsonResponse({"ok": True, "needs_cooldown": True, "task": task_json(t)})
 
     t.mark_done(minutes_watched=minutes_watched)
+
+    # Un curso de idioma (CourseModule) necesita avanzar el vídeo "actual"
+    # a mano -- a diferencia de Hábito simple con playlist, que se
+    # recalcula solo desde las Occurrence (ver Plan._study_playlist_progress)
+    # -- o la tarea de mañana volvería a enseñar el mismo vídeo de hoy para
+    # siempre (ver Plan.mark_current_module_watched). El móvil reproduce un
+    # único vídeo por sesión, sin encadenar varios cortos como
+    # task_video.html en la web (ver docstring de arriba), así que basta
+    # con avanzar 1. El test de repaso (CourseQuiz) se deja fuera a
+    # propósito: todavía no hay pantalla en la app para hacerlo (ver
+    # views.task_video_save / api.maybe_trigger_quiz).
+    plan = t.plan
+    if plan and plan.plan_type == Plan.PLAN_TYPE_STUDY and plan.study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE:
+        plan.mark_current_module_watched()
+
     return JsonResponse({"ok": True, "task": task_json(t)})
 
 
@@ -1127,11 +1142,30 @@ def plan_json(p, detail=False):
         "custom_days": p.custom_days_list(),
         "due_time": p.due_time.strftime("%H:%M") if p.due_time else None,
         "headline": _item(head) if head else None,
+        # Estudio · Idiomas no lleva PlanItem (headline sale None) -- sin
+        # esto la app móvil no podía ni distinguir un plan de idioma de
+        # un Hábito simple, ver plan_language_options/_draft/_save más abajo.
+        "study_subtype": p.study_subtype,
+        "language_name": p.language_name,
+        "level_from": p.level_from,
+        "level_to": p.level_to,
+        "known_languages": p.known_languages,
+        "language_daily_minutes": p.language_daily_minutes,
+        "quiz_every_n_videos": p.quiz_every_n_videos,
     }
     if detail:
         data["items"] = [_item(i) for i in p.items.select_related("exercise")]
         data["schedule"] = head.schedule(60) if head else []
         data["history"] = head.history(12) if head else []
+        if p.plan_type == Plan.PLAN_TYPE_STUDY and p.study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE:
+            progress = p.course_progress()
+            nxt = progress["next"]
+            data["course_progress"] = {
+                "total": progress["total"],
+                "watched": progress["watched"],
+                "pct": progress["pct"],
+                "next_title": nxt.title if nxt else None,
+            }
     return data
 
 
@@ -1176,7 +1210,13 @@ def plan_detail(request, uuid):
         return JsonResponse({"plan": plan_json(p, detail=True)})
 
     if request.method == "PATCH":
-        error = _apply_plan_fields(p, body(request))
+        data = body(request)
+        error = _apply_plan_fields(p, data)
+        # Idioma + nivel son editables en cualquier momento (no regeneran
+        # el temario ya asignado) -- mismo criterio que views.plan_form,
+        # ver el comentario junto a Plan.language_name en models.py.
+        if not error and p.plan_type == Plan.PLAN_TYPE_STUDY and p.study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE:
+            _apply_language_plan_fields(p, data)
         if error:
             return JsonResponse({"ok": False, "error": error}, status=400)
         p.save()
@@ -2037,6 +2077,102 @@ def maybe_trigger_quiz(plan):
         plan=plan, up_to_order=last_module.order,
         topics=topics, questions=result.get("questions") or [],
     )
+
+
+@api("GET")
+def plan_language_options(request):
+    """
+    Catálogo dinámico para el formulario de Estudio · Idiomas del móvil
+    -- mismo contenido que la web arma en `views.plan_form`
+    (`catalog_language_options` / `catalog_native_language_options`),
+    aquí como JSON en vez de contexto de plantilla.
+    """
+    return JsonResponse({
+        "study_subtypes": [{"value": v, "label": l} for v, l in Plan.STUDY_SUBTYPE_CHOICES],
+        "cefr_levels": [{"value": v, "label": l} for v, l in Plan.CEFR_LEVEL_CHOICES],
+        "languages": catalog_language_options(),
+        "native_languages": catalog_native_language_options(),
+    })
+
+
+@api("POST")
+def plan_language_draft(request):
+    """
+    Paso 1 -> borrador. Equivalente móvil de `views.plan_form` cuando
+    study_subtype='language': arma la selección de cursos del catálogo
+    sin guardar nada (ver build_language_plan_draft).
+
+    El borrador entero viaja de vuelta al cliente -- la app lo guarda en
+    memoria hasta que confirma o descarta (mismo criterio que ya usa
+    "Generar con IA", ver plan-view.js) -- en vez de quedarse en sesión
+    de servidor como hace la web (`request.session["plan_language_draft"]`
+    en views.plan_form): la app habla en Basic Auth, sin sesión de
+    verdad persistiendo entre peticiones.
+    """
+    data = body(request)
+    draft, error = build_language_plan_draft(
+        user=_user(),
+        weeks=data.get("weeks"),
+        custom_days=data.get("custom_days"),
+        language=data.get("language_name"),
+        level_from=data.get("level_from"),
+        level_to=data.get("level_to"),
+        known_languages=data.get("known_languages"),
+        quiz_every_n_videos=data.get("quiz_every_n_videos"),
+        language_daily_minutes=data.get("language_daily_minutes"),
+    )
+    if error:
+        return JsonResponse({"ok": False, "error": error}, status=400)
+    if data.get("name"):
+        draft["plan_fields"]["name"] = str(data["name"]).strip()[:80]
+    draft["plan_fields"]["notes"] = (data.get("notes") or "").strip()
+    draft["due_time"] = data.get("due_time")
+    draft["reward"] = (data.get("reward") or "").strip()[:200]
+    return JsonResponse({"ok": True, "draft": draft})
+
+
+@api("POST")
+def plan_language_save(request):
+    """
+    Paso 2 -> confirmar. Equivalente móvil del POST de
+    `views.plan_language_confirm`: expande el catálogo elegido en
+    CourseModule reales (ver expand_language_selection) y guarda el
+    plan. `data` es el propio borrador que devolvió `plan_language_draft`
+    (selected/plan_fields), con nombre/notas/hora/recompensa ya editados
+    si el usuario los tocó en la pantalla de revisión.
+    """
+    data = body(request)
+    due_time = data.get("due_time")
+    if not due_time:
+        return JsonResponse({
+            "ok": False,
+            "error": "Ponle una hora — la notificación y el cierre automático del día la necesitan.",
+        }, status=400)
+
+    course_modules, error = expand_language_selection(data.get("selected") or [])
+    if error:
+        return JsonResponse({"ok": False, "error": error}, status=400)
+
+    plan_data = dict(data.get("plan_fields") or {})
+    if data.get("name"):
+        plan_data["name"] = str(data["name"]).strip()[:80]
+    plan_data["notes"] = (data.get("notes") or "").strip()
+    plan_data["reward"] = (data.get("reward") or "").strip()[:200]
+    plan_data["due_time"] = due_time
+    plan_data["is_active"] = True
+
+    plan = Plan(user=_user(), plan_type=Plan.PLAN_TYPE_STUDY)
+    error = _apply_plan_fields(plan, plan_data)
+    if not error:
+        _apply_language_plan_fields(plan, plan_data)
+    if error:
+        return JsonResponse({"ok": False, "error": error}, status=400)
+    plan.save()
+    for module in course_modules:
+        module.plan = plan
+        module.save()
+    plan.sync_task()
+    return JsonResponse({"ok": True, "plan": plan_json(plan, detail=True)}, status=201)
 
 
 @api("POST")
