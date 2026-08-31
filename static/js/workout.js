@@ -2041,13 +2041,19 @@ class WorkoutSession {
    * de ahí solo se dice "Serie de N terminada.", corto y al grano.
    */
   announceSetComplete(prefix, waitingMessage) {
-    // Descanso obligatorio: se dice SIEMPRE (no solo la primera vez, a
-    // diferencia del resto de este aviso) — es la regla de "no cuento
-    // nada hasta que no pasen los 90s" (ver MIN_REST_MS, countRep,
-    // notePostureOk), hace falta que quede claro en cada serie, no solo
-    // en la primera de la sesión.
-    const restNote = `Descanso obligatorio: mínimo ${Math.round(MIN_REST_MS / 1000)} segundos.`;
-    const fullText = `${prefix} terminada. ${restNote} ${waitingMessage}`;
+    // Descanso obligatorio: la explicación completa ("mínimo N segundos")
+    // se decía SIEMPRE, en cada serie — pero es la misma tabarra que el
+    // resto de este aviso (cómo colocarte), así que ahora sigue la misma
+    // regla: la chapa completa solo la PRIMERA vez de la sesión; a partir
+    // de la segunda serie ya sabes que hay descanso obligatorio y cuánto
+    // dura, así que por voz basta con "Descanso.", a secas. La regla de
+    // "no cuento nada hasta que no pasen los 90s" en sí no cambia (ver
+    // MIN_REST_MS, countRep, notePostureOk) — si intentas algo antes de
+    // tiempo, announceRestBlocked() sí te lo explica con detalle cada vez,
+    // porque ahí hace falta.
+    const restNoteFull = `Descanso obligatorio: mínimo ${Math.round(MIN_REST_MS / 1000)} segundos.`;
+    const restNoteShort = "Descanso.";
+    const fullText = `${prefix} terminada. ${restNoteFull} ${waitingMessage}`;
     this.setStatus(fullText);
     if (!this.voiceEnabled) return;
     const isFirst = this.setsCompletedVoiceCount === 0;
@@ -2056,7 +2062,7 @@ class WorkoutSession {
     const anyGap = this.lastSpokenStatusAt === null ? Infinity : now - this.lastSpokenStatusAt;
     if (anyGap < STATUS_VOICE_MIN_GAP_MS) return;
     this.lastSpokenStatusAt = now;
-    this.speak(isFirst ? fullText : `${prefix} terminada. ${restNote}`, { flush: false });
+    this.speak(isFirst ? fullText : `${prefix} terminada. ${restNoteShort}`, { flush: false });
   }
 
   /**
