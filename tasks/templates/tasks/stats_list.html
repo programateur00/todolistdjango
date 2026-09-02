@@ -25,6 +25,27 @@
 </section>
 {% endif %}
 
+{% if time_buckets %}
+<section class="time-totals" aria-label="Tiempo acumulado">
+    <h2 class="time-totals__heading">Tiempo acumulado</h2>
+    <ul class="time-totals__list">
+        {% for key, b in time_buckets.items %}
+        <li class="time-card">
+            <div class="time-card__top">
+                <p class="time-card__title">{{ b.label }}</p>
+                <span class="time-card__hours">{{ b.all_time_hours }}h</span>
+            </div>
+            <p class="time-card__meta">
+                {{ b.this_year_hours }}h este año
+                {% if b.badges_earned %}· {{ b.badges_earned|length }} insignia{{ b.badges_earned|length|pluralize:"s" }}{% endif %}
+                {% if b.next_badge_hours %}· próxima a las {{ b.next_badge_hours }}h{% endif %}
+            </p>
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}
+
 {% if series_list %}
 <ul class="stats-list">
     {% for s in series_list %}

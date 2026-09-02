@@ -188,6 +188,19 @@
         </label>
     </div>
 
+    <div id="udemy-fields">
+        <label class="field">
+            <span class="field__label">Palabra clave del curso</span>
+            <input type="text" name="watch_keyword" maxlength="120" value="{{ task.watch_keyword|default:'' }}"
+                placeholder="Ej: Linux">
+            <span class="field__hint">
+                La extensión de Chrome cuenta el tiempo cuando esta palabra aparece en el
+                título de la pestaña de Udemy que tienes activa — así sabe que es este curso
+                y no otro. Usa algo que salga en el nombre del curso, tal cual aparece en Udemy.
+            </span>
+        </label>
+    </div>
+
     <label class="field focus-target-field" id="focus-target-field">
         <span class="field__label">Objetivo (minutos)</span>
         <input type="number" name="target_minutes" min="1" max="600"
@@ -349,6 +362,7 @@
     var focusSubcategoryField = document.getElementById('focus-subcategory-field');
     var studySubcategoryField = document.getElementById('study-subcategory-field');
     var languageFields = document.getElementById('language-fields');
+    var udemyFields = document.getElementById('udemy-fields');
     var focusTargetField = document.getElementById('focus-target-field');
     var videoSourceField = document.getElementById('video-source-field');
     var sportModeField = document.getElementById('sport-mode-field');
@@ -365,7 +379,6 @@
         var v = (document.querySelector('[data-category-toggle]:checked') || {}).value || 'general';
         subcategoryField.style.display = v === 'sport' ? 'block' : 'none';
         focusSubcategoryField.style.display = v === 'work' ? 'block' : 'none';
-        focusTargetField.style.display = v === 'work' ? 'block' : 'none';
 
         // Deporte: el método se elige aquí, al crear la tarea. Qué
         // métodos valen depende del subtipo — correr no se hace con
@@ -376,6 +389,13 @@
         var subSel = document.querySelector('[name="subcategory"]:checked');
         var subSelValue = subSel ? subSel.value : '';
         var sub = esDeporte ? subSelValue : '';
+
+        // "Curso de Udemy" vive en category=study pero cronometra igual
+        // que Enfoque (ver watch_keyword arriba) — comparte el mismo
+        // campo de objetivo en minutos, por eso se decide aquí y no solo
+        // con v === 'work'.
+        var esUdemy = v === 'study' && subSelValue === 'udemy';
+        focusTargetField.style.display = (v === 'work' || esUdemy) ? 'block' : 'none';
         var esCarrera = sub === 'running';
         var modosPorSub = { upper_body: ['camera', 'circuit', 'video'], lower_body: ['camera', 'circuit', 'video'] };
         var modosValidos = modosPorSub[sub] || [];
@@ -406,20 +426,23 @@
         var esEstudio = v === 'study';
         studySubcategoryField.style.display = esEstudio ? 'block' : 'none';
         languageFields.style.display = (esEstudio && subSelValue === 'language') ? 'block' : 'none';
+        udemyFields.style.display = esUdemy ? 'block' : 'none';
         var videoEnDeporte = esDeporte && modoActual === 'video';
         videoSourceField.style.display = (esEnfoque || videoEnDeporte) ? 'block' : 'none';
         var fuente = (document.querySelector('[name="video_source"]:checked') || {}).value || 'youtube';
         videoField.style.display =
-            esEstudio || ((esEnfoque || videoEnDeporte) && fuente === 'youtube') ? 'block' : 'none';
+            (esEstudio && !esUdemy) || ((esEnfoque || videoEnDeporte) && fuente === 'youtube') ? 'block' : 'none';
         localVideoField.style.display =
             ((esEnfoque || videoEnDeporte) && fuente === 'local') ? 'block' : 'none';
 
         // Playlist / vídeos largos: solo tiene sentido para estudiar
         // (clases, cursos, idiomas) — dominadas no vienen en playlists
         // de 40 horas, y Enfoque ya tiene su vídeo simple de sobra.
-        playlistField.style.display = esEstudio ? 'block' : 'none';
-        videoTargetMinutesField.style.display = esEstudio ? 'block' : 'none';
-        videoTargetCountField.style.display = esEstudio ? 'block' : 'none';
+        // "Curso de Udemy" queda fuera: no es un vídeo de YouTube, es un
+        // curso externo que se sigue por la palabra clave de arriba.
+        playlistField.style.display = (esEstudio && !esUdemy) ? 'block' : 'none';
+        videoTargetMinutesField.style.display = (esEstudio && !esUdemy) ? 'block' : 'none';
+        videoTargetCountField.style.display = (esEstudio && !esUdemy) ? 'block' : 'none';
         avoidFields.style.display = v === 'avoid' ? 'block' : 'none';
 
         // Una antitarea no "vence": se te pregunta. Y como se repite a

@@ -101,6 +101,9 @@ def task_json(t):
         # Solo relevante si category="work" (Enfoque): objetivo en minutos
         # del temporizador. None = sesión libre, sin objetivo.
         "target_minutes": t.target_minutes,
+        # Solo con subcategory="udemy": palabra clave para que la
+        # extensión de Chrome sepa si la pestaña activa es de este curso.
+        "watch_keyword": t.watch_keyword,
         "youtube_video_id": t.youtube_video_id,
         "youtube_playlist_id": t.youtube_playlist_id,
         "target_video_count": t.target_video_count,
@@ -207,6 +210,7 @@ def meta(request):
         # selector (verías "Lectura" al elegir un ejercicio de deporte).
         "sport_subcategories": [{"value": v, "label": l} for v, l in Task.SPORT_SUBCATEGORY_CHOICES],
         "focus_subcategories": [{"value": v, "label": l} for v, l in Task.FOCUS_SUBCATEGORY_CHOICES],
+        "study_subcategories": [{"value": v, "label": l} for v, l in Task.STUDY_SUBCATEGORY_CHOICES],
         "repeats": [{"value": v, "label": l} for v, l in Task.REPEAT_CHOICES],
         "weekdays": [{"value": v, "label": l} for v, l in Task.WEEKDAYS],
         "capabilities": Task.CATEGORY_CAPABILITIES,
@@ -403,6 +407,8 @@ def _apply_task_fields(t, data):
                 t.target_video_count = max(1, int(raw))
             except (TypeError, ValueError):
                 t.target_video_count = None
+    if "watch_keyword" in data:
+        t.watch_keyword = (data.get("watch_keyword") or "").strip()[:120]
     if "has_local_video" in data:
         t.has_local_video = bool(data.get("has_local_video"))
     if "sport_mode" in data:
@@ -551,6 +557,10 @@ def task_mark(request, uuid, action):
         # Deshacer: revierte la ocurrencia y la instancia futura, para que
         # las estadísticas vuelvan exactamente a como estaban.
         t.reopen()
+    elif action == "course-complete":
+        # Udemy reportó el curso al 100% (ver extensión de Chrome): da la
+        # tarea de hoy por hecha y detiene la serie entera, no solo el día.
+        t.finish_recurring_series()
     else:
         return JsonResponse({"ok": False, "error": "Acción desconocida"}, status=400)
     return JsonResponse({"ok": True, "task": task_json(t)})
@@ -774,7 +784,8 @@ def focus_save(request, uuid):
 
     minutes = max(0, int(data.get("minutes", 0)))
     source = data.get("source") if data.get("source") in dict(TimerSession.SOURCE_CHOICES) else TimerSession.SOURCE_MANUAL
-    app_package = (data.get("app_package") or "")[:120] if source == TimerSession.SOURCE_APP_USAGE else ""
+    _sources_with_app_package = (TimerSession.SOURCE_APP_USAGE, TimerSession.SOURCE_PC_USAGE)
+    app_package = (data.get("app_package") or "")[:120] if source in _sources_with_app_package else ""
 
     ts = TimerSession.objects.create(
         task=t, user=_user(), series_id=t.series_id,

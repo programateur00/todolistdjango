@@ -13,6 +13,7 @@ import uuid as _uuid
 from django.utils import timezone
 
 from . import ai, api
+from . import time_stats
 from .models import (
     CourseQuiz, Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, SavedVideo, Task,
     TimerSession, WarmupStatus, WorkoutSession,
@@ -71,6 +72,11 @@ def _read_subcategory(request, default=""):
 def _read_language_name(request):
     """Idioma de una tarea suelta con subcategory=Idiomas (Task.language_name)."""
     return request.POST.get("language_name", "").strip()[:40]
+
+
+def _read_watch_keyword(request):
+    """Palabra clave de una tarea con subcategory=Udemy (Task.watch_keyword)."""
+    return request.POST.get("watch_keyword", "").strip()[:120]
 
 
 def _read_level(request):
@@ -261,6 +267,7 @@ def task_create(request):
                 subcategory=_read_subcategory(request),
                 language_name=_read_language_name(request),
                 level=_read_level(request),
+                watch_keyword=_read_watch_keyword(request),
                 target_minutes=_read_target_minutes(request),
                 youtube_video_id=_read_youtube_video_id(request),
                 youtube_playlist_id=_read_youtube_playlist_id(request),
@@ -311,6 +318,7 @@ def task_edit(request, pk):
         task.subcategory = _read_subcategory(request, default=task.subcategory)
         task.language_name = _read_language_name(request)
         task.level = _read_level(request)
+        task.watch_keyword = _read_watch_keyword(request)
         task.target_minutes = _read_target_minutes(request)
         task.youtube_video_id = _read_youtube_video_id(request)
         task.youtube_playlist_id = _read_youtube_playlist_id(request)
@@ -1104,6 +1112,7 @@ def stats_list(request):
     return render(request, "tasks/stats_list.html", {
         "series_list": series_list,
         "weekly": Occurrence.weekly_completion(get_current_user()),
+        "time_buckets": time_stats.time_totals(get_current_user()),
     })
 
 

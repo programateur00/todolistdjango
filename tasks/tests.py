@@ -6,7 +6,7 @@ from django.utils import timezone
 from django.urls import reverse
 
 from .models import (
-    Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, Task, WorkoutSession,
+    Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, Task, TimerSession, WorkoutSession,
 )
 from .utils import get_current_user
 
@@ -1717,3 +1717,95 @@ class ApiTests(TestCase):
         r2 = self.client.delete(f"/api/tasks/{uuid_}/")
         self.assertEqual(r2.status_code, 404)
         self.assertEqual(r2["Content-Type"], "application/json")
+
+
+class UdemyTrackingTests(TestCase):
+    """
+    Fase 2 del tracking de tiempo en Udemy (ver docs/plan-tracking-tiempo.md):
+    subtipo "Curso de Udemy" dentro de Estudio, TimerSession.SOURCE_PC_USAGE,
+    y el cierre de la serie entera cuando la extensión de Chrome detecta el
+    curso al 100%.
+    """
+    def setUp(self):
+        self.user = get_current_user()
+        self.task = Task.objects.create(
+            title="Curso de Linux", category=Task.CATEGORY_STUDY,
+            subcategory=Task.SUBCATEGORY_UDEMY, watch_keyword="Linux",
+            repeat=Task.REPEAT_DAILY, user=self.user,
+        )
+
+    def test_capability_and_meta_expose_udemy(self):
+        self.assertTrue(self.task.has_capability("app_usage"))
+        r = self.client.get(reverse("api:meta"))
+        values = {c["value"] for c in r.json()["study_subcategories"]}
+        self.assertIn("udemy", values)
+
+    def test_task_list_exposes_watch_keyword(self):
+        r = self.client.get(reverse("api:task_list"))
+        mine = [t for t in r.json()["pending"] if t["uuid"] == str(self.task.uuid)]
+        self.assertEqual(len(mine), 1)
+        self.assertEqual(mine[0]["watch_keyword"], "Linux")
+        self.assertEqual(mine[0]["subcategory"], "udemy")
+
+    def test_focus_save_with_pc_usage_creates_session(self):
+        r = self.client.post(
+            reverse("api:focus_save", args=[self.task.uuid]),
+            data=json.dumps({"minutes": 15, "source": "pc_usage", "app_package": "udemy.com"}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        ts = TimerSession.objects.get(task=self.task)
+        self.assertEqual(ts.source, TimerSession.SOURCE_PC_USAGE)
+        self.assertEqual(ts.app_package, "udemy.com")
+        self.assertEqual(ts.minutes, 15)
+
+    def test_course_complete_stops_the_series(self):
+        r = self.client.post(reverse("api:task_mark", args=[self.task.uuid, "course-complete"]))
+        self.assertEqual(r.status_code, 200, r.content)
+        self.task.refresh_from_db()
+        self.assertTrue(self.task.is_done)
+        self.assertEqual(self.task.repeat, Task.REPEAT_NONE)
+        # No debe haber nacido una instancia de mañana: finish_recurring_series
+        # pone repeat=NONE ANTES de mark_done(), así que _spawn_next() no crea nada.
+        self.assertEqual(Task.objects.filter(series_id=self.task.series_id).count(), 1)
+
+    def test_time_stats_picks_up_udemy_sessions(self):
+        from .time_stats import time_totals
+        TimerSession.objects.create(
+            task=self.task, user=self.user, subcategory=self.task.subcategory,
+            source=TimerSession.SOURCE_PC_USAGE, app_package="udemy.com", minutes=120,
+        )
+        buckets = time_totals(self.user)
+        self.assertIn("study_udemy", buckets)
+        self.assertEqual(buckets["study_udemy"]["all_time_hours"], 2.0)
+
+    # ---------------------------------------------------- Fase 3 (formulario web)
+
+    def test_web_create_saves_watch_keyword_and_target_minutes(self):
+        r = self.client.post(reverse("tasks:task_create"), {
+            "title": "Curso de Excel", "category": "study", "subcategory": "udemy",
+            "watch_keyword": "Excel completo", "target_minutes": "45",
+            "due_date": "2026-09-10", "due_time": "20:00", "repeat": "daily",
+        })
+        self.assertEqual(r.status_code, 302, r.content)
+        t = Task.objects.get(title="Curso de Excel")
+        self.assertEqual(t.watch_keyword, "Excel completo")
+        self.assertEqual(t.target_minutes, 45)
+        self.assertEqual(t.category, Task.CATEGORY_STUDY)
+        self.assertEqual(t.subcategory, Task.SUBCATEGORY_UDEMY)
+
+    def test_web_edit_updates_watch_keyword(self):
+        r = self.client.post(reverse("tasks:task_edit", args=[self.task.pk]), {
+            "title": self.task.title, "category": "study", "subcategory": "udemy",
+            "watch_keyword": "Linux avanzado", "target_minutes": "30",
+            "due_date": "2026-09-10", "due_time": "20:00", "repeat": "daily",
+        })
+        self.assertEqual(r.status_code, 302, r.content)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.watch_keyword, "Linux avanzado")
+
+    def test_web_form_renders_with_udemy_task(self):
+        """La página de editar no debe romperse con una tarea de Udemy ya guardada."""
+        r = self.client.get(reverse("tasks:task_edit", args=[self.task.pk]))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "watch_keyword")

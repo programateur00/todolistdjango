@@ -79,7 +79,12 @@ class Task(models.Model):
     # cualquier cosa que quieras cronometrar sin que sea deporte.
     CATEGORY_CAPABILITIES = {
         CATEGORY_GENERAL: [],
-        CATEGORY_STUDY: [],
+        # "timer"/"app_usage": para "Curso de Udemy" (ver
+        # SUBCATEGORY_UDEMY) — cronómetro igual que Enfoque, y tiempo real
+        # medido en el PC (TimerSession.SOURCE_PC_USAGE) en vez de a mano.
+        # "Idiomas" (SUBCATEGORY_LANGUAGE) no usa ninguna de las dos, va
+        # por su propio mecanismo de vídeos secuenciados (CourseModule).
+        CATEGORY_STUDY: ["timer", "app_usage"],
         CATEGORY_SPORT: ["timer", "pose_tracking"],
         CATEGORY_WORK: ["timer", "app_usage"],
         CATEGORY_PERSONAL: [],
@@ -119,8 +124,16 @@ class Task(models.Model):
     # CourseModule), en vez del hábito diario simple de siempre. En
     # blanco sigue siendo el Estudio de toda la vida, sin curso detrás.
     SUBCATEGORY_LANGUAGE = "language"
+    # Curso de Udemy: seguimiento de tiempo real (ver watch_keyword más
+    # abajo y TimerSession.SOURCE_PC_USAGE) en vez de vídeos secuenciados
+    # — la extensión de Chrome cuenta el tiempo con la pestaña de Udemy
+    # en primer plano, y detecta el "100% completado" que reporta Udemy
+    # para dar la tarea por terminada del todo (ver
+    # Task.finish_recurring_series).
+    SUBCATEGORY_UDEMY = "udemy"
     STUDY_SUBCATEGORY_CHOICES = [
         (SUBCATEGORY_LANGUAGE, "Idiomas"),
+        (SUBCATEGORY_UDEMY, "Curso de Udemy"),
     ]
 
     SUBCATEGORY_CHOICES = SPORT_SUBCATEGORY_CHOICES + FOCUS_SUBCATEGORY_CHOICES + STUDY_SUBCATEGORY_CHOICES
@@ -175,6 +188,16 @@ class Task(models.Model):
     target_minutes = models.PositiveIntegerField(
         null=True, blank=True,
         help_text="Objetivo en minutos para tareas de Enfoque (category='work'). Ej. 60 para 'leer una hora'.",
+    )
+    # Solo con subcategory=SUBCATEGORY_UDEMY: qué palabra buscar en el
+    # título de la pestaña activa para saber que estás viendo ESTE curso
+    # y no otro (ver la extensión de Chrome). En blanco por defecto se
+    # sugiere el propio título de la tarea al crearla, pero es editable
+    # por si el nombre del curso en Udemy no coincide literalmente.
+    watch_keyword = models.CharField(
+        max_length=120, blank=True,
+        help_text="Solo para 'Curso de Udemy': palabra o frase que debe aparecer en el "
+                   "título de la pestaña de Udemy para contar el tiempo en esta tarea.",
     )
     youtube_video_id = models.CharField(
         max_length=255, blank=True,
@@ -678,6 +701,28 @@ class Task(models.Model):
         self.completed_at = None
         self.reopened_at = timezone.now()
         self.save()
+
+    def finish_recurring_series(self):
+        """
+        Da la tarea de hoy por hecha y detiene la serie entera: no se
+        genera ninguna instancia futura (ver _spawn_next, que ya no hace
+        nada en cuanto repeat=REPEAT_NONE).
+
+        Pensado para "Curso de Udemy" (ver SUBCATEGORY_UDEMY): cuando la
+        extensión de Chrome detecta que Udemy reporta el curso al 100%,
+        ya no tiene sentido seguir pidiendo "estudiar este curso" cada
+        día que tocaba — a diferencia de mark_done(), que asume que la
+        serie sigue y prepara la siguiente repetición.
+
+        Idempotente: si ya estaba en REPEAT_NONE y ya hecha, no hace nada
+        raro (mark_done() con la tarea ya hecha simplemente la repite,
+        pero aquí ni se llega a eso).
+        """
+        if self.repeat != self.REPEAT_NONE:
+            self.repeat = self.REPEAT_NONE
+            self.save(update_fields=["repeat"])
+        if not self.is_done:
+            self.mark_done()
 
     def mark_not_done(self):
         """
@@ -2508,9 +2553,11 @@ class TimerSession(models.Model):
     """
     SOURCE_MANUAL = "manual"
     SOURCE_APP_USAGE = "app_usage"
+    SOURCE_PC_USAGE = "pc_usage"
     SOURCE_CHOICES = [
         (SOURCE_MANUAL, "Cronómetro manual"),
         (SOURCE_APP_USAGE, "Tiempo en la app"),
+        (SOURCE_PC_USAGE, "Tiempo en el PC"),
     ]
 
     task = models.ForeignKey(
@@ -2533,7 +2580,8 @@ class TimerSession(models.Model):
     source = models.CharField(max_length=16, choices=SOURCE_CHOICES, default=SOURCE_MANUAL)
     app_package = models.CharField(
         max_length=120, blank=True,
-        help_text="Paquete Android de la app leída (ej. com.adobe.reader). Solo si source=app_usage.",
+        help_text="Paquete Android de la app leída (ej. com.adobe.reader) si source=app_usage, "
+                   "o el dominio vigilado (ej. udemy.com) si source=pc_usage.",
     )
 
     minutes = models.PositiveIntegerField(default=0)
