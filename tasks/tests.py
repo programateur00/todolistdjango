@@ -1812,14 +1812,17 @@ class UdemyTrackingTests(TestCase):
 
     # -------------------------------------------- completado automático
 
-    def test_workout_kind_is_focus_for_udemy_task(self):
-        """Igual que running: no se ofrece el check manual de 'hecha',
-        se ofrece el botón que lleva al flujo que la completa sola."""
-        self.assertEqual(self.task.workout_kind, "focus")
+    def test_workout_kind_is_auto_for_udemy_task(self):
+        """Igual que running (workout_kind='distance'): no se ofrece
+        NINGÚN botón manual, ni el check de 'hecha' ni un temporizador —
+        se completa ella sola cuando llegan minutos suficientes."""
+        self.assertEqual(self.task.workout_kind, "auto")
 
     def test_web_list_hides_manual_done_button_for_udemy_task(self):
         r = self.client.get(reverse("tasks:task_list"))
-        self.assertContains(r, reverse("tasks:task_focus", args=[self.task.pk]))
+        self.assertNotContains(r, reverse("tasks:task_mark_done", args=[self.task.pk]))
+        self.assertNotContains(r, reverse("tasks:task_focus", args=[self.task.pk]))
+        self.assertContains(r, "task-card__waiting")
 
     def test_focus_save_pc_usage_accumulates_across_short_sessions(self):
         """La extensión corta la sesión en cada cambio de pestaña: dos

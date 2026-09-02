@@ -408,11 +408,11 @@ class Task(models.Model):
         if self.category == self.CATEGORY_WORK:
             return "focus"          # temporizador de Enfoque: leer, estudiar, estirar…
         if self.category == self.CATEGORY_STUDY and self.subcategory == self.SUBCATEGORY_UDEMY:
-            # Curso de Udemy: se completa sola (por la extensión de Chrome,
-            # o con el temporizador manual de esta misma pantalla) al
-            # llegar a los minutos objetivo del día — igual que running,
-            # no se puede marcar "hecha" a mano sin haber llegado.
-            return "focus"
+            # Curso de Udemy: se completa sola cuando la extensión de
+            # Chrome manda minutos suficientes — no hay nada que pulsar
+            # aquí, igual que running ("distance") no ofrece nada porque
+            # se completa sola al importar de Health Connect.
+            return "auto"
         return None
 
     @property

@@ -550,6 +550,13 @@ button { font-family:var(--font-b); cursor:pointer; }
   border:1px solid transparent; }
 .workout-btn:hover { border-color:currentColor; }
 
+/* Tareas que se completan solas (running, Curso de Udemy…): nada que
+   pulsar, solo un indicador de "esto se resuelve por sí mismo" con el
+   mismo hueco que ocupa un botón, para que la fila no salte. */
+.task-card__waiting { display:inline-flex; align-items:center; justify-content:center; width:40px; height:40px;
+  border-radius:999px; background:var(--paper); color:var(--bone-faded); font-size:17px;
+  border:1px solid var(--line); cursor:default; }
+
 /* ── Circuitos: selector, constructor y reproductor ────────────────── */
 
 .exercise-picker__hint--routines { margin-top:18px; }

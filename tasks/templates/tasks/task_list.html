@@ -71,7 +71,9 @@
         {% with mins=task.minutes_remaining overdue=task.is_overdue %}
         <li class="task-card{% if task.is_important %} task-card--important{% endif %}{% if overdue %} task-card--overdue{% endif %}">
             <div class="task-card__actions">
-                {% if task.workout_kind %}
+                {% if task.workout_kind == "auto" %}
+                <span class="task-card__waiting" title="Se completa sola al llegar a los minutos objetivo de hoy">⏳</span>
+                {% elif task.workout_kind %}
                 <a href="{% if task.workout_kind == 'focus' %}{% url 'tasks:task_focus' task.pk %}{% elif task.workout_kind == 'video' %}{% url 'tasks:task_video' task.pk %}{% else %}{% url 'tasks:task_workout' task.pk %}{% endif %}" class="workout-btn"
                    title="{% if task.workout_kind == 'camera' %}Contar repeticiones con la cámara{% elif task.workout_kind == 'timer' %}Empezar circuito cronometrado{% elif task.workout_kind == 'focus' %}Empezar temporizador{% elif task.workout_kind == 'video' %}Ver el vídeo{% else %}Anotar la sesión{% endif %}">
                     <svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4.5l12 7.5-12 7.5v-15z"/></svg>
