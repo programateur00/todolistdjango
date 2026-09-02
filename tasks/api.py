@@ -778,6 +778,12 @@ def focus_save(request, uuid):
     nativo, la fuente y el paquete de la app. Mismo criterio de
     completado que workout_save: si hay objetivo y no se llega, la tarea
     se queda pendiente con el porcentaje guardado.
+
+    Excepción: source="pc_usage" (la extensión de Chrome de Udemy) suma
+    todas las sesiones de HOY de esta tarea antes de comparar contra el
+    objetivo, en vez de mirar esta sesión sola — la extensión corta la
+    sesión cada vez que cambias de pestaña, así que un curso visto a
+    ratos nunca llegaría solo en una sola sesión.
     """
     t = get_object_or_404(tasks_qs(), uuid=uuid)
     data = body(request)
@@ -792,7 +798,20 @@ def focus_save(request, uuid):
         subcategory=t.subcategory, source=source, app_package=app_package,
         minutes=minutes, target_minutes=t.target_minutes,
     )
-    if ts.target_met:
+    if source == TimerSession.SOURCE_PC_USAGE:
+        # La extensión de Chrome corta la sesión cada vez que cambias de
+        # pestaña/ventana, así que un curso de Udemy visto a ratos llega
+        # al objetivo en varias sesiones cortas, ninguna de ellas sola —
+        # aquí se suma lo de HOY para esta tarea, igual que running suma
+        # los pasos del día en vez de mirar cada carrera por separado.
+        hoy = timezone.localtime(timezone.now()).date()
+        minutos_hoy = TimerSession.objects.filter(
+            user=_user(), series_id=t.series_id, source=TimerSession.SOURCE_PC_USAGE,
+            recorded_at__date=hoy, deleted_at__isnull=True,
+        ).aggregate(m=Sum("minutes"))["m"] or 0
+        if not t.is_done and (not t.target_minutes or minutos_hoy >= t.target_minutes):
+            t.mark_done()
+    elif ts.target_met:
         t.mark_done()
     return JsonResponse({"ok": True, "session_uuid": str(ts.uuid), "task": task_json(t)})
 

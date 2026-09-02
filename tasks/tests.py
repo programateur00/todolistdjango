@@ -1809,3 +1809,60 @@ class UdemyTrackingTests(TestCase):
         r = self.client.get(reverse("tasks:task_edit", args=[self.task.pk]))
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, "watch_keyword")
+
+    # -------------------------------------------- completado automático
+
+    def test_workout_kind_is_focus_for_udemy_task(self):
+        """Igual que running: no se ofrece el check manual de 'hecha',
+        se ofrece el botón que lleva al flujo que la completa sola."""
+        self.assertEqual(self.task.workout_kind, "focus")
+
+    def test_web_list_hides_manual_done_button_for_udemy_task(self):
+        r = self.client.get(reverse("tasks:task_list"))
+        self.assertContains(r, reverse("tasks:task_focus", args=[self.task.pk]))
+
+    def test_focus_save_pc_usage_accumulates_across_short_sessions(self):
+        """La extensión corta la sesión en cada cambio de pestaña: dos
+        sesiones cortas que SUMADAS llegan al objetivo deben completar
+        la tarea, aunque ninguna de las dos sola lo consiga."""
+        self.task.target_minutes = 45
+        self.task.save(update_fields=["target_minutes"])
+
+        self.client.post(
+            reverse("api:focus_save", args=[self.task.uuid]),
+            data=json.dumps({"minutes": 20, "source": "pc_usage"}),
+            content_type="application/json",
+        )
+        self.task.refresh_from_db()
+        self.assertFalse(self.task.is_done)
+
+        self.client.post(
+            reverse("api:focus_save", args=[self.task.uuid]),
+            data=json.dumps({"minutes": 25, "source": "pc_usage"}),
+            content_type="application/json",
+        )
+        self.task.refresh_from_db()
+        self.assertTrue(self.task.is_done)
+
+    def test_focus_save_pc_usage_does_not_double_complete(self):
+        """Una vez hecha, una sesión de la extensión que llegue tarde no
+        debe volver a completarla (ni duplicar la instancia de mañana)."""
+        self.task.target_minutes = 10
+        self.task.save(update_fields=["target_minutes"])
+
+        self.client.post(
+            reverse("api:focus_save", args=[self.task.uuid]),
+            data=json.dumps({"minutes": 15, "source": "pc_usage"}),
+            content_type="application/json",
+        )
+        count_before = Task.objects.filter(series_id=self.task.series_id).count()
+
+        self.client.post(
+            reverse("api:focus_save", args=[self.task.uuid]),
+            data=json.dumps({"minutes": 5, "source": "pc_usage"}),
+            content_type="application/json",
+        )
+        self.assertEqual(
+            Task.objects.filter(series_id=self.task.series_id).count(),
+            count_before,
+        )
