@@ -199,6 +199,13 @@ class Task(models.Model):
         help_text="Solo para 'Curso de Udemy': palabra o frase que debe aparecer en el "
                    "título de la pestaña de Udemy para contar el tiempo en esta tarea.",
     )
+    # Se pone al llamar finish_recurring_series() — señal inequívoca de
+    # "esto era un curso y Udemy lo reportó al 100%", distinta de
+    # is_done/repeat=NONE (que también los ponen otras cosas, como una
+    # tarea suelta sin repetición). La usa Plan.auto_close_expired() para
+    # saber cuándo cerrar (y enseñar la recompensa de) un plan que iba
+    # detrás de este curso.
+    course_completed_at = models.DateTimeField(null=True, blank=True)
     youtube_video_id = models.CharField(
         max_length=255, blank=True,
         help_text="ID o URL de un vídeo de YouTube (ej. 'dQw4w9WgXcQ' o el enlace completo — "
@@ -724,9 +731,10 @@ class Task(models.Model):
         raro (mark_done() con la tarea ya hecha simplemente la repite,
         pero aquí ni se llega a eso).
         """
-        if self.repeat != self.REPEAT_NONE:
+        if self.repeat != self.REPEAT_NONE or not self.course_completed_at:
             self.repeat = self.REPEAT_NONE
-            self.save(update_fields=["repeat"])
+            self.course_completed_at = self.course_completed_at or timezone.now()
+            self.save(update_fields=["repeat", "course_completed_at"])
         if not self.is_done:
             self.mark_done()
 
@@ -1349,12 +1357,20 @@ class Plan(models.Model):
             has_tracked_playlist = bool(
                 head and not is_language and head.youtube_playlist_id and head.playlist_videos_cache
             )
+            has_udemy_course = bool(head and not is_language and head.watch_keyword)
             if is_language:
                 progress = plan.course_progress()
                 finished = progress["total"] > 0 and progress["pct"] >= 100
             elif has_tracked_playlist:
                 progress = plan._study_playlist_progress(head)
                 finished = progress["total"] > 0 and progress["finished"]
+            elif has_udemy_course:
+                # Igual que Idiomas/playlist: el fin es terminar el
+                # curso, no cumplir `weeks` — lo dice course_completed_at
+                # en la tarea vigente, puesto por finish_recurring_series()
+                # cuando la extensión de Chrome detecta el 100% en Udemy.
+                current_task = Task.objects.filter(series_id=plan.task_series_id).order_by("-due_date").first()
+                finished = bool(current_task and current_task.course_completed_at)
             else:
                 finished = today >= plan.ends_on
             if finished:
@@ -1495,6 +1511,7 @@ class Plan(models.Model):
         fields = {
             "youtube_video_id": head.youtube_video_id,
             "youtube_playlist_id": head.youtube_playlist_id,
+            "watch_keyword": head.watch_keyword,
             "target_minutes": head.target_minutes,
             "target_video_count": head.target_video_count,
             "playlist_start_index": None,
@@ -1686,6 +1703,7 @@ class Plan(models.Model):
             sport_mode="",
             youtube_video_id="",
             youtube_playlist_id="",
+            watch_keyword="",
             target_minutes=None,
             target_video_count=None,
             playlist_start_index=None,
@@ -1700,6 +1718,12 @@ class Plan(models.Model):
                 fields.update(self._language_target_fields())
             else:
                 fields.update(self._study_target_fields())
+                # Curso de Udemy: no es un study_subtype aparte, es que
+                # el objetivo (headline) tiene palabra clave puesta en
+                # vez de vídeo/playlist — igual que un headline con
+                # youtube_video_id hace que la tarea sea "de vídeo".
+                if fields.get("watch_keyword"):
+                    fields["subcategory"] = Task.SUBCATEGORY_UDEMY
         elif self.plan_type == self.PLAN_TYPE_SPORT:
             fields.update(self._running_target_fields())
             fields.update(self._sport_mode_fields())
@@ -1981,6 +2005,12 @@ class PlanItem(models.Model):
     # siguiente, así que no tiene sentido ofrecerlo aquí.
     youtube_video_id = models.CharField(max_length=255, blank=True)
     youtube_playlist_id = models.CharField(max_length=255, blank=True)
+    # Alternativa a vídeo/playlist, solo Estudio · Hábito simple: si se
+    # pone, la tarea diaria que genera el plan sale como "Curso de
+    # Udemy" (Task.SUBCATEGORY_UDEMY) con esta palabra clave, y se
+    # completa exactamente igual que una tarea suelta de Udemy — ver
+    # Plan._study_target_fields() y Plan.auto_close_expired().
+    watch_keyword = models.CharField(max_length=120, blank=True)
     target_minutes = models.PositiveIntegerField(null=True, blank=True)
     target_video_count = models.PositiveIntegerField(null=True, blank=True)
 

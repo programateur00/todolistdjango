@@ -186,6 +186,17 @@
 
     <div id="study-video-fields">
         <label class="field">
+            <span class="field__label">Curso de Udemy — palabra clave (opcional)</span>
+            <input type="text" name="watch_keyword" value="{{ study_headline.watch_keyword|default:'' }}"
+                placeholder="Un trozo único del título del curso en Udemy, ej. \'Excel\'">
+            <span class="field__hint">
+                Si pones esto, la tarea diaria sale como Curso de Udemy: la extensión de
+                Chrome cuenta el tiempo con la pestaña en primer plano y detecta ella sola
+                cuándo terminas el curso — no hace falta vídeo ni playlist para esto, y el
+                plan se cierra solo (con tu recompensa, si le pusiste una) al terminarlo.
+            </span>
+        </label>
+        <label class="field">
             <span class="field__label">Vídeo de YouTube (opcional)</span>
             <input type="text" name="youtube_video_id" value="{{ study_headline.youtube_video_id|default:'' }}"
                 placeholder="Pega la URL o el ID del vídeo">

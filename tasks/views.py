@@ -1786,6 +1786,7 @@ def plan_form(request, pk=None):
                         item.is_headline = True
                         item.youtube_video_id = request.POST.get("youtube_video_id", "").strip()[:255]
                         item.youtube_playlist_id = request.POST.get("youtube_playlist_id", "").strip()[:255]
+                        item.watch_keyword = request.POST.get("watch_keyword", "").strip()[:120]
                         raw_minutes = request.POST.get("target_minutes", "").strip()
                         try:
                             item.target_minutes = max(1, int(raw_minutes)) if raw_minutes else None

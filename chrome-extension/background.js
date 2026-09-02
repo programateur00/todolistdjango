@@ -120,15 +120,23 @@ function isUdemyUrl(rawUrl) {
 /** Tarea+pestaña que tocaría estar contando AHORA MISMO, o null si nada aplica. */
 async function getActiveMatch() {
   try {
-    const idleState = await chrome.idle.queryState(IDLE_DETECTION_SECONDS);
-    if (idleState !== "active") return null;
-
     const win = await chrome.windows.getLastFocused({ populate: false }).catch(() => null);
     if (!win || !win.focused) return null;
 
     const tabs = await chrome.tabs.query({ active: true, windowId: win.id });
     const tab = tabs[0];
     if (!tab || !tab.url || !isUdemyUrl(tab.url)) return null;
+
+    // "Inactivo" según Chrome (chrome.idle) solo mira ratón/teclado — ver
+    // un vídeo de una clase es EXACTAMENTE el caso en el que no tocas
+    // ninguno de los dos durante minutos y sigues ahí delante. Por eso el
+    // corte de inactividad no aplica si la propia pestaña está sonando:
+    // el audio es una señal de "en uso" más fiable que el ratón para
+    // este caso concreto.
+    if (!tab.audible) {
+      const idleState = await chrome.idle.queryState(IDLE_DETECTION_SECONDS);
+      if (idleState !== "active") return null;
+    }
 
     const tasks = await getCachedTasks();
     const found = matchTask(tasks, tab.title);
@@ -257,12 +265,20 @@ async function startSession(match) {
   });
 }
 
-async function reevaluate() {
+async function reevaluate({ allowEndOnNoMatch = true } = {}) {
   const match = await getActiveMatch();
   const current = await getCurrentSession();
 
   if (!match) {
-    if (current) await endSession(current);
+    // chrome.tabs.onUpdated dispara por CUALQUIER cambio en la pestaña —
+    // Udemy cambia el título entre lecciones, hay instantes de buffering
+    // sin sonido, etc. Cortar la sesión ahí mismo la trocea en un montón
+    // de sesiones de segundos que casi nunca llegan al minuto mínimo, y
+    // deja el popup enseñando "sin actividad" casi todo el rato aunque
+    // sí se esté contando. Solo se corta de verdad ante una señal fiable
+    // (cambiaste de pestaña, perdiste el foco, te quedaste inactivo) o
+    // en el latido de cada minuto, que confirma el estado real.
+    if (current && allowEndOnNoMatch) await endSession(current);
     return;
   }
 
@@ -285,8 +301,16 @@ async function heartbeat() {
 
 chrome.tabs.onActivated.addListener(() => reevaluate());
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
-  if (changeInfo.title !== undefined || changeInfo.url !== undefined || changeInfo.status === "complete") {
-    reevaluate();
+  if (
+    changeInfo.title !== undefined ||
+    changeInfo.url !== undefined ||
+    changeInfo.status === "complete" ||
+    changeInfo.audible !== undefined
+  ) {
+    // "Suave": puede EMPEZAR o CAMBIAR de sesión (nueva coincidencia),
+    // pero no la CORTA solo porque en este instante concreto no
+    // coincida nada — ver más arriba, en reevaluate().
+    reevaluate({ allowEndOnNoMatch: false });
   }
 });
 chrome.tabs.onRemoved.addListener(async (tabId) => {
@@ -312,4 +336,59 @@ chrome.runtime.onStartup.addListener(() => {
   chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 1 });
   chrome.alarms.create(RETRY_ALARM, { periodInMinutes: 5 });
   refreshTasksCache();
+});
+
+// ------------------------------------------------------------ diagnóstico
+
+/**
+ * Foto del estado ahora mismo, para el panel de diagnóstico del popup:
+ * qué pestaña ve la extensión, si la reconoce como Udemy, qué tareas
+ * tiene en caché con sus palabras clave, y si alguna encaja con el
+ * título real de la pestaña. Todo lo que necesitamos para saber POR QUÉ
+ * no está contando, en vez de adivinarlo desde fuera.
+ */
+async function debugSnapshot() {
+  const cfg = await getConfig();
+
+  const win = await chrome.windows.getLastFocused({ populate: false }).catch(() => null);
+  const focused = Boolean(win && win.focused);
+  let tab = null;
+  if (win) {
+    const tabs = await chrome.tabs.query({ active: true, windowId: win.id });
+    tab = tabs[0] || null;
+  }
+
+  const idleState = await chrome.idle.queryState(IDLE_DETECTION_SECONDS).catch(() => "desconocido");
+  const tasks = await getCachedTasks();
+  const { tasksCacheAt } = await chrome.storage.local.get("tasksCacheAt");
+
+  const isUdemyTab = Boolean(tab && tab.url && isUdemyUrl(tab.url));
+  const match = isUdemyTab ? matchTask(tasks, tab.title) : null;
+
+  const current = await getCurrentSession();
+
+  return {
+    configured: isConfigured(cfg),
+    baseUrl: cfg.baseUrl || null,
+    windowFocused: focused,
+    tab: tab ? { url: tab.url, title: tab.title, audible: Boolean(tab.audible) } : null,
+    isUdemyTab,
+    idleState,
+    tasksCount: tasks.length,
+    tasksCacheAgeSeconds: tasksCacheAt ? Math.round((Date.now() - tasksCacheAt) / 1000) : null,
+    tasks: tasks.map((t) => ({ title: t.title, watch_keyword: t.watch_keyword })),
+    match: match ? { taskTitle: match.task.title, keyword: match.keyword } : null,
+    currentSession: current ? { taskTitle: current.task.title, startedAt: current.startedAt } : null,
+  };
+}
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg && msg.type === "debug-snapshot") {
+    debugSnapshot().then(sendResponse);
+    return true; // respuesta asíncrona
+  }
+  if (msg && msg.type === "debug-refresh-tasks") {
+    refreshTasksCache().then(() => debugSnapshot()).then(sendResponse);
+    return true;
+  }
 });

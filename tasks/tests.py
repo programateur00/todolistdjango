@@ -1869,3 +1869,74 @@ class UdemyTrackingTests(TestCase):
             Task.objects.filter(series_id=self.task.series_id).count(),
             count_before,
         )
+
+
+class UdemyPlanTests(TestCase):
+    """
+    Fase 6: un Plan de Estudio · Hábito simple con palabra clave en su
+    objetivo se comporta EXACTAMENTE como la tarea suelta de Udemy —
+    misma tarea generada, mismo cierre al detectar el 100%, y de propina
+    el plan se cierra solo (con su recompensa, si la tiene) al terminar
+    el curso, en vez de esperar a que se cumplan las semanas.
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.plan = Plan.objects.create(
+            name="Terminar Excel", user=self.user, plan_type=Plan.PLAN_TYPE_STUDY,
+            study_subtype=Plan.STUDY_SUBTYPE_GENERAL, reward="unas zapatillas nuevas",
+            repeat="daily", due_time=time(20, 0),
+        )
+        PlanItem.objects.create(
+            plan=self.plan, is_headline=True, progression=PlanItem.PROG_COMPLETION,
+            watch_keyword="Excel", target_minutes=30,
+        )
+
+    def test_sync_task_creates_udemy_task_with_keyword(self):
+        task = self.plan.sync_task()
+        self.assertEqual(task.category, Task.CATEGORY_STUDY)
+        self.assertEqual(task.subcategory, Task.SUBCATEGORY_UDEMY)
+        self.assertEqual(task.watch_keyword, "Excel")
+        self.assertEqual(task.target_minutes, 30)
+
+    def test_removing_keyword_clears_it_from_the_task(self):
+        task = self.plan.sync_task()
+        self.assertEqual(task.subcategory, Task.SUBCATEGORY_UDEMY)
+
+        head = self.plan.headline
+        head.watch_keyword = ""
+        head.youtube_video_id = ""
+        head.save()
+        task = self.plan.sync_task()
+        self.assertEqual(task.watch_keyword, "")
+        self.assertEqual(task.subcategory, "")
+
+    def test_course_complete_closes_the_plan_with_its_reward(self):
+        task = self.plan.sync_task()
+        task.finish_recurring_series()
+        self.assertIsNotNone(task.course_completed_at)
+
+        Plan.auto_close_expired(user=self.user)
+        self.plan.refresh_from_db()
+        self.assertIsNotNone(self.plan.closed_at)
+        self.assertEqual(self.plan.reward, "unas zapatillas nuevas")
+
+    def test_plan_stays_open_while_course_not_finished(self):
+        self.plan.sync_task()
+        Plan.auto_close_expired(user=self.user)
+        self.plan.refresh_from_db()
+        self.assertIsNone(self.plan.closed_at)
+
+    def test_web_create_udemy_plan_saves_watch_keyword(self):
+        r = self.client.post(reverse("tasks:plan_create"), {
+            "plan_type": "study", "study_subtype": "general", "is_active": "on",
+            "name": "Terminar Linux", "watch_keyword": "Linux",
+            "target_minutes": "20", "due_time": "20:00", "repeat": "daily",
+            "custom_days": ["0", "2", "4"],
+        })
+        self.assertEqual(r.status_code, 302, r.content)
+        plan = Plan.objects.get(name="Terminar Linux")
+        head = plan.headline
+        self.assertEqual(head.watch_keyword, "Linux")
+        task = Task.objects.get(series_id=plan.task_series_id)
+        self.assertEqual(task.subcategory, Task.SUBCATEGORY_UDEMY)
