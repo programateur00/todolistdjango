@@ -1,6 +1,5 @@
 __pycache__/
 *.pyc
-staticfiles/
 .env
 *.sqlite3-journal
 db.sqlite3
