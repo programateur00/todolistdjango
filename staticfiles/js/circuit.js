@@ -136,6 +136,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 
     let remaining = item.work;
     let elapsed = 0;
+    let lastSpokenNumber = null; // último entero ya dicho, para no repetirlo en el mismo segundo
     const timerEl = document.getElementById("run-timer");
     paused = false;
 
@@ -152,6 +153,14 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         return;
       }
       if (remaining <= 3) beep(660, 0.1);
+      // Cuenta atrás dicha en voz alta cada segundo — igual que ya hacía
+      // runTimerWithPosture() más abajo (mismo motivo: se pidió poder
+      // seguir un ejercicio cronometrado de oído, sin mirar la pantalla,
+      // igual que ya se puede con las repeticiones).
+      if (isVoiceEnabled() && remaining !== lastSpokenNumber) {
+        lastSpokenNumber = remaining;
+        speakOut(numeroEnPalabras(remaining));
+      }
       timerEl.textContent = fmt(remaining);
     }, 1000);
 

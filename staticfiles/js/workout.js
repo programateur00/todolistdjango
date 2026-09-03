@@ -3987,11 +3987,10 @@ class WorkoutSession {
 
     if (!this.startupVoiceGiven) {
       this.startupVoiceGiven = true;
-      // El consejo de apretar abdomen/glúteos salía solo como consejo
-      // rotativo pasados PLANK_TIP_FIRST_AT_SECONDS (8s) — pero es lo
-      // primero que hay que saber para aguantar bien, no algo que
-      // esperar a que salga a mitad de la serie. Ahora se dice también
-      // aquí, nada más confirmarse la postura.
+      // El texto completo (técnica, cómo terminar la serie…) se sigue
+      // viendo en pantalla, pero por VOZ se pidió lo mínimo — "listo, en
+      // posición" y ya está, nada de explicar la técnica ni cómo cerrar
+      // la serie hablado (eso ya sale por pantalla si hace falta).
       const startupTip =
         this.counterKey === "sideplank"
           ? "Postura correcta. ¡Listo! Aguanta la postura, con el abdomen apretado y la cadera alineada, sin caer ni subir. Para terminar una serie, rompe la postura, ponte de pie, sal del encuadre, o levanta un brazo y agita la mano."
@@ -4002,7 +4001,7 @@ class WorkoutSession {
           : this.counterKey === "handstand"
           ? "Postura correcta. ¡Listo! Aguanta el pino, con el abdomen apretado y el cuerpo recto. Para terminar una serie, baja del pino o sal del encuadre."
           : "Postura correcta. ¡Listo! Aguanta la postura, apretando el abdomen y metiendo el culo hacia dentro, sin dejar caer la cadera. Para terminar una serie, rompe la postura, ponte de pie, sal del encuadre, o levanta un brazo y agita la mano.";
-      this.announceStatus(startupTip, "startup_ready");
+      this.announceStatus(startupTip, "startup_ready", "Listo. En posición.");
     }
 
     if (this.postureValidSince === null) {
@@ -4082,25 +4081,29 @@ class WorkoutSession {
       return; // sin consejos rotativos mezclándose por encima, ver comentario de arriba
     }
 
-    const tips =
-      this.counterKey === "sideplank"
-        ? SIDEPLANK_TIPS
-        : this.counterKey === "wallsit"
-        ? WALLSIT_TIPS
-        : this.counterKey === "kneeholdbar"
-        ? KNEEHOLDBAR_TIPS
-        : this.counterKey === "handstand"
-        ? HANDSTAND_TIPS
-        : PLANK_TIPS;
-    if (
-      this.currentHoldSeconds >= PLANK_TIP_FIRST_AT_SECONDS &&
-      this.tipIndex < tips.length &&
-      (this.lastTipAt === null || now - this.lastTipAt >= PLANK_TIP_INTERVAL_MS)
-    ) {
-      this.lastTipAt = now;
-      this.speak(tips[this.tipIndex], { flush: false });
-      this.tipIndex += 1;
+    // Modo freestyle SIN objetivo (targetSeconds vacío: ejercicio suelto,
+    // sin plan ni meta guardada) — se reportó que aquí no se oía nada de
+    // los segundos, a diferencia de un circuito (runTimerWithPosture en
+    // session-runner.js/circuit.js, que siempre cuenta porque el work
+    // del circuito SÍ hace de objetivo). Sin objetivo no hay hacia dónde
+    // contar atrás, así que se cuenta hacia ADELANTE los aguantados,
+    // igual que el tramo "over" de arriba una vez pasado el objetivo —
+    // así cualquier aguante se puede seguir de oído, tenga meta o no.
+    const heldWhole = Math.floor(this.currentHoldSeconds);
+    if (heldWhole >= 1 && heldWhole !== this.postureCountdownLastSecond) {
+      this.postureCountdownLastSecond = heldWhole;
+      this.speak(numeroEnPalabras(heldWhole), { flush: true });
     }
+
+    // Antes, aquí salían ADEMÁS consejos rotativos hablados cada
+    // PLANK_TIP_INTERVAL_MS (PLANK_TIPS/SIDEPLANK_TIPS/…: "aprieta el
+    // abdomen", "respira con normalidad"…) — se quitó la voz a
+    // propósito: se pidió reducir la voz al mínimo indispensable, y
+    // estos consejos, por útiles que sean, no son imprescindibles para
+    // seguir el ejercicio (a diferencia del conteo o de "sal de
+    // posición"). PLANK_TIPS y compañía se quedan definidas por si algún
+    // día se quieren mostrar en pantalla en vez de hablarlos, pero
+    // this.tipIndex/this.lastTipAt ya no se usan.
   }
 
   /**
@@ -4111,26 +4114,24 @@ class WorkoutSession {
    * dominadas — y solo entonces se cierra el tramo aguantado (si había
    * alguno) como una serie terminada.
    *
-   * `isSetupIssue` marca los avisos de "no te veo/no estás en el
-   * encuadre" (fallo de VISIBILIDAD, no de forma) — por voz, en vez del
-   * texto largo de colocación ("No se te ve entera/o. Ponte de perfil a
-   * la cámara..."), se dice solo "Ponte en posición" (o "...de perfil"
-   * si el ejercicio se hace así, ver PROFILE_POSTURE_COUNTERS). El
-   * texto completo se sigue viendo en pantalla igual que antes — esto
-   * solo acorta lo que se OYE. Las correcciones de forma en plena
-   * postura (cadera, rodillas…) no son "isSetupIssue" y se siguen
-   * diciendo tal cual, ya son frases cortas que dicen qué corregir.
+   * Por voz SIEMPRE se dice el mensaje corto genérico ("Ponte en
+   * posición" / "...de perfil" si el ejercicio se hace así, ver
+   * PROFILE_POSTURE_COUNTERS) — sea cual sea el motivo concreto de por
+   * qué se rompió (encuadre, cadera, rodillas…). Antes solo se acortaba
+   * el aviso de "no te veo"; las correcciones de forma (p.ej. "baja un
+   * poco más…") se seguían diciendo enteras, y se pidió quitarlas
+   * también de la voz — el texto completo de CUALQUIER motivo se sigue
+   * viendo en pantalla igual que siempre (setStatus, más abajo en
+   * announceStatus), esto solo acorta lo que se OYE.
    */
-  notePostureBroken(now, reason, isSetupIssue = false) {
+  notePostureBroken(now, reason) {
     if (this.postureInvalidSince === null) this.postureInvalidSince = now;
     this.postureValidSince = null;
     this.lastPostureTickTs = null;
     if (reason) {
-      const speechText = isSetupIssue
-        ? PROFILE_POSTURE_COUNTERS.has(this.counterKey)
-          ? "Ponte en posición de perfil."
-          : "Ponte en posición."
-        : reason;
+      const speechText = PROFILE_POSTURE_COUNTERS.has(this.counterKey)
+        ? "Ponte en posición de perfil."
+        : "Ponte en posición.";
       this.announceStatus(reason, "posture_broken", speechText);
     }
 
@@ -4217,11 +4218,11 @@ class WorkoutSession {
       // quedaba en texto en pantalla nada más, sin decirse en voz alta.
       if (isKneeHoldStep1 && flat.visible && !this.startupVoiceGiven) {
         this.startupVoiceGiven = true;
-        this.announceStatus("¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready");
+        this.announceStatus("¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
       }
       if (isWallsitStep1 && flat.visible && !this.startupVoiceGiven) {
         this.startupVoiceGiven = true;
-        this.announceStatus("¡Listo! Ponte de pie del todo, con la pierna estirada, para empezar.", "startup_ready");
+        this.announceStatus("¡Listo! Ponte de pie del todo, con la pierna estirada, para empezar.", "startup_ready", "Te quiero ver recto.");
       }
       if (flat.ok) {
         if (this.postureGroundSince === null) this.postureGroundSince = now;
@@ -4238,7 +4239,17 @@ class WorkoutSession {
             : this.counterKey === "sideplank"
             ? "¡Bien, te veo! Ahora ponte de lado, apoya el codo justo debajo del hombro y los pies uno sobre otro, y levanta el cuerpo del suelo hasta quedar en línea recta, de los hombros a los tobillos."
             : "¡Bien, te veo! Ahora date la vuelta, boca abajo, y ponte en posición de plancha: apoyada/o en los antebrazos, con los codos justo debajo de los hombros y el cuerpo entero alzado del suelo, en línea recta.";
-          this.announceStatus(flipMessage, isKneeHoldStep1 ? "kneehold_ready" : isWallsitStep1 ? "wallsit_ready" : "plank_flip");
+          // Por voz, la versión corta — el texto completo de arriba se ve
+          // en pantalla (setStatus, dentro de announceStatus) para quien
+          // lo necesite, pero se pidió que la voz diga lo mínimo.
+          const flipSpeech = isKneeHoldStep1
+            ? "Listo. Sube las rodillas."
+            : isWallsitStep1
+            ? "Listo. Ponte de perfil, en posición."
+            : this.counterKey === "sideplank"
+            ? "Listo. De lado, en posición."
+            : "Listo. Boca abajo, en posición.";
+          this.announceStatus(flipMessage, isKneeHoldStep1 ? "kneehold_ready" : isWallsitStep1 ? "wallsit_ready" : "plank_flip", flipSpeech);
         } else {
           this.setStatus(isKneeHoldStep1 ? "Colgada/o… confirmando (no te muevas)" : isWallsitStep1 ? "De pie… confirmando (no te muevas)" : "Tumbada/o… confirmando (no te muevas)");
         }
@@ -4336,7 +4347,7 @@ class WorkoutSession {
     );
 
     if (!this.postureLastOk) {
-      this.notePostureBroken(now, check.reason, check.debug?.fail === "vis");
+      this.notePostureBroken(now, check.reason);
       return;
     }
     this.notePostureOk(now);
@@ -5193,7 +5204,7 @@ class WorkoutSession {
       const waitedSeconds = Math.floor((now - this.prepStartTs) / 1000);
       if ((wristVisible || elbowVisible) && !this.startupVoiceGiven) {
         this.startupVoiceGiven = true;
-        this.announceStatus("¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready");
+        this.announceStatus("¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
       }
 
       if (armsUpNow) {
@@ -5705,7 +5716,7 @@ class WorkoutSession {
       // Plancha / plancha lateral: salir del encuadre también rompe la
       // postura, así que cierra el tramo aguantado por el mismo camino
       // que cualquier otra forma de romperla (ver notePostureBroken).
-      if (CAMERA_POSTURE_COUNTERS.has(this.counterKey)) this.notePostureBroken(now, "No se te detecta en el encuadre.", true);
+      if (CAMERA_POSTURE_COUNTERS.has(this.counterKey)) this.notePostureBroken(now, "No se te detecta en el encuadre.");
       return;
     }
     const lm = result.landmarks[0];
@@ -5798,7 +5809,7 @@ class WorkoutSession {
       // repetirlo, ya sabes cómo colocarte.
       if ((wristVisible || elbowVisible) && !this.startupVoiceGiven) {
         this.startupVoiceGiven = true;
-        this.announceStatus("¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready");
+        this.announceStatus("¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
       }
 
       if (armsUpNow) {
