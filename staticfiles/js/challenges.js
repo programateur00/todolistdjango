@@ -22,7 +22,7 @@
  */
 import {
   checkPushupTopHoldPosture, checkPushupBottomHoldPosture,
-  speakOut, isVoiceEnabled, startWorkout,
+  speakOut, stopSpeaking, isVoiceEnabled, startWorkout,
 } from "./workout.js";
 import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./mediapipe-vendor.js";
 
@@ -159,6 +159,9 @@ async function runSallyPushups(host) {
     clearInterval(waitId);
     if (stream) stream.getTracks().forEach((t) => t.stop());
     if (poseLandmarker) poseLandmarker.close();
+    // Sales de la pantalla de la cámara del reto: la voz se calla con
+    // ella (ver stopSpeaking() en workout.js).
+    stopSpeaking();
   };
 
   document.getElementById("sally-quit").addEventListener("click", () => {

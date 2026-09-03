@@ -21,7 +21,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-03-sentadilla-armado-estable";
+const WORKOUT_JS_BUILD = "2026-09-03-armado-estable-abdominales";
 
 // Umbral de movimiento (proporcional al ancho de hombros) para
 // considerar que hay un cambio de estado real y no ruido de la cámara.
@@ -97,6 +97,12 @@ const GROUND_STYLE_COUNTERS = new Set(["squat", "crunch", "legraise", "situp", "
 // solas. Por eso plank/sideplank no viven en GROUND_STYLE_COUNTERS ni
 // comparten su lógica de cierre.
 const CAMERA_POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "handstand"]);
+// Para el aviso hablado corto de "ponte en posición" (ver
+// notePostureBroken): estos tres se hacen de perfil (de lado a la
+// cámara), así que ese aviso añade "de perfil" — el resto de
+// CAMERA_POSTURE_COUNTERS (kneehold en barra, de frente; pino, sin
+// restricción de orientación) usa el genérico a secas.
+const PROFILE_POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit"]);
 // Vaivén de la mano para terminar una serie sin ponerte de pie ni salir
 // del encuadre — ver checkWaveGesture. Solo para GROUND_STYLE_COUNTERS:
 // ya se pueden cerrar poniéndote de pie o saliendo del encuadre, esto es
@@ -563,6 +569,18 @@ const SQUAT_ARM_STABLE_MS = 500;
 // tumbado y QUIETO un rato (ON_GROUND_STABLE_MS) antes de armar, no
 // solo un frame — así ponerte en el suelo no cuenta como repetición.
 const ON_GROUND_MAX_TILT_DEG = 40;  // por encima de esto, no se considera "tumbado"
+// Umbral MÁS ESTRICTO, solo para ARMAR (no para cerrar la serie, donde
+// sigue valiendo ON_GROUND_MAX_TILT_DEG tal cual): agacharte o inclinarte
+// para colocar el móvil en el suelo (de perfil, a ras de suelo) puede dar
+// una inclinación de torso de 25-40° sostenida varios segundos mientras
+// ajustas el encuadre — eso ya bastaba para armar el contador (viendo
+// "tumbado" donde en realidad solo estabas agachada/o) y que el resto de
+// la colocación (levantarte, volver a tumbarte del todo) contara como una
+// repetición completa. Tumbado de verdad boca arriba da una inclinación
+// mucho más cercana a 0°, así que un umbral más ajustado para armar sigue
+// dejando margen de sobra sin colar una simple postura de "agachado
+// colocando la cámara".
+const ON_GROUND_ARM_MAX_TILT_DEG = 20;
 const ON_GROUND_STABLE_MS = 600;    // cuanto tiempo tumbado y quieto para armar el contador
 const OFF_GROUND_STABLE_MS = 400;   // cuanto tiempo "de pie" seguido para dar la serie por terminada
 
@@ -1203,38 +1221,55 @@ export function checkSidePlankPosture(lm, downSideHint = null) {
 // puede medir cuánto se dobla la rodilla en profundidad.
 //
 // A diferencia de la sentadilla (que cuenta repeticiones subiendo y
-// bajando), aquí se AGUANTA la postura con la espalda apoyada en la
-// pared — mismo patrón que la plancha (checkPlankPosture): se
-// comprueba la postura frame a frame y se cuenta el TIEMPO aguantado,
-// no repeticiones. Reutiliza el mismo mecanismo de aguante
-// (CAMERA_POSTURE_COUNTERS, _flushPostureHold, notePostureOk/Broken,
-// PLANK_INVALID_STABLE_MS, PLANK_MIN_HOLD_TO_COUNT_SECONDS…) que la
-// plancha y la plancha lateral, así que no hace falta duplicar esas
-// constantes de tiempo aquí.
+// bajando), aquí se AGUANTA la postura con la espalda apoyada — mismo
+// patrón que la plancha (checkPlankPosture): se comprueba la postura
+// frame a frame y se cuenta el TIEMPO aguantado, no repeticiones.
+// Reutiliza el mismo mecanismo de aguante (CAMERA_POSTURE_COUNTERS,
+// _flushPostureHold, notePostureOk/Broken, PLANK_INVALID_STABLE_MS,
+// PLANK_MIN_HOLD_TO_COUNT_SECONDS…) que la plancha y la plancha
+// lateral, así que no hace falta duplicar esas constantes de tiempo
+// aquí.
 //
 // A diferencia también de la plancha, no hay un primer paso de
 // "túmbate para confirmar que te veo": la postura de partida (de pie)
 // ya es trivial de detectar, así que se pide la postura de la silla
 // directamente, igual que en sentadillas.
 //
+// NO hace falta que el apoyo sea una pared: la cámara no ve lo que hay
+// detrás, solo el ángulo del cuerpo — así que apoyarse en una barra,
+// un poste o cualquier otra cosa vale igual, mientras la espalda quede
+// recta y las piernas dobladas (pedido explícitamente: antes el aviso
+// hablaba de "pared" como si fuera obligatoria, cuando nunca lo fue de
+// verdad para la detección).
+//
 // Dos ángulos, de perfil, definen la postura:
 //   - RODILLA (cadera-rodilla-tobillo) cerca de 90° — el muslo queda
 //     paralelo al suelo, como sentada/o en una silla invisible.
-//   - CADERA (hombro-cadera-rodilla) cerca de 90° — el torso, apoyado
-//     en la pared, queda perpendicular al muslo.
+//   - CADERA (hombro-cadera-rodilla) cerca de 90° — el torso, apoyado,
+//     queda perpendicular al muslo.
 // Y una comprobación de inclinación del torso respecto a la VERTICAL
 // (no a la horizontal, al revés que en checkLyingFlat) para asegurar
-// que la espalda está recta y apoyada en la pared, en vez de inclinada
-// hacia delante como en una sentadilla libre sin apoyo.
-const WALLSIT_KNEE_MIN_DEG = 80;  // rodilla algo más doblada que 90° todavía vale
-const WALLSIT_KNEE_MAX_DEG = 100; // por encima de esto, las piernas no están lo bastante dobladas
-const WALLSIT_HIP_MIN_DEG = 75;
-const WALLSIT_HIP_MAX_DEG = 105;
+// que la espalda está recta y apoyada, en vez de inclinada hacia
+// delante como en una sentadilla libre sin apoyo.
+//
+// Márgenes ampliados (se reportó que la detección iba mal, saltando a
+// "postura rota" con demasiada facilidad): la rodilla y la cadera
+// admiten ahora ±25° alrededor de 90° (antes ±10-15°), y el torso
+// admite algo más de inclinación hacia delante (antes exigía casi
+// vertical del todo, que encajaba con una pared plana pero no tanto
+// con apoyarse en una barra o un poste, donde el ángulo real varía más
+// de una persona a otra).
+const WALLSIT_KNEE_MIN_DEG = 65;  // rodilla más doblada que 90° todavía vale
+const WALLSIT_KNEE_MAX_DEG = 115; // por encima de esto, las piernas no están lo bastante dobladas
+const WALLSIT_HIP_MIN_DEG = 60;
+const WALLSIT_HIP_MAX_DEG = 120;
 // Cuánto puede inclinarse el torso hacia delante y aun así contar como
-// "espalda apoyada en la pared". tiltFromHorizontal() da 90° con el
-// torso en vertical del todo; un valor bastante alto pero con algo de
-// margen (una espalda real nunca queda perfectamente a plomo).
-const WALLSIT_TORSO_MIN_TILT_DEG = 65;
+// "espalda recta y apoyada". tiltFromHorizontal() da 90° con el torso
+// en vertical del todo; bajado de 65° a 50° para dar más margen al
+// apoyarse en una barra o un poste (no siempre queda tan a plomo como
+// contra una pared plana) sin dejar de distinguirlo de una sentadilla
+// libre inclinada hacia delante.
+const WALLSIT_TORSO_MIN_TILT_DEG = 50;
 const WALLSIT_MIN_VISIBILITY = 0.4;
 
 export function checkWallSitPosture(lm) {
@@ -1267,7 +1302,8 @@ export function checkWallSitPosture(lm) {
   const kneeAngle = angle(hip, knee, ankle);
   const hipAngle = angle(shoulder, hip, knee);
   // 0°=torso horizontal (tumbado), 90°=torso en vertical del todo —
-  // aquí interesa que sea ALTO (torso recto, apoyado en la pared).
+  // aquí interesa que sea ALTO (torso recto y apoyado — pared, barra,
+  // poste...).
   const tilt = tiltFromHorizontal(shoulder, hip);
 
   const debug = {
@@ -1277,13 +1313,13 @@ export function checkWallSitPosture(lm) {
   };
 
   if (tilt === null || tilt < WALLSIT_TORSO_MIN_TILT_DEG) {
-    return { ok: false, reason: "Espalda desalineada — apoya toda la espalda en la pared, sin inclinarte hacia delante.", debug };
+    return { ok: false, reason: "Espalda desalineada — mantenla recta y apoyada (pared, barra o poste), sin inclinarte hacia delante.", debug };
   }
   if (kneeAngle === null || kneeAngle < WALLSIT_KNEE_MIN_DEG) {
     return { ok: false, reason: "Te has agachado de más — sube un poco, hasta que la rodilla ronde los 90°.", debug };
   }
   if (kneeAngle > WALLSIT_KNEE_MAX_DEG) {
-    return { ok: false, reason: "Baja un poco más, deslizando la espalda por la pared, hasta que el muslo quede paralelo al suelo.", debug };
+    return { ok: false, reason: "Baja un poco más, deslizando la espalda por el apoyo, hasta que el muslo quede paralelo al suelo.", debug };
   }
   if (hipAngle === null || hipAngle < WALLSIT_HIP_MIN_DEG || hipAngle > WALLSIT_HIP_MAX_DEG) {
     return { ok: false, reason: "Ajusta la altura: la cadera tiene que quedar más o menos a 90°, como sentada/o en una silla.", debug };
@@ -1587,7 +1623,7 @@ const SIDEPLANK_TIPS = [
 ];
 const WALLSIT_TIPS = [
   "Consejo: reparte el peso entre los dos pies y no dejes que las rodillas se junten hacia dentro.",
-  "Consejo: mantén toda la espalda pegada a la pared, sin arquear la zona baja.",
+  "Consejo: mantén toda la espalda pegada al apoyo (pared, barra o poste), sin arquear la zona baja.",
   "Consejo: respira con normalidad, no aguantes el aire — se aguanta más tiempo respirando bien.",
 ];
 const KNEEHOLDBAR_TIPS = [
@@ -1662,6 +1698,24 @@ export function speakOut(texto, { flush = true, rate = 1 } = {}) {
     speechSynthesis.speak(u);
   } catch (e) {
     console.error("speechSynthesis", e);
+  }
+}
+
+/**
+ * Corta cualquier voz en curso YA, sin decir nada nuevo detrás — para
+ * cuando sales de la pantalla de la cámara (stopCamera) y no tiene
+ * sentido que la voz te siga hablando de un ejercicio que ya no estás
+ * viendo. Mismo cambio que en la app móvil (ver mobile-app/www/js/
+ * workout.js) — misma regla en las dos partes, aunque aquí no hay voz
+ * nativa que parar aparte, solo la Web Speech API del navegador.
+ */
+export function stopSpeaking() {
+  if (typeof speechSynthesis !== "undefined") {
+    try {
+      speechSynthesis.cancel();
+    } catch (e) {
+      console.error("speechSynthesis.cancel", e);
+    }
   }
 }
 
@@ -2015,6 +2069,11 @@ class WorkoutSession {
    * solo de sobra para no pillar un parpadeo de un par de frames entre
    * dos estados).
    *
+   * `speechText` (opcional) es lo que se DICE si es distinto de lo que
+   * se ve en pantalla (`text`) — para avisos donde el texto completo es
+   * útil leído pero pesado hablado (ver notePostureBroken: "no te veo,
+   * ponte en posición" en vez del texto largo de encuadre).
+   *
    * `key` identifica el TIPO de aviso para esta comparación — por
    * defecto es el propio texto, pero hace falta pasarlo aparte cuando el
    * texto cambia cada vez aunque sea "la misma" repetición (p.ej. una
@@ -2027,7 +2086,7 @@ class WorkoutSession {
    * CUALQUIER aviso hablado, sea del tipo que sea, solo para no
    * solapar dos avisos casi en el mismo instante.
    */
-  announceStatus(text, key = text) {
+  announceStatus(text, key = text, speechText = text) {
     this.setStatus(text);
     if (!this.voiceEnabled) return;
     const now = performance.now();
@@ -2038,7 +2097,7 @@ class WorkoutSession {
     if (anyGap < STATUS_VOICE_MIN_GAP_MS) return;
     this.lastSpokenStatusAt = now;
     this.lastSpokenAtByKey.set(key, now);
-    this.speak(text, { flush: false });
+    this.speak(speechText, { flush: false });
   }
 
   /**
@@ -3733,7 +3792,7 @@ class WorkoutSession {
     // detectar) — se pide la postura de la silla directamente, igual
     // que en sentadillas.
     if (this.counterKey === "wallsit") {
-      return "Ponte de espaldas a la pared, de perfil a la cámara y algo alejada/o (para que quepa la pierna entera), y dobla las rodillas deslizando la espalda por la pared hasta que los muslos queden paralelos al suelo.";
+      return "Ponte de espaldas a un apoyo (pared, barra o poste), de perfil a la cámara y algo alejada/o (para que quepa la pierna entera), y dobla las rodillas deslizando la espalda por el apoyo hasta que los muslos queden paralelos al suelo.";
     }
     // Kneehold en barra: SÍ tiene paso 1 (a diferencia de silla en pared),
     // pero uno más simple que plancha/plancha lateral: solo confirmar que
@@ -3863,7 +3922,7 @@ class WorkoutSession {
         this.counterKey === "sideplank"
           ? "Postura correcta. ¡Listo! Aguanta la postura, con el abdomen apretado y la cadera alineada, sin caer ni subir. Para terminar una serie, rompe la postura, ponte de pie, sal del encuadre, o levanta un brazo y agita la mano."
           : this.counterKey === "wallsit"
-          ? "Postura correcta. ¡Listo! Aguanta la postura, con la espalda bien pegada a la pared y el peso repartido entre los dos pies. Para terminar una serie, ponte de pie del todo, sal del encuadre, o levanta un brazo y agita la mano."
+          ? "Postura correcta. ¡Listo! Aguanta la postura, con la espalda bien pegada al apoyo y el peso repartido entre los dos pies. Para terminar una serie, ponte de pie del todo, sal del encuadre, o levanta un brazo y agita la mano."
           : this.counterKey === "kneeholdbar"
           ? "Postura correcta. ¡Listo! Aguanta con las rodillas arriba, sin balancearte. Para terminar una serie, suelta la barra o sal del encuadre."
           : this.counterKey === "handstand"
@@ -3977,12 +4036,29 @@ class WorkoutSession {
    * cámara o un ajuste rápido, igual que ARMS_DOWN_STABLE_MS en
    * dominadas — y solo entonces se cierra el tramo aguantado (si había
    * alguno) como una serie terminada.
+   *
+   * `isSetupIssue` marca los avisos de "no te veo/no estás en el
+   * encuadre" (fallo de VISIBILIDAD, no de forma) — por voz, en vez del
+   * texto largo de colocación ("No se te ve entera/o. Ponte de perfil a
+   * la cámara..."), se dice solo "Ponte en posición" (o "...de perfil"
+   * si el ejercicio se hace así, ver PROFILE_POSTURE_COUNTERS). El
+   * texto completo se sigue viendo en pantalla igual que antes — esto
+   * solo acorta lo que se OYE. Las correcciones de forma en plena
+   * postura (cadera, rodillas…) no son "isSetupIssue" y se siguen
+   * diciendo tal cual, ya son frases cortas que dicen qué corregir.
    */
-  notePostureBroken(now, reason) {
+  notePostureBroken(now, reason, isSetupIssue = false) {
     if (this.postureInvalidSince === null) this.postureInvalidSince = now;
     this.postureValidSince = null;
     this.lastPostureTickTs = null;
-    if (reason) this.announceStatus(reason, "posture_broken");
+    if (reason) {
+      const speechText = isSetupIssue
+        ? PROFILE_POSTURE_COUNTERS.has(this.counterKey)
+          ? "Ponte en posición de perfil."
+          : "Ponte en posición."
+        : reason;
+      this.announceStatus(reason, "posture_broken", speechText);
+    }
 
     // Kneehold en barra usa un margen más largo que el resto (ver
     // KNEEHOLDBAR_INVALID_STABLE_MS, junto a POSTURE_FLICKER_STABLE_MS):
@@ -4172,7 +4248,7 @@ class WorkoutSession {
     );
 
     if (!this.postureLastOk) {
-      this.notePostureBroken(now, check.reason);
+      this.notePostureBroken(now, check.reason, check.debug?.fail === "vis");
       return;
     }
     this.notePostureOk(now);
@@ -4294,7 +4370,12 @@ class WorkoutSession {
     const onGround = tilt <= ON_GROUND_MAX_TILT_DEG;
 
     if (this.state === null) {
-      if (onGround) {
+      // Para armar hace falta el umbral MÁS ESTRICTO (ver
+      // ON_GROUND_ARM_MAX_TILT_DEG) — no basta con "no estás de pie", hace
+      // falta estar de verdad tumbado, no solo agachado colocando la
+      // cámara.
+      const onGroundToArm = tilt <= ON_GROUND_ARM_MAX_TILT_DEG;
+      if (onGroundToArm) {
         if (this.groundStableSince === null) this.groundStableSince = now;
         if (now - this.groundStableSince >= ON_GROUND_STABLE_MS) {
           this.state = "down";
@@ -4308,7 +4389,7 @@ class WorkoutSession {
         this.setStatus("Túmbate boca arriba, con los hombros en el suelo, para empezar.");
       }
       if (this.debugEl) {
-        this.debugEl.textContent = `inclinación torso: ${tilt.toFixed(0)}° | tumbado: ${onGround ? "sí" : "no"} | esperando a armar`;
+        this.debugEl.textContent = `inclinación torso: ${tilt.toFixed(0)}° | tumbado: ${onGroundToArm ? "sí" : "no"} | esperando a armar`;
       }
       return;
     }
@@ -4404,7 +4485,12 @@ class WorkoutSession {
     const legsStraight = kneeAngle >= LEG_RAISE_STRAIGHT_MIN_DEG;
 
     if (this.state === null) {
-      if (onGround && legsStraight) {
+      // Para armar hace falta el umbral MÁS ESTRICTO (ver
+      // ON_GROUND_ARM_MAX_TILT_DEG) — no basta con "no estás de pie", hace
+      // falta estar de verdad tumbado, no solo agachado colocando la
+      // cámara.
+      const onGroundToArm = tilt <= ON_GROUND_ARM_MAX_TILT_DEG;
+      if (onGroundToArm && legsStraight) {
         if (this.groundStableSince === null) this.groundStableSince = now;
         if (now - this.groundStableSince >= ON_GROUND_STABLE_MS) {
           this.state = "down";
@@ -4416,12 +4502,12 @@ class WorkoutSession {
       } else {
         this.groundStableSince = null;
         this.setStatus(
-          !onGround ? "Túmbate boca arriba para empezar." : "Estira las piernas del todo, en el suelo, para empezar."
+          !onGroundToArm ? "Túmbate boca arriba para empezar." : "Estira las piernas del todo, en el suelo, para empezar."
         );
       }
       if (this.debugEl) {
         this.debugEl.textContent =
-          `tumbado: ${onGround ? "sí" : "no"} | piernas estiradas: ${legsStraight ? "sí" : "no"} (rodilla ${kneeAngle.toFixed(0)}°) | esperando a armar`;
+          `tumbado: ${onGroundToArm ? "sí" : "no"} | piernas estiradas: ${legsStraight ? "sí" : "no"} (rodilla ${kneeAngle.toFixed(0)}°) | esperando a armar`;
       }
       return;
     }
@@ -4517,7 +4603,12 @@ class WorkoutSession {
     const onGround = tilt <= ON_GROUND_MAX_TILT_DEG;
 
     if (this.state === null) {
-      if (onGround) {
+      // Para armar hace falta el umbral MÁS ESTRICTO (ver
+      // ON_GROUND_ARM_MAX_TILT_DEG) — no basta con "no estás de pie", hace
+      // falta estar de verdad tumbado, no solo agachado colocando la
+      // cámara.
+      const onGroundToArm = tilt <= ON_GROUND_ARM_MAX_TILT_DEG;
+      if (onGroundToArm) {
         if (this.groundStableSince === null) this.groundStableSince = now;
         if (now - this.groundStableSince >= ON_GROUND_STABLE_MS) {
           this.state = "down";
@@ -4531,7 +4622,7 @@ class WorkoutSession {
         this.setStatus("Túmbate boca arriba del todo para empezar.");
       }
       if (this.debugEl) {
-        this.debugEl.textContent = `inclinación torso: ${tilt.toFixed(0)}° | tumbado: ${onGround ? "sí" : "no"} | esperando a armar`;
+        this.debugEl.textContent = `inclinación torso: ${tilt.toFixed(0)}° | tumbado: ${onGroundToArm ? "sí" : "no"} | esperando a armar`;
       }
       return;
     }
@@ -5526,7 +5617,7 @@ class WorkoutSession {
       // Plancha / plancha lateral: salir del encuadre también rompe la
       // postura, así que cierra el tramo aguantado por el mismo camino
       // que cualquier otra forma de romperla (ver notePostureBroken).
-      if (CAMERA_POSTURE_COUNTERS.has(this.counterKey)) this.notePostureBroken(now, "No se te detecta en el encuadre.");
+      if (CAMERA_POSTURE_COUNTERS.has(this.counterKey)) this.notePostureBroken(now, "No se te detecta en el encuadre.", true);
       return;
     }
     const lm = result.landmarks[0];
@@ -5832,6 +5923,9 @@ class WorkoutSession {
   stopCamera() {
     if (!this.running && !this.stream && !this.poseLandmarker) return; // ya estaba parada — nada que hacer
     this.running = false;
+    // Sales de la pantalla de la cámara: la voz se calla con ella, no se
+    // queda hablando de un ejercicio que ya no ves (ver stopSpeaking()).
+    stopSpeaking();
     if (this.restIntervalId) clearInterval(this.restIntervalId);
     if (this.stream) {
       this.stream.getTracks().forEach((t) => t.stop());
