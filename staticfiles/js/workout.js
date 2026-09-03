@@ -21,7 +21,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-08-31-dominadas-fin-serie-y-sin-distancia";
+const WORKOUT_JS_BUILD = "2026-09-03-sentadilla-armado-estable";
 
 // Umbral de movimiento (proporcional al ancho de hombros) para
 // considerar que hay un cambio de estado real y no ruido de la cámara.
@@ -533,6 +533,15 @@ const INCLINE_PUSHUP_BROKEN_STABLE_MS = 400; // cuánto tiempo seguido fuera de 
 const SQUAT_UP_ANGLE_DEG = 160;   // pierna casi recta -> de pie ("arriba")
 const SQUAT_DOWN_ANGLE_DEG = 100; // rodilla suficientemente doblada -> sentadilla ("abajo")
 const SQUAT_MIN_VISIBILITY = 0.4;
+// Cuánto tiempo seguido de pie (rodilla estirada) hace falta para armar
+// el contador — evita armar con una sola lectura ruidosa mientras se
+// coloca el móvil (un frame suelto puede dar un ángulo alto por pura
+// casualidad durante ese rato). Mismo patrón que hangStableSince en
+// dominadas (HANG_STABLE_MS) o groundStableSince en abdominales tumbado
+// (ON_GROUND_STABLE_MS) — sentadillas no lo tenía porque "no hay nada
+// que calibrar", pero armar el contador SÍ necesita esta estabilidad,
+// sea cual sea el ejercicio.
+const SQUAT_ARM_STABLE_MS = 500;
 
 // ── Abdominales tumbado (crunch, elevación de piernas, abdominal
 // completo) ──────────────────────────────────────────────────────────
@@ -1851,6 +1860,7 @@ class WorkoutSession {
     this.dipBarType = null; // "alta" | "baja" | null (aún sin determinar esta serie) — de qué altura son las paralelas, decidido una vez por serie nada más armar (ver processDip)
     this.squatSide = null;     // "left" | "right" — qué lado del cuerpo se ve mejor este frame (de perfil solo se ve bien uno)
     this.squatKneeAngle = null; // último ángulo de rodilla medido, solo para overlay/debug
+    this.squatArmStableSince = null; // desde cuándo llevas de pie (rodilla estirada) seguido, sin armar aún el contador — ver SQUAT_ARM_STABLE_MS
     this.curlSide = null;            // curl: "left" | "right" — qué lado del cuerpo se ve mejor este frame (de perfil solo se ve bien uno), mismo concepto que squatSide/pushupSide
     this.curlElbowAngle = null;      // curl: último ángulo de codo medido, solo para overlay/debug
     this.curlTopHoldSince = null;    // curl: performance.now() de cuándo se llegó arriba (codo doblado) en la repetición en curso — para el aviso de "llevas aguantando, esto no cuenta todavía" (ver CURL_TOP_HOLD_WARN_MS/processDumbbellCurl)
@@ -2252,6 +2262,7 @@ class WorkoutSession {
       this.state = null;
       this.squatSide = null;
       this.squatKneeAngle = null;
+      this.squatArmStableSince = null;
       this.setStatus("Ponte de perfil a la cámara, de pie, para empezar.");
     } else if (this.counterKey === "crunch") {
       // Tampoco hay nada que calibrar: se mide el hombro frente a la
@@ -3629,10 +3640,22 @@ class WorkoutSession {
 
     if (this.state === null) {
       // Hay que empezar de pie, para no contar media repetición al entrar.
+      // Y no basta con un solo frame: mientras se coloca el móvil en
+      // posición, una lectura ruidosa suelta puede dar un ángulo de
+      // rodilla alto por casualidad y armar el contador antes de que
+      // estés de verdad de pie — se exige la postura estable durante
+      // SQUAT_ARM_STABLE_MS, igual que hangStableSince en dominadas.
       if (kneeAngle >= SQUAT_UP_ANGLE_DEG) {
-        this.state = "top";
-        this.announceStatus("¡Listo! Baja en sentadilla y vuelve a subir.", "ready_to_go");
+        if (this.squatArmStableSince === null) this.squatArmStableSince = now;
+        if (now - this.squatArmStableSince >= SQUAT_ARM_STABLE_MS) {
+          this.state = "top";
+          this.squatArmStableSince = null;
+          this.announceStatus("¡Listo! Baja en sentadilla y vuelve a subir.", "ready_to_go");
+        } else {
+          this.setStatus("De pie… confirmando (no te muevas)");
+        }
       } else {
+        this.squatArmStableSince = null;
         this.setStatus("Ponte de pie, de perfil a la cámara, para empezar.");
       }
     } else if (this.state === "top") {
