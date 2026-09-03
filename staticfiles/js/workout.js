@@ -1230,10 +1230,16 @@ export function checkSidePlankPosture(lm, downSideHint = null) {
 // lateral, así que no hace falta duplicar esas constantes de tiempo
 // aquí.
 //
-// A diferencia también de la plancha, no hay un primer paso de
-// "túmbate para confirmar que te veo": la postura de partida (de pie)
-// ya es trivial de detectar, así que se pide la postura de la silla
-// directamente, igual que en sentadillas.
+// SÍ hay un primer paso (a diferencia de lo que decía este comentario
+// antes): confirmar que te ve DE PIE, antes de aceptar la postura
+// doblada de la silla — ver checkStanding()/postureGroundConfirmed en
+// processPosture, mismo patrón que plancha/kneehold en barra. Se
+// reportó que, colocando la cámara mientras ya estabas sentada/o en una
+// silla de verdad, rodilla y cadera ya rondaban los 90° por sí solos —
+// eso pasaba checkWallSitPosture a la primera sin haber hecho el
+// ejercicio, contando el rato sentada/o como si fuera aguante de
+// verdad. Pedir primero el cuerpo estirado del todo hace falta el
+// movimiento real (de pie → silla) para empezar a contar.
 //
 // NO hace falta que el apoyo sea una pared: la cámara no ve lo que hay
 // detrás, solo el ángulo del cuerpo — así que apoyarse en una barra,
@@ -1325,6 +1331,52 @@ export function checkWallSitPosture(lm) {
     return { ok: false, reason: "Ajusta la altura: la cadera tiene que quedar más o menos a 90°, como sentada/o en una silla.", debug };
   }
   return { ok: true, debug };
+}
+
+// Paso 1 de silla en pared (ver postureGroundConfirmed en
+// processPosture): confirmar que te ve DE PIE, con la pierna estirada
+// del todo, antes de aceptar la postura doblada — mismo criterio de
+// "pierna recta" que SQUAT_UP_ANGLE_DEG (160°) para "de pie" en
+// sentadillas, aplicado también a la cadera para que sentarte en una
+// silla normal (rodilla Y cadera ya dobladas desde el principio) no
+// cumpla nunca este paso 1 y por tanto nunca llegue a checkWallSitPosture.
+const WALLSIT_STANDING_MIN_VISIBILITY = 0.4;
+const WALLSIT_STANDING_KNEE_MIN_DEG = 160;
+const WALLSIT_STANDING_HIP_MIN_DEG = 160;
+const WALLSIT_STANDING_STABLE_MS = 600; // mismo margen que ON_GROUND_STABLE_MS
+
+function checkStanding(lm) {
+  const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
+  const lH = lm[L_HIP], rH = lm[R_HIP];
+  const lK = lm[L_KNEE], rK = lm[R_KNEE];
+  const lA = lm[L_ANKLE], rA = lm[R_ANKLE];
+
+  const leftVis = ((lS.visibility ?? 1) + (lH.visibility ?? 1) + (lK.visibility ?? 1) + (lA.visibility ?? 1)) / 4;
+  const rightVis = ((rS.visibility ?? 1) + (rH.visibility ?? 1) + (rK.visibility ?? 1) + (rA.visibility ?? 1)) / 4;
+  const useLeft = leftVis >= rightVis;
+  const sideVis = useLeft ? leftVis : rightVis;
+
+  if (sideVis < WALLSIT_STANDING_MIN_VISIBILITY) {
+    return { ok: false, visible: false, kneeAngle: null, hipAngle: null };
+  }
+
+  const shoulder = useLeft ? lS : rS;
+  const hip = useLeft ? lH : rH;
+  const knee = useLeft ? lK : rK;
+  const ankle = useLeft ? lA : rA;
+
+  const kneeAngle = angle(hip, knee, ankle);
+  const hipAngle = angle(shoulder, hip, knee);
+  const ok =
+    kneeAngle !== null && kneeAngle >= WALLSIT_STANDING_KNEE_MIN_DEG &&
+    hipAngle !== null && hipAngle >= WALLSIT_STANDING_HIP_MIN_DEG;
+
+  return {
+    ok,
+    visible: true,
+    kneeAngle: kneeAngle === null ? null : kneeAngle.toFixed(0),
+    hipAngle: hipAngle === null ? null : hipAngle.toFixed(0),
+  };
 }
 
 // A diferencia de plancha/plancha lateral/silla en pared, aquí SÍ hace
@@ -1933,6 +1985,15 @@ class WorkoutSession {
     this.sessionStart = null;
     this.lastRepTime = null;
     this.setClosedAt = null; // performance.now() de cuándo se cerró la última serie (con reps o con tiempo aguantado) — para el descanso obligatorio (ver MIN_REST_MS, countRep, notePostureOk, announceRestBlocked)
+    // Si ya se ha avisado por voz de "todavía en descanso" EN ESTE descanso —
+    // se resetea cada vez que se cierra una serie nueva (ver setClosedAt más
+    // arriba, mismos 3 sitios). Antes este aviso se repetía cada 25s
+    // (STATUS_VOICE_REPEAT_GAP_MS) mientras insistieras en moverte o te
+    // quedaras ya colocada/o esperando — con una postura mantenida (plancha,
+    // silla en pared…) eso significa "quedan 88s… quedan 63s… quedan 38s…"
+    // sin parar durante todo el descanso, justo la chapa que se reportó.
+    // Ahora se dice UNA vez por descanso y ya está — se entendió a la primera.
+    this.restBlockedVoiceGiven = false;
     this.restAlerted = false;
     // Silencia CUALQUIER voz (avisos, consejos, "te veo"/"no te veo",
     // "¡listo!"...) desde que termina una serie hasta que el reloj de
@@ -2149,14 +2210,19 @@ class WorkoutSession {
     const text = `Todavía en descanso obligatorio — quedan ${remaining}s. No se cuenta nada hasta entonces.`;
     this.setStatus(text);
     if (!this.voiceEnabled) return;
-    const key = "rest_blocked";
-    const lastForKey = this.lastSpokenAtByKey.get(key) ?? null;
-    const keyGap = lastForKey === null ? Infinity : now - lastForKey;
-    if (keyGap < STATUS_VOICE_REPEAT_GAP_MS) return;
+    // Una sola vez POR DESCANSO (ver restBlockedVoiceGiven, reseteado
+    // cada vez que se cierra una serie nueva) — no cada
+    // STATUS_VOICE_REPEAT_GAP_MS. Con una postura mantenida (plancha,
+    // silla en pared…) esto se llama en CADA frame mientras insistes o
+    // simplemente te quedas ya colocada/o esperando a que pase el
+    // descanso, así que repetirlo cada 25s se oía como "quedan 88s…
+    // quedan 63s… quedan 38s…" sin parar — una vez ya sabes cuánto
+    // queda y que no se está contando nada, no hace falta que insista.
+    if (this.restBlockedVoiceGiven) return;
     const anyGap = this.lastSpokenStatusAt === null ? Infinity : now - this.lastSpokenStatusAt;
     if (anyGap < STATUS_VOICE_MIN_GAP_MS) return;
+    this.restBlockedVoiceGiven = true;
     this.lastSpokenStatusAt = now;
-    this.lastSpokenAtByKey.set(key, now);
     speakOut(text, { flush: false });
   }
 
@@ -2228,6 +2294,7 @@ class WorkoutSession {
       this.currentSetDurations = [];
       this.updateSetDisplay();
       this.setClosedAt = performance.now();
+      this.restBlockedVoiceGiven = false;
     }
     // Plancha / plancha lateral: el equivalente de lo de arriba pero para
     // un tramo de tiempo aguantado en vez de repeticiones (ver
@@ -3787,15 +3854,19 @@ class WorkoutSession {
         ? "Ponte boca abajo, en posición de plancha, apoyada/o en los antebrazos, con el cuerpo en línea recta."
         : "Túmbate boca arriba en el suelo, de perfil a la cámara, con el cuerpo entero en el encuadre.";
     }
-    // Silla en pared: a diferencia de plancha/plancha lateral, no hay
-    // paso 1 (la postura de partida, de pie, ya es trivial de
-    // detectar) — se pide la postura de la silla directamente, igual
-    // que en sentadillas.
+    // Silla en pared: SÍ tiene paso 1 (ver checkStanding/postureGroundConfirmed
+    // en processPosture) — confirmar que te ve de pie, con la pierna
+    // estirada, antes de pedir la postura doblada. Se añadió porque,
+    // pidiendo la postura de la silla directamente, sentarte en una
+    // silla de verdad (rodilla y cadera ya dobladas desde el principio,
+    // sin haber hecho el ejercicio) pasaba el chequeo igualmente.
     if (this.counterKey === "wallsit") {
-      return "Ponte de espaldas a un apoyo (pared, barra o poste), de perfil a la cámara y algo alejada/o (para que quepa la pierna entera), y dobla las rodillas deslizando la espalda por el apoyo hasta que los muslos queden paralelos al suelo.";
+      return this.postureGroundConfirmed
+        ? "Ponte de espaldas a un apoyo (pared, barra o poste), de perfil a la cámara y algo alejada/o (para que quepa la pierna entera), y dobla las rodillas deslizando la espalda por el apoyo hasta que los muslos queden paralelos al suelo."
+        : "Ponte de pie del todo, de perfil a la cámara y algo alejada/o (para que quepa la pierna entera), con la pierna estirada, para confirmar que te veo antes de pedirte que te agaches.";
     }
-    // Kneehold en barra: SÍ tiene paso 1 (a diferencia de silla en pared),
-    // pero uno más simple que plancha/plancha lateral: solo confirmar que
+    // Kneehold en barra: también tiene paso 1, uno más simple que
+    // plancha/plancha lateral: solo confirmar que
     // te has agarrado a la barra (checkKneeHoldBarHanging), no hace falta
     // una postura intermedia rara como tumbarse. Antes se pedía la
     // postura completa (colgarte Y subir las rodillas) de golpe desde el
@@ -3808,9 +3879,11 @@ class WorkoutSession {
         ? "Dobla las rodillas y súbelas hasta dejarlas más o menos a la altura de la cadera."
         : "Ve y agárrate a la barra, con los brazos estirados, de frente a la cámara y algo alejada/o (para que quepa el cuerpo entero).";
     }
-    // Pino: como silla en pared, sin paso 1 — la señal de "cuerpo
-    // invertido" ya es lo bastante clara como para pedir la postura
-    // directamente (ver checkHandstandPosture).
+    // Pino: sin paso 1 — la señal de "cuerpo invertido" ya es lo bastante
+    // clara como para pedir la postura directamente (ver
+    // checkHandstandPosture); a diferencia de silla en pared, aquí no hay
+    // ninguna postura cotidiana (sentarse en una silla…) que pueda colarse
+    // como un falso positivo.
     if (this.counterKey === "handstand") {
       return "Sube a un pino (con o sin apoyo en la pared) hasta que la cadera quede por encima de los hombros y los brazos por debajo de la cadera, aguantando el peso cerca del suelo.";
     }
@@ -3848,6 +3921,7 @@ class WorkoutSession {
       this.updateSetDisplay();
       if (this.repsEl) this.repsEl.textContent = "0";
       this.setClosedAt = performance.now();
+      this.restBlockedVoiceGiven = false;
       // El aviso de descanso obligatorio SÍ tiene que oírse — por eso va
       // antes de silenciar la voz (restVoiceQuiet), no después.
       this.announceSetComplete(`Serie de ${closedReps}`, waitingMessage);
@@ -4100,6 +4174,7 @@ class WorkoutSession {
 
     if (held > 0) {
       this.setClosedAt = performance.now();
+      this.restBlockedVoiceGiven = false;
       this.announceSetComplete(`Serie de ${formatHoldSeconds(held)}`, this.postureWaitingMessage());
       this.restVoiceQuiet = true;
     } else {
@@ -4121,20 +4196,21 @@ class WorkoutSession {
     // práctica pedía la postura completa de golpe nada más empezar la
     // serie — ahora sigue el mismo patrón de dos pasos que la plancha
     // normal.
-    // Silla en pared no pasa por este paso 1 (ver postureWaitingMessage):
-    // postureGroundConfirmed se queda en false toda la sesión para
-    // "wallsit", así que esta condición nunca se cumple para ese
-    // contador y se va directa a la comprobación de la postura, más
-    // abajo.
-    //
     // Kneehold en barra reutiliza el mismo patrón de dos pasos, pero con
     // su propio paso 1 (checkKneeHoldBarHanging: confirmar el agarre) en
     // vez de tumbarte del todo — ver postureWaitingMessage/
     // checkKneeHoldBarHanging para el porqué.
+    //
+    // Silla en pared TAMBIÉN tiene su propio paso 1 (checkStanding:
+    // confirmar que te ve DE PIE, con la pierna estirada) — ver el
+    // comentario junto a checkStanding() para el porqué (sentarte en una
+    // silla de verdad, sin más, no debe empezar a contar como si fuera
+    // el ejercicio).
     const isKneeHoldStep1 = this.counterKey === "kneeholdbar" && !this.postureGroundConfirmed;
-    if (((this.counterKey === "plank" || this.counterKey === "sideplank") && !this.postureGroundConfirmed) || isKneeHoldStep1) {
-      const flat = isKneeHoldStep1 ? checkKneeHoldBarHanging(lm) : checkLyingFlat(lm);
-      const stableMs = isKneeHoldStep1 ? HANG_STABLE_MS : ON_GROUND_STABLE_MS;
+    const isWallsitStep1 = this.counterKey === "wallsit" && !this.postureGroundConfirmed;
+    if (((this.counterKey === "plank" || this.counterKey === "sideplank") && !this.postureGroundConfirmed) || isKneeHoldStep1 || isWallsitStep1) {
+      const flat = isKneeHoldStep1 ? checkKneeHoldBarHanging(lm) : isWallsitStep1 ? checkStanding(lm) : checkLyingFlat(lm);
+      const stableMs = isKneeHoldStep1 ? HANG_STABLE_MS : isWallsitStep1 ? WALLSIT_STANDING_STABLE_MS : ON_GROUND_STABLE_MS;
       // Igual que dominadas (ver startupVoiceGiven junto a HANG_STABLE_MS,
       // más abajo): nada más verte aparecer en la cámara, aunque todavía
       // no estés colgada/o, un aviso por voz de qué hacer — antes esto se
@@ -4142,6 +4218,10 @@ class WorkoutSession {
       if (isKneeHoldStep1 && flat.visible && !this.startupVoiceGiven) {
         this.startupVoiceGiven = true;
         this.announceStatus("¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready");
+      }
+      if (isWallsitStep1 && flat.visible && !this.startupVoiceGiven) {
+        this.startupVoiceGiven = true;
+        this.announceStatus("¡Listo! Ponte de pie del todo, con la pierna estirada, para empezar.", "startup_ready");
       }
       if (flat.ok) {
         if (this.postureGroundSince === null) this.postureGroundSince = now;
@@ -4153,12 +4233,14 @@ class WorkoutSession {
           this.postureCandidateSince = null;
           const flipMessage = isKneeHoldStep1
             ? "¡Listo! Ya puedes subir las rodillas, doblándolas, hasta dejarlas más o menos a la altura de la cadera."
+            : isWallsitStep1
+            ? "¡Bien, te veo de pie! Ahora dobla las rodillas apoyando la espalda en un apoyo (pared, barra o poste) hasta que los muslos queden paralelos al suelo."
             : this.counterKey === "sideplank"
             ? "¡Bien, te veo! Ahora ponte de lado, apoya el codo justo debajo del hombro y los pies uno sobre otro, y levanta el cuerpo del suelo hasta quedar en línea recta, de los hombros a los tobillos."
             : "¡Bien, te veo! Ahora date la vuelta, boca abajo, y ponte en posición de plancha: apoyada/o en los antebrazos, con los codos justo debajo de los hombros y el cuerpo entero alzado del suelo, en línea recta.";
-          this.announceStatus(flipMessage, isKneeHoldStep1 ? "kneehold_ready" : "plank_flip");
+          this.announceStatus(flipMessage, isKneeHoldStep1 ? "kneehold_ready" : isWallsitStep1 ? "wallsit_ready" : "plank_flip");
         } else {
-          this.setStatus(isKneeHoldStep1 ? "Colgada/o… confirmando (no te muevas)" : "Tumbada/o… confirmando (no te muevas)");
+          this.setStatus(isKneeHoldStep1 ? "Colgada/o… confirmando (no te muevas)" : isWallsitStep1 ? "De pie… confirmando (no te muevas)" : "Tumbada/o… confirmando (no te muevas)");
         }
       } else {
         this.postureGroundSince = null;
@@ -4167,6 +4249,10 @@ class WorkoutSession {
       if (this.debugEl) {
         this.debugEl.textContent = isKneeHoldStep1
           ? `paso 1 de 2: agarrada/o a la barra — ${flat.ok ? "sí, confirmando" : "todavía no"}`
+          : isWallsitStep1
+          ? `paso 1 de 2: de pie — ${flat.ok ? "sí, confirmando" : "todavía no"} | ` +
+            `rodilla: ${flat.kneeAngle ?? "-"}° (mínimo ${WALLSIT_STANDING_KNEE_MIN_DEG}) | ` +
+            `cadera: ${flat.hipAngle ?? "-"}° (mínimo ${WALLSIT_STANDING_HIP_MIN_DEG})`
           : `paso 1 de 2: tumbarte del todo — ${flat.ok ? "sí, confirmando" : "todavía no"} | ` +
             `ángulo cadera: ${flat.lineAngle ?? "-"}° (mínimo ${LYING_FLAT_MIN_DEG}) | ` +
             `largo cuerpo/hombros: ${flat.bodyLengthFactor} (mínimo ${MIN_BODY_LENGTH_FACTOR})`;
@@ -4174,6 +4260,8 @@ class WorkoutSession {
       this.logScissor(
         isKneeHoldStep1
           ? `[kneehold en barra, paso 1] ok=${flat.ok ? "sí" : "no"}`
+          : isWallsitStep1
+          ? `[silla en pared, paso 1] ok=${flat.ok ? "sí" : "no"} rodilla=${flat.kneeAngle ?? "-"} cadera=${flat.hipAngle ?? "-"}`
           : `[${this.counterKey === "sideplank" ? "plancha lateral" : "plancha"}, paso 1] ok=${flat.ok ? "sí" : "no"} motivo=${flat.reason ?? "-"} ` +
             `angulo=${flat.lineAngle ?? "-"} largo=${flat.bodyLengthFactor}`
       );
