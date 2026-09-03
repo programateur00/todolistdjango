@@ -71,8 +71,10 @@
         {% with mins=task.minutes_remaining overdue=task.is_overdue %}
         <li class="task-card{% if task.is_important %} task-card--important{% endif %}{% if overdue %} task-card--overdue{% endif %}">
             <div class="task-card__actions">
-                {% if task.workout_kind == "auto" %}
-                <span class="task-card__waiting" title="Se completa sola al llegar a los minutos objetivo de hoy">⏳</span>
+                {% if task.workout_kind == "auto" or task.workout_kind == "distance" %}
+                {# Correr y Curso de Udemy: sin iconos de ningún tipo — se completan solas al #}
+                {# llegar al objetivo, y si no se cumple, se resuelven como no hechas ellas #}
+                {# solas a la hora límite (ver Task.mark_expired). Nada que pulsar aquí. #}
                 {% elif task.workout_kind %}
                 <a href="{% if task.workout_kind == 'focus' %}{% url 'tasks:task_focus' task.pk %}{% elif task.workout_kind == 'video' %}{% url 'tasks:task_video' task.pk %}{% else %}{% url 'tasks:task_workout' task.pk %}{% endif %}" class="workout-btn"
                    title="{% if task.workout_kind == 'camera' %}Contar repeticiones con la cámara{% elif task.workout_kind == 'timer' %}Empezar circuito cronometrado{% elif task.workout_kind == 'focus' %}Empezar temporizador{% elif task.workout_kind == 'video' %}Ver el vídeo{% else %}Anotar la sesión{% endif %}">
@@ -87,6 +89,7 @@
                     </button>
                 </form>
                 {% endif %}
+                {% if task.workout_kind != "auto" and task.workout_kind != "distance" %}
                 <form action="{% if task.is_avoid %}{% url 'tasks:task_mark_failed' task.pk %}{% else %}{% url 'tasks:task_mark_not_done' task.pk %}{% endif %}" method="post">
                     {% csrf_token %}
                     <button type="submit" class="check-btn check-btn--undone"
@@ -94,6 +97,7 @@
                         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
                     </button>
                 </form>
+                {% endif %}
             </div>
 
             <a class="task-card__body" href="{% url 'tasks:task_edit' task.pk %}">

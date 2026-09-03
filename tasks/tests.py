@@ -1819,10 +1819,14 @@ class UdemyTrackingTests(TestCase):
         self.assertEqual(self.task.workout_kind, "auto")
 
     def test_web_list_hides_manual_done_button_for_udemy_task(self):
+        # Como las tareas de correr: nada que pulsar. Se resuelve sola al
+        # llegar a los minutos objetivo, o queda como no hecha ella sola a
+        # medianoche si no se cumple (Task.mark_expired) — sin iconos.
         r = self.client.get(reverse("tasks:task_list"))
         self.assertNotContains(r, reverse("tasks:task_mark_done", args=[self.task.pk]))
+        self.assertNotContains(r, reverse("tasks:task_mark_not_done", args=[self.task.pk]))
         self.assertNotContains(r, reverse("tasks:task_focus", args=[self.task.pk]))
-        self.assertContains(r, "task-card__waiting")
+        self.assertNotContains(r, "task-card__waiting")
 
     def test_focus_save_pc_usage_accumulates_across_short_sessions(self):
         """La extensión corta la sesión en cada cambio de pestaña: dos
