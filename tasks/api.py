@@ -853,10 +853,19 @@ def workout_save(request, uuid):
                 })
     avg = round(sum(rep_durations) / len(rep_durations), 2) if rep_durations else None
 
-    ctx = _plan_context(
-        exercise_slug,
-        sets=data.get("target_sets"),
-        reps=data.get("target_reps"),
+    # Mismo bug/arreglo que task_workout_save en views.py (2026-09-04):
+    # freestyle ya no engancha el objetivo/progresión de un plan activo
+    # solo por coincidir el ejercicio — solo se resuelve contra el plan
+    # si ESTA tarea la generó un plan de verdad (t.plan). Decisión
+    # explícita del usuario, sabiendo que pierde el conteo cruzado (ver
+    # el comentario largo en views.py y SingleExerciseCompletionTests).
+    ctx = (
+        _plan_context(
+            exercise_slug,
+            sets=data.get("target_sets"),
+            reps=data.get("target_reps"),
+        ) if t.plan
+        else {"plan": None, "target_sets": data.get("target_sets"), "target_reps": data.get("target_reps"), "target_seconds": None}
     )
     ws = WorkoutSession.objects.create(
         task=t, user=_user(), series_id=t.series_id, exercise=exercise_slug,

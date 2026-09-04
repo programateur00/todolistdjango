@@ -21,7 +21,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-04-fondos-minrep-doble";
+const WORKOUT_JS_BUILD = "2026-09-04-log-buffer-x4";
 
 // Umbral de movimiento (proporcional al ancho de hombros) para
 // considerar que hay un cambio de estado real y no ruido de la cámara.
@@ -1962,7 +1962,30 @@ class WorkoutSession {
     this.scissorTrackB = null;        // tijeretas: lo mismo para la pierna rastreada "2"
     this.scissorSwitchCount = 0;      // tijeretas: cambios de pierna confirmados desde que se armó — una repetición es un vaivén COMPLETO, así que solo se cuenta cada dos cambios
     this.scissorLog = [];             // tijeretas: registro de depuración en memoria (ver logScissor/exportScissorLog)
-    this.scissorLogMax = 900;         // tijeretas: tope de líneas del registro (FIFO) — de sobra para unos 30s a 30fps
+    // DECIMOCUARTO BUG REAL (2026-09-04): este tope se puso en 900
+    // pensando en "de sobra para unos 30s a 30fps" — es decir, 1 línea
+    // por frame. Pero processDip (y el resto de ejercicios) escriben DOS
+    // líneas por frame: this.debugEl.textContent pasa por un shim que ya
+    // llama a logScissor() (ver el shim de debugEl, arriba, donde se
+    // define this.debugEl), Y ADEMÁS hay una llamada explícita a
+    // logScissor() justo después con el registro detallado del mismo
+    // frame. Con 2 líneas/frame la ventana real era la mitad (o menos,
+    // si además hay avisos de estado de por medio) de los 30s pensados.
+    // El usuario reprodujo el fallo de "cuenta una rep al montarse en las
+    // paralelas sin hacer un fondo de verdad" en el build con el arreglo
+    // de DIP_MIN_SHOULDER_DROP_FACTOR ya puesto, pulsó "copiar registro"
+    // nada más terminar y pegó el registro completo (confirmado por él:
+    // "no esta cortado, lo copio y pego directo") — y aun así el registro
+    // exportado empezaba de golpe a los 9.9s, sin ni un [ARMADO] ni
+    // [REP CONTADA] ni [rep descartada], todo en estado "top" quieto. No
+    // es que faltara texto al pegarlo: el propio FIFO ya se había comido
+    // esos frames antes de llegar a pulsar el botón, porque la ventana
+    // real (con 2 líneas/frame) era bastante más corta de lo que este
+    // comentario decía. Se sube el tope a 3600 (el cuádruple) para tener
+    // margen real de sobra incluso contando las 2 líneas/frame — así la
+    // próxima vez que reproduzca el fallo, el registro exportado sí debe
+    // llegar hasta el momento exacto de la repetición en cuestión.
+    this.scissorLogMax = 3600;
     this.scissorLogStart = performance.now(); // tijeretas: instante de referencia para los timestamps del registro
     // Plancha / plancha lateral: aquí no se cuentan repeticiones, se
     // cuenta TIEMPO aguantando la postura — ver processPosture,

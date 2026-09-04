@@ -1144,11 +1144,19 @@ class PlanAndFreestyleTests(TestCase):
 
 class SingleExerciseCompletionTests(TestCase):
     """
-    Regla: un ejercicio SUELTO con objetivo solo completa la tarea si lo
-    alcanza; si se queda corto, la tarea sigue pendiente y el porcentaje
-    queda guardado en la sesión. Sin objetivo (sin plan), se completa
-    como siempre. Cubre la API (móvil) y la web con el mismo criterio,
-    porque antes solo la API enlazaba la sesión con el plan.
+    Regla desde el 2026-09-04 (decisión explícita del usuario, ver el
+    comentario largo junto a la resolución de ctx en task_workout_save/
+    workout_save): un ejercicio SUELTO (freestyle, no generado por un
+    plan) NUNCA engancha el objetivo ni la progresión de un plan activo
+    que entrene el mismo ejercicio, aunque coincida el slug — se guarda
+    sin objetivo y la tarea se completa siempre, igual que un ejercicio
+    freestyle sin ningún plan relacionado. Antes de este cambio pasaba
+    lo contrario a propósito (ver el historial en git blame de este
+    archivo si hace falta el porqué original); se cambió porque
+    confundía, mostrando en pantalla el objetivo/nombre de un plan como
+    si la tarea perteneciera a él sin serlo. Solo una tarea que SÍ
+    generó un plan (task.plan, ver plan_session/plan_session_save) sigue
+    atada a su objetivo — eso no ha cambiado y no lo cubre esta clase.
     """
 
     def setUp(self):
@@ -1168,34 +1176,26 @@ class SingleExerciseCompletionTests(TestCase):
 
     # ---------------------------------------------------------- API
 
-    def test_api_below_target_leaves_task_pending(self):
+    def test_api_freestyle_ignores_unrelated_active_plan(self):
+        """Aunque haya un plan activo (self.plan) siguiendo pull-c, esta
+        tarea no la generó ese plan — se guarda sin objetivo/plan y se
+        completa siempre, con pocas o muchas reps."""
         r = self.client.post(
             f"/api/tasks/{self.task.uuid}/workout/",
-            data=json.dumps({"exercise": "pull-c", "total_reps": 10, "total_sets": 3}),  # objetivo 3x8=24
-            content_type="application/json",
-        )
-        self.assertEqual(r.status_code, 200)
-        self.task.refresh_from_db()
-        self.assertFalse(self.task.is_done)
-        ws = WorkoutSession.objects.get(task=self.task)
-        self.assertEqual(ws.achievement_pct, 42)
-        self.assertFalse(ws.target_met)
-
-    def test_api_meeting_or_beating_target_completes_task(self):
-        r = self.client.post(
-            f"/api/tasks/{self.task.uuid}/workout/",
-            data=json.dumps({"exercise": "pull-c", "total_reps": 30, "total_sets": 3}),  # 125% del objetivo
+            data=json.dumps({"exercise": "pull-c", "total_reps": 10, "total_sets": 3}),
             content_type="application/json",
         )
         self.assertEqual(r.status_code, 200)
         self.task.refresh_from_db()
         self.assertTrue(self.task.is_done)
         ws = WorkoutSession.objects.get(task=self.task)
-        self.assertEqual(ws.achievement_pct, 125)
+        self.assertIsNone(ws.plan)
+        self.assertIsNone(ws.target_sets)
+        self.assertIsNone(ws.target_reps)
 
     def test_api_without_plan_always_completes(self):
-        """Entreno libre (sin plan que lo siga): no hay objetivo, se
-        completa como antes de este cambio."""
+        """Entreno libre (sin ningún plan, ni activo ni relacionado): no
+        hay objetivo, se completa como siempre."""
         Exercise.objects.create(slug="free-c", name="Sentadillas", mode=Exercise.MODE_POSE)
         r = self.client.post(
             f"/api/tasks/{self.task.uuid}/workout/",
@@ -1208,28 +1208,24 @@ class SingleExerciseCompletionTests(TestCase):
 
     # ---------------------------------------------------------- web
 
-    def test_web_below_target_leaves_task_pending(self):
-        """Regresión: antes la web ni siquiera enlazaba la sesión con el
-        plan, así que esto nunca podía funcionar."""
+    def test_web_freestyle_ignores_unrelated_active_plan(self):
+        """Mismo criterio que la API (ver arriba) — antes esto SÍ
+        enganchaba el objetivo del plan a propósito; ya no. La tarea se
+        marca hecha en task_cooldown, no en task_workout_save (ver el
+        docstring de task_cooldown en views.py) — se sigue el flujo
+        completo en vez de comprobar is_done a medio camino."""
         r = self.client.post(
             reverse("tasks:task_workout_save", args=[self.task.pk]) + "?exercise=pull-c",
             data=json.dumps({"total_reps": 10, "total_sets": 3}),
             content_type="application/json",
         )
         self.assertEqual(r.status_code, 200)
-        self.task.refresh_from_db()
-        self.assertFalse(self.task.is_done)
         ws = WorkoutSession.objects.get(task=self.task)
-        self.assertEqual(ws.plan, self.plan)
-        self.assertEqual(ws.achievement_pct, 42)
-
-    def test_web_meeting_target_completes_task(self):
-        r = self.client.post(
-            reverse("tasks:task_workout_save", args=[self.task.pk]) + "?exercise=pull-c",
-            data=json.dumps({"total_reps": 24, "total_sets": 3}),
-            content_type="application/json",
-        )
-        self.assertEqual(r.status_code, 200)
+        self.assertIsNone(ws.plan)
+        self.assertIsNone(ws.target_sets)
+        self.assertTrue(ws.target_met)  # sin objetivo, se da por cumplido
+        self.assertIn(reverse("tasks:task_cooldown", args=[self.task.pk]), r.json()["redirect_url"])
+        self.client.post(reverse("tasks:task_cooldown", args=[self.task.pk]))
         self.task.refresh_from_db()
         self.assertTrue(self.task.is_done)
 

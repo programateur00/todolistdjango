@@ -478,9 +478,21 @@ def task_workout(request, pk):
             "unsupported": exercise,
         })
 
+    # DECIMOTERCER BUG REAL (2026-09-04): resolve_plan_target busca por
+    # SLUG de ejercicio, no por tarea — así que una tarea freestyle de
+    # fondos enseñaba el objetivo (y el nombre) de un plan activo que
+    # también entrena fondos, como si la tarea perteneciera a ese plan.
+    # El usuario pidió que freestyle y plan queden del todo separados:
+    # solo se resuelve el objetivo del plan si ESTA tarea la generó un
+    # plan de verdad (task.plan) — si no, freestyle no ve nada de ningún
+    # plan, aunque haya uno activo con el mismo ejercicio.
+    target = (
+        resolve_plan_target(exercise.slug) if task.plan
+        else {"plan": None, "target_sets": None, "target_reps": None, "target_seconds": None}
+    )
     return render(request, "tasks/task_workout.html", {
         "task": task, "exercise": exercise,
-        "target": resolve_plan_target(exercise.slug),
+        "target": target,
     })
 
 
@@ -521,11 +533,21 @@ def task_workout_save(request, pk):
 
     avg_rep_seconds = round(sum(rep_durations) / len(rep_durations), 2) if rep_durations else None
 
-    # Si hay un plan activo siguiendo este ejercicio, manda su objetivo
-    # (aunque esta tarea en concreto no la generara el plan). Antes esto
-    # solo pasaba en la app móvil — entrenar desde la web no contaba
-    # para el plan.
-    ctx = resolve_plan_target(exercise_value)
+    # DECIMOTERCER BUG REAL (2026-09-04): esto usaba a propósito
+    # resolve_plan_target(exercise_value) sin más — cualquier tarea de
+    # este ejercicio "enganchaba" el objetivo (y la progresión) de un
+    # plan activo, aunque la tarea en concreto fuera freestyle y no la
+    # hubiera generado ese plan. El usuario reportó justo esto (una
+    # tarea freestyle de fondos enseñando el objetivo de su plan de tren
+    # superior) y, tras ver que separarlo del todo significaba perder el
+    # conteo cruzado (ver SingleExerciseCompletionTests, actualizado en
+    # el mismo commit), pidió explícitamente separarlo igualmente: ahora
+    # solo se resuelve contra un plan si ESTA tarea la generó un plan de
+    # verdad (task.plan) — freestyle ya no ve ni cuenta para el plan.
+    ctx = (
+        resolve_plan_target(exercise_value) if task.plan
+        else {"plan": None, "target_sets": None, "target_reps": None, "target_seconds": None}
+    )
 
     ws = WorkoutSession.objects.create(
         task=task,
