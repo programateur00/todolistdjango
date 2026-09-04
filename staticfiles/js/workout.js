@@ -613,7 +613,8 @@ const BENCHDIP_HAND_RISE_MIN_FACTOR = 0.12; // (tobillo.y - muñeca.y) en propor
 // pie o salir del encuadre son ahora las formas de cerrar la serie.
 const BENCHDIP_BODY_ANGLE_MIN_DEG = 60;  // solo informativo (ver ARREGLO arriba): ángulo hombro-cadera-tobillo por debajo del cual ya no se parece a una L
 const BENCHDIP_BODY_ANGLE_MAX_DEG = 120; // solo informativo (ver ARREGLO arriba): ángulo hombro-cadera-tobillo por encima del cual ya es más un cuerpo estirado (flexión/plancha) que una L
-const BENCHDIP_BROKEN_STABLE_MS = 400; // cuánto tiempo seguido fuera de posición (manos ya no en alto) para dar la serie por rota y cerrarla — mismo valor/criterio que INCLINE_PUSHUP_BROKEN_STABLE_MS: aquí un falso positivo importa más que cortar por un parpadeo de la detección
+const BENCHDIP_BROKEN_STABLE_MS = 400; // cuánto tiempo seguido fuera de posición (manos ya no en alto, o piernas ya no estiradas) para dar la serie por rota y cerrarla — mismo valor/criterio que INCLINE_PUSHUP_BROKEN_STABLE_MS: aquí un falso positivo importa más que cortar por un parpadeo de la detección
+const BENCHDIP_KNEE_MIN_DEG = 150; // ángulo cadera-rodilla-tobillo mínimo para considerar las piernas "estiradas" — ver la nota "SEGUNDO ARREGLO" en processBenchDip, más abajo: doblar la rodilla (sentarte normal, o el primer gesto de levantarte) rompe la postura, igual que soltar las manos del apoyo.
 
 
 // Sentadillas: se cuentan por el ÁNGULO DE LA RODILLA (cadera-rodilla-tobillo),
@@ -3907,25 +3908,27 @@ class WorkoutSession {
     const lElbow = lm[L_ELBOW], rElbow = lm[R_ELBOW];
     const lWrist = lm[L_WRIST], rWrist = lm[R_WRIST];
     const lHip = lm[L_HIP], rHip = lm[R_HIP];
+    const lKnee = lm[L_KNEE], rKnee = lm[R_KNEE];
     const lAnkle = lm[L_ANKLE], rAnkle = lm[R_ANKLE];
 
     const leftVis = (
       (lShoulder.visibility ?? 1) + (lElbow.visibility ?? 1) + (lWrist.visibility ?? 1) +
-      (lHip.visibility ?? 1) + (lAnkle.visibility ?? 1)
-    ) / 5;
+      (lHip.visibility ?? 1) + (lKnee.visibility ?? 1) + (lAnkle.visibility ?? 1)
+    ) / 6;
     const rightVis = (
       (rShoulder.visibility ?? 1) + (rElbow.visibility ?? 1) + (rWrist.visibility ?? 1) +
-      (rHip.visibility ?? 1) + (rAnkle.visibility ?? 1)
-    ) / 5;
+      (rHip.visibility ?? 1) + (rKnee.visibility ?? 1) + (rAnkle.visibility ?? 1)
+    ) / 6;
     const useLeft = leftVis >= rightVis;
     const vis = useLeft ? leftVis : rightVis;
 
     if (vis < PUSHUP_MIN_VISIBILITY) {
       this.announceStatus(
-        "No se te ven bien el hombro, el codo, la muñeca, la cadera y el tobillo. Ponte de perfil a la " +
-        "cámara, con las manos apoyadas detrás en un banco o silla y los pies en el suelo por delante."
+        "No se te ven bien el hombro, el codo, la muñeca, la cadera, la rodilla y el tobillo. Ponte de " +
+        "perfil a la cámara, con las manos apoyadas detrás en un banco o silla y los pies en el suelo por " +
+        "delante."
       );
-      if (this.debugEl) this.debugEl.textContent = "buscando hombro, codo, muñeca, cadera y tobillo de perfil…";
+      if (this.debugEl) this.debugEl.textContent = "buscando hombro, codo, muñeca, cadera, rodilla y tobillo de perfil…";
       this.pushupSide = null;
       this.groundStableSince = null;
       // Igual que en flexiones inclinadas: sin ver el cuerpo entero no
@@ -3949,11 +3952,13 @@ class WorkoutSession {
     const elbow = useLeft ? lElbow : rElbow;
     const wrist = useLeft ? lWrist : rWrist;
     const hip = useLeft ? lHip : rHip;
+    const knee = useLeft ? lKnee : rKnee;
     const ankle = useLeft ? lAnkle : rAnkle;
 
     const elbowAngle = angle(shoulder, elbow, wrist);
     const bodyAngle = angle(shoulder, hip, ankle);
-    if (elbowAngle === null || bodyAngle === null) return;
+    const kneeAngle = angle(hip, knee, ankle);
+    if (elbowAngle === null || bodyAngle === null || kneeAngle === null) return;
 
     // "Manos por encima de los pies de verdad", medido en DIRECTO —
     // mismo tipo de comparación que footRise en flexiones inclinadas,
@@ -3966,13 +3971,28 @@ class WorkoutSession {
     const torsoLength = Math.hypot(shoulder.x - hip.x, shoulder.y - hip.y);
     const handRise = torsoLength > 0 ? (ankle.y - wrist.y) / torsoLength : 0;
     const handsElevated = handRise >= BENCHDIP_HAND_RISE_MIN_FACTOR;
+    // SEGUNDO ARREGLO, a petición de Alex tras la segunda prueba real:
+    // sentarte normal en el banco (sin extender las piernas) no cerraba
+    // la serie, y levantarte al terminar contaba una repetición de más
+    // — porque para levantarte hay que DOBLAR las rodillas (plantar los
+    // pies) antes de ponerte de pie, y ese gesto se colaba en el ciclo
+    // de ángulo de codo antes de que diera tiempo a salir del encuadre
+    // o soltar las manos. A diferencia del ángulo de cadera (bodyInL,
+    // más abajo — desactivado la vez anterior por el mismo motivo:
+    // cambia de forma natural AL HACER la repetición), las piernas SÍ
+    // se quedan extendidas de principio a fin durante todo un fondo en
+    // banco real — doblar la rodilla nunca pasa a media repetición, así
+    // que es una señal fiable de "te has movido de la postura" (sentarte
+    // normal, o el primer gesto de levantarte) sin arriesgarse a cortar
+    // una repetición legítima. Entra en el gate real de postura junto
+    // con handsElevated.
+    const legsExtended = kneeAngle >= BENCHDIP_KNEE_MIN_DEG;
     // "Cuerpo en forma de L" — YA NO gatea nada (ver la nota "ARREGLO
     // tras la primera prueba real", junto a BENCHDIP_BODY_ANGLE_MIN_DEG/
     // MAX_DEG más arriba): se deja calculado solo para el registro de
-    // depuración, por si hace falta revisar el dato más adelante. El
-    // único gate real de postura es handsElevated.
+    // depuración, por si hace falta revisar el dato más adelante.
     const bodyInL = bodyAngle >= BENCHDIP_BODY_ANGLE_MIN_DEG && bodyAngle <= BENCHDIP_BODY_ANGLE_MAX_DEG;
-    const inPosition = handsElevated;
+    const inPosition = handsElevated && legsExtended;
 
     this.pushupSide = useLeft ? "left" : "right";
 
@@ -3993,7 +4013,8 @@ class WorkoutSession {
         if (this.debugEl) {
           this.debugEl.textContent =
             `fuera de posición (manos sobre pies: ${(handRise * 100).toFixed(0)}% tronco, mínimo ` +
-            `${(BENCHDIP_HAND_RISE_MIN_FACTOR * 100).toFixed(0)}% · ángulo cuerpo (informativo): ${bodyAngle.toFixed(0)}°) — se descarta este frame`;
+            `${(BENCHDIP_HAND_RISE_MIN_FACTOR * 100).toFixed(0)}% · rodilla: ${kneeAngle.toFixed(0)}° estirada: ${legsExtended ? "sí" : "no"} ` +
+            `(mínimo ${BENCHDIP_KNEE_MIN_DEG}°) · ángulo cuerpo (informativo): ${bodyAngle.toFixed(0)}°) — se descarta este frame`;
         }
         return;
       }
@@ -4003,7 +4024,7 @@ class WorkoutSession {
     if (this.state === null) {
       // Para armar el contador hace falta verte en la posición
       // INICIAL: brazos rectos, manos claramente por encima de los
-      // pies y el cuerpo en forma de L — sostenida un rato, no un solo
+      // pies y las piernas estiradas — sostenida un rato, no un solo
       // frame, para no armar por un vistazo de pasada mientras te
       // colocas. A esta misma posición hay que volver para que cuente
       // cada repetición (ver más abajo) — no se cuenta ninguna
@@ -4053,7 +4074,7 @@ class WorkoutSession {
 
     if (this.debugEl) {
       this.debugEl.textContent =
-        `ángulo codo (${useLeft ? "izq" : "der"}): ${elbowAngle.toFixed(0)}° | manos sobre pies: ${(handRise * 100).toFixed(0)}% tronco (mínimo ${(BENCHDIP_HAND_RISE_MIN_FACTOR * 100).toFixed(0)}%) | ángulo cuerpo: ${bodyAngle.toFixed(0)}° | estado: ${this.state ?? "esperando"} ` +
+        `ángulo codo (${useLeft ? "izq" : "der"}): ${elbowAngle.toFixed(0)}° | manos sobre pies: ${(handRise * 100).toFixed(0)}% tronco (mínimo ${(BENCHDIP_HAND_RISE_MIN_FACTOR * 100).toFixed(0)}%) | rodilla: ${kneeAngle.toFixed(0)}° (mínimo ${BENCHDIP_KNEE_MIN_DEG}°) | ángulo cuerpo (informativo): ${bodyAngle.toFixed(0)}° | estado: ${this.state ?? "esperando"} ` +
         `(abajo ≤${DIP_DOWN_ANGLE_DEG}°, arriba ≥${DIP_UP_ANGLE_DEG}°)`;
     }
   }
