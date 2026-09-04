@@ -21,7 +21,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-04-jumpingjack-minrep-rapido";
+const WORKOUT_JS_BUILD = "2026-09-04-fondos-minrep-doble";
 
 // Umbral de movimiento (proporcional al ancho de hombros) para
 // considerar que hay un cambio de estado real y no ruido de la cámara.
@@ -304,7 +304,25 @@ const DIP_BREAK_STABLE_MS = 1000; // cuánto tiempo seguido con la combinación 
 const DIP_BREAK_INTERRUPT_GRACE_MS = 300; // octavo bug: un solo frame (o unos pocos) que deja de cumplir la forma de desmonte, por ruido de un landmark, NO reinicia la cuenta de arriba al momento — hace falta que la interrupción misma se sostenga esto para darla por real (ver processDip)
 const DIP_SHOULDER_RISE_MOUNTED_RATIO = 0.5;  // fracción del pico de subida de hombro de ESTA serie por debajo de la cual el ciclo de repetición se congela (te estás bajando/subiendo, no haciendo un fondo)
 const DIP_SHOULDER_RISE_DISMOUNT_RATIO = 0.25; // fracción, más estricta todavía, por debajo de la cual se considera que te has bajado de verdad "de perfil"
-const DIP_MIN_SHOULDER_DROP_FACTOR = 0.15; // cuánto (en largo de tronco, hombro-cadera — ver el sexto bug, arriba) tiene que bajar el hombro en el tramo de abajada para que la repetición cuente — ver el bug de "rascarse la nariz", arriba
+const DIP_MIN_SHOULDER_DROP_FACTOR = 0.30; // cuánto (en largo de tronco, hombro-cadera — ver el sexto bug, arriba) tiene que bajar el hombro en el tramo de abajada para que la repetición cuente — ver el bug de "rascarse la nariz", arriba
+// DUODÉCIMO BUG REAL (2026-09-04, registro real desde el móvil, paralelas):
+// el usuario reprodujo aposta el fallo original — de pie, SIN subirse a
+// las paralelas, levantando las piernas a 90° y moviendo un poco los
+// hombros arriba/abajo para imitar el gesto — y las 3 "repeticiones" de
+// esa serie se contaron igual, confirmado por el usuario ("los 3 han
+// sido los 3 fallos", "ni he puesto los brazos a 90° tampoco"). En el
+// registro real, las 3 bajada_hombro fueron 0.16, 0.16 y 0.22 — las tres
+// pasaban el mínimo de 0.15 por un margen mínimo (0.01–0.07), justo lo
+// que se esperaría de un simple bamboleo de hombro sin fondo real. Se
+// sube el mínimo a 0.30 (el doble) para exigir una bajada de verdad —
+// con datos reales de picos de serie ya vistos (dipSetPeakShoulderRise
+// llegando a 0.40 en fondos genuinos), 0.30 sigue dejando sitio a un
+// fondo real sin exigir el pico entero. Si con este cambio deja de
+// contar fondos de verdad (demasiado exigente) o sigue colándose algún
+// bamboleo (demasiado laxo), hace falta un registro nuevo con el número
+// real de bajada_hombro de ESE caso concreto para afinar otra vez — no
+// adivinar sin datos (ver el historial de bugs de arriba, con más de un
+// "arreglo" revertido por eso mismo).
 const DIP_SHOULDER_SMOOTHING_ALPHA = 0.3; // media móvil exponencial sobre la Y del hombro (calibración/subida/pico/bajada — NO el ángulo del codo) — mismo valor que SCISSOR_SMOOTHING_ALPHA, ya probado
 const DIP_SHOULDER_MAX_Y_JUMP = 0.04; // cuánto puede cambiar como mucho la Y bruta del hombro de un frame al siguiente antes de pasar por la media móvil — un salto mayor no es el cuerpo moviéndose, es un fallo puntual de tracking (ver el tercer bug, arriba, y SCISSOR_MAX_LIFT_JUMP)
 const DIP_TORSO_LENGTH_MAX_JUMP = 0.05; // igual que DIP_SHOULDER_MAX_Y_JUMP pero para el largo hombro-cadera (dipTorsoLength) — ver el sexto bug, arriba
