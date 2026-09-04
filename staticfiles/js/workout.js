@@ -587,21 +587,33 @@ const INCLINE_PUSHUP_BROKEN_STABLE_MS = 400; // cuánto tiempo seguido fuera de 
 //     ni la cadera queda siempre a la misma altura entre gente distinta
 //     ni la cámara mide el ángulo con precisión perfecta.
 //
-// Igual que en flexiones inclinadas, la postura (A + B, "en posición")
-// se comprueba en TODOS los frames mientras la serie está armada, no
-// solo al principio — así un gesto suelto de brazo nunca se puede colar
-// como repetición, y salir de la postura (levantarte, sentarte del
-// todo) cierra la serie sola (BENCHDIP_BROKEN_STABLE_MS).
-//
-// Primera versión, sin probar todavía en cámara real (igual que
-// flexiones inclinadas en su día): si cuesta armar o se cuelan
-// repeticiones sueltas, lo primero es revisar estos dos números con un
-// registro real, no las constantes de ángulo de codo (esas ya están
-// probadas en fondos normales).
+// Igual que en flexiones inclinadas, la postura se comprueba en TODOS
+// los frames mientras la serie está armada, no solo al principio — así
+// un gesto suelto de brazo nunca se puede colar como repetición, y
+// salir de la postura cierra la serie sola (BENCHDIP_BROKEN_STABLE_MS).
+// Ver la nota "ARREGLO tras la primera prueba real", justo debajo, para
+// el porqué (B) ya no forma parte de ese gate — se quedó en (A) sola.
 const BENCHDIP_HAND_RISE_MIN_FACTOR = 0.12; // (tobillo.y - muñeca.y) en proporción al largo de tronco (hombro-cadera) — cuánto tiene que quedar la muñeca por ENCIMA del tobillo en la imagen.
-const BENCHDIP_BODY_ANGLE_MIN_DEG = 60;  // ángulo hombro-cadera-tobillo mínimo para contar como "en forma de L"
-const BENCHDIP_BODY_ANGLE_MAX_DEG = 120; // ángulo hombro-cadera-tobillo máximo para contar como "en forma de L" — por encima de esto ya es más un cuerpo estirado (flexión/plancha) que una L
-const BENCHDIP_BROKEN_STABLE_MS = 400; // cuánto tiempo seguido fuera de posición (manos ya no en alto, o cuerpo ya no en L) para dar la serie por rota y cerrarla — mismo valor/criterio que INCLINE_PUSHUP_BROKEN_STABLE_MS: aquí un falso positivo importa más que cortar por un parpadeo de la detección
+// ARREGLO tras la primera prueba real en cámara: feedback de Alex —
+// pidió relajar el ángulo de cuerpo ("si no forma una L perfecta no
+// pasa nada") y reportó que, con el cuerpo en una L correcta al bajar,
+// en cuanto se contaba la primera repetición y volvía a subir (brazos
+// rectos), la serie se cerraba sola justo después — mismo patrón que
+// el "cuenta 1, 1, 1..." que ya tuvo processDip en su día (ver el
+// bloque DIP_* de más arriba): al subir del todo la cadera se abre de
+// forma natural y variable de una persona a otra, así que exigirla
+// dentro de un rango estrecho para MANTENER la serie abierta cerraba
+// series reales por algo que no tiene nada que ver con romper la
+// postura de verdad. Arreglo: (B) deja de formar parte de inPosition
+// (ver más abajo, en processBenchDip) — se sigue calculando y
+// mostrando en el registro de depuración, por si hace falta revisar el
+// dato más adelante, pero ya no arma ni cierra la serie por sí solo. El
+// único gate real que queda es (A) — manos por encima de los pies —
+// tal y como pidió Alex: soltar las manos hacia el suelo, ponerte de
+// pie o salir del encuadre son ahora las formas de cerrar la serie.
+const BENCHDIP_BODY_ANGLE_MIN_DEG = 60;  // solo informativo (ver ARREGLO arriba): ángulo hombro-cadera-tobillo por debajo del cual ya no se parece a una L
+const BENCHDIP_BODY_ANGLE_MAX_DEG = 120; // solo informativo (ver ARREGLO arriba): ángulo hombro-cadera-tobillo por encima del cual ya es más un cuerpo estirado (flexión/plancha) que una L
+const BENCHDIP_BROKEN_STABLE_MS = 400; // cuánto tiempo seguido fuera de posición (manos ya no en alto) para dar la serie por rota y cerrarla — mismo valor/criterio que INCLINE_PUSHUP_BROKEN_STABLE_MS: aquí un falso positivo importa más que cortar por un parpadeo de la detección
 
 
 // Sentadillas: se cuentan por el ÁNGULO DE LA RODILLA (cadera-rodilla-tobillo),
@@ -3869,18 +3881,21 @@ class WorkoutSession {
   /**
    * Fondos en banco: mismo ángulo de codo que un fondo normal
    * (DIP_UP_ANGLE_DEG/DIP_DOWN_ANGLE_DEG) para contar la repetición,
-   * pero con la postura del ejercicio comprobada en directo — cuerpo en
-   * forma de L (BENCHDIP_BODY_ANGLE_MIN_DEG/MAX_DEG) y manos apoyadas
-   * por encima del nivel de los pies (BENCHDIP_HAND_RISE_MIN_FACTOR) —
-   * ver el bloque BENCHDIP_* de más arriba para el porqué del diseño,
-   * calcado del de processInclinePushup en vez del de processDip.
+   * con la postura comprobada en directo — manos apoyadas por encima
+   * del nivel de los pies (BENCHDIP_HAND_RISE_MIN_FACTOR) — ver el
+   * bloque BENCHDIP_* de más arriba para el porqué del diseño, calcado
+   * del de processInclinePushup en vez del de processDip, y para la
+   * nota "ARREGLO tras la primera prueba real" sobre por qué el ángulo
+   * de cuerpo (L) se quedó fuera de este gate.
    *
-   * La posición inicial (armado, "top": brazos rectos y cuerpo en L,
-   * sostenido un rato) es la que arma el contador y a la que hay que
-   * volver para que cuente cada repetición — igual que el resto de
-   * ejercicios de este archivo, no se cuenta ninguna repetición hasta
-   * no haber pasado primero por "abajo" (codo a 90°) y haber vuelto a
-   * esa posición inicial.
+   * La posición inicial (armado, "top": brazos rectos y manos por
+   * encima de los pies, sostenida un rato) es la que arma el contador
+   * y a la que hay que volver para que cuente cada repetición — igual
+   * que el resto de ejercicios de este archivo, no se cuenta ninguna
+   * repetición hasta no haber pasado primero por "abajo" (codo a 90°)
+   * y haber vuelto a esa posición inicial. La serie se cierra sola al
+   * romper esa postura (soltar las manos hacia el suelo), al ponerte
+   * de pie, o al salir del encuadre.
    */
   processBenchDip(lm, now) {
     if (this.state !== null && this.checkWaveGesture(lm, now)) {
@@ -3951,11 +3966,13 @@ class WorkoutSession {
     const torsoLength = Math.hypot(shoulder.x - hip.x, shoulder.y - hip.y);
     const handRise = torsoLength > 0 ? (ankle.y - wrist.y) / torsoLength : 0;
     const handsElevated = handRise >= BENCHDIP_HAND_RISE_MIN_FACTOR;
-    // "Cuerpo en forma de L", no en línea recta — ver el bloque
-    // BENCHDIP_* de más arriba sobre por qué el rango es alrededor de
-    // 90° y no un mínimo tipo PUSHUP_LINE_MIN_DEG.
+    // "Cuerpo en forma de L" — YA NO gatea nada (ver la nota "ARREGLO
+    // tras la primera prueba real", junto a BENCHDIP_BODY_ANGLE_MIN_DEG/
+    // MAX_DEG más arriba): se deja calculado solo para el registro de
+    // depuración, por si hace falta revisar el dato más adelante. El
+    // único gate real de postura es handsElevated.
     const bodyInL = bodyAngle >= BENCHDIP_BODY_ANGLE_MIN_DEG && bodyAngle <= BENCHDIP_BODY_ANGLE_MAX_DEG;
-    const inPosition = handsElevated && bodyInL;
+    const inPosition = handsElevated;
 
     this.pushupSide = useLeft ? "left" : "right";
 
@@ -3976,7 +3993,7 @@ class WorkoutSession {
         if (this.debugEl) {
           this.debugEl.textContent =
             `fuera de posición (manos sobre pies: ${(handRise * 100).toFixed(0)}% tronco, mínimo ` +
-            `${(BENCHDIP_HAND_RISE_MIN_FACTOR * 100).toFixed(0)}% · ángulo cuerpo: ${bodyAngle.toFixed(0)}° en L: ${bodyInL ? "sí" : "no"}) — se descarta este frame`;
+            `${(BENCHDIP_HAND_RISE_MIN_FACTOR * 100).toFixed(0)}% · ángulo cuerpo (informativo): ${bodyAngle.toFixed(0)}°) — se descarta este frame`;
         }
         return;
       }
