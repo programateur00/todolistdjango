@@ -97,10 +97,16 @@ class Task(models.Model):
     SUBCATEGORY_UPPER_BODY = "upper_body"
     SUBCATEGORY_LOWER_BODY = "lower_body"
     SUBCATEGORY_RUNNING = "running"
+    # Subtipo temporal para probar ejercicios de calentamiento/estiramiento
+    # por camara (jumping jacks, de momento) antes de decidir como se
+    # engancha de verdad (idea: quitar este subtipo suelto y meter estos
+    # ejercicios al principio/final de las tareas de Deporte en su lugar).
+    SUBCATEGORY_WARMUP = "warmup"
     SPORT_SUBCATEGORY_CHOICES = [
         (SUBCATEGORY_UPPER_BODY, "Tren superior"),
         (SUBCATEGORY_LOWER_BODY, "Tren inferior"),
         (SUBCATEGORY_RUNNING, "Running"),
+        (SUBCATEGORY_WARMUP, "Estiramientos y calentamientos"),
     ]
 
     # Subcategorías de "Enfoque": qué se está cronometrando. Todas

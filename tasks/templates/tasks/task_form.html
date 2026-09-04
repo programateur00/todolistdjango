@@ -397,7 +397,7 @@
         var esUdemy = v === 'study' && subSelValue === 'udemy';
         focusTargetField.style.display = (v === 'work' || esUdemy) ? 'block' : 'none';
         var esCarrera = sub === 'running';
-        var modosPorSub = { upper_body: ['camera', 'circuit', 'video'], lower_body: ['camera', 'circuit', 'video'] };
+        var modosPorSub = { upper_body: ['camera', 'circuit', 'video'], lower_body: ['camera', 'circuit', 'video'], warmup: ['camera'] };
         var modosValidos = modosPorSub[sub] || [];
 
         sportModeField.style.display = modosValidos.length ? 'block' : 'none';

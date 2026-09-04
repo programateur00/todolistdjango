@@ -21,7 +21,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-03-armado-estable-abdominales";
+const WORKOUT_JS_BUILD = "2026-09-04-jumpingjack-minrep-rapido";
 
 // Umbral de movimiento (proporcional al ancho de hombros) para
 // considerar que hay un cambio de estado real y no ruido de la cámara.
@@ -83,7 +83,7 @@ const OUT_OF_FRAME_STABLE_MS = 1200;
 // les aplica el cierre por salir del encuadre de arriba, y también el
 // cierre por ponerte de pie en el caso de los abdominales tumbado (ver
 // ON_GROUND_STABLE_MS más abajo).
-const GROUND_STYLE_COUNTERS = new Set(["squat", "crunch", "legraise", "situp", "scissor", "doublecrunch", "pushup", "dip", "inclinepushup", "dumbbellcurl"]);
+const GROUND_STYLE_COUNTERS = new Set(["squat", "crunch", "legraise", "situp", "scissor", "doublecrunch", "pushup", "dip", "inclinepushup", "dumbbellcurl", "jumpingjack"]);
 // Plancha / plancha lateral: a diferencia del resto de GROUND_STYLE_COUNTERS
 // (que cuentan repeticiones), aquí se cuenta TIEMPO aguantando la postura
 // — el cierre de serie no es "te has puesto de pie o has salido del
@@ -548,6 +548,45 @@ const SQUAT_MIN_VISIBILITY = 0.4;
 // que calibrar", pero armar el contador SÍ necesita esta estabilidad,
 // sea cual sea el ejercicio.
 const SQUAT_ARM_STABLE_MS = 500;
+
+// -- Jumping jacks (calentamiento, subtipo de prueba) -------------------
+// Ejercicio DE FRENTE a la camara (a diferencia de sentadillas/fondos,
+// que van de perfil) y simetrico izquierda-derecha, asi que no hace
+// falta elegir un lado como en processSquat. Se cuenta un ciclo cerrado
+// (brazos pegados al cuerpo, pies juntos) -> abierto (brazos por encima
+// de la cabeza, piernas separadas) -> cerrado, contando la repeticion al
+// volver a cerrar (mismo patron que sentadillas: se cuenta al VOLVER a
+// la posicion de partida, no al abrir). Referencia de escala: el ancho
+// de hombros, igual que el resto del fichero (MOVE_FACTOR,
+// HANG_MARGIN_FACTOR...) para que el umbral no dependa de la distancia
+// a la camara.
+const JUMPINGJACK_MIN_VISIBILITY = 0.3; // visibilidad media de hombros+caderas+munecas+tobillos exigida para fiarse del frame -- bajado de 0.4: saltando de verdad (movimiento rapido de todo el cuerpo) la confianza de MediaPipe en munecas y tobillos baja por el propio movimiento (motion blur), no porque hayas salido del encuadre; con 0.4 se perdian frames en pleno salto (ver JUMPINGJACK_OUT_OF_FRAME_MS para el otro lado de este mismo problema)
+const JUMPINGJACK_ARMS_UP_MARGIN_FACTOR = 0.15;   // cuanto por encima del hombro tienen que estar las munecas para contar "brazos arriba" (proporcional al ancho de hombros)
+const JUMPINGJACK_ARMS_DOWN_MARGIN_FACTOR = 0.1;  // cuanto como mucho por encima del hombro para contar "brazos abajo/pegados al cuerpo"
+const JUMPINGJACK_LEGS_OPEN_RATIO = 1.6;  // los tobillos tienen que estar al menos esto de veces mas separados que la cadera para contar "piernas abiertas"
+const JUMPINGJACK_LEGS_CLOSED_RATIO = 1.3; // como mucho esto de veces mas separados que la cadera para contar "piernas juntas" -- subido de 1.15: de pie de forma normal (sin pegar los pies a proposito) el ratio real ya anda cerca de 1.15-1.3, asi que exigir <1.15 en TODOS los frames de forma continua (sin margen de ruido, ver JUMPINGJACK_ARM_NOISE_TOLERANCE_MS) tardaba muchisimo en armar, o incluso no llegaba a armar
+const JUMPINGJACK_ARM_STABLE_MS = 500; // tiempo quieto en posicion cerrada para armar el contador (mismo patron que SQUAT_ARM_STABLE_MS)
+const JUMPINGJACK_STILL_MS = 2000; // sin abrir ni cerrar (ni un medio-ciclo) durante esto: se interpreta que has parado y se cierra la serie sola -- sustituye a checkWaveGesture aqui, ver la nota junto a processJumpingJack
+const JUMPINGJACK_OPEN_STABLE_MS = 150; // "piernas abiertas" tiene que sostenerse esto seguido antes de contarlo como el inicio de un salto -- filtra un roce/ruido de un frame suelto (occlusion, un tropiezo) sin estar saltando; ver la nota junto a processJumpingJack sobre la serie fantasma reportada
+const JUMPINGJACK_FIRST_JUMP_GRACE_MS = 6000; // margen (desde que se arma) antes de que el primer salto cuente como "te has quedado quieto" -- tiene que cubrir el tiempo que tarda en decirse el aviso hablado "Listo!..." (unos 2-3s) MAS el tiempo de reaccion para empezar a saltar; ver la nota junto al bloque de armado en processJumpingJack
+const JUMPINGJACK_ARM_NOISE_TOLERANCE_MS = 200; // al armar (posicion cerrada quieta), un frame suelto que NO cumple armsDown/legsClosed (parpadeo del tracking, no un movimiento real) se tolera hasta esto sin reiniciar el cronometro de estabilidad -- de pie de forma normal el ratio de piernas ya baila por ruido de deteccion, y sin esta tolerancia cualquier parpadeo aislado reiniciaba jjArmStableSince entero y el armado no terminaba nunca de completarse
+const JUMPINGJACK_OUT_OF_FRAME_MS = 3000; // cuanto tiempo sin verte bien (vis < JUMPINGJACK_MIN_VISIBILITY) hace falta para cerrar la serie por ausencia -- mas largo que el OUT_OF_FRAME_STABLE_MS generico (1200ms) porque saltando de verdad es normal encadenar varios frames de visibilidad baja seguidos por el propio movimiento; reportado: con el umbral generico la serie se cerraba sola (0 repeticiones, en silencio) a mitad de una tanda de saltos reales
+const JUMPINGJACK_MIN_REP_SECONDS = 0.12; // sustituye al MIN_REP_SECONDS generico (0.3s) SOLO para jumping jacks -- repStartTime se marca ya DESPUES del debounce de apertura (JUMPINGJACK_OPEN_STABLE_MS, 150ms), que es el que de verdad filtra el ruido de un frame suelto; exigir encima 0.3s completos de duracion de "repeticion" descartaba saltos reales rapidos como si fueran ruido -- reportado explicitamente: a partir de cierto punto, yendo mas rapido, dejaban de contarse repeticiones sueltas (confirmado en el registro: aperturas reales de ~0.25-0.3s de duracion, sin ningun aviso de "Jumping jack N")
+// NOTA sobre un intento anterior descartado: hubo una version que daba a
+// "brazos arriba/abajo" y "piernas abiertas/juntas" una ventana de
+// tiempo (creerselos "recientes" un rato) para tolerar que brazos y
+// piernas no lleguen a su extremo en el mismo frame exacto durante un
+// salto rapido. Se quito: esa ventana podia dejar "piernas abiertas" Y
+// "piernas juntas" contados como ciertos A LA VEZ (uno de hace un
+// instante, otro del frame actual) sin que en NINGUN instante real lo
+// fueran las dos -- eso hacia que el estado oscilara solo entre
+// open/closed varias veces por segundo, reiniciando repStartTime en
+// cada oscilacion y descartando la repeticion real siguiente por
+// "demasiado rapida" (MIN_REP_SECONDS). Visto en el registro: reportado
+// como "de 15 saltos solo cuenta 12". El diseno de abajo (piernas
+// como unica senal de abrir/cerrar, brazos solo como "algun frame
+// arriba durante esta apertura") evita el problema de raiz sin
+// necesitar ninguna ventana de tiempo.
 
 // ── Abdominales tumbado (crunch, elevación de piernas, abdominal
 // completo) ──────────────────────────────────────────────────────────
@@ -1702,7 +1741,7 @@ function formatHoldSeconds(totalSeconds) {
 // pedido), y no hay techo duro: si algún día alguien encadena más de
 // 99 reps en una sola serie, se lee el número tal cual como último
 // recurso, pero eso ya no es un caso realista.
-const UNIDADES_ES = ["", "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve"];
+const UNIDADES_ES = ["cero", "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve"];
 const ESPECIALES_ES = {
   10: "diez", 11: "once", 12: "doce", 13: "trece", 14: "catorce", 15: "quince",
   16: "dieciséis", 17: "diecisiete", 18: "dieciocho", 19: "diecinueve",
@@ -2390,6 +2429,20 @@ class WorkoutSession {
       this.squatKneeAngle = null;
       this.squatArmStableSince = null;
       this.setStatus("Ponte de perfil a la cámara, de pie, para empezar.");
+    } else if (this.counterKey === "jumpingjack") {
+      // Tampoco hay nada que calibrar: los umbrales son proporcionales
+      // al ancho de hombros/cadera, no dependen de la distancia a la
+      // cámara. Solo hace falta esperar a verte de pie con los brazos
+      // pegados al cuerpo y los pies juntos, para no contar media
+      // repetición al entrar.
+      this.prepping = false;
+      this.state = null;
+      this.jjArmStableSince = null;
+      this.jjArmBadSince = null;
+      this.jjLastTransitionAt = null;
+      this.jjArmsUpSeenThisRep = false;
+      this.jjLegsOpenSince = null;
+      this.setStatus("Ponte de pie, de frente a la cámara, con los brazos pegados al cuerpo y los pies juntos, para empezar.");
     } else if (this.counterKey === "crunch") {
       // Tampoco hay nada que calibrar: se mide el hombro frente a la
       // cadera, en proporción al muslo — ningún valor depende de la
@@ -2666,11 +2719,17 @@ class WorkoutSession {
     // repetición de verdad, así que el descanso ya ha terminado por
     // definición (ver countRep, que además pone restVoiceQuiet a false
     // justo antes de llamar aquí).
+    //
+    // Se probó a anunciar jumping jacks solo cada varias repeticiones
+    // (la voz se queda atrás a ritmo rápido) pero se pidió explícitamente
+    // volver a decir todas — se prefiere la voz atrasada a que cuente de
+    // 5 en 5. El contador en pantalla (repsEl, en countRep) de todas
+    // formas no tiene ese problema: se actualiza al instante, sin voz.
     speakOut(numeroEnPalabras(n), { rate: 1.1 }); // un poco más rápido que el habla normal, para no quedarse atrás
   }
 
-  countRep(duration, now, label) {
-    if (duration < MIN_REP_SECONDS) return false;   // ruido, no cuenta
+  countRep(duration, now, label, minSeconds = MIN_REP_SECONDS) {
+    if (duration < minSeconds) return false;   // ruido, no cuenta
     if (this.currentSetReps === 0 && this.setClosedAt !== null && now - this.setClosedAt < MIN_REST_MS) {
       // Descanso obligatorio en curso: aunque te coloques y te muevas
       // antes de tiempo, esto NO cuenta como repetición — antes sí se
@@ -3803,6 +3862,192 @@ class WorkoutSession {
   }
 
   /**
+   * Jumping jacks — DE FRENTE a la cámara, ciclo cerrado (brazos pegados
+   * al cuerpo, pies juntos) -> abierto (brazos por encima de la cabeza,
+   * piernas separadas) -> cerrado, contando la repetición al volver a
+   * cerrar (ver el bloque JUMPINGJACK_* de más arriba para el porqué de
+   * cada umbral).
+   *
+   * A diferencia del resto de GROUND_STYLE_COUNTERS, aquí NO se usa
+   * checkWaveGesture para cerrar la serie a mano: levantar un brazo es
+   * parte del propio gesto del ejercicio (los dos brazos suben en cada
+   * repetición), así que cualquier repetición se podía confundir con
+   * "quiero terminar" y cerraba la serie sola en pleno calentamiento —
+   * reportado explícitamente. En su lugar, la serie se cierra si te
+   * quedas JUMPINGJACK_STILL_MS sin completar ningún medio-ciclo
+   * (ni abrir ni volver a cerrar) — pararte es la señal de que has
+   * terminado, igual que se le pide al usuario en groundWaitingMessage.
+   */
+  processJumpingJack(lm, now) {
+    const lShoulder = lm[L_SHOULDER], rShoulder = lm[R_SHOULDER];
+    const lHip = lm[L_HIP], rHip = lm[R_HIP];
+    const lWrist = lm[L_WRIST], rWrist = lm[R_WRIST];
+    const lAnkle = lm[L_ANKLE], rAnkle = lm[R_ANKLE];
+
+    const vis = (
+      (lShoulder.visibility ?? 1) + (rShoulder.visibility ?? 1) +
+      (lHip.visibility ?? 1) + (rHip.visibility ?? 1) +
+      (lWrist.visibility ?? 1) + (rWrist.visibility ?? 1) +
+      (lAnkle.visibility ?? 1) + (rAnkle.visibility ?? 1)
+    ) / 8;
+
+    if (vis < JUMPINGJACK_MIN_VISIBILITY) {
+      this.announceStatus("No se te ve bien de cuerpo entero. Ponte de frente a la cámara, con hombros, caderas, muñecas y tobillos en el encuadre.");
+      if (this.debugEl) this.debugEl.textContent = "buscando cuerpo entero de frente…";
+      // JUMPINGJACK_OUT_OF_FRAME_MS (no el generico OUT_OF_FRAME_STABLE_MS):
+      // saltando de verdad esto tambien se dispara sin haberte ido a
+      // ningun lado (motion blur en munecas/tobillos durante el propio
+      // salto), asi que hace falta mas margen antes de dar la serie por
+      // terminada -- ver la nota junto a esa constante.
+      this.noteAbsence(now, JUMPINGJACK_OUT_OF_FRAME_MS);
+      return;
+    }
+    this.outOfFrameSince = null;
+
+    // La primera vez en toda la sesión que se te ve bien, un aviso de
+    // que ya puedes empezar — en las siguientes series no hace falta
+    // repetirlo (mismo patrón que processSquat/processDip).
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Cuerpo entero a la vista. ¡Listo! Ya puedes empezar. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
+        "startup_ready"
+      );
+    }
+
+    // Parar de moverse (ni abrir ni cerrar) JUMPINGJACK_STILL_MS seguidos
+    // es la señal de que has terminado la serie — ver la nota de más
+    // arriba sobre por qué esto sustituye a checkWaveGesture aquí.
+    if (this.state !== null && this.jjLastTransitionAt !== null && now - this.jjLastTransitionAt >= JUMPINGJACK_STILL_MS) {
+      this.closeActiveSet();
+      return;
+    }
+
+    const shoulderWidth = Math.hypot(lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y);
+    const hipWidth = Math.hypot(lHip.x - rHip.x, lHip.y - rHip.y);
+    const ankleWidth = Math.hypot(lAnkle.x - rAnkle.x, lAnkle.y - rAnkle.y);
+    if (!shoulderWidth || !hipWidth) return;
+
+    const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
+    const wristMidY = (lWrist.y + rWrist.y) / 2;
+
+    const armsUpNow = wristMidY < shoulderMidY - JUMPINGJACK_ARMS_UP_MARGIN_FACTOR * shoulderWidth;
+    const armsDownNow = wristMidY > shoulderMidY - JUMPINGJACK_ARMS_DOWN_MARGIN_FACTOR * shoulderWidth;
+    const legsOpenNow = ankleWidth > hipWidth * JUMPINGJACK_LEGS_OPEN_RATIO;
+    const legsClosedNow = ankleWidth < hipWidth * JUMPINGJACK_LEGS_CLOSED_RATIO;
+
+    if (this.state === null) {
+      // Para armar hay que confirmar que estás DE VERDAD quieto en la
+      // posición cerrada, estable durante JUMPINGJACK_ARM_STABLE_MS —
+      // igual que sentadillas. Reportado: de pie de forma normal (sin
+      // pegar los pies a propósito) el tracking de MediaPipe ya hace que
+      // el ratio de piernas parpadee solo entre "juntas"/"a medio" de
+      // vez en cuando, y antes CUALQUIER frame que no cumpliera del todo
+      // reiniciaba el cronómetro entero — el armado podía tardar 10-15s
+      // o no completarse nunca. Ahora un parpadeo aislado (hasta
+      // JUMPINGJACK_ARM_NOISE_TOLERANCE_MS seguidos) no cuenta como que
+      // te has movido de verdad; solo se reinicia el cronómetro si el
+      // frame "malo" se sostiene más que eso.
+      if (armsDownNow && legsClosedNow) {
+        this.jjArmBadSince = null;
+        if (this.jjArmStableSince === null) this.jjArmStableSince = now;
+        if (now - this.jjArmStableSince >= JUMPINGJACK_ARM_STABLE_MS) {
+          this.state = "closed";
+          this.jjArmStableSince = null;
+          // OJO: no se pone a "now" sin más. Reportado: la serie se
+          // cerraba sola ANTES de dar tiempo a saltar ni una vez —
+          // causa: el aviso hablado "¡Listo!..." tarda unos 2-3s en
+          // decirse, y el reloj de "llevas quieto JUMPINGJACK_STILL_MS"
+          // arrancaba en el mismo instante que empezaba a sonar, no
+          // cuando terminaba — para cuando de verdad podías reaccionar
+          // y saltar, el margen de 2s ya casi se había ido entero. Aquí
+          // se adelanta el reloj artificialmente para dar
+          // JUMPINGJACK_FIRST_JUMP_GRACE_MS de margen SOLO en este
+          // primer salto (una vez ya estás saltando, entre repetición y
+          // repetición sí vale el JUMPINGJACK_STILL_MS normal, más
+          // ajustado, para cerrar la serie pronto cuando de verdad
+          // paras).
+          this.jjLastTransitionAt = now + (JUMPINGJACK_FIRST_JUMP_GRACE_MS - JUMPINGJACK_STILL_MS);
+          this.announceStatus("¡Listo! Abre brazos y piernas a la vez y vuelve a cerrar.", "ready_to_go");
+        } else {
+          this.setStatus("Pies juntos, brazos pegados al cuerpo… confirmando (no te muevas)");
+        }
+      } else {
+        if (this.jjArmStableSince !== null) {
+          // Ya estábamos acumulando estabilidad -- puede ser un parpadeo
+          // de un frame suelto. Solo se tira todo el progreso si el
+          // frame "malo" persiste más que la tolerancia de ruido.
+          if (this.jjArmBadSince === null) this.jjArmBadSince = now;
+          if (now - this.jjArmBadSince >= JUMPINGJACK_ARM_NOISE_TOLERANCE_MS) {
+            this.jjArmStableSince = null;
+            this.jjArmBadSince = null;
+          }
+        }
+        this.setStatus("Ponte de pie, de frente a la cámara, con los brazos pegados al cuerpo y los pies juntos, para empezar.");
+      }
+    } else if (this.state === "closed") {
+      // Las PIERNAS son la única señal que decide abrir/cerrar (igual de
+      // simple que el ángulo de rodilla en sentadillas) — el hueco entre
+      // JUMPINGJACK_LEGS_OPEN_RATIO y JUMPINGJACK_LEGS_CLOSED_RATIO ya da
+      // la histéresis necesaria, sin depender de que los brazos se lean
+      // exactamente en el mismo frame.
+      //
+      // Reportado: se contó una serie entera sin haber saltado. Causa
+      // más probable: un solo frame ruidoso (oclusión de un tobillo,
+      // un roce al ajustarte la postura) leído como "piernas abiertas"
+      // de golpe, sin estar saltando de verdad. Por eso aquí SÍ se exige
+      // que "piernas abiertas" se sostenga JUMPINGJACK_OPEN_STABLE_MS
+      // seguidos antes de dar el salto por empezado — un salto real lo
+      // cumple de sobra (las piernas están arriba de ese umbral bastante
+      // más que eso), un parpadeo de un frame suelto no.
+      if (legsOpenNow) {
+        if (this.jjLegsOpenSince === null) this.jjLegsOpenSince = now;
+        if (now - this.jjLegsOpenSince >= JUMPINGJACK_OPEN_STABLE_MS) {
+          this.state = "open";
+          this.jjLastTransitionAt = now;
+          this.jjArmsUpSeenThisRep = armsUpNow; // por si ya suben en el mismo frame que las piernas
+          this.repStartTime = now; // la repetición empieza al abrir (momento real de apertura, no cuando se confirma)
+          this.jjLegsOpenSince = null;
+        }
+      } else {
+        this.jjLegsOpenSince = null;
+      }
+    } else {
+      // state === "open": los brazos solo se comprueban como "¿han
+      // estado arriba EN ALGÚN MOMENTO de esta apertura?", no en el
+      // frame exacto del cierre — en un salto rápido, el pico de brazos
+      // y el de piernas casi nunca caen en el mismo frame capturado, y
+      // exigir coincidencia exacta perdía repeticiones (reportado: "de
+      // 15 saltos solo cuenta 12" — ver la nota junto a las constantes
+      // JUMPINGJACK_* de más arriba sobre el intento anterior con una
+      // ventana de tiempo, que era peor: podía contar "abierto" y
+      // "cerrado" a la vez y disparaba cierres de serie fantasma).
+      if (armsUpNow) this.jjArmsUpSeenThisRep = true;
+      if (legsClosedNow) {
+        this.jjLastTransitionAt = now;
+        if (this.jjArmsUpSeenThisRep) {
+          // minSeconds mas bajo que el generico MIN_REP_SECONDS (0.3s):
+          // repStartTime se marca DESPUES de exigir JUMPINGJACK_OPEN_STABLE_MS
+          // (150ms) de piernas abiertas sostenidas, o sea que un salto real
+          // rapido puede medir bastante menos de 0.3s desde ahi hasta volver a
+          // cerrar sin ser ruido -- el propio debounce de apertura ya filtra los
+          // parpadeos de un frame suelto, asi que aqui hace falta menos margen.
+          // Reportado: yendo rapido, a partir de cierto punto dejaba de contar
+          // repeticiones sueltas -- duracion por debajo de 0.3s.
+          this.countRep((now - this.repStartTime) / 1000, now, "Jumping jack", JUMPINGJACK_MIN_REP_SECONDS);
+        }
+        this.state = "closed";
+        this.jjArmsUpSeenThisRep = false;
+      }
+    }
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `piernas: ${legsOpenNow ? "abiertas" : legsClosedNow ? "juntas" : "medio"} | brazos arriba vistos en esta apertura: ${this.jjArmsUpSeenThisRep ? "sí" : "no"} | estado: ${this.state ?? "esperando"} | quieto desde hace: ${this.jjLastTransitionAt ? Math.round(now - this.jjLastTransitionAt) + "ms" : "-"}`;
+    }
+  }
+
+  /**
    * Mensaje de "vuelve a colocarte" propio de cada ejercicio de este
    * grupo (sentadillas y los tres abdominales tumbado) — usado tanto al
    * esperar la primera vez como al reabrir tras cerrar una serie.
@@ -3817,6 +4062,8 @@ class WorkoutSession {
         return "Túmbate boca arriba del todo para empezar.";
       case "squat":
         return "Ponte de pie, de perfil a la cámara, para empezar.";
+      case "jumpingjack":
+        return "Ponte de pie, de frente a la cámara, con los brazos pegados al cuerpo y los pies juntos, para empezar.";
       case "scissor":
         return "Túmbate boca arriba y levanta los pies a un palmo del suelo para empezar.";
       case "doublecrunch":
@@ -3937,10 +4184,15 @@ class WorkoutSession {
    * Si se mantiene un rato seguido (OUT_OF_FRAME_STABLE_MS, más largo
    * que un simple parpadeo de la detección), se interpreta como que te
    * has salido del encuadre a propósito y se cierra la serie en curso.
+   *
+   * thresholdMs es opcional (por defecto OUT_OF_FRAME_STABLE_MS) -- lo
+   * usa jumping jacks con JUMPINGJACK_OUT_OF_FRAME_MS, más largo, porque
+   * ahí la visibilidad baja también salta sola en pleno movimiento rápido
+   * (motion blur), no solo al salirte de verdad del encuadre.
    */
-  noteAbsence(now) {
+  noteAbsence(now, thresholdMs = OUT_OF_FRAME_STABLE_MS) {
     if (this.outOfFrameSince === null) this.outOfFrameSince = now;
-    if (now - this.outOfFrameSince >= OUT_OF_FRAME_STABLE_MS) {
+    if (now - this.outOfFrameSince >= thresholdMs) {
       this.closeActiveSet();
     }
   }
@@ -4053,7 +4305,7 @@ class WorkoutSession {
       } else if (!this.postureGoalAnnouncedThisHold) {
         this.postureGoalAnnouncedThisHold = true;
         this.postureCountdownLastSecond = 0;
-        this.speak("¡Objetivo cumplido!", { flush: false });
+        this.speak(numeroEnPalabras(0), { flush: true });
         if (this.goalBannerEl) {
           this.goalBannerEl.hidden = false;
           this.goalBannerEl.textContent = `🎯 ¡Objetivo cumplido! (${formatHoldSeconds(this.targetSeconds)}) Sigue si quieres, o termina cuando acabes.`;
@@ -5737,6 +5989,10 @@ class WorkoutSession {
     }
     if (this.counterKey === "squat") {
       this.processSquat(lm, now);
+      return;
+    }
+    if (this.counterKey === "jumpingjack") {
+      this.processJumpingJack(lm, now);
       return;
     }
     if (this.counterKey === "crunch") {

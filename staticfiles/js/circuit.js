@@ -341,7 +341,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         goalReached = true;
         lastSpokenNumber = 0;
         beep(880, 0.2);
-        if (isVoiceEnabled()) speakOut("¡Objetivo cumplido!", { flush: false });
+        if (isVoiceEnabled()) speakOut(numeroEnPalabras(0), { flush: true });
         if (goalBannerEl) {
           goalBannerEl.hidden = false;
           goalBannerEl.textContent = `🎯 ¡Objetivo cumplido! (${fmt(item.work)}) Sigue si quieres, o termina cuando acabes.`;

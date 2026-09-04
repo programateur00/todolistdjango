@@ -92,6 +92,7 @@ LABELS = {
     "handstand": "Handstand", "archer-pullup": "Dominadas de arquero",
     "incline-push-up": "Flexiones inclinadas",
     "dumbbell-curl": "Curl con mancuernas",
+    "jumping-jack": "Jumping Jacks",
 }
 
 

@@ -74,7 +74,10 @@
                 {% if task.workout_kind == "auto" or task.workout_kind == "distance" %}
                 {# Correr y Curso de Udemy: sin iconos de ningún tipo — se completan solas al #}
                 {# llegar al objetivo, y si no se cumple, se resuelven como no hechas ellas #}
-                {# solas a la hora límite (ver Task.mark_expired). Nada que pulsar aquí. #}
+                {# solas a la hora límite (ver Task.mark_expired). Nada que pulsar aquí, pero #}
+                {# se reserva el mismo ancho que las demás tarjetas para que el título quede #}
+                {# alineado con el resto de la lista. #}
+                <span class="task-card__actions-spacer" aria-hidden="true"></span>
                 {% elif task.workout_kind %}
                 <a href="{% if task.workout_kind == 'focus' %}{% url 'tasks:task_focus' task.pk %}{% elif task.workout_kind == 'video' %}{% url 'tasks:task_video' task.pk %}{% else %}{% url 'tasks:task_workout' task.pk %}{% endif %}" class="workout-btn"
                    title="{% if task.workout_kind == 'camera' %}Contar repeticiones con la cámara{% elif task.workout_kind == 'timer' %}Empezar circuito cronometrado{% elif task.workout_kind == 'focus' %}Empezar temporizador{% elif task.workout_kind == 'video' %}Ver el vídeo{% else %}Anotar la sesión{% endif %}">

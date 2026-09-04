@@ -230,6 +230,7 @@ button { font-family:var(--font-b); cursor:pointer; }
 }
 
 .task-card__actions { display:flex; gap:4px; flex-shrink:0; }
+.task-card__actions-spacer { width:68px; flex-shrink:0; }
 
 .check-btn { width:34px; height:34px; border-radius:50%; border:1.6px solid var(--line);
   background:var(--ash); display:flex; align-items:center; justify-content:center;
