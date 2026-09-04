@@ -63,6 +63,11 @@ STATIC = {"plank", "side-plank", "wall-sit", "kneehold-bar"}
 #     en el suelo — la silueta no distingue la altura de apoyo de los
 #     pies, así que reutiliza esa silueta.
 #
+#   - bench-dip: mismo gesto de flexión de codo que dips, solo que con
+#     las manos apoyadas en un banco/silla en vez de en paralelas y los
+#     pies en el suelo (cuerpo en forma de L) — misma familia de
+#     movimiento, así que reutiliza esa silueta, igual que weighted-dips.
+#
 # handstand (el pino) NO tiene alias: ninguna silueta de Everkinetic que
 # tenemos (todas de pie o tumbadas) se parece a un cuerpo invertido, así
 # que cae al hueco discreto de solo texto en vez de tomar prestado un
@@ -79,6 +84,7 @@ ALIAS = {
     "kneehold-bar": "pullup",
     "archer-pullup": "pullup",
     "incline-push-up": "push-up",
+    "bench-dip": "dips",
 }
 
 LABELS = {
@@ -93,6 +99,7 @@ LABELS = {
     "incline-push-up": "Flexiones inclinadas",
     "dumbbell-curl": "Curl con mancuernas",
     "jumping-jack": "Jumping Jacks",
+    "bench-dip": "Fondos en banco",
 }
 
 

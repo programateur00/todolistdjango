@@ -108,6 +108,7 @@ _EXERCISE_DIFFICULTY = {
     "push-up": "beginner",
     "jumping-pullup": "beginner",
     "incline-push-up": "beginner",
+    "bench-dip": "beginner",
     "dumbbell-curl": "beginner",
     "chinup": "beginner",       # dominadas supinas — agarre más asistido por el bíceps
     "dips": "intermediate",

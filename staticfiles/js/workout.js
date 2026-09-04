@@ -83,7 +83,7 @@ const OUT_OF_FRAME_STABLE_MS = 1200;
 // les aplica el cierre por salir del encuadre de arriba, y también el
 // cierre por ponerte de pie en el caso de los abdominales tumbado (ver
 // ON_GROUND_STABLE_MS más abajo).
-const GROUND_STYLE_COUNTERS = new Set(["squat", "crunch", "legraise", "situp", "scissor", "doublecrunch", "pushup", "dip", "inclinepushup", "dumbbellcurl", "jumpingjack"]);
+const GROUND_STYLE_COUNTERS = new Set(["squat", "crunch", "legraise", "situp", "scissor", "doublecrunch", "pushup", "dip", "inclinepushup", "dumbbellcurl", "jumpingjack", "benchdip"]);
 // Plancha / plancha lateral: a diferencia del resto de GROUND_STYLE_COUNTERS
 // (que cuentan repeticiones), aquí se cuenta TIEMPO aguantando la postura
 // — el cierre de serie no es "te has puesto de pie o has salido del
@@ -544,6 +544,65 @@ const CURL_REST_WARN_MS = 2000; // a partir de aquí se avisa en pantalla de la 
 // PUSHUP_MIN_VISIBILITY, PUSHUP_LINE_MIN_DEG, ON_GROUND_STABLE_MS).
 const INCLINE_PUSHUP_MIN_FOOT_RISE_FACTOR = 0.12; // (muñeca.y - tobillo.y) en proporción al largo de tronco (hombro-cadera) — cuánto tiene que quedar el tobillo por ENCIMA de la muñeca en la imagen. Valor de partida, sin probar en cámara real: si cuesta armar con los pies solo un poco elevados, bajarlo; si sigue colándose una flexión plana, subirlo.
 const INCLINE_PUSHUP_BROKEN_STABLE_MS = 400; // cuánto tiempo seguido fuera de posición (pies ya no en alto, o cuerpo encogido) para dar la serie por rota y cerrarla — más corto que PUSHUP_BREAK_STABLE_MS (1000ms) a propósito: aquí un falso positivo importa más que cortar por un parpadeo de la detección
+
+// ── Fondos en banco (bench dip) ─────────────────────────────────────
+// A petición de Alex: variante de fondos donde, en vez de paralelas,
+// las manos se apoyan detrás del cuerpo en una superficie elevada (un
+// banco, una silla, el borde de un sofá) y los pies se apoyan en el
+// suelo por delante — el cuerpo entero forma una "L": el tronco
+// prácticamente vertical y las piernas estiradas hacia delante,
+// prácticamente horizontales, con la cadera en el vértice de la L.
+//
+// Mismo gesto de brazo que un fondo normal: el codo se dobla hasta
+// ~90° y vuelve a estirarse para contar la repetición (se reutilizan
+// DIP_UP_ANGLE_DEG/DIP_DOWN_ANGLE_DEG, arriba — misma familia "fondos",
+// mismo criterio "~90°" pedido).
+//
+// A diferencia de processDip (paralelas, de pie, con toda su lógica de
+// calibración de altura de hombro/cadera — ver el bloque DIP_* de más
+// arriba y los muchos bugs reales que fue arreglando), aquí NO hace
+// falta calibrar nada: la postura se puede comprobar en DIRECTO en cada
+// frame con dos comparaciones de landmarks, sin aprender ninguna
+// referencia de pie primero. Se sigue el mismo patrón que
+// processInclinePushup (ver el bloque INCLINE_PUSHUP_* de más arriba)
+// en vez del de processDip:
+//
+//  A) "Manos por encima de los pies" — a petición explícita de Alex
+//     ("los brazos tienen que estar rectos y tienen que estar a un
+//     nivel por encima de los pies"): la MUÑECA tiene que quedar
+//     claramente por ENCIMA del TOBILLO en la imagen (Y crece hacia
+//     abajo, así que muñeca.y < tobillo.y con margen — ver
+//     BENCHDIP_HAND_RISE_MIN_FACTOR). Es la comparación CONTRARIA a la
+//     de flexiones inclinadas (allí el tobillo tenía que estar por
+//     encima de la muñeca — pies en alto, manos en el suelo; aquí es al
+//     revés — manos en alto, pies en el suelo), normalizada igual, por
+//     el largo de tronco (hombro-cadera) del frame actual.
+//
+//  B) "Cuerpo en forma de L" — el ángulo hombro-cadera-tobillo tiene que
+//     quedar cerca de 90°, NO cerca de 180° como en una flexión o una
+//     plancha (cuerpo estirado en línea recta): eso es precisamente lo
+//     que distingue un fondo en banco de, por ejemplo, tumbarte con las
+//     manos elevadas. Rango con margen (BENCHDIP_BODY_ANGLE_MIN_DEG /
+//     BENCHDIP_BODY_ANGLE_MAX_DEG) en vez de exigir 90° exactos, porque
+//     ni la cadera queda siempre a la misma altura entre gente distinta
+//     ni la cámara mide el ángulo con precisión perfecta.
+//
+// Igual que en flexiones inclinadas, la postura (A + B, "en posición")
+// se comprueba en TODOS los frames mientras la serie está armada, no
+// solo al principio — así un gesto suelto de brazo nunca se puede colar
+// como repetición, y salir de la postura (levantarte, sentarte del
+// todo) cierra la serie sola (BENCHDIP_BROKEN_STABLE_MS).
+//
+// Primera versión, sin probar todavía en cámara real (igual que
+// flexiones inclinadas en su día): si cuesta armar o se cuelan
+// repeticiones sueltas, lo primero es revisar estos dos números con un
+// registro real, no las constantes de ángulo de codo (esas ya están
+// probadas en fondos normales).
+const BENCHDIP_HAND_RISE_MIN_FACTOR = 0.12; // (tobillo.y - muñeca.y) en proporción al largo de tronco (hombro-cadera) — cuánto tiene que quedar la muñeca por ENCIMA del tobillo en la imagen.
+const BENCHDIP_BODY_ANGLE_MIN_DEG = 60;  // ángulo hombro-cadera-tobillo mínimo para contar como "en forma de L"
+const BENCHDIP_BODY_ANGLE_MAX_DEG = 120; // ángulo hombro-cadera-tobillo máximo para contar como "en forma de L" — por encima de esto ya es más un cuerpo estirado (flexión/plancha) que una L
+const BENCHDIP_BROKEN_STABLE_MS = 400; // cuánto tiempo seguido fuera de posición (manos ya no en alto, o cuerpo ya no en L) para dar la serie por rota y cerrarla — mismo valor/criterio que INCLINE_PUSHUP_BROKEN_STABLE_MS: aquí un falso positivo importa más que cortar por un parpadeo de la detección
+
 
 // Sentadillas: se cuentan por el ÁNGULO DE LA RODILLA (cadera-rodilla-tobillo),
 // no por la altura de la nariz como en fondos. Un ángulo no depende de lo
@@ -2460,6 +2519,25 @@ class WorkoutSession {
         "Túmbate boca abajo, de perfil a la cámara, con los brazos estirados, las manos a la altura del " +
         "pecho y los codos pegados al cuerpo (mirando hacia atrás), para empezar."
       );
+    } else if (this.counterKey === "benchdip") {
+      // Tampoco hay nada que calibrar: ni el ángulo de codo ni las
+      // comprobaciones de postura (manos sobre pies, ángulo de cuerpo
+      // en L) dependen de la distancia a la cámara. Solo hace falta
+      // confirmarte en la posición INICIAL (brazos rectos, cuerpo en
+      // L, manos por encima de los pies) antes de empezar a contar —
+      // ver processBenchDip. A propósito this.state = null (no
+      // "down"): no se cuenta ninguna repetición hasta que no te vea
+      // de verdad en esa posición inicial primero.
+      this.prepping = false;
+      this.state = null;
+      this.pushupSide = null;
+      this.groundStableSince = null;
+      this.offGroundSince = null;
+      this.setStatus(
+        "Siéntate en el borde de un banco o silla, apoya las manos a los lados con los brazos rectos, " +
+        "estira las piernas hacia delante con los pies en el suelo, y baja la cadera hasta formar una L " +
+        "con el cuerpo, de perfil a la cámara, para empezar."
+      );
     } else if (this.counterKey === "squat") {
       // Tampoco hay barra que calibrar aquí: el ángulo de rodilla no
       // depende de la distancia a la cámara. Solo hace falta esperar a
@@ -2692,7 +2770,7 @@ class WorkoutSession {
         drawArm(lm[R_SHOULDER], lm[R_ELBOW], lm[R_WRIST], this.archerLiveRightAngle);
       }
 
-      if ((this.counterKey === "pushup" || this.counterKey === "inclinepushup") && this.pushupSide) {
+      if ((this.counterKey === "pushup" || this.counterKey === "inclinepushup" || this.counterKey === "benchdip") && this.pushupSide) {
         const shoulder = this.pushupSide === "left" ? lm[L_SHOULDER] : lm[R_SHOULDER];
         const elbow = this.pushupSide === "left" ? lm[L_ELBOW] : lm[R_ELBOW];
         const wrist = this.pushupSide === "left" ? lm[L_WRIST] : lm[R_WRIST];
@@ -3785,6 +3863,181 @@ class WorkoutSession {
       this.debugEl.textContent =
         `ángulo codo (${useLeft ? "izq" : "der"}): ${elbowAngle.toFixed(0)}° | pies sobre manos: ${(footRise * 100).toFixed(0)}% tronco (mínimo ${(INCLINE_PUSHUP_MIN_FOOT_RISE_FACTOR * 100).toFixed(0)}%) | estado: ${this.state ?? "esperando"} ` +
         `(abajo ≤${PUSHUP_DOWN_ANGLE_DEG}°, arriba ≥${PUSHUP_UP_ANGLE_DEG}°)`;
+    }
+  }
+
+  /**
+   * Fondos en banco: mismo ángulo de codo que un fondo normal
+   * (DIP_UP_ANGLE_DEG/DIP_DOWN_ANGLE_DEG) para contar la repetición,
+   * pero con la postura del ejercicio comprobada en directo — cuerpo en
+   * forma de L (BENCHDIP_BODY_ANGLE_MIN_DEG/MAX_DEG) y manos apoyadas
+   * por encima del nivel de los pies (BENCHDIP_HAND_RISE_MIN_FACTOR) —
+   * ver el bloque BENCHDIP_* de más arriba para el porqué del diseño,
+   * calcado del de processInclinePushup en vez del de processDip.
+   *
+   * La posición inicial (armado, "top": brazos rectos y cuerpo en L,
+   * sostenido un rato) es la que arma el contador y a la que hay que
+   * volver para que cuente cada repetición — igual que el resto de
+   * ejercicios de este archivo, no se cuenta ninguna repetición hasta
+   * no haber pasado primero por "abajo" (codo a 90°) y haber vuelto a
+   * esa posición inicial.
+   */
+  processBenchDip(lm, now) {
+    if (this.state !== null && this.checkWaveGesture(lm, now)) {
+      this.closeActiveSet();
+      return;
+    }
+
+    const lShoulder = lm[L_SHOULDER], rShoulder = lm[R_SHOULDER];
+    const lElbow = lm[L_ELBOW], rElbow = lm[R_ELBOW];
+    const lWrist = lm[L_WRIST], rWrist = lm[R_WRIST];
+    const lHip = lm[L_HIP], rHip = lm[R_HIP];
+    const lAnkle = lm[L_ANKLE], rAnkle = lm[R_ANKLE];
+
+    const leftVis = (
+      (lShoulder.visibility ?? 1) + (lElbow.visibility ?? 1) + (lWrist.visibility ?? 1) +
+      (lHip.visibility ?? 1) + (lAnkle.visibility ?? 1)
+    ) / 5;
+    const rightVis = (
+      (rShoulder.visibility ?? 1) + (rElbow.visibility ?? 1) + (rWrist.visibility ?? 1) +
+      (rHip.visibility ?? 1) + (rAnkle.visibility ?? 1)
+    ) / 5;
+    const useLeft = leftVis >= rightVis;
+    const vis = useLeft ? leftVis : rightVis;
+
+    if (vis < PUSHUP_MIN_VISIBILITY) {
+      this.announceStatus(
+        "No se te ven bien el hombro, el codo, la muñeca, la cadera y el tobillo. Ponte de perfil a la " +
+        "cámara, con las manos apoyadas detrás en un banco o silla y los pies en el suelo por delante."
+      );
+      if (this.debugEl) this.debugEl.textContent = "buscando hombro, codo, muñeca, cadera y tobillo de perfil…";
+      this.pushupSide = null;
+      this.groundStableSince = null;
+      // Igual que en flexiones inclinadas: sin ver el cuerpo entero no
+      // se puede confirmar que sigues en posición — cuenta como salir
+      // de posición además de la señal de "fuera de encuadre" ya
+      // existente (noteAbsence/OUT_OF_FRAME_STABLE_MS, que sigue
+      // corriendo aparte).
+      if (this.state !== null) {
+        if (this.offGroundSince === null) this.offGroundSince = now;
+        if (now - this.offGroundSince >= BENCHDIP_BROKEN_STABLE_MS) {
+          this.closeActiveSet();
+          return;
+        }
+      }
+      this.noteAbsence(now);
+      return;
+    }
+    this.outOfFrameSince = null;
+
+    const shoulder = useLeft ? lShoulder : rShoulder;
+    const elbow = useLeft ? lElbow : rElbow;
+    const wrist = useLeft ? lWrist : rWrist;
+    const hip = useLeft ? lHip : rHip;
+    const ankle = useLeft ? lAnkle : rAnkle;
+
+    const elbowAngle = angle(shoulder, elbow, wrist);
+    const bodyAngle = angle(shoulder, hip, ankle);
+    if (elbowAngle === null || bodyAngle === null) return;
+
+    // "Manos por encima de los pies de verdad", medido en DIRECTO —
+    // mismo tipo de comparación que footRise en flexiones inclinadas,
+    // pero al revés (ver el bloque BENCHDIP_* de más arriba): la
+    // muñeca tiene que quedar claramente por ENCIMA del tobillo. Y
+    // crece hacia abajo, así que "por encima" es muñeca.y < tobillo.y.
+    // Normalizado por el largo de tronco (hombro-cadera) del frame
+    // actual para que el umbral sirva igual da igual lo lejos que
+    // estés de la cámara.
+    const torsoLength = Math.hypot(shoulder.x - hip.x, shoulder.y - hip.y);
+    const handRise = torsoLength > 0 ? (ankle.y - wrist.y) / torsoLength : 0;
+    const handsElevated = handRise >= BENCHDIP_HAND_RISE_MIN_FACTOR;
+    // "Cuerpo en forma de L", no en línea recta — ver el bloque
+    // BENCHDIP_* de más arriba sobre por qué el rango es alrededor de
+    // 90° y no un mínimo tipo PUSHUP_LINE_MIN_DEG.
+    const bodyInL = bodyAngle >= BENCHDIP_BODY_ANGLE_MIN_DEG && bodyAngle <= BENCHDIP_BODY_ANGLE_MAX_DEG;
+    const inPosition = handsElevated && bodyInL;
+
+    this.pushupSide = useLeft ? "left" : "right";
+
+    if (this.state !== null) {
+      // Ya armado: SIEMPRE se comprueba la postura, no solo al empezar
+      // — mismo criterio que flexiones inclinadas (ver el bloque
+      // BENCHDIP_* de más arriba). En cuanto deja de cumplirse (manos
+      // ya no en alto, o el cuerpo deja de estar en L), este frame se
+      // descarta ANTES de mirar el ángulo de codo, así un gesto suelto
+      // de brazo nunca se puede colar como repetición. Si se sostiene
+      // fuera de posición, se cierra la serie sola.
+      if (!inPosition) {
+        if (this.offGroundSince === null) this.offGroundSince = now;
+        if (now - this.offGroundSince >= BENCHDIP_BROKEN_STABLE_MS) {
+          this.closeActiveSet();
+          return;
+        }
+        if (this.debugEl) {
+          this.debugEl.textContent =
+            `fuera de posición (manos sobre pies: ${(handRise * 100).toFixed(0)}% tronco, mínimo ` +
+            `${(BENCHDIP_HAND_RISE_MIN_FACTOR * 100).toFixed(0)}% · ángulo cuerpo: ${bodyAngle.toFixed(0)}° en L: ${bodyInL ? "sí" : "no"}) — se descarta este frame`;
+        }
+        return;
+      }
+      this.offGroundSince = null;
+    }
+
+    if (this.state === null) {
+      // Para armar el contador hace falta verte en la posición
+      // INICIAL: brazos rectos, manos claramente por encima de los
+      // pies y el cuerpo en forma de L — sostenida un rato, no un solo
+      // frame, para no armar por un vistazo de pasada mientras te
+      // colocas. A esta misma posición hay que volver para que cuente
+      // cada repetición (ver más abajo) — no se cuenta ninguna
+      // repetición hasta no haber pasado por abajo (codo a 90°) y
+      // haber vuelto aquí.
+      const armsStraight = elbowAngle >= DIP_UP_ANGLE_DEG;
+
+      if (inPosition && armsStraight) {
+        if (this.groundStableSince === null) this.groundStableSince = now;
+        if (now - this.groundStableSince >= ON_GROUND_STABLE_MS) {
+          this.state = "top";
+          this.groundStableSince = null;
+          this.offGroundSince = null;
+          if (!this.startupVoiceGiven) {
+            this.startupVoiceGiven = true;
+            this.announceStatus(
+              "Te veo. ¡Listo! Puedes empezar. Para terminar una serie, ponte de pie, sal del " +
+              "encuadre, o levanta un brazo y agita la mano.",
+              "startup_ready"
+            );
+          } else {
+            this.announceStatus("¡Listo! Puedes empezar.", "ready_to_go");
+          }
+        } else {
+          this.setStatus("Postura vista… confirmando (no te muevas).");
+        }
+      } else {
+        this.groundStableSince = null;
+        this.setStatus(
+          "Siéntate en el borde de un banco o silla, apoya las manos a los lados con los brazos rectos, " +
+          "estira las piernas hacia delante con los pies en el suelo, y baja la cadera hasta formar una L " +
+          "con el cuerpo, de perfil a la cámara, para empezar."
+        );
+      }
+    } else if (this.state === "top") {
+      if (elbowAngle <= DIP_DOWN_ANGLE_DEG) {
+        // Empieza a bajar: arranca el fondo.
+        this.state = "bottom";
+        this.repStartTime = now;
+      }
+    } else if (elbowAngle >= DIP_UP_ANGLE_DEG) {
+      // El brazo ha vuelto a estar recto, en la posición inicial:
+      // repetición completa.
+      this.countRep((now - this.repStartTime) / 1000, now, "Fondo en banco");
+      this.state = "top";
+    }
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `ángulo codo (${useLeft ? "izq" : "der"}): ${elbowAngle.toFixed(0)}° | manos sobre pies: ${(handRise * 100).toFixed(0)}% tronco (mínimo ${(BENCHDIP_HAND_RISE_MIN_FACTOR * 100).toFixed(0)}%) | ángulo cuerpo: ${bodyAngle.toFixed(0)}° | estado: ${this.state ?? "esperando"} ` +
+        `(abajo ≤${DIP_DOWN_ANGLE_DEG}°, arriba ≥${DIP_UP_ANGLE_DEG}°)`;
     }
   }
 
@@ -6026,6 +6279,10 @@ class WorkoutSession {
     }
     if (this.counterKey === "inclinepushup") {
       this.processInclinePushup(lm, now);
+      return;
+    }
+    if (this.counterKey === "benchdip") {
+      this.processBenchDip(lm, now);
       return;
     }
     if (this.counterKey === "squat") {
