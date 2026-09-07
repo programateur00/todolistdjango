@@ -1861,6 +1861,23 @@ class Plan(models.Model):
         los daba por completados aunque se hubiera visto el curso
         entero — quedaba corregido aparte, no es un cambio de conducta
         nuevo para el usuario, es arreglar algo que estaba roto de base.
+
+        BUG REAL (reportado por Alex, 2026-09-07): esto medía "escalones
+        conseguidos / escalones totales" (`current_step()`, un entero).
+        Con ejercicios que suben cada varias sesiones (`sessions_per_step`
+        > 1 — ej. dominadas, sessions_per_step=4), cualquier sesión que no
+        complete el escalón entero no mueve NADA la cuenta: 3 sesiones al
+        100% con sessions_per_step=4 dan current_step()=0 igual que 0
+        sesiones, así que la barra se queda clavada en 0% durante varias
+        sesiones seguidas y solo salta a trompicones cuando se completa
+        un escalón entero — desde fuera es indistinguible de "no hace
+        ningún seguimiento", que es justo lo que reportó. El objetivo de
+        HOY (`current_target`/`current_step`) tiene que seguir siendo un
+        escalón entero (no tiene sentido pedir "4,75 dominadas"), pero la
+        BARRA es solo una medida de cuánto llevas, así que aquí se cuenta
+        en SESIONES cumplidas frente a sesiones totales hasta la meta, no
+        en escalones — así cada sesión de sobra mueve la barra, aunque
+        el número de reps de hoy todavía no haya subido.
         """
         if self.plan_type == self.PLAN_TYPE_STUDY and self.study_subtype == self.STUDY_SUBTYPE_LANGUAGE:
             return self.course_progress()["pct"]
@@ -1873,14 +1890,14 @@ class Plan(models.Model):
                 return 0
             successes = sum(1 for o in head._occurrences() if o.result == Occurrence.RESULT_DONE)
             return min(100, round(100 * successes / total))
-        done = head.current_step()
         remaining = head.sessions_to_goal()
         if remaining is None:
             return None
-        total_steps = done + (remaining // max(1, head.sessions_per_step))
-        if total_steps <= 0:
+        successes, _ = head.successes_and_streak()
+        total_sessions = head.current_step() * head.sessions_per_step + remaining
+        if total_sessions <= 0:
             return 100
-        return min(100, round(100 * done / total_steps))
+        return min(100, round(100 * successes / total_sessions))
 
     def weekly_completion(self):
         """
@@ -2205,6 +2222,26 @@ class PlanItem(models.Model):
         if self.deload_after_failures and failure_streak >= self.deload_after_failures:
             step = max(0, step - 1)
         return step
+
+    def sessions_to_next_step(self):
+        """
+        Cuántas sesiones cumplidas más hacen falta para subir al
+        siguiente escalón (y por tanto para que suban las reps/peso de
+        hoy).
+
+        Para "cumplimiento" no hay escalón que subir (progress_pct ya se
+        mide distinto ahí), así que no aplica.
+
+        Es lo que le faltaba a la pantalla del plan para que 3 sesiones
+        al 100% con sessions_per_step=4 no se sintieran como "no cuenta
+        nada": antes solo se veía el objetivo de hoy sin cambiar, sin
+        decir que ya llevabas 3 de las 4 que hacían falta.
+        """
+        if self.progression == self.PROG_COMPLETION:
+            return None
+        successes, _ = self.successes_and_streak()
+        per_step = max(1, self.sessions_per_step)
+        return per_step - (successes % per_step)
 
     # -------------------------------------------------------- objetivo
 

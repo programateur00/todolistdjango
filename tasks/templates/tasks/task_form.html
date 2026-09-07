@@ -9,7 +9,7 @@
 
     <label class="field">
         <span class="field__label">Título</span>
-        <input type="text" name="title" value="{{ task.title }}" placeholder="¿Qué hay que hacer?" required maxlength="255" autofocus>
+        <input type="text" name="title" value="{{ task.title|default:initial_title }}" placeholder="¿Qué hay que hacer?" required maxlength="255" autofocus>
     </label>
 
     <label class="field">

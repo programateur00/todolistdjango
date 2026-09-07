@@ -20,6 +20,12 @@ apoyo, así que va como bloque aparte.
         {% if pack.target.done %}<span class="plan-item__done">✓ destino alcanzado</span>{% endif %}
     </p>
 
+    {% if pack.sessions_to_next_step and not pack.target.done %}
+    <p class="plan-item__step-hint">
+        Llevas {{ pack.sessions_into_step }} de {{ pack.item.sessions_per_step }} sesiones para subir al siguiente escalón
+    </p>
+    {% endif %}
+
     {% if pack.history %}
     <details class="plan-details">
         <summary>Lo que has hecho ({{ pack.history|length }})</summary>

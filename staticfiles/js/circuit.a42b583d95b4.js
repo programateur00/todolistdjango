@@ -19,7 +19,7 @@ import {
   NOSE, L_SHOULDER, R_SHOULDER, L_HIP, R_HIP, L_ANKLE, R_ANKLE, L_WRIST, R_WRIST,
   angle,
   checkPlankPosture, checkSidePlankPosture, checkWallSitPosture,
-  checkKneeHoldBarPosture, checkHandstandPosture, checkArmCrossStretch, checkTricepsOverheadStretch,
+  checkKneeHoldBarPosture, checkHandstandPosture, checkArmCrossStretch,
   speakOut, numeroEnPalabras, isVoiceEnabled,
 } from "./workout.js";
 // De dónde sale MediaPipe (versión + rutas a los ficheros locales)
@@ -106,7 +106,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   // postura en vez de contar repeticiones. Ver checkPlankPosture /
   // checkSidePlankPosture / checkWallSitPosture / checkKneeHoldBarPosture /
   // checkHandstandPosture más abajo.
-  const POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch", "tricepsoverheadstretch"]);
+  const POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch"]);
 
   function runCurrent() {
     const item = current();
@@ -157,9 +157,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       // runTimerWithPosture() más abajo (mismo motivo: se pidió poder
       // seguir un ejercicio cronometrado de oído, sin mirar la pantalla,
       // igual que ya se puede con las repeticiones).
-      // Cada 5 segundos, no cada uno - dicho cada segundo la voz no daba
-      // abasto (números solapándose/cortados a medias).
-      if (isVoiceEnabled() && remaining % 5 === 0 && remaining !== lastSpokenNumber) {
+      if (isVoiceEnabled() && remaining !== lastSpokenNumber) {
         lastSpokenNumber = remaining;
         speakOut(numeroEnPalabras(remaining));
       }
@@ -205,8 +203,6 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         ? checkHandstandPosture
         : item.counter_key === "armcrossstretch"
         ? checkArmCrossStretch
-        : item.counter_key === "tricepsoverheadstretch"
-        ? checkTricepsOverheadStretch
         : checkPlankPosture;
 
     playerHost.innerHTML = `
@@ -334,9 +330,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         const remaining = item.work - elapsed;
         timerEl.textContent = fmt(remaining);
         if (remaining <= 3) beep(660, 0.1);
-        // Cada 5 segundos, no cada uno - ver nota junto a runTimer() más
-        // arriba.
-        if (isVoiceEnabled() && remaining % 5 === 0 && remaining !== lastSpokenNumber) {
+        if (isVoiceEnabled() && remaining !== lastSpokenNumber) {
           lastSpokenNumber = remaining;
           speakOut(numeroEnPalabras(remaining));
         }
@@ -369,7 +363,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       // sabe compararlo contra item.work).
       const over = elapsed - item.work;
       timerEl.textContent = `+${fmt(over)}`;
-      if (isVoiceEnabled() && over % 5 === 0 && over !== lastSpokenNumber) {
+      if (isVoiceEnabled() && over !== lastSpokenNumber) {
         lastSpokenNumber = over;
         speakOut(numeroEnPalabras(over));
       }

@@ -294,7 +294,7 @@ def task_create(request):
             messages.success(request, "Tarea creada.")
             return redirect(reverse("tasks:task_list"))
 
-    initial_title = request.GET.get("title", "")
+    initial_title = title if request.method == "POST" else request.GET.get("title", "")
     return render(request, "tasks/task_form.html", {
         "repeat_choices": Task.REPEAT_CHOICES,
         "weekdays": Task.WEEKDAYS,
@@ -1188,7 +1188,7 @@ def stats_delete_series(request, series_id):
 # ─────────────────────────────────────────────────────────────────────
 
 # Contadores que existen de verdad en workout.js.
-COUNTERS = {"pullup", "dip", "pushup", "squat", "crunch", "legraise", "situp", "doublecrunch", "scissor", "archerpullup", "inclinepushup", "dumbbellcurl", "jumpingjack", "benchdip"}
+COUNTERS = {"pullup", "dip", "pushup", "squat", "splitsquat", "crunch", "legraise", "situp", "doublecrunch", "scissor", "archerpullup", "inclinepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks"}
 
 # Ejercicios "timed" (se aguantan, no se cuentan en repeticiones) que
 # workout.js sabe seguir con cámara comprobando la postura — plancha,
@@ -1196,7 +1196,7 @@ COUNTERS = {"pullup", "dip", "pushup", "squat", "crunch", "legraise", "situp", "
 # task_workout: a estos, a diferencia del resto de "timed" (bicicleta…),
 # sí se les deja entrar en el entreno individual de una tarea con cámara
 # encendida, no solo dentro de un circuito.
-POSTURE_COUNTERS = {"plank", "sideplank", "wallsit", "kneeholdbar", "handstand"}
+POSTURE_COUNTERS = {"plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch", "tricepsoverheadstretch"}
 
 
 def _plans_qs():
@@ -1287,6 +1287,7 @@ def plan_detail(request, pk):
         # 35 escalones — y no se veía el final, que es lo que da sentido
         # a todo. El tope es solo una red de seguridad.
         remaining = item.sessions_to_goal()
+        _sessions_to_next_step = item.sessions_to_next_step()
         rows = 60
         if remaining is not None:
             rows = min(120, item.current_step() + remaining // max(1, item.sessions_per_step) + 2)
@@ -1297,6 +1298,18 @@ def plan_detail(request, pk):
             "remaining": remaining,
             "schedule": item.schedule(rows),
             "history": item.history(12),
+            # Cuántas sesiones cumplidas más hacen falta para el
+            # siguiente escalón (None en cumplimiento, donde no aplica) —
+            # sin esto, entre escalón y escalón no había ninguna señal de
+            # que las sesiones de sobra estuvieran contando para algo.
+            # `sessions_into_step` es la cuenta ya hecha del par, lista
+            # para pintar "X de Y sesiones" sin hacer aritmética en la
+            # plantilla.
+            "sessions_to_next_step": _sessions_to_next_step,
+            "sessions_into_step": (
+                item.sessions_per_step - _sessions_to_next_step
+                if _sessions_to_next_step is not None else None
+            ),
             # Si el entrenador ha bajado un escalón conviene decirlo: si
             # no, parece que la app se ha equivocado.
             "deloaded": item.successes_and_streak()[1] >= item.deload_after_failures > 0,

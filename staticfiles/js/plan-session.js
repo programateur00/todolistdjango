@@ -157,7 +157,9 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       // runTimerWithPosture() más abajo (mismo motivo: se pidió poder
       // seguir un ejercicio cronometrado de oído, sin mirar la pantalla,
       // igual que ya se puede con las repeticiones).
-      if (isVoiceEnabled() && remaining !== lastSpokenNumber) {
+      // Cada 5 segundos, no cada uno - dicho cada segundo la voz no daba
+      // abasto (números solapándose/cortados a medias).
+      if (isVoiceEnabled() && remaining % 5 === 0 && remaining !== lastSpokenNumber) {
         lastSpokenNumber = remaining;
         speakOut(numeroEnPalabras(remaining));
       }
@@ -317,7 +319,9 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         const remaining = item.work - elapsed;
         timerEl.textContent = fmt(remaining);
         if (remaining <= 3) beep(660, 0.1);
-        if (isVoiceEnabled() && remaining !== lastSpokenNumber) {
+        // Cada 5 segundos, no cada uno - ver nota junto a runTimer() más
+        // arriba.
+        if (isVoiceEnabled() && remaining % 5 === 0 && remaining !== lastSpokenNumber) {
           lastSpokenNumber = remaining;
           speakOut(numeroEnPalabras(remaining));
         }
@@ -340,7 +344,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 
       const over = elapsed - item.work;
       timerEl.textContent = `+${fmt(over)}`;
-      if (isVoiceEnabled() && over !== lastSpokenNumber) {
+      if (isVoiceEnabled() && over % 5 === 0 && over !== lastSpokenNumber) {
         lastSpokenNumber = over;
         speakOut(numeroEnPalabras(over));
       }

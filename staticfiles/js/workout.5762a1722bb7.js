@@ -21,7 +21,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-06-rep-voice-step5+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10";
+const WORKOUT_JS_BUILD = "2026-09-05-arm-cross-stretch";
 
 // Umbral de movimiento (proporcional al ancho de hombros) para
 // considerar que hay un cambio de estado real y no ruido de la cámara.
@@ -44,7 +44,6 @@ const HANG_MARGIN_FACTOR = 0.08; // cuanto tienen que estar las munecas por enci
 const RELEASE_MARGIN_FACTOR = 0.15;
 const SCALE_TOLERANCE = 0.3; // cuanto puede variar el ancho de hombros (te acercas/alejas) antes de desconfiar del frame
 const MIN_REP_SECONDS = 0.3; // por debajo de esto, se descarta como ruido
-const REP_VOICE_STEP = 5; // la voz solo anuncia multiplos de este numero (5, 10, 15...) en todos los ejercicios -- decirlas todas no daba tiempo a seguir el ritmo real de la serie
 const HANG_STABLE_MS = 500;   // cuanto tiempo seguido con los brazos en alto para empezar a calibrar
 const ARMS_DOWN_STABLE_MS = 400; // cuanto tiempo seguido con los brazos abajo para dar la serie por terminada (evita falsos positivos por un frame ruidoso)
 const CALIBRATION_MS = 1200;  // tiempo colgado quieto que se usa como referencia
@@ -84,7 +83,7 @@ const OUT_OF_FRAME_STABLE_MS = 1200;
 // les aplica el cierre por salir del encuadre de arriba, y también el
 // cierre por ponerte de pie en el caso de los abdominales tumbado (ver
 // ON_GROUND_STABLE_MS más abajo).
-const GROUND_STYLE_COUNTERS = new Set(["squat", "splitsquat", "crunch", "legraise", "situp", "scissor", "doublecrunch", "pushup", "dip", "inclinepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks"]);
+const GROUND_STYLE_COUNTERS = new Set(["squat", "crunch", "legraise", "situp", "scissor", "doublecrunch", "pushup", "dip", "inclinepushup", "dumbbellcurl", "jumpingjack", "benchdip"]);
 // Plancha / plancha lateral: a diferencia del resto de GROUND_STYLE_COUNTERS
 // (que cuentan repeticiones), aquí se cuenta TIEMPO aguantando la postura
 // — el cierre de serie no es "te has puesto de pie o has salido del
@@ -97,14 +96,7 @@ const GROUND_STYLE_COUNTERS = new Set(["squat", "splitsquat", "crunch", "legrais
 // pie, salir del encuadre, agitar la mano) ya rompen la postura por sí
 // solas. Por eso plank/sideplank no viven en GROUND_STYLE_COUNTERS ni
 // comparten su lógica de cierre.
-const CAMERA_POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch", "tricepsoverheadstretch"]);
-// Calentamientos y estiramientos (Exercise.body_area="warmup": jumping
-// jacks, estiramiento cruzado de brazo…): pedido explicitamente no forzar
-// el descanso obligatorio (MIN_REST_MS) entre series/lados aqui - no tiene
-// sentido "descansar" entre un lado y el otro de un estiramiento, ni entre
-// series de un calentamiento, que es precisamente para lo contrario
-// (activarse antes de la sesion de verdad). Ver countRep()/notePostureOk().
-const NO_REST_COUNTERS = new Set(["jumpingjack", "armcrossstretch", "tricepsoverheadstretch", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks"]);
+const CAMERA_POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch"]);
 // Para el aviso hablado corto de "ponte en posición" (ver
 // notePostureBroken): estos tres se hacen de perfil (de lado a la
 // cámara), así que ese aviso añade "de perfil" — el resto de
@@ -648,38 +640,6 @@ const SQUAT_MIN_VISIBILITY = 0.4;
 // sea cual sea el ejercicio.
 const SQUAT_ARM_STABLE_MS = 500;
 
-// Split squat / zancada estática: mismo ángulo cadera-rodilla-tobillo de
-// perfil que la sentadilla (ver bloque SQUAT_* arriba), pero aquí las
-// dos piernas quedan separadas delante/detrás en vez de una tapando a
-// la otra -- processSplitSquat NO fija un lado de antemano como
-// processSquat, usa la rodilla más doblada de las que se vean bien (ver
-// esa función). Mismos umbrales de ángulo que sentadillas como primera
-// aproximación -- pendiente de calibrar con cámara real, igual que el
-// resto de la familia de ejercicios nuevos.
-const SPLITSQUAT_UP_ANGLE_DEG = 160;
-const SPLITSQUAT_DOWN_ANGLE_DEG = 100;
-const SPLITSQUAT_MIN_VISIBILITY = 0.4;
-const SPLITSQUAT_STABLE_MS = 500; // mismo criterio/valor que SQUAT_ARM_STABLE_MS
-// Cuarta forma de terminar la serie: quedarte quieto (parado, de pie o
-// de frente a la cámara) sin avanzar en la repetición durante más de
-// SPLITSQUAT_IDLE_CLOSE_MS. Se probaron dos versiones geométricas de
-// "detectar que te has puesto de frente" (anchura de cadera, luego
-// anchura de hombros) y ninguna de las dos dio resultados fiables con
-// cámara real -- un aviso simple de inactividad es más simple y más
-// robusto (pedido explícitamente por Alex).
-const SPLITSQUAT_IDLE_CLOSE_MS = 5000;
-// BUG REAL visto en el primer test (reportado por Alex): levantar un pie
-// hacia atrás y doblar solo ESA rodilla (tipo curl femoral de pie, sin
-// tocar la otra pierna) se contaba como repetición, porque kneeAngle
-// (el mínimo de las dos piernas) bajaba de sobra del umbral aunque la
-// pierna de apoyo siguiera con la rodilla recta. Un split squat de
-// verdad dobla las DOS rodillas a la vez (la de delante y la de
-// detrás), así que además de exigir que la más doblada baje de
-// SPLITSQUAT_DOWN_ANGLE_DEG, se exige que la OTRA pierna (si también se
-// ve) no esté recta del todo -- ver processSplitSquat. Primer valor,
-// pendiente de calibrar con cámara real.
-const SPLITSQUAT_SUPPORT_MAX_ANGLE_DEG = 150;
-
 // -- Jumping jacks (calentamiento, subtipo de prueba) -------------------
 // Ejercicio DE FRENTE a la camara (a diferencia de sentadillas/fondos,
 // que van de perfil) y simetrico izquierda-derecha, asi que no hace
@@ -703,243 +663,6 @@ const JUMPINGJACK_FIRST_JUMP_GRACE_MS = 6000; // margen (desde que se arma) ante
 const JUMPINGJACK_ARM_NOISE_TOLERANCE_MS = 200; // al armar (posicion cerrada quieta), un frame suelto que NO cumple armsDown/legsClosed (parpadeo del tracking, no un movimiento real) se tolera hasta esto sin reiniciar el cronometro de estabilidad -- de pie de forma normal el ratio de piernas ya baila por ruido de deteccion, y sin esta tolerancia cualquier parpadeo aislado reiniciaba jjArmStableSince entero y el armado no terminaba nunca de completarse
 const JUMPINGJACK_OUT_OF_FRAME_MS = 3000; // cuanto tiempo sin verte bien (vis < JUMPINGJACK_MIN_VISIBILITY) hace falta para cerrar la serie por ausencia -- mas largo que el OUT_OF_FRAME_STABLE_MS generico (1200ms) porque saltando de verdad es normal encadenar varios frames de visibilidad baja seguidos por el propio movimiento; reportado: con el umbral generico la serie se cerraba sola (0 repeticiones, en silencio) a mitad de una tanda de saltos reales
 const JUMPINGJACK_MIN_REP_SECONDS = 0.12; // sustituye al MIN_REP_SECONDS generico (0.3s) SOLO para jumping jacks -- repStartTime se marca ya DESPUES del debounce de apertura (JUMPINGJACK_OPEN_STABLE_MS, 150ms), que es el que de verdad filtra el ruido de un frame suelto; exigir encima 0.3s completos de duracion de "repeticion" descartaba saltos reales rapidos como si fueran ruido -- reportado explicitamente: a partir de cierto punto, yendo mas rapido, dejaban de contarse repeticiones sueltas (confirmado en el registro: aperturas reales de ~0.25-0.3s de duracion, sin ningun aviso de "Jumping jack N")
-
-// Círculos de brazos — DE FRENTE a la cámara, calentamiento dinámico (no
-// isométrico: a diferencia de armcrossstretch/tricepsoverheadstretch, que
-// se aguantan, aquí se cuentan repeticiones — un círculo completo de los
-// dos brazos a la vez = una repetición, igual de espíritu que jumping
-// jack). Pedido por el usuario con un vídeo de referencia (WhatsApp,
-// 2026-09-05): de pie, los dos brazos extendidos giran a la vez, primero
-// hacia delante y luego, dentro de la MISMA serie, la cámara cambia sola
-// el sentido esperado a "hacia atrás" (mismo espíritu que el cambio de
-// lado en checkArmCrossStretch, pero aquí los dos brazos giran juntos en
-// vez de alternar izq/der).
-//
-// Geometría: para cada brazo se calcula un ángulo LOCAL alrededor de su
-// propio hombro (ver wrapAngleDelta/processArmCircles), con el eje X
-// normalizado para que "hacia fuera" sea siempre positivo en los dos
-// lados (el hombro/muñeca izquierdos del cuerpo -L_SHOULDER/L_WRIST-
-// aparecen en la mitad DERECHA de la imagen sin espejar -ver la nota ya
-// existente sobre PoseLandmarker.detectForVideo leyendo el frame sin
-// espejar-, así que su "fuera" es +x; los del lado derecho del cuerpo
-// aparecen en la mitad IZQUIERDA, así que su "fuera" es -x) y el eje Y
-// invertido para que "arriba" sea positivo. Con este ángulo local, un
-// giro real sincronizado de los dos brazos produce el MISMO signo de
-// velocidad angular en ambos brazos, así que un simple promedio de los
-// dos ya sirve de señal combinada sin tratar cada brazo por separado.
-//
-// Sentido: analizando el vídeo de referencia (brazos abajo -> suben
-// cruzando por delante del cuerpo hasta juntarse arriba cerca de la cara
-// -> bajan abriéndose por los lados, en cruz, hasta abajo otra vez), con
-// esta convención de ángulo local el ángulo desciende de forma continua
-// a lo largo de toda la vuelta — así que "hacia delante" se define como
-// ángulo DECRECIENTE, y "hacia atrás" como creciente (el sentido
-// contrario). Confirmado con cámara real (test 2026-09-05): el signo
-// calculado coincide con este análisis del vídeo -- igual que
-// armcrossstretch/tricepsoverheadstretch, lo que falló en el primer
-// test no fue el signo sino los umbrales de tracking (ver
-// ARMCIRCLES_MIN_REACH_FACTOR y ARMCIRCLES_MAX_SINGLE_ARM_DELTA).
-const ARMCIRCLES_MIN_VISIBILITY = 0.4; // visibilidad media de hombros+muñecas exigida para fiarse del frame
-const ARMCIRCLES_MIN_REACH_FACTOR = 0.45; // la muñeca tiene que estar al menos esto de veces el ancho de hombros lejos del hombro para considerar el brazo "extendido" (evita acumular ángulo con el brazo pegado al cuerpo, quieto) -- bajado de 0.6 (segundo test en cámara real, 2026-09-05): con 0.6 hacía falta el brazo prácticamente perfectamente recto para armar el contador, cualquier codo algo doblado se quedaba corto
-const ARMCIRCLES_ARM_STABLE_MS = 400; // brazos extendidos sostenido esto antes de armar el contador (mismo espíritu que JUMPINGJACK_ARM_STABLE_MS, más corto porque aquí no hay piernas que comprobar)
-const ARMCIRCLES_MIN_ANGULAR_DELTA = 0.02; // radianes por frame por debajo de esto se consideran ruido de tracking, no giro de verdad (ni cuenta como progreso para ARMCIRCLES_STILL_MS ni se acumula)
-const ARMCIRCLES_STILL_MS = 2500; // sin progreso angular de verdad durante esto: se interpreta que te has parado -- si en esta serie aún no has hecho el otro sentido, se cambia de sentido solo, sin pedir bajar los brazos (ver processArmCircles); si ya lo habías hecho, se cierra la serie sola (mismo patrón que JUMPINGJACK_STILL_MS)
-const ARMCIRCLES_OUT_OF_FRAME_MS = 3000; // mismo motivo que JUMPINGJACK_OUT_OF_FRAME_MS: girando de verdad los brazos también se pierde visibilidad por motion blur, no solo al salirte del encuadre
-const ARMCIRCLES_MIN_REP_SECONDS = 0.5; // una vuelta completa por debajo de esto es un salto de ángulo mal calculado (ruido), no un círculo de verdad hecho a mano
-const ARMCIRCLES_MAX_SINGLE_ARM_DELTA = 2.4; // radianes (~137°) por frame: por encima de esto, el ángulo de ESE brazo este frame se descarta como fallo puntual de tracking (típicamente cuando las muñecas se cruzan cerca de la cara, con el "radio" muy pequeño y el ángulo hipersensible a cualquier ruido) en vez de sumarse al acumulado — primer test en cámara real (2026-09-05) mostró saltos aislados de 30-57°/frame justo ahí, algunos con el signo cambiado, que descuadraban el conteo; subido de 1.0 a 1.6 (segundo test, girar rápido perdía reps) y luego a 2.4 (cuarto test, seguía perdiendo reps yendo rápido pese a v5 dejar de tirar el giro para siempre en el frame descartado -- 2.4 deja mucho más margen sin acercarse a pi, donde el propio signo del delta dejaría de ser fiable)
-
-// NECKLATERAL_*: giros/inclinaciones laterales de cuello -- de frente a
-// la cámara, de pie o sentada/o, la nariz se separa del centro (punto
-// medio de los hombros) hacia un lado y vuelve al centro; un vaivén
-// completo (centro -> lado -> centro) cuenta como una repetición (ver
-// processNeckLateral). Pedido con un vídeo de referencia (WhatsApp,
-// 2026-09-05): "que detecte cuando la nariz va a un lado sin que el
-// cuello se mueva de sitio" -- por eso, aparte de contar el vaivén, se
-// vigila el punto medio de los HOMBROS (no de la cara): la cabeza puede
-// girar/inclinarse, pero el torso tiene que quedarse donde estaba (ver
-// NECKLATERAL_DRIFT_TOLERANCE_FACTOR) -- primera versión, pendiente de
-// calibrar con un test en cámara real, mismo patrón que
-// armcrossstretch/tricepsoverheadstretch/armcircles en su día.
-const NECKLATERAL_MIN_VISIBILITY = 0.4; // visibilidad media de nariz+hombros exigida para fiarse del frame
-const NECKLATERAL_ENTER_FACTOR = 0.16; // la nariz tiene que separarse del punto medio de los hombros al menos esto de veces el ancho de hombros para contar "ha llegado a un lado"
-const NECKLATERAL_MAX_VERTICAL_FACTOR = 0.12; // cuanto puede "caer" la nariz (respecto a los hombros, ya descontado tu propio centro) para que un desplazamiento siga contando como ir HACIA UN LADO -- reportado en la primera prueba real (2026-09-05): tirar la cabeza hacia delante/abajo (barbilla al pecho) se contaba como repetición, porque ese movimiento también corre algo la nariz en horizontal (ruido de tracking/perspectiva), aunque el movimiento real sea sobre todo vertical. Por debajo de este umbral el vaivén se acepta igual (una inclinación lateral real también baja algo la nariz hacia el hombro, no es un movimiento puramente horizontal); por encima, se descarta como "eso ha sido hacia abajo, no hacia un lado"
-const NECKLATERAL_EXIT_FACTOR = 0.05; // tiene que volver a estar más cerca del centro que esto para cerrar el vaivén y contar la repetición (histéresis, evita contar temblores cerca del umbral de entrada como varias repeticiones)
-const NECKLATERAL_CENTER_STABLE_MS = 500; // centrada/o y quieta/o sostenido esto antes de armar el contador -- fija tu propio "centro" real como baseline (mismo espíritu que ARMCIRCLES_ARM_STABLE_MS/JUMPINGJACK_ARM_STABLE_MS)
-const NECKLATERAL_SIDE_STABLE_MS = 100; // el lado tiene que sostenerse esto seguido antes de confirmarse -- filtra un pico de un frame suelto (ruido de tracking), no un giro de verdad
-const NECKLATERAL_MIN_REP_SECONDS = 0.15; // sustituye al MIN_REP_SECONDS generico (0.3s) SOLO para este ejercicio -- repStartTime se marca YA DESPUES del debounce de confirmacion (NECKLATERAL_SIDE_STABLE_MS), que es el que de verdad filtra el ruido de un pico de un frame suelto (mismo razonamiento que JUMPINGJACK_MIN_REP_SECONDS); exigir encima 0.3s completos desde ahi hasta volver al centro descartaba como "ruido" un vaiven real hecho con cierta soltura (visto en pruebas: 400ms de ida y vuelta, con 100ms ya consumidos por el debounce, se quedaba en ~300ms y caia justo en el borde)
-const NECKLATERAL_STILL_MS = 4000; // sin completar ningún vaivén durante esto: se interpreta que has terminado y se cierra la serie sola (mismo patrón que JUMPINGJACK_STILL_MS/ARMCIRCLES_STILL_MS, con más margen porque este es un movimiento lento de cuello, no un salto o un giro de brazo entero)
-const NECKLATERAL_DRIFT_TOLERANCE_FACTOR = 0.12; // cuánto puede desplazarse el punto medio de los hombros (respecto a donde estaba al salir del centro) antes de avisar de que el cuerpo se está inclinando en vez de solo girar/inclinar la cabeza -- se avisa, no se penaliza (misma filosofía que el sentido equivocado en círculos de brazos): la repetición se sigue contando igual
-
-// ARMSCISSORS_*: tijeras de brazos -- de pie, de frente a la cámara,
-// calentamiento/estiramiento dinámico: los dos brazos se extienden en
-// cruz (a los lados, como una T) y luego se cruzan por delante del
-// pecho, volviendo después a extendidos; un vaivén completo (extendidos
-// -> cruzados -> extendidos) cuenta como una repetición (ver
-// processArmScissors). Mismo espíritu de vaivén centro/lado que
-// NECKLATERAL_*, pero aquí el "centro" es brazos extendidos y el "lado"
-// es brazos cruzados; el cruce se mide con la misma fracción relativa
-// al ancho de hombros que checkArmCrossStretch (STRETCH_CROSS_MIN_FRACTION),
-// por ser aspect-ratio-independiente. Pedido con un vídeo de referencia
-// (WhatsApp, 2026-09-06). Primera versión, pendiente de calibrar con un
-// test en cámara real, mismo patrón que el resto de la familia.
-const ARMSCISSORS_MIN_VISIBILITY = 0.4; // visibilidad media de hombros+muñecas exigida para fiarse del frame
-const ARMSCISSORS_MIN_REACH_FACTOR = 0.6; // muñeca a al menos esto de veces el ancho de hombros de su propio hombro para considerar el brazo "extendido" (estado centro) -- más exigente que ARMCIRCLES_MIN_REACH_FACTOR (0.45) porque aquí no hay giro continuo que perdone un brazo algo doblado, se compara solo en el instante de reposo
-const ARMSCISSORS_CENTER_STABLE_MS = 400; // brazos extendidos sostenido esto antes de armar (mismo espíritu que ARMCIRCLES_ARM_STABLE_MS)
-const ARMSCISSORS_CROSS_MIN_FRACTION = 0.4; // cada muñeca tiene que haber recorrido, en horizontal, al menos esta fracción de la distancia hasta el hombro contrario para considerar los brazos "cruzados" -- umbral más bajo que STRETCH_CROSS_MIN_FRACTION (0.5) porque aquí basta con cruzar el centro del pecho, no llegar hasta el hombro contrario como en el estiramiento sostenido
-const ARMSCISSORS_CROSS_STABLE_MS = 100; // el cruce tiene que sostenerse esto seguido antes de confirmarse -- filtra un pico de un frame suelto, no un cruce de verdad (mismo espíritu que NECKLATERAL_SIDE_STABLE_MS)
-const ARMSCISSORS_CROSS_EXIT_FRACTION = 0.15; // para cerrar el vaivén hace falta que la fracción de cruce de las dos muñecas baje de esto (histéresis) -- NO se mide con reach: primera prueba real (2026-09-06) mostró que reach apenas cambia entre brazos extendidos y cruzados a la altura del pecho, así que el cierre saltaba en el frame siguiente al cruce y la repetición nunca llegaba a MIN_REP_SECONDS
-const ARMSCISSORS_MIN_REP_SECONDS = 0.15; // un vaivén completo por debajo de esto es ruido, no un cruce de verdad -- bajado de 0.25 (mismo valor que NECKLATERAL_MIN_REP_SECONDS), un cruce rápido real puede ser breve
-const ARMSCISSORS_STILL_MS = 3000; // sin completar ningún vaivén durante esto: se interpreta que has terminado y se cierra la serie sola (mismo patrón que NECKLATERAL_STILL_MS/ARMCIRCLES_STILL_MS)
-const ARMSCISSORS_OUT_OF_FRAME_MS = 3000; // igual que ARMCIRCLES_OUT_OF_FRAME_MS: cruzando los brazos rápido también baja la confianza de MediaPipe por motion blur, no solo al salirte del encuadre
-
-// ---------------------------------------------------------------------
-// Rotación de piernas — DE FRENTE a la cámara, de pie, en equilibrio
-// sobre una pierna: la otra rodilla se levanta y traza un giro parcial
-// alrededor de la cadera (de delante hacia el lado, o al revés), antes
-// de volver a bajar el pie al suelo. Un giro cuenta como una
-// repetición en cuanto la pierna levantada acumula suficiente rotación
-// alrededor de su propia cadera (ver LEGROTATION_MIN_ROTATION_DEG) --
-// SIN exigir una vuelta completa de 360° como en círculos de brazos
-// (aquí es anatómicamente imposible, la cadera no gira tanto de pie) y
-// sin importar el sentido del giro (pedido explícitamente: "no seas
-// muy estricto con el umbral").
-//
-// Pedido por el usuario con dos vídeos de referencia (WhatsApp,
-// 2026-09-06): de pie, brazos en cruz para el equilibrio, se levanta
-// una rodilla y se rota la cadera (la rodilla dibuja un arco desde
-// delante hacia el lado) antes de volver a apoyar el pie.
-//
-// Dos puntos pedidos explícitamente, y los dos son justo lo contrario
-// del patrón habitual del resto de la familia (armcrossstretch et al,
-// donde volver a la postura de reposo SÍ resetea/exige reconfirmar):
-//   1. "si el usuario toca el suelo entre reps no pasa nada" -- aquí
-//      apoyar el pie entre repeticiones NO es un fallo ni un reseteo a
-//      "esperando postura", es justo el punto normal de cierre de cada
-//      repetición (mismo espíritu que una sentadilla volviendo a estar
-//      de pie entre reps): el momento en que la pierna vuelve a bajar
-//      del todo es cuando se decide si lo girado cuenta como
-//      repetición, y se vuelve a esperar la siguiente subida sin pedir
-//      nada más.
-//   2. "si pasa mas de 5 segundos entre reps sin hacer nada que cuente
-//      como nueva serie" -- igual que ARMCIRCLES_STILL_MS/
-//      NECKLATERAL_STILL_MS/ARMSCISSORS_STILL_MS, pero con el valor
-//      concreto pedido (5000ms en vez de los 2500-4000ms del resto).
-// ---------------------------------------------------------------------
-const LEGROTATION_MIN_VISIBILITY = 0.4; // visibilidad media de caderas+rodillas+tobillos exigida para fiarse del frame (mismo umbral que el resto de la familia)
-const LEGROTATION_STABLE_MS = 400; // de pie con las dos piernas apoyadas sostenido esto antes de armar el contador (mismo espíritu que ARMCIRCLES_ARM_STABLE_MS/ARMSCISSORS_CENTER_STABLE_MS)
-const LEGROTATION_RAISE_ENTER_FRACTION = 0.6; // fracción cadera->rodilla (0 = rodilla a la altura de la cadera, 1 = pierna colgando recta) por debajo de la cual se considera que ESA pierna se ha levantado -- deliberadamente laxo ("no seas muy estricto con el umbral"), no hace falta levantar la rodilla hasta la cadera, solo despegarla claramente del reposo
-const LEGROTATION_RAISE_EXIT_FRACTION = 0.85; // para dar la pierna por "vuelta a apoyar" hace falta que la fracción suba de esto -- histéresis por encima de LEGROTATION_RAISE_ENTER_FRACTION para que el ruido de tracking justo en el umbral no abra y cierre repeticiones fantasma
-const LEGROTATION_MIN_ROTATION_DEG = 40; // grados de rotación acumulada (en cualquier sentido) de la rodilla alrededor de su cadera, durante UNA subida, para que cuente como el "giro" pedido y no un simple levantar-y-bajar la pierna sin rotar -- laxo a propósito, pendiente de calibrar con un test en cámara real como el resto de la familia
-const LEGROTATION_MIN_ANGULAR_DELTA = 0.02; // radianes por frame por debajo de esto se consideran ruido de tracking, no giro de verdad (mismo umbral que ARMCIRCLES_MIN_ANGULAR_DELTA)
-const LEGROTATION_MAX_SINGLE_LEG_DELTA = 2.4; // radianes (~137°) por frame: un salto puntual mayor que esto se descarta como fallo de tracking, no rotación real (mismo valor y motivo que ARMCIRCLES_MAX_SINGLE_ARM_DELTA)
-const LEGROTATION_MIN_REP_SECONDS = 0.3; // una subida+giro por debajo de esto es ruido, no una repetición de verdad
-const LEGROTATION_STILL_MS = 5000; // sin empezar ninguna subida nueva ni completar ninguna repetición durante esto: se interpreta que has terminado y se cierra la serie sola (mismo patrón que ARMCIRCLES_STILL_MS/NECKLATERAL_STILL_MS/ARMSCISSORS_STILL_MS) -- valor pedido explícitamente por el usuario
-const LEGROTATION_OUT_OF_FRAME_MS = 3000; // mismo motivo que ARMCIRCLES_OUT_OF_FRAME_MS: girando la pierna de verdad también baja la confianza de MediaPipe por motion blur, no solo al salirte del encuadre
-const LEGROTATION_VISIBLE_CONFIRM_MS = 500; // reportado en vivo: el aviso de "a la vista" saltaba con un solo frame suelto que superaba LEGROTATION_MIN_VISIBILITY (p.ej. mientras el modelo aún calentaba justo tras cargar) y un instante después volvía "sin detección" del todo -- exige mantenerse por encima del umbral este rato seguido antes de anunciarlo, para no decir que se ve algo que en realidad no se ve
-const LEGROTATION_MAX_HIP_DRIFT_FACTOR = 1.4; // reportado en vivo: "estaba yendo de camino a la silla y la ha contado" -- caminar también levanta la rodilla y puede acumular ángulo de sobra en el vector cadera->rodilla, así que la geometría del giro sola no basta para distinguirlo de una rotación de verdad en el sitio. Se compara el punto medio de las dos caderas al empezar la subida con el de al bajarla, normalizado por el ancho de cadera (para no depender de la distancia a la cámara) -- por encima de esta fracción se interpreta que el cuerpo entero se ha desplazado (caminando varios pasos), no que la pierna ha girado en el sitio, y la repetición NO cuenta aunque el giro acumulado supere LEGROTATION_MIN_ROTATION_DEG. SUBIDO de 0.4 a 1.4 tras reportarse en vivo que 0.4 rechazaba repeticiones genuinas -- el balanceo normal de equilibrio a la pata coja ya desplaza la cadera esa fracción por sí solo, así que hacía falta mucho más margen antes de asumir que el usuario caminó. Sigue siendo una cifra pendiente de calibrar con más pruebas en cámara real
-
-// ---------------------------------------------------------------------
-// Rodillas altas (marcha con rodillas altas) -- DE PERFIL a la cámara,
-// de pie, marchando en el sitio: se alterna levantar una rodilla y
-// volver a apoyar el pie, sin pausa entre piernas. Pedido por el
-// usuario con un vídeo de referencia (WhatsApp, 2026-09-07).
-//
-// Cuatro puntos pedidos explícitamente:
-//   1. De perfil, con la cadera, la rodilla y el tobillo bien visibles
-//      (igual que sentadillas) -- no de frente, como rotación de
-//      piernas.
-//   2. Mensajes al mínimo -- un solo aviso hablado al empezar (igual
-//      que sentadillas), no dos (visibilidad + armado por separado)
-//      como rotación de piernas o jumping jacks.
-//   3. Umbral de ángulo relajado, por si no se llega muy alto con la
-//      rodilla -- KNEERAISE_RAISE_ENTER_FRACTION más laxo todavía que
-//      LEGROTATION_RAISE_ENTER_FRACTION (0.75 vs 0.6: hace falta menos
-//      recorrido de la rodilla para que cuente como "levantada").
-//   4. Que el contador aguante el ritmo real (marcha rápida, casi sin
-//      pausa entre piernas) sin saltarse ninguna repetición -- por eso
-//      esta versión NO seguye ningún giro ni comprueba desplazamiento
-//      de cadera como rotación de piernas (mismo tipo de geometría
-//      cadera->rodilla, pero pensada para un movimiento lento y
-//      controlado): cuanto menos cálculo haga falta por fotograma,
-//      menos margen para que un fotograma real de la subida se quede
-//      sin mirar. Y MIN_REP_SECONDS bajo (0.12s, igual que jumping
-//      jacks) para no descartar como "ruido" una subida y bajada
-//      rápidas de verdad -- ver la nota junto a
-//      JUMPINGJACK_MIN_REP_SECONDS sobre el mismo problema, ya
-//      reportado ahí con otro ejercicio rápido.
-//
-// Igual que rotación de piernas: apoyar el pie entre repeticiones NO es
-// un fallo, es el cierre normal de cada subida (no hay postura de
-// reposo que reconfirmar entre repeticiones).
-// ---------------------------------------------------------------------
-const KNEERAISE_MIN_VISIBILITY = 0.4; // visibilidad media de caderas+rodillas+tobillos exigida para fiarse del frame (mismo umbral que el resto de la familia)
-const KNEERAISE_STABLE_MS = 400; // de pie con las dos piernas apoyadas sostenido esto antes de armar el contador, para no contar media repetición si entras en encuadre a media zancada (mismo espíritu que LEGROTATION_STABLE_MS)
-const KNEERAISE_RAISE_ENTER_FRACTION = 0.75; // fracción cadera->rodilla (0 = rodilla a la altura de la cadera, 1 = pierna colgando recta) por debajo de la cual se considera que ESA pierna se ha levantado -- deliberadamente MÁS laxo que LEGROTATION_RAISE_ENTER_FRACTION (0.6): pedido explícitamente "que el umbral sea relajado en caso que no lleguen tan alto", así que basta con un recorrido de rodilla moderado, no hace falta acercarse a la horizontal
-const KNEERAISE_RAISE_EXIT_FRACTION = 0.90; // para dar la pierna por "vuelta a apoyar" hace falta que la fracción suba de esto -- histéresis por encima de KNEERAISE_RAISE_ENTER_FRACTION para que el ruido de tracking justo en el umbral no abra y cierre repeticiones fantasma; hueco más corto que en rotación de piernas para confirmar la bajada antes y no retrasar la siguiente subida en un ritmo rápido
-const KNEERAISE_MIN_REP_SECONDS = 0.12; // una subida+bajada por debajo de esto es ruido, no una repetición de verdad -- bajo a propósito (igual que JUMPINGJACK_MIN_REP_SECONDS) para no descartar reps reales rápidas en marcha a buen ritmo
-const KNEERAISE_STILL_MS = 2000; // sin empezar ninguna subida nueva ni completar ninguna repetición durante esto: se interpreta que has terminado y se cierra la serie sola -- más corto que LEGROTATION_STILL_MS (5000ms, pensado para recuperar el equilibrio a la pata coja): este ejercicio es marcha continua rápida, no hace falta tanto margen para decidir que has parado
-const KNEERAISE_OUT_OF_FRAME_MS = 3000; // mismo motivo que LEGROTATION_OUT_OF_FRAME_MS/JUMPINGJACK_OUT_OF_FRAME_MS: marchando de verdad la confianza de MediaPipe también baja por el propio movimiento (motion blur), no solo al salirte del encuadre
-const KNEERAISE_VISIBLE_CONFIRM_MS = 500; // mismo motivo que LEGROTATION_VISIBLE_CONFIRM_MS: exige mantenerse por encima de KNEERAISE_MIN_VISIBILITY este rato seguido antes de anunciar "a la vista", para no decir que se ve algo que en realidad no se veía con un solo frame suelto
-
-// ---------------------------------------------------------------------
-// ---------------------------------------------------------------------
-// Talones al gluteo (butt kicks) -- DE PERFIL a la camara, de pie,
-// marchando en el sitio: se alterna llevar el talon hacia el gluteo
-// (la rodilla se dobla mucho, el muslo se queda casi vertical) y volver
-// a apoyar el pie, sin pausa entre piernas. Pedido por el usuario con
-// un video de referencia (WhatsApp, subido 2026-09-07) para anadir al
-// calentamiento.
-//
-// Cuatro puntos pedidos explicitamente (mismo formato que rodillas
-// altas, el ejercicio hermano mas parecido de la familia):
-//   1. De perfil, con la cadera, la rodilla y el tobillo bien visibles.
-//   2. Mensajes al minimo -- un solo aviso hablado al empezar, igual
-//      que rodillas altas/sentadillas, no separado en visibilidad +
-//      armado.
-//   3. Umbral relajado, por si no se llega muy alto con el talon -- ver
-//      HEELKICK_KNEE_ANGLE_ENTER_DEG mas abajo.
-//   4. Que el contador aguante el ritmo real (marcha rapida, casi sin
-//      pausa entre piernas) sin saltarse ninguna repeticion -- mismo
-//      motivo que rodillas altas: nada de rotacion, el minimo calculo
-//      posible por fotograma, y MIN_REP_SECONDS bajo para no descartar
-//      como "ruido" una subida y bajada rapidas de verdad.
-//
-// Geometria: angulo cadera-rodilla-tobillo, usando la funcion angle()
-// ya existente en este archivo (la misma que usan las sentadillas,
-// documentada alli como fiable de perfil porque solo usa x/y). Pierna
-// estirada de pie ~= 180 grados; al doblar la rodilla y acercar el
-// talon al gluteo el angulo baja. v1-v4 usaban en su lugar una fraccion
-// de distancia cadera->tobillo (self-relativa, sin necesitar
-// calibracion) que funcionaba para contar, pero su intento de v4 de
-// distinguir "patear en el sitio" de "caminar" (comparando las DOS
-// caderas, igual que legrotation) resulto ROTO en este ejercicio: de
-// perfil, las dos caderas caen casi en el mismo punto de la pantalla,
-// asi que esa comparacion se disparaba con cualquier ruido minimo y
-// rechazaba casi todas las repeticiones reales (ver el historial en
-// memoria). El angulo de una sola pierna evita ese problema de raiz
-// (no compara las dos caderas entre si) y fue ademas sugerido
-// directamente por el usuario tras el fallo.
-// ---------------------------------------------------------------------
-const HEELKICK_MIN_VISIBILITY = 0.4; // visibilidad media de caderas+rodillas+tobillos exigida para fiarse del frame (mismo umbral que el resto de la familia)
-const HEELKICK_MAX_HIP_DRIFT_FACTOR = 0.25; // desplazamiento del punto medio de caderas durante una subida, respecto a la longitud de la pierna QUE SE QUEDA apoyada (no la que patea), por encima del cual la repeticion se descarta por "te has desplazado" (caminar) en vez de patear en el sitio. Bajado de 0.5 a 0.25 en v7 tras un registro en vivo: las 13 repeticiones limpias de una serie marchando en el sitio dieron deriva 0.02-0.15, mientras que las sospechosas de arrastrar caminar (justo tras reposicionarte, ver el hueco de deteccion antes de HEELKICK_VISIBLE_CONFIRM_MS mas abajo) dieron 0.32-1.71 -- separacion clara, 0.25 deja margen a ambos lados sin necesitar mas datos todavia.
-const HEELKICK_KNEE_ANGLE_ENTER_DEG = 90; // angulo cadera-rodilla-tobillo por DEBAJO del cual se considera que ESA pierna ha llevado el talon hacia el gluteo -- pedido directamente por el usuario ("que sea minimo 90 grados") tras el fallo de la v4; deliberadamente relajado, en linea con "que el umbral sea relajado en caso que no lleguen tan alto": no hace falta doblar la rodilla del todo
-const HEELKICK_KNEE_ANGLE_EXIT_DEG = 160; // para dar la pierna por "vuelta a apoyar" (estirada de nuevo) hace falta que el angulo suba de esto -- histeresis por encima de HEELKICK_KNEE_ANGLE_ENTER_DEG para que el ruido de tracking justo en el umbral no abra y cierre repeticiones fantasma; mismo valor que SQUAT_UP_ANGLE_DEG para "de pie"
-const HEELKICK_MIN_REP_SECONDS = 0.12; // una subida+bajada por debajo de esto es ruido, no una repeticion de verdad -- bajo a proposito (igual que KNEERAISE_MIN_REP_SECONDS/JUMPINGJACK_MIN_REP_SECONDS) para no descartar reps reales rapidas en marcha a buen ritmo
-const HEELKICK_STILL_MS = 2000; // sin empezar ninguna subida nueva ni completar ninguna repeticion durante esto: se interpreta que has terminado y se cierra la serie sola -- mismo valor que rodillas altas, marcha continua rapida, no hace falta mas margen
-const HEELKICK_OUT_OF_FRAME_MS = 3000; // mismo motivo que KNEERAISE_OUT_OF_FRAME_MS: marchando de verdad la confianza de MediaPipe tambien baja por el propio movimiento (motion blur), no solo al salirte del encuadre
-const HEELKICK_VISIBLE_CONFIRM_MS = 500; // mismo motivo que KNEERAISE_VISIBLE_CONFIRM_MS/LEGROTATION_VISIBLE_CONFIRM_MS: exige mantenerse por encima de HEELKICK_MIN_VISIBILITY este rato seguido antes de anunciar "a la vista", para no decir que se ve algo que en realidad no se veia con un solo frame suelto
-const HEELKICK_MAX_ANGLE_DELTA = 90; // avance maximo (en grados del angulo cadera-rodilla-tobillo) permitido POR FOTOGRAMA -- ratchet, no filtro de "congelar": la referencia SIEMPRE avanza hacia el dato crudo, como maximo esta cantidad por fotograma, en vez de quedarse fija en el ultimo valor bueno (mismo mecanismo que HEELKICK_MAX_FRAME_DELTA usaba en v3 para la fraccion de distancia -- ver el historial en memoria sobre por que un filtro de "congelar" bloqueaba repeticiones reales y rapidas en este ejercicio explosivo). Cifra pendiente de calibrar con mas pruebas en camara real.
-const HEELKICK_ANGLE_SMOOTHING_ALPHA = 0.5; // media movil exponencial aplicada DESPUES del ratchet de arriba, una pierna a la vez -- misma tecnica que SCISSOR_SMOOTHING_ALPHA en tijeretas, para la pierna que la camara ve peor. De perfil, la pierna MAS LEJANA a la camara queda parcialmente tapada por el torso durante todo el ejercicio (no solo a veces), asi que MediaPipe le da una confianza mas baja y su angulo tiembla bastante mas que el de la pierna cercana aunque el ratchet ya recorte los saltos imposibles -- eso es lo que produce repeticiones fantasma sin haber hecho el movimiento y la sensacion de que "solo cuenta la pierna que se ve mejor". Alpha mas alto que el 0.3 de tijeretas (que es un ejercicio mucho mas lento) para no introducir demasiado retraso en un ejercicio explosivo. Cifra de partida sin calibrar con datos reales todavia.
-
-// Ángulo2 - ángulo1 normalizado a (-π, π] — necesario porque un ángulo
-// que pasa de 179° a -179° en un frame ha girado solo 2°, no casi 360°
-// (ver processArmCircles).
-function wrapAngleDelta(rawDelta) {
-  let d = rawDelta;
-  while (d > Math.PI) d -= 2 * Math.PI;
-  while (d < -Math.PI) d += 2 * Math.PI;
-  return d;
-}
 // NOTA sobre un intento anterior descartado: hubo una version que daba a
 // "brazos arriba/abajo" y "piernas abiertas/juntas" una ventana de
 // tiempo (creerselos "recientes" un rato) para tolerar que brazos y
@@ -1983,12 +1706,6 @@ export function checkHandstandPosture(lm) {
   // Brazos por debajo de la cintura: codos y muñecas por debajo de la
   // cadera en la imagen (Y mayor), como pide el ejercicio — manos en el
   // suelo aguantando el peso, no estiradas hacia arriba.
-  if (elbowMidY <= hipMidY + margin || wristMidY <= hipMidY + margin) {
-    return { ok: false, reason: "Lleva los brazos hacia el suelo, por debajo de la cadera.", debug };
-  }
-
-  return { ok: true, debug };
-}
 
 // Estiramiento cruzado de brazo (cross-body / posterior deltoid
 // stretch): primero de una futura familia de estiramientos con cámara,
@@ -2024,36 +1741,18 @@ const STRETCH_MIN_VISIBILITY = 0.4;
 const STRETCH_STANDBY_ELBOW_MIN_DEG = 150; // brazo casi recto, colgando -> standby
 const STRETCH_STANDBY_WRIST_BELOW_SHOULDER_FACTOR = 0.15; // cuánto por debajo del hombro tiene que quedar la muñeca (proporción al ancho de hombros)
 const STRETCH_STANDBY_STABLE_MS = 500;
-const STRETCH_ARM_CROSS_MIN_ELBOW_DEG = 90; // brazo que se estira: bastante recto, no doblado del todo (más margen: en la práctica, sujetando/tirando del brazo, el ángulo baja de vez en cuando incluso en repeticiones que sí valen - ver notas 2026-09-05)
-const STRETCH_CROSS_MIN_FRACTION = 0.5; // la muñeca del brazo estirado tiene que haber recorrido, en horizontal, al menos esta fracción de la distancia hasta el hombro contrario (0 = no se ha movido de su propio hombro, 1 = ha llegado exactamente al hombro contrario) - esto es lo que de verdad distingue "brazo cruzado" de "brazo colgando en standby", sea cual sea el ancho de hombros o el encuadre de la cámara
-const STRETCH_WRIST_HEIGHT_MAX_FACTOR = 3.2; // muñeca del brazo estirado, a una altura parecida a la del hombro (ni muy arriba ni muy abajo) - umbral amplio, ver notas de calibración 2026-09-05
-const STRETCH_GRAB_MAX_FACTOR = 2.4; // muñeca del brazo que agarra, cerca del codo del brazo estirado - umbral amplio, ver notas de calibración 2026-09-05
-// Antes en 600ms, igual que PLANK_INVALID_STABLE_MS - tenía sentido para
-// plancha (si ya estás en posición, 600ms seguidos "mal" es que de
-// verdad la has roto), pero aquí paso 2 empieza en standby y hay que
-// MOVER un brazo entero, cruzarlo y agarrarlo - un gesto deliberado que
-// lleva bastante más de 600ms. Con un registro real (build v6, ver
-// notas 2026-09-05) se ve clarísimo: en CADA intento fallido, pasan
-// entre 600 y 700ms de "postura incorrecta" y entonces salta de vuelta
-// a pedir standby desde cero - incluso en un intento (21.2-21.5s del
-// registro) donde el brazo derecho SÍ llegaba a cruzar del todo
-// (cruce=1.06, codo=99°, igual de bien que cuando el izquierdo sí
-// cuenta), el reinicio a standby llegaba antes de que esos ~200ms de
-// postura correcta pudieran acumular los STRETCH_FLICKER_STABLE_MS
-// necesarios para confirmarse - o sea, el problema no era la geometría
-// ni los umbrales (que ya estaban bien), era que el temporizador de
-// "date por vencido, vuelve a standby" no daba tiempo ni de terminar el
-// gesto. Subido a un margen mucho más generoso para dar tiempo real a
-// cruzar el brazo y agarrarlo sin que la propia comprobación te corte
-// a medias.
-const STRETCH_INVALID_STABLE_MS = 3000;
+const STRETCH_ARM_CROSS_MIN_ELBOW_DEG = 120; // brazo que se estira: bastante recto, no doblado del todo
+const STRETCH_WRIST_TO_SHOULDER_MAX_FACTOR = 0.55; // muñeca del brazo estirado, lo bastante cerca del hombro contrario (cruzando el pecho)
+const STRETCH_WRIST_HEIGHT_MAX_FACTOR = 0.35; // muñeca del brazo estirado, a una altura parecida a la del hombro (ni muy arriba ni muy abajo)
+const STRETCH_GRAB_MAX_FACTOR = 0.45; // muñeca del brazo que agarra, cerca del codo del brazo estirado
+const STRETCH_INVALID_STABLE_MS = 600;
 const STRETCH_FLICKER_STABLE_MS = 300;
 const DEFAULT_STRETCH_TARGET_SECONDS = 30;
 // Contadores de estiramiento que, sin objetivo propio (fuera de un plan
 // o circuito), arrancan igualmente con una cuenta atrás por defecto en
 // vez de contar libremente desde 0 - ver el constructor de
 // WorkoutSession, más abajo.
-const STRETCH_HOLD_COUNTERS = new Set(["armcrossstretch", "tricepsoverheadstretch"]);
+const STRETCH_HOLD_COUNTERS = new Set(["armcrossstretch"]);
 
 /**
  * Paso 1 de cualquier estiramiento: posición "standby" - de pie,
@@ -2100,25 +1799,10 @@ export function checkArmCrossStretch(lm) {
   const lW = lm[L_WRIST], rW = lm[R_WRIST];
 
   if ([lS, rS, lE, rE, lW, rW].some((p) => (p.visibility ?? 1) < STRETCH_MIN_VISIBILITY)) {
-    // Antes esto solo decía "fail: vis" sin más - no había forma de saber,
-    // mirando el registro, si lo que perdía visibilidad era justo el lado
-    // que se estaba intentando estirar (indicio de un problema de encuadre
-    // u oclusión en ESE lado en concreto) o cualquier otra cosa. Con los
-    // números de visibilidad de cada articulación se puede distinguir -
-    // ver notas de calibración 2026-09-05 (el brazo derecho seguía sin
-    // contar incluso con la fracción de cruce ya corregida).
     return {
       ok: false,
       reason: "No se te ve entera/o. Ponte de frente a la cámara, algo alejada/o, para que se vean los dos brazos enteros.",
-      debug: {
-        fail: "vis",
-        "vis-izq-hombro": (lS.visibility ?? 1).toFixed(2),
-        "vis-izq-codo": (lE.visibility ?? 1).toFixed(2),
-        "vis-izq-muneca": (lW.visibility ?? 1).toFixed(2),
-        "vis-der-hombro": (rS.visibility ?? 1).toFixed(2),
-        "vis-der-codo": (rE.visibility ?? 1).toFixed(2),
-        "vis-der-muneca": (rW.visibility ?? 1).toFixed(2),
-      },
+      debug: { fail: "vis" },
     };
   }
 
@@ -2130,28 +1814,19 @@ export function checkArmCrossStretch(lm) {
 
   function evalSide(extShoulder, extElbow, extWrist, otherShoulder, otherWrist) {
     const extElbowAngle = angle(extShoulder, extElbow, extWrist);
-    // Cuánto ha cruzado la muñeca hacia el hombro contrario, en horizontal,
-    // como fracción de la distancia entre los dos hombros - en vez de una
-    // distancia absoluta (que depende del ancho de hombros Y de la relación
-    // de aspecto de la cámara, muy poco fiable, ver notas 2026-09-05). Signo
-    // relativo a la propia postura, así que no depende de si la imagen viene
-    // reflejada o no.
-    const acrossDir = otherShoulder.x - extShoulder.x;
-    const wristAcross = extWrist.x - extShoulder.x;
-    const crossFraction = acrossDir === 0 ? 0 : wristAcross / acrossDir;
-    const crossedEnough = crossFraction >= STRETCH_CROSS_MIN_FRACTION;
+    const wristToOtherShoulder = Math.hypot(extWrist.x - otherShoulder.x, extWrist.y - otherShoulder.y) / shoulderWidth;
     const wristHeightOffset = Math.abs(extWrist.y - shoulderMidY) / shoulderWidth;
     const grabDist = Math.hypot(otherWrist.x - extElbow.x, otherWrist.y - extElbow.y) / shoulderWidth;
     const ok =
       extElbowAngle !== null && extElbowAngle >= STRETCH_ARM_CROSS_MIN_ELBOW_DEG &&
-      crossedEnough &&
+      wristToOtherShoulder <= STRETCH_WRIST_TO_SHOULDER_MAX_FACTOR &&
       wristHeightOffset <= STRETCH_WRIST_HEIGHT_MAX_FACTOR &&
       grabDist <= STRETCH_GRAB_MAX_FACTOR;
     return {
       ok,
       debug: {
         codo: extElbowAngle === null ? null : extElbowAngle.toFixed(0),
-        cruce: crossFraction.toFixed(2),
+        munecaHombro: wristToOtherShoulder.toFixed(2),
         alturaMuneca: wristHeightOffset.toFixed(2),
         agarre: grabDist.toFixed(2),
       },
@@ -2164,165 +1839,10 @@ export function checkArmCrossStretch(lm) {
   if (leftExtends.ok) return { ok: true, side: "left", debug: leftExtends.debug };
   if (rightExtends.ok) return { ok: true, side: "right", debug: rightExtends.debug };
 
-  // Antes, aquí se devolvía siempre leftExtends.debug sin más - así que en
-  // cualquier fallo con el brazo DERECHO estirado, el registro de
-  // depuración mostraba los números de la hipótesis "brazo izquierdo
-  // estirado" (que no tiene nada que ver con lo que la persona está
-  // haciendo), dando datos sin sentido para calibrar ese lado - ver notas
-  // de calibración 2026-09-05. Ahora se devuelven los dos lados por
-  // separado, con prefijo, para poder ver de verdad cuál de los dos
-  // estaba más cerca de valer y por qué.
   return {
     ok: false,
     reason: "Estira un brazo hacia el lado contrario, más o menos a la altura del hombro, y agárralo con el otro brazo por el codo, tirando de él hacia el pecho.",
-    debug: {
-      "izq-codo": leftExtends.debug.codo,
-      "izq-cruce": leftExtends.debug.cruce,
-      "izq-altura": leftExtends.debug.alturaMuneca,
-      "izq-agarre": leftExtends.debug.agarre,
-      "der-codo": rightExtends.debug.codo,
-      "der-cruce": rightExtends.debug.cruce,
-      "der-altura": rightExtends.debug.alturaMuneca,
-      "der-agarre": rightExtends.debug.agarre,
-    },
-  };
-}
-
-// Estiramiento de tríceps por encima de la cabeza (overhead triceps
-// stretch): segundo de la familia de estiramientos con cámara (ver el
-// comentario junto a checkArmCrossStretch para el porqué de la familia
-// y el patrón de dos pasos). Reutiliza tal cual checkStandbyPosture
-// como paso 1.
-//
-// A diferencia del cruzado de brazo (brazo estirado, cruzando el
-// pecho en horizontal), aquí el brazo que se estira va DOBLADO por el
-// codo y ARRIBA, con la mano cayendo por detrás de la nuca/omóplato
-// contrario, y el otro brazo sube para agarrar el codo (no la mano) y
-// tirar de él hacia el centro/abajo. Pedido explícitamente de frente a
-// la cámara (igual que el cruzado) — no hace falta perfil, y así se ven
-// los dos brazos y la cabeza a la vez para las tres comprobaciones de
-// abajo.
-//
-// Se comprueban los dos lados posibles (izquierdo doblado/derecho
-// agarra, o al revés) igual que en checkArmCrossStretch, sin exigir un
-// lado concreto — misma razón: alternar brazos sin lógica aparte,
-// contando cada aguante como una serie aparte (STRETCH_HOLD_COUNTERS).
-//
-// Umbrales ajustados a partir de un registro real de cámara (primera
-// prueba en vivo): con los valores iniciales el check nunca llegaba a
-// confirmarse - "ok" parpadeaba frame a frame porque el ángulo de codo
-// rondaba/superaba el límite y sobre todo porque "muñecaCabeza" y
-// "agarre" oscilaban muchísimo entre frames consecutivos del mismo
-// intento (p.ej. muñecaCabeza saltando de ~0.4 a ~4.0), por el ruido de
-// tracking al estar esa muñeca semioculta detrás de la cabeza.
-// alturaCodo se deja igual porque en el registro nunca fue el cuello
-// de botella (en standby/de pie daba valores muy negativos, con mucho
-// margen respecto al umbral).
-const STRETCH_TRICEPS_ELBOW_MAX_DEG = 130; // ampliado de 100: en aguantes válidos del registro real el ángulo rondaba/superaba 100°
-const STRETCH_TRICEPS_ELBOW_HIGH_FACTOR = 0.25; // sin cambios: nunca fue el cuello de botella en el registro real
-const STRETCH_TRICEPS_WRIST_NEAR_HEAD_MAX_FACTOR = 2.2; // ampliado de 1.1: muy ruidoso por la oclusión parcial de la muñeca detrás de la cabeza
-const STRETCH_TRICEPS_GRAB_MAX_FACTOR = 2.4; // ampliado de 1.3, igualado al umbral ya probado en producción para el cruzado de brazo (STRETCH_GRAB_MAX_FACTOR)
-
-// La muñeca del brazo que se dobla queda parcialmente tapada por la
-// cabeza al meterse detrás de la nuca (vista de frente) - MediaPipe
-// refleja eso con visibility baja para ESA muñeca en concreto (se vio
-// hasta 0.09 en el registro real, con la postura por lo demás
-// correcta), aunque el resto del cuerpo se vea perfectamente. Exigirle
-// el mismo umbral que a hombros/codos/muñeca que agarra (que sí deben
-// verse enteros) forzaba "no se te ve" de forma constante y sumaba al
-// parpadeo. Se usa un umbral mucho más permisivo solo para esa muñeca.
-const STRETCH_TRICEPS_BENT_WRIST_MIN_VISIBILITY = 0.05; // bajado de 0.12: en el registro real la muneca doblada bajaba a 0.13 en aguantes validos
-const STRETCH_TRICEPS_GRAB_WRIST_MIN_VISIBILITY = 0.25; // dedicado (antes reusaba STRETCH_MIN_VISIBILITY=0.4): la muneca que agarra tambien se vio bajar a ~0.41 en aguantes validos, justo en el borde del umbral estricto
-
-/**
- * Paso 2 del estiramiento de tríceps: un brazo se dobla por el codo,
- * levantado, con la mano cayendo por detrás de la nuca, y el otro
- * brazo sube y agarra ese codo (no la mano) tirando de él hacia el
- * centro. Se comprueban los dos lados posibles y se devuelve el
- * primero que encaje - ver el comentario junto a esta función para el
- * porqué de no exigir un lado concreto.
- */
-export function checkTricepsOverheadStretch(lm) {
-  const nose = lm[NOSE];
-  const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
-  const lE = lm[L_ELBOW], rE = lm[R_ELBOW];
-  const lW = lm[L_WRIST], rW = lm[R_WRIST];
-
-  // Solo hombros/codos exigen visibilidad estricta aquí: son los puntos
-  // que hacen falta para la geometría de los dos lados. La visibilidad
-  // de cada muñeca se comprueba dentro de evalSide(), con un umbral
-  // distinto según el papel (la que se dobla puede quedar tapada por
-  // la cabeza; la que agarra no debería).
-  if ([nose, lS, rS, lE, rE].some((p) => (p.visibility ?? 1) < STRETCH_MIN_VISIBILITY)) {
-    return {
-      ok: false,
-      reason: "No se te ve entera/o. Ponte de frente a la cámara, algo alejada/o, para que se vean los dos brazos y la cabeza enteros.",
-      debug: {
-        fail: "vis",
-        "vis-izq-hombro": (lS.visibility ?? 1).toFixed(2),
-        "vis-izq-codo": (lE.visibility ?? 1).toFixed(2),
-        "vis-der-hombro": (rS.visibility ?? 1).toFixed(2),
-        "vis-der-codo": (rE.visibility ?? 1).toFixed(2),
-      },
-    };
-  }
-
-  const shoulderWidth = Math.hypot(lS.x - rS.x, lS.y - rS.y);
-  if (!shoulderWidth) {
-    return { ok: false, reason: "No se te ve entera/o. Ponte de frente a la cámara.", debug: { fail: "vis" } };
-  }
-  const shoulderMidY = (lS.y + rS.y) / 2;
-
-  function evalSide(bentShoulder, bentElbow, bentWrist, grabWrist) {
-    // La muñeca que se dobla puede estar parcialmente tapada por la
-    // cabeza (umbral permisivo); la que agarra tiene que verse normal.
-    const bentWristVisible = (bentWrist.visibility ?? 1) >= STRETCH_TRICEPS_BENT_WRIST_MIN_VISIBILITY;
-    const grabWristVisible = (grabWrist.visibility ?? 1) >= STRETCH_TRICEPS_GRAB_WRIST_MIN_VISIBILITY;
-    const bentElbowAngle = angle(bentShoulder, bentElbow, bentWrist);
-    // Y crece hacia abajo en la imagen: el codo tiene que quedar POR
-    // ENCIMA de los hombros (Y menor), cerca de la cabeza.
-    const elbowHeightOffset = (shoulderMidY - bentElbow.y) / shoulderWidth;
-    const elbowHigh = elbowHeightOffset >= STRETCH_TRICEPS_ELBOW_HIGH_FACTOR;
-    const wristNearHead = Math.hypot(bentWrist.x - nose.x, bentWrist.y - nose.y) / shoulderWidth;
-    const grabDist = Math.hypot(grabWrist.x - bentElbow.x, grabWrist.y - bentElbow.y) / shoulderWidth;
-    const ok =
-      bentWristVisible && grabWristVisible &&
-      bentElbowAngle !== null && bentElbowAngle <= STRETCH_TRICEPS_ELBOW_MAX_DEG &&
-      elbowHigh &&
-      wristNearHead <= STRETCH_TRICEPS_WRIST_NEAR_HEAD_MAX_FACTOR &&
-      grabDist <= STRETCH_TRICEPS_GRAB_MAX_FACTOR;
-    return {
-      ok,
-      debug: {
-        codo: bentElbowAngle === null ? null : bentElbowAngle.toFixed(0),
-        alturaCodo: elbowHeightOffset.toFixed(2),
-        munecaCabeza: wristNearHead.toFixed(2),
-        agarre: grabDist.toFixed(2),
-        visMunecaDoblada: (bentWrist.visibility ?? 1).toFixed(2),
-        visMunecaAgarre: (grabWrist.visibility ?? 1).toFixed(2),
-      },
-    };
-  }
-
-  const leftBends = evalSide(lS, lE, lW, rW);  // brazo izquierdo se dobla, el derecho agarra el codo
-  const rightBends = evalSide(rS, rE, rW, lW); // brazo derecho se dobla, el izquierdo agarra el codo
-
-  if (leftBends.ok) return { ok: true, side: "left", debug: leftBends.debug };
-  if (rightBends.ok) return { ok: true, side: "right", debug: rightBends.debug };
-
-  return {
-    ok: false,
-    reason: "Dobla un brazo por el codo, llevando la mano por detrás de la nuca, y con el otro brazo agarra ese codo (no la mano) tirando de él hacia el centro.",
-    debug: {
-      "izq-codo": leftBends.debug.codo,
-      "izq-alturaCodo": leftBends.debug.alturaCodo,
-      "izq-munecaCabeza": leftBends.debug.munecaCabeza,
-      "izq-agarre": leftBends.debug.agarre,
-      "der-codo": rightBends.debug.codo,
-      "der-alturaCodo": rightBends.debug.alturaCodo,
-      "der-munecaCabeza": rightBends.debug.munecaCabeza,
-      "der-agarre": rightBends.debug.agarre,
-    },
+    debug: leftExtends.debug,
   };
 }
 
@@ -2745,9 +2265,6 @@ class WorkoutSession {
     this.squatSide = null;     // "left" | "right" — qué lado del cuerpo se ve mejor este frame (de perfil solo se ve bien uno)
     this.squatKneeAngle = null; // último ángulo de rodilla medido, solo para overlay/debug
     this.squatArmStableSince = null; // desde cuándo llevas de pie (rodilla estirada) seguido, sin armar aún el contador — ver SQUAT_ARM_STABLE_MS
-    this.splitSquatKneeAngle = null; // último ángulo de rodilla (el mínimo de las dos piernas visibles), solo para overlay/debug
-    this.splitSquatStableSince = null; // desde cuándo llevas de pie (las dos rodillas casi rectas) seguido, sin armar aún el contador — ver SPLITSQUAT_STABLE_MS
-    this.splitSquatStateEnteredAt = null; // performance.now() de cuándo entraste en el estado actual (top/bottom) — para cerrar la serie si pasas SPLITSQUAT_IDLE_CLOSE_MS sin avanzar, ver processSplitSquat
     this.curlSide = null;            // curl: "left" | "right" — qué lado del cuerpo se ve mejor este frame (de perfil solo se ve bien uno), mismo concepto que squatSide/pushupSide
     this.curlElbowAngle = null;      // curl: último ángulo de codo medido, solo para overlay/debug
     this.curlTopHoldSince = null;    // curl: performance.now() de cuándo se llegó arriba (codo doblado) en la repetición en curso — para el aviso de "llevas aguantando, esto no cuenta todavía" (ver CURL_TOP_HOLD_WARN_MS/processDumbbellCurl)
@@ -2762,54 +2279,6 @@ class WorkoutSession {
     this.archerLastSide = null;       // dominadas de arquero: "left" | "right" — lado detectado en la última repetición contada (para avisar si repites)
     this.archerLiveLeftAngle = null;  // dominadas de arquero: ángulo de codo izquierdo de ESTE frame, solo para overlay/debug
     this.archerLiveRightAngle = null; // idem, codo derecho
-    this.armCirclePrevAngleL = null;    // círculos de brazos: último ángulo local (radianes) del brazo izquierdo, para calcular el delta del frame (ver ARMCIRCLES_* y processArmCircles)
-    this.armCirclePrevAngleR = null;    // círculos de brazos: idem, brazo derecho
-    this.armCircleAccum = 0;            // círculos de brazos: ángulo acumulado (con signo) desde la última vuelta completa contada — al llegar a ±2π se cuenta una repetición
-    this.armCirclePhase = null;    // círculos de brazos: null (sentido aún no detectado) | "forward" | "backward" — se fija solo con la primera vuelta completa que hagas, y luego cambia sola en cuanto te paras un momento (ver ARMCIRCLES_STILL_MS/armCircleDidPhaseSwitch), no por llegar a un número de reps concreto
-    this.armCirclePhaseReps = 0;        // círculos de brazos: repeticiones contadas en el sentido actual, para saber cuándo toca el cambio de fase
-    this.armCircleArmStableSince = null; // círculos de brazos: desde cuándo llevas los dos brazos extendidos seguido, sin armar aún (ver ARMCIRCLES_ARM_STABLE_MS)
-    this.armCircleLastProgressAt = null; // círculos de brazos: performance.now() del último frame con giro de verdad (por encima de ARMCIRCLES_MIN_ANGULAR_DELTA) — para cerrar la serie sola si te paras (ver ARMCIRCLES_STILL_MS)
-    this.armCircleRepStartTime = null;   // círculos de brazos: performance.now() de cuándo empezó la vuelta en curso, para el filtro de ruido ARMCIRCLES_MIN_REP_SECONDS
-    this.armCircleDidPhaseSwitch = false; // círculos de brazos: si ya se ha cambiado de sentido en la serie en curso -- al pararte la primera vez (ARMCIRCLES_STILL_MS) se cambia de sentido solo y se sigue la serie; al pararte la segunda vez (con los dos sentidos ya hechos) se cierra la serie (ver processArmCircles)
-    this.neckLateralStableSince = null;      // giros de cuello: desde cuándo llevas la nariz centrada seguido, sin armar aún (ver NECKLATERAL_CENTER_STABLE_MS)
-    this.neckLateralBaselineOffset = 0;      // giros de cuello: desviación nariz/hombros que se considera "centro" -- se fija al armar (ver processNeckLateral), para no exigir que la nariz esté perfectamente centrada de fábrica
-    this.neckLateralBaselineVerticalOffset = 0; // giros de cuello: lo mismo que neckLateralBaselineOffset pero en vertical -- referencia de "qué tan abajo cae tu nariz de fábrica" respecto a tus hombros, para poder medir cuánto CAE DE MÁS durante el vaivén (ver NECKLATERAL_MAX_VERTICAL_FACTOR)
-    this.neckLateralSide = null;             // giros de cuello: "left" | "right" mientras se confirma un lado (antes de que se sostenga NECKLATERAL_SIDE_STABLE_MS), null en el centro
-    this.neckLateralSideSince = null;        // giros de cuello: desde cuándo llevas el lado actual sostenido, sin confirmar aún (ver NECKLATERAL_SIDE_STABLE_MS)
-    this.neckLateralAnchorX = null;          // giros de cuello: punto medio de hombros (x) al confirmarse el lado, para medir cuánto se desplaza el torso durante el vaivén (ver NECKLATERAL_DRIFT_TOLERANCE_FACTOR)
-    this.neckLateralDrifted = false;         // giros de cuello: si el torso se ha desplazado más de la cuenta durante el vaivén en curso (se avisa, no se penaliza -- ver processNeckLateral)
-    this.neckLateralLastTransitionAt = null; // giros de cuello: performance.now() del último vaivén completado (o del armado), para cerrar la serie sola si te paras (ver NECKLATERAL_STILL_MS)
-    this.armScissorsCenterStableSince = null; // tijeras de brazos: desde cuándo llevas los dos brazos extendidos seguido, sin armar aún (ver ARMSCISSORS_CENTER_STABLE_MS)
-    this.armScissorsCrossSince = null;        // tijeras de brazos: desde cuándo llevas los brazos cruzados seguido, sin confirmar aún (ver ARMSCISSORS_CROSS_STABLE_MS)
-    this.armScissorsLastTransitionAt = null;  // tijeras de brazos: performance.now() del último vaivén completado (o del armado), para cerrar la serie sola si te paras (ver ARMSCISSORS_STILL_MS)
-    this.legRotationStableSince = null;    // rotación de piernas: desde cuándo llevas las dos piernas apoyadas seguido, sin armar aún (ver LEGROTATION_STABLE_MS)
-    this.legRotationActiveSide = null;     // rotación de piernas: "left" | "right" mientras una pierna está levantada y se le sigue el ángulo, null si las dos están apoyadas (esperando la siguiente subida)
-    this.legRotationPrevAngle = null;      // rotación de piernas: último ángulo local (radianes) cadera->rodilla de la pierna activa, para calcular el delta del frame (ver LEGROTATION_* y processLegRotation)
-    this.legRotationAccum = 0;             // rotación de piernas: rotación acumulada (valor absoluto) de la subida en curso -- se compara con LEGROTATION_MIN_ROTATION_DEG al bajar la pierna
-    this.legRotationRepStartTime = null;   // rotación de piernas: performance.now() de cuándo empezó la subida en curso, para el filtro de ruido LEGROTATION_MIN_REP_SECONDS
-    this.legRotationLastActivityAt = null; // rotación de piernas: performance.now() de la última subida empezada o repetición contada -- para cerrar la serie sola si pasan LEGROTATION_STILL_MS sin nada (ver processLegRotation)
-    this.legRotationLastCountedSide = null; // rotación de piernas: "left" | "right" -- lado de la ÚLTIMA repetición contada, para saber si el lado actual es un cambio real y avisar por voz ("pierna izquierda"/"pierna derecha"); se resetea a null en cada serie nueva (ver processLegRotation) -- pedido explícitamente: que funcione para las dos piernas y sea capaz de diferenciarlas
-    this.legRotationVisibleSince = null; // rotación de piernas: performance.now() desde cuándo la visibilidad lleva seguido por encima de LEGROTATION_MIN_VISIBILITY, sin cortes -- para no anunciar "a la vista" con un solo frame suelto (ver LEGROTATION_VISIBLE_CONFIRM_MS)
-    this.legRotationExcursionHipMidX = null; // rotación de piernas: punto medio (x) de las dos caderas al EMPEZAR la subida en curso -- referencia para detectar si el cuerpo se ha desplazado de sitio (caminando) en vez de girar la pierna en el sitio (ver LEGROTATION_MAX_HIP_DRIFT_FACTOR)
-    this.legRotationExcursionHipMidY = null; // rotación de piernas: idem, punto medio (y)
-    this.legRotationExcursionHipWidth = null; // rotación de piernas: ancho de cadera al EMPEZAR la subida en curso, para normalizar el desplazamiento medido al cerrarla (ver LEGROTATION_MAX_HIP_DRIFT_FACTOR)
-    this.kneeRaiseStableSince = null;      // rodillas altas: desde cuándo llevas las dos piernas apoyadas seguido, sin armar aún (ver KNEERAISE_STABLE_MS)
-    this.kneeRaiseActiveSide = null;       // rodillas altas: "left" | "right" mientras una pierna está levantada, null si las dos están apoyadas (esperando la siguiente subida) -- sin lado "pegajoso", no se diferencian left/right entre repeticiones
-    this.kneeRaiseRepStartTime = null;     // rodillas altas: performance.now() de cuándo empezó la subida en curso, para el filtro de ruido KNEERAISE_MIN_REP_SECONDS
-    this.kneeRaiseLastActivityAt = null;   // rodillas altas: performance.now() de la última subida empezada o repetición contada -- para cerrar la serie sola si pasan KNEERAISE_STILL_MS sin nada
-    this.kneeRaiseVisibleSince = null;     // rodillas altas: performance.now() desde cuándo la visibilidad lleva seguido por encima de KNEERAISE_MIN_VISIBILITY, sin cortes -- para no anunciar "a la vista" con un solo frame suelto (ver KNEERAISE_VISIBLE_CONFIRM_MS)
-    this.heelKickTrackedSide = null;      // talones al gluteo: "left" | "right" -- que pierna se vigila esta serie, elegida UNA VEZ al armar segun cual se ve mejor (ver el porque junto a "this.state = active" en processHeelKicks); la otra no se procesa en absoluto
-    this.heelKickUp = false;              // talones al gluteo: true mientras la pierna vigilada tiene el talon arriba
-    this.heelKickRepStart = null;         // talones al gluteo: performance.now() de cuando empezo la subida en curso, para el filtro de ruido HEELKICK_MIN_REP_SECONDS
-    this.heelKickExcursionHipMidX = null; // talones al gluteo: punto medio x de las caderas al empezar la subida en curso, para detectar "caminar" (ver HEELKICK_MAX_HIP_DRIFT_FACTOR)
-    this.heelKickExcursionHipMidY = null; // talones al gluteo: punto medio y de las caderas al empezar la subida en curso
-    this.heelKickExcursionLegScale = null; // talones al gluteo: longitud (cadera-tobillo) de la pierna que se queda apoyada al empezar la subida -- escala para normalizar el desplazamiento anterior
-    this.heelKickLastActivityAt = null;   // talones al gluteo: performance.now() de la ultima subida empezada o repeticion contada -- para cerrar la serie sola si pasan HEELKICK_STILL_MS sin nada
-    this.heelKickVisibleSince = null;     // talones al gluteo: performance.now() desde cuando la visibilidad lleva seguido por encima de HEELKICK_MIN_VISIBILITY, sin cortes -- para no anunciar "a la vista" con un solo frame suelto (ver HEELKICK_VISIBLE_CONFIRM_MS)
-    this.heelKickPrevAngleL = null;      // talones al gluteo: angulo cadera-rodilla-tobillo (grados, pierna izquierda) del ultimo fotograma aceptado -- para descartar saltos imposibles de un fotograma al siguiente (ver HEELKICK_MAX_ANGLE_DELTA)
-    this.heelKickPrevAngleR = null;      // talones al gluteo: idem, pierna derecha
-    this.heelKickSmoothAngleL = null;    // talones al gluteo: angulo (grados, pierna izquierda) YA suavizado con media movil exponencial, tras el ratchet -- para amortiguar el temblor de la pierna que la camara ve peor (ver HEELKICK_ANGLE_SMOOTHING_ALPHA)
-    this.heelKickSmoothAngleR = null;    // talones al gluteo: idem, pierna derecha
 
     this.sessionStart = null;
     this.lastRepTime = null;
@@ -3002,26 +2471,17 @@ class WorkoutSession {
   announceSetComplete(prefix, waitingMessage) {
     // Descanso obligatorio: la explicación completa ("mínimo N segundos")
     // se decía SIEMPRE, en cada serie — pero es la misma tabarra que el
-    // resto de este aviso (cómo colocarte), así que sigue la misma regla:
-    // la chapa completa solo la PRIMERA vez de la sesión; a partir de la
-    // segunda serie ya sabes que hay descanso obligatorio y cuánto dura,
-    // así que por voz basta con "Descanso.", a secas. La regla de "no
-    // cuento nada hasta que no pasen los 90s" en sí no cambia (ver
+    // resto de este aviso (cómo colocarte), así que ahora sigue la misma
+    // regla: la chapa completa solo la PRIMERA vez de la sesión; a partir
+    // de la segunda serie ya sabes que hay descanso obligatorio y cuánto
+    // dura, así que por voz basta con "Descanso.", a secas. La regla de
+    // "no cuento nada hasta que no pasen los 90s" en sí no cambia (ver
     // MIN_REST_MS, countRep, notePostureOk) — si intentas algo antes de
     // tiempo, announceRestBlocked() sí te lo explica con detalle cada vez,
     // porque ahí hace falta.
-    //
-    // Calentamientos/estiramientos (NO_REST_COUNTERS): aquí no HAY
-    // descanso obligatorio de verdad (ver countRep()/notePostureOk()),
-    // así que mencionarlo en la voz era mentira - se reportó que seguía
-    // oyéndose "descanso obligatorio de 90s" en el estiramiento cruzado
-    // de brazo pese a que ya no se aplicaba. Para estos, el aviso se
-    // queda solo en "Serie de N terminada. <cómo seguir>", sin nada de
-    // descanso.
-    const skipsRest = NO_REST_COUNTERS.has(this.counterKey);
-    const restNoteFull = skipsRest ? "" : `Descanso obligatorio: mínimo ${Math.round(MIN_REST_MS / 1000)} segundos. `;
-    const restNoteShort = skipsRest ? "" : "Descanso. ";
-    const fullText = `${prefix} terminada. ${restNoteFull}${waitingMessage}`;
+    const restNoteFull = `Descanso obligatorio: mínimo ${Math.round(MIN_REST_MS / 1000)} segundos.`;
+    const restNoteShort = "Descanso.";
+    const fullText = `${prefix} terminada. ${restNoteFull} ${waitingMessage}`;
     this.setStatus(fullText);
     if (!this.voiceEnabled) return;
     const isFirst = this.setsCompletedVoiceCount === 0;
@@ -3030,7 +2490,7 @@ class WorkoutSession {
     const anyGap = this.lastSpokenStatusAt === null ? Infinity : now - this.lastSpokenStatusAt;
     if (anyGap < STATUS_VOICE_MIN_GAP_MS) return;
     this.lastSpokenStatusAt = now;
-    this.speak(skipsRest || isFirst ? fullText : `${prefix} terminada. ${restNoteShort}`, { flush: false });
+    this.speak(isFirst ? fullText : `${prefix} terminada. ${restNoteShort}`, { flush: false });
   }
 
   /**
@@ -3248,17 +2708,6 @@ class WorkoutSession {
       this.squatKneeAngle = null;
       this.squatArmStableSince = null;
       this.setStatus("Ponte de perfil a la cámara, de pie, para empezar.");
-    } else if (this.counterKey === "splitsquat") {
-      // Igual que sentadillas: sin barra que calibrar, el ángulo de
-      // rodilla no depende de la distancia a la cámara -- solo hace
-      // falta esperar a verte de pie y en zancada para no contar media
-      // repetición al entrar en encuadre a media bajada.
-      this.prepping = false;
-      this.state = null;
-      this.splitSquatKneeAngle = null;
-      this.splitSquatStableSince = null;
-      this.splitSquatStateEnteredAt = null;
-      this.setStatus("Ponte en posición para empezar.");
     } else if (this.counterKey === "jumpingjack") {
       // Tampoco hay nada que calibrar: los umbrales son proporcionales
       // al ancho de hombros/cadera, no dependen de la distancia a la
@@ -3273,104 +2722,6 @@ class WorkoutSession {
       this.jjArmsUpSeenThisRep = false;
       this.jjLegsOpenSince = null;
       this.setStatus("Ponte de pie, de frente a la cámara, con los brazos pegados al cuerpo y los pies juntos, para empezar.");
-    } else if (this.counterKey === "armcircles") {
-      // Tampoco hay nada que calibrar: el ángulo es relativo a tu propio
-      // hombro, no depende de la distancia a la cámara. Solo hace falta
-      // esperar a verte con los dos brazos extendidos, para no arrancar
-      // a mitad de un círculo.
-      this.prepping = false;
-      this.state = null;
-      this.armCirclePrevAngleL = null;
-      this.armCirclePrevAngleR = null;
-      this.armCircleAccum = 0;
-      this.armCirclePhase = null;
-      this.armCirclePhaseReps = 0;
-      this.armCircleArmStableSince = null;
-      this.armCircleLastProgressAt = null;
-      this.armCircleRepStartTime = null;
-      this.armCircleDidPhaseSwitch = false;
-      this.setStatus("Ponte de pie, de frente a la cámara, con los brazos extendidos, para empezar.");
-    } else if (this.counterKey === "necklateral") {
-      // Tampoco hay nada que calibrar de una barra o de tu altura: el
-      // umbral es proporcional al ancho de hombros, no depende de la
-      // distancia a la cámara. Solo hace falta esperar a verte
-      // centrada/o y quieta/o, para fijar tu propio "centro" real
-      // (baseline) antes de empezar a contar vaivenes.
-      this.prepping = false;
-      this.state = null;
-      this.neckLateralStableSince = null;
-      this.neckLateralBaselineOffset = 0;
-      this.neckLateralBaselineVerticalOffset = 0;
-      this.neckLateralSide = null;
-      this.neckLateralSideSince = null;
-      this.neckLateralAnchorX = null;
-      this.neckLateralDrifted = false;
-      this.neckLateralLastTransitionAt = null;
-      this.setStatus("Ponte de frente a la cámara, mirando al frente, para empezar.");
-    } else if (this.counterKey === "armscissors") {
-      // Tampoco hay nada que calibrar: los umbrales son proporcionales
-      // al ancho de hombros, no a la distancia a la cámara. Solo hace
-      // falta esperar a verte con los dos brazos extendidos en cruz,
-      // para no arrancar a mitad de un cruce.
-      this.prepping = false;
-      this.state = null;
-      this.armScissorsCenterStableSince = null;
-      this.armScissorsCrossSince = null;
-      this.armScissorsLastTransitionAt = null;
-      this.setStatus("Ponte de pie, de frente a la cámara, con los brazos extendidos en cruz, para empezar.");
-    } else if (this.counterKey === "legrotation") {
-      // Tampoco hay nada que calibrar: los umbrales son proporcionales a
-      // tu propio muslo (distancia cadera-rodilla), no a la distancia a
-      // la cámara. Solo hace falta esperar a verte de pie con las dos
-      // piernas apoyadas, para no arrancar a mitad de una subida.
-      this.prepping = false;
-      this.state = null;
-      this.legRotationStableSince = null;
-      this.legRotationActiveSide = null;
-      this.legRotationPrevAngle = null;
-      this.legRotationAccum = 0;
-      this.legRotationRepStartTime = null;
-      this.legRotationLastActivityAt = null;
-      this.legRotationLastCountedSide = null;
-      this.legRotationVisibleSince = null;
-      this.legRotationExcursionHipMidX = null;
-      this.legRotationExcursionHipMidY = null;
-      this.legRotationExcursionHipWidth = null;
-      this.setStatus("Ponte de pie, de frente a la cámara, con las dos piernas apoyadas, para empezar.");
-    } else if (this.counterKey === "kneeraises") {
-      // Tampoco hay nada que calibrar: los umbrales son proporcionales a
-      // tu propio muslo (distancia cadera-rodilla), no a la distancia a
-      // la cámara. Solo hace falta esperar a verte de pie con las dos
-      // piernas apoyadas, para no arrancar a media zancada.
-      this.prepping = false;
-      this.state = null;
-      this.kneeRaiseStableSince = null;
-      this.kneeRaiseActiveSide = null;
-      this.kneeRaiseRepStartTime = null;
-      this.kneeRaiseLastActivityAt = null;
-      this.kneeRaiseVisibleSince = null;
-      this.setStatus("Ponte de pie, de perfil a la cámara, con las dos piernas apoyadas, para empezar.");
-    } else if (this.counterKey === "heelkicks") {
-      // Tampoco hay nada que calibrar: los umbrales son proporcionales a
-      // tu propia pierna (cadera-tobillo respecto a muslo+espinilla), no
-      // a la distancia a la camara. Solo hace falta esperar a verte de
-      // pie con las dos piernas apoyadas, para no arrancar a media
-      // zancada.
-      this.prepping = false;
-      this.state = null;
-      this.heelKickTrackedSide = null;
-      this.heelKickUp = false;
-      this.heelKickRepStart = null;
-      this.heelKickExcursionHipMidX = null;
-      this.heelKickExcursionHipMidY = null;
-      this.heelKickExcursionLegScale = null;
-      this.heelKickLastActivityAt = null;
-      this.heelKickVisibleSince = null;
-      this.heelKickPrevAngleL = null;
-      this.heelKickSmoothAngleL = null;
-      this.heelKickSmoothAngleR = null;
-      this.heelKickPrevAngleR = null;
-      this.setStatus("Ponte de pie, de perfil a la cámara, con las dos piernas apoyadas, para empezar.");
     } else if (this.counterKey === "crunch") {
       // Tampoco hay nada que calibrar: se mide el hombro frente a la
       // cadera, en proporción al muslo — ningún valor depende de la
@@ -3648,19 +2999,17 @@ class WorkoutSession {
     // definición (ver countRep, que además pone restVoiceQuiet a false
     // justo antes de llamar aquí).
     //
-    // Solo se anuncia de REP_VOICE_STEP en REP_VOICE_STEP (5, 10, 15…),
-    // en TODOS los ejercicios: decirlas todas no daba tiempo a seguir el
-    // ritmo real de la serie, la voz se quedaba atrás. El contador en
-    // pantalla (repsEl, en countRep) no tiene ese problema — se actualiza
-    // al instante en cada repetición, sin voz — así que el número real
-    // siempre se ve aunque la voz solo marque los múltiplos de 5.
-    if (n % REP_VOICE_STEP !== 0) return;
+    // Se probó a anunciar jumping jacks solo cada varias repeticiones
+    // (la voz se queda atrás a ritmo rápido) pero se pidió explícitamente
+    // volver a decir todas — se prefiere la voz atrasada a que cuente de
+    // 5 en 5. El contador en pantalla (repsEl, en countRep) de todas
+    // formas no tiene ese problema: se actualiza al instante, sin voz.
     speakOut(numeroEnPalabras(n), { rate: 1.1 }); // un poco más rápido que el habla normal, para no quedarse atrás
   }
 
   countRep(duration, now, label, minSeconds = MIN_REP_SECONDS) {
     if (duration < minSeconds) return false;   // ruido, no cuenta
-    if (this.currentSetReps === 0 && this.setClosedAt !== null && now - this.setClosedAt < MIN_REST_MS && !NO_REST_COUNTERS.has(this.counterKey)) {
+    if (this.currentSetReps === 0 && this.setClosedAt !== null && now - this.setClosedAt < MIN_REST_MS) {
       // Descanso obligatorio en curso: aunque te coloques y te muevas
       // antes de tiempo, esto NO cuenta como repetición — antes sí se
       // contaba en silencio si probabas a moverte en pleno descanso.
@@ -5009,124 +4358,6 @@ class WorkoutSession {
   }
 
   /**
-   * Split squat / zancada estática -- pedido con vídeo de referencia
-   * (WhatsApp, 2026-09-04): de perfil, de pie con una pierna delante y
-   * otra detrás, bajando la cadera hasta casi rozar la rodilla trasera
-   * el suelo y volviendo a subir.
-   *
-   * Se cuenta igual que la sentadilla (ángulo cadera-rodilla-tobillo,
-   * DE PERFIL), pero a diferencia de processSquat NO se elige "la
-   * pierna más visible": en split squat las dos piernas quedan
-   * separadas delante/detrás en la imagen en vez de una tapando a la
-   * otra, así que de perfil normalmente se ven bien las DOS. Se usa la
-   * rodilla MÁS DOBLADA entre las que se vean lo bastante -- da igual
-   * cuál sea físicamente la pierna de delante, las dos se doblan en el
-   * mismo ciclo de bajada/subida.
-   *
-   * Primera versión: umbrales de ángulo iguales a los de sentadillas
-   * como punto de partida, pendientes de calibrar con cámara real igual
-   * que el resto de la familia de ejercicios nuevos.
-   */
-  processSplitSquat(lm, now) {
-    if (this.state !== null && this.checkWaveGesture(lm, now)) {
-      this.closeActiveSet();
-      return;
-    }
-
-    // Cuarta forma de terminar la serie: llevar SPLITSQUAT_IDLE_CLOSE_MS
-    // sin avanzar en la repetición (por ejemplo, pararte y ponerte de
-    // frente a la cámara para descansar) -- ver el razonamiento junto a
-    // la constante, más arriba.
-    if (this.state !== null && this.splitSquatStateEnteredAt !== null
-      && now - this.splitSquatStateEnteredAt >= SPLITSQUAT_IDLE_CLOSE_MS) {
-      this.closeActiveSet();
-      return;
-    }
-
-    const lHip = lm[L_HIP], rHip = lm[R_HIP];
-    const lKnee = lm[L_KNEE], rKnee = lm[R_KNEE];
-    const lAnkle = lm[L_ANKLE], rAnkle = lm[R_ANKLE];
-
-    const leftVis = ((lHip.visibility ?? 1) + (lKnee.visibility ?? 1) + (lAnkle.visibility ?? 1)) / 3;
-    const rightVis = ((rHip.visibility ?? 1) + (rKnee.visibility ?? 1) + (rAnkle.visibility ?? 1)) / 3;
-    const leftOk = leftVis >= SPLITSQUAT_MIN_VISIBILITY;
-    const rightOk = rightVis >= SPLITSQUAT_MIN_VISIBILITY;
-
-    if (!leftOk && !rightOk) {
-      this.announceStatus("Ponte en posición.");
-      if (this.debugEl) this.debugEl.textContent = "buscando cadera, rodilla y tobillo de las dos piernas…";
-      this.splitSquatKneeAngle = null;
-      this.noteAbsence(now);
-      return;
-    }
-    this.outOfFrameSince = null;
-
-    // La primera vez en toda la sesión que se te ve bien, un aviso de
-    // que ya puedes empezar (mismo patrón que processSquat).
-    if (!this.startupVoiceGiven) {
-      this.startupVoiceGiven = true;
-      this.announceStatus("¡Listo! Empieza.", "startup_ready");
-    }
-
-    const leftAngle = leftOk ? angle(lHip, lKnee, lAnkle) : null;
-    const rightAngle = rightOk ? angle(rHip, rKnee, rAnkle) : null;
-    let kneeAngle;
-    if (leftAngle !== null && rightAngle !== null) {
-      kneeAngle = Math.min(leftAngle, rightAngle);
-    } else {
-      kneeAngle = leftAngle !== null ? leftAngle : rightAngle;
-    }
-    if (kneeAngle === null) return;
-
-    this.splitSquatKneeAngle = kneeAngle;
-
-    if (this.state === null) {
-      // Hay que empezar de pie (las dos rodillas casi rectas) y de
-      // forma estable, para no contar media repetición al entrar en
-      // encuadre a media bajada -- mismo patrón que squatArmStableSince.
-      if (kneeAngle >= SPLITSQUAT_UP_ANGLE_DEG) {
-        if (this.splitSquatStableSince === null) this.splitSquatStableSince = now;
-        if (now - this.splitSquatStableSince >= SPLITSQUAT_STABLE_MS) {
-          this.state = "top";
-          this.splitSquatStableSince = null;
-          this.splitSquatStateEnteredAt = now;
-          this.announceStatus("¡Listo!", "ready_to_go");
-        } else {
-          this.setStatus("Confirmando…");
-        }
-      } else {
-        this.splitSquatStableSince = null;
-        this.setStatus("Ponte en posición.");
-      }
-    } else if (this.state === "top") {
-      // La otra pierna (la que no es la más doblada) tiene que enseñar
-      // también algo de flexión real -- si sigue recta del todo, esto
-      // no es un split squat, es solo una pierna moviéndose sola (ver
-      // el bug de "levantar un pie y doblar la rodilla" arriba).
-      const otherAngle = (leftAngle !== null && rightAngle !== null)
-        ? Math.max(leftAngle, rightAngle)
-        : null;
-      const bothLegsBent = otherAngle === null || otherAngle <= SPLITSQUAT_SUPPORT_MAX_ANGLE_DEG;
-      if (kneeAngle <= SPLITSQUAT_DOWN_ANGLE_DEG && bothLegsBent) {
-        this.state = "bottom";
-        this.repStartTime = now; // la repetición empieza al bajar
-        this.splitSquatStateEnteredAt = now;
-      }
-    } else if (kneeAngle >= SPLITSQUAT_UP_ANGLE_DEG) {
-      // Ha vuelto a subir del todo: repetición completa.
-      this.countRep((now - this.repStartTime) / 1000, now, "Split squat");
-      this.state = "top";
-      this.splitSquatStateEnteredAt = now;
-    }
-
-    if (this.debugEl) {
-      this.debugEl.textContent =
-        `ángulo rodilla (mín. de las piernas visibles): ${kneeAngle.toFixed(0)}° | estado: ${this.state ?? "esperando"} ` +
-        `(abajo ≤${SPLITSQUAT_DOWN_ANGLE_DEG}°, arriba ≥${SPLITSQUAT_UP_ANGLE_DEG}°)`;
-    }
-  }
-
-  /**
    * Jumping jacks — DE FRENTE a la cámara, ciclo cerrado (brazos pegados
    * al cuerpo, pies juntos) -> abierto (brazos por encima de la cabeza,
    * piernas separadas) -> cerrado, contando la repetición al volver a
@@ -5313,1252 +4544,6 @@ class WorkoutSession {
   }
 
   /**
-   * Círculos de brazos — DE FRENTE a la cámara, calentamiento dinámico:
-   * los dos brazos extendidos giran a la vez alrededor del hombro, un
-   * giro completo (360°) cuenta como una repetición (ver el bloque
-   * ARMCIRCLES_* de más arriba para la geometría, la convención de signo
-   * y el porqué de cada umbral — primera versión, pendiente de calibrar
-   * con un test en cámara real, mismo patrón que armcrossstretch/
-   * tricepsoverheadstretch en su día).
-   *
-   * A diferencia de jumping jack, aquí no hay dos estados discretos
-   * (abierto/cerrado) que comprobar: el "progreso" es continuo (ángulo
-   * acumulado), así que this.state solo distingue "todavía sin armar"
-   * (null, esperando brazos extendidos estables) de "armado y contando"
-   * ("active").
-   */
-  processArmCircles(lm, now) {
-    const lShoulder = lm[L_SHOULDER], rShoulder = lm[R_SHOULDER];
-    const lWrist = lm[L_WRIST], rWrist = lm[R_WRIST];
-
-    const vis = (
-      (lShoulder.visibility ?? 1) + (rShoulder.visibility ?? 1) +
-      (lWrist.visibility ?? 1) + (rWrist.visibility ?? 1)
-    ) / 4;
-
-    if (vis < ARMCIRCLES_MIN_VISIBILITY) {
-      this.announceStatus("No se te ven bien los hombros y las muñecas. Ponte de frente a la cámara, con los dos brazos en el encuadre.");
-      if (this.debugEl) this.debugEl.textContent = "buscando hombros y muñecas de frente…";
-      // ARMCIRCLES_OUT_OF_FRAME_MS (no el genérico OUT_OF_FRAME_STABLE_MS):
-      // igual que en jumping jack, girando de verdad los brazos también
-      // baja la confianza de MediaPipe en las muñecas por el propio
-      // movimiento (motion blur), no solo al salirte del encuadre de verdad.
-      this.noteAbsence(now, ARMCIRCLES_OUT_OF_FRAME_MS);
-      return;
-    }
-    this.outOfFrameSince = null;
-
-    if (!this.startupVoiceGiven) {
-      this.startupVoiceGiven = true;
-      this.announceStatus(
-        "Hombros y muñecas a la vista. ¡Listo! Extiende los dos brazos y empieza a girarlos. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
-        "startup_ready"
-      );
-    }
-
-    const shoulderWidth = Math.hypot(lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y);
-    if (!shoulderWidth) return;
-
-    const reachL = Math.hypot(lWrist.x - lShoulder.x, lWrist.y - lShoulder.y);
-    const reachR = Math.hypot(rWrist.x - rShoulder.x, rWrist.y - rShoulder.y);
-    const reachOkL = reachL > ARMCIRCLES_MIN_REACH_FACTOR * shoulderWidth;
-    const reachOkR = reachR > ARMCIRCLES_MIN_REACH_FACTOR * shoulderWidth;
-    const armsExtended = reachOkL && reachOkR;
-
-    if (this.state === null) {
-      // Armado: brazos extendidos sostenido ARMCIRCLES_ARM_STABLE_MS
-      // seguidos, igual de simple que el armado de jumping jack pero sin
-      // piernas que comprobar.
-      if (armsExtended) {
-        if (this.armCircleArmStableSince === null) this.armCircleArmStableSince = now;
-        if (now - this.armCircleArmStableSince >= ARMCIRCLES_ARM_STABLE_MS) {
-          this.state = "active";
-          this.armCircleArmStableSince = null;
-          // Ángulo local de cada brazo (ver el bloque ARMCIRCLES_* de más
-          // arriba): X normalizado para que "hacia fuera" sea siempre
-          // positivo en los dos lados, Y invertido para que "arriba" sea
-          // positivo. Se fija AHORA (no antes) para que el primer delta
-          // salga de una posición realmente armada, sin saltos raros.
-          this.armCirclePrevAngleL = Math.atan2(-(lWrist.y - lShoulder.y), lWrist.x - lShoulder.x);
-          this.armCirclePrevAngleR = Math.atan2(-(rWrist.y - rShoulder.y), -(rWrist.x - rShoulder.x));
-          this.armCircleAccum = 0;
-          this.armCirclePhase = null;
-          this.armCirclePhaseReps = 0;
-          this.armCircleDidPhaseSwitch = false;
-          this.armCircleLastProgressAt = now;
-          this.armCircleRepStartTime = now;
-          this.announceStatus("¡Listo! Empieza a girar los brazos.", "ready_to_go");
-        } else {
-          this.setStatus("Brazos extendidos… confirmando (no te muevas)");
-        }
-      } else {
-        this.armCircleArmStableSince = null;
-        this.setStatus("Ponte de pie, de frente a la cámara, con los brazos extendidos, para empezar.");
-      }
-      if (this.debugEl) {
-        this.debugEl.textContent =
-          `esperando brazos extendidos… reach_izq=${reachL.toFixed(2)} reach_der=${reachR.toFixed(2)} umbral=${(ARMCIRCLES_MIN_REACH_FACTOR * shoulderWidth).toFixed(2)}`;
-      }
-      return;
-    }
-
-    // state === "active": ya armado, se acumula ángulo cada frame.
-
-    // Parar de girar ARMCIRCLES_STILL_MS seguidos es la señal de que has
-    // terminado la serie (mismo patrón que JUMPINGJACK_STILL_MS) — se
-    // reinicia todo el estado de fase para que la siguiente serie
-    // siempre vuelva a empezar en "hacia delante".
-    if (this.armCircleLastProgressAt !== null && now - this.armCircleLastProgressAt >= ARMCIRCLES_STILL_MS) {
-      if (!this.armCircleDidPhaseSwitch && this.armCirclePhaseReps > 0) {
-        // Te has parado, pero en esta serie todavía no has hecho el otro
-        // sentido: nada de pedir bajar los brazos ni confirmar de
-        // nuevo, se sigue en pleno seguimiento activo (this.state no se
-        // toca) y se pasa directamente al otro sentido.
-        //
-        // Orden de los avisos (pedido explícito tras probarlo en cámara
-        // real, 2026-09-05): antes se oía "Ahora hacia atrás/delante" de
-        // entrada y "Serie de N terminada" solo mucho después, al cerrar
-        // la serie de verdad -- así que si luego no llegabas a completar
-        // ninguna vuelta en el sentido nuevo, esa invitación quedaba en
-        // el aire seguida de un cierre sin relación aparente con ella.
-        // Ahora el sentido que acabas de hacer se cierra aquí mismo como
-        // una serie completa en sí misma (reps guardadas, contador de
-        // reps de pantalla a cero) y ESE aviso ("Serie de N terminada")
-        // suena primero, con la invitación al otro sentido pegada justo
-        // detrás en el mismo mensaje.
-        const closedReps = this.currentSetReps;
-        if (closedReps > 0) {
-          this.sets.push({ reps: this.currentSetReps, durations: [...this.currentSetDurations] });
-          this.currentSetReps = 0;
-          this.currentSetDurations = [];
-          this.updateSetDisplay();
-          if (this.repsEl) this.repsEl.textContent = "0";
-          this.setClosedAt = now;
-        }
-        this.armCirclePhase = this.armCirclePhase === "forward" ? "backward" : "forward";
-        this.armCircleDidPhaseSwitch = true;
-        this.armCirclePhaseReps = 0;
-        this.armCircleAccum = 0;
-        this.armCirclePrevAngleL = null;
-        this.armCirclePrevAngleR = null;
-        this.armCircleLastProgressAt = now; // para no volver a disparar esto mismo con la misma quietud
-        this.announceSetComplete(
-          `Serie de ${closedReps}`,
-          this.armCirclePhase === "forward" ? "Ahora hacia delante." : "Ahora hacia atrás."
-        );
-        return;
-      }
-      // Ya has hecho los dos sentidos en esta serie (o te has parado sin
-      // llegar a completar ninguna repetición): aquí sí se cierra la serie.
-      this.closeActiveSet();
-      this.armCirclePhase = null;
-      this.armCirclePhaseReps = 0;
-      this.armCircleAccum = 0;
-      this.armCirclePrevAngleL = null;
-      this.armCirclePrevAngleR = null;
-      this.armCircleDidPhaseSwitch = false;
-      return;
-    }
-
-    const angleL = Math.atan2(-(lWrist.y - lShoulder.y), lWrist.x - lShoulder.x);
-    const angleR = Math.atan2(-(rWrist.y - rShoulder.y), -(rWrist.x - rShoulder.x));
-
-    // Cada brazo se acepta o descarta POR SEPARADO este frame (antes se
-    // exigían los dos a la vez y un frame entero se perdía si solo uno
-    // fallaba): reportado en el primer test real que la cuenta se
-    // quedaba corta -- el vídeo de referencia cruza las dos muñecas
-    // cerca de la cara en lo alto del círculo, momento en que una
-    // muñeca queda parcialmente detrás/pegada a la otra y su "radio"
-    // (reach) se hunde una fracción de segundo aunque el otro brazo
-    // siga perfectamente fiable. Con el brazo pegado al cuerpo (radio
-    // casi cero) el ángulo no es de fiar -- cualquier ruido de tracking
-    // se nota muchísimo -- así que ese brazo no acumula nada este
-    // frame, pero SÍ se actualiza su ángulo previo, para no generar un
-    // salto falso cuando vuelva a extenderse. Además, incluso con radio
-    // suficiente, un salto de ángulo mayor que ARMCIRCLES_MAX_SINGLE_ARM_DELTA
-    // en un solo frame se descarta como fallo puntual de tracking (visto
-    // en el primer test: saltos aislados de 30-57°/frame, alguno con el
-    // signo cambiado, justo en ese mismo punto del círculo).
-    let deltaL = 0, deltaR = 0, validL = false, validR = false;
-    if (this.armCirclePrevAngleL === null) {
-      this.armCirclePrevAngleL = angleL;
-    } else if (reachOkL) {
-      const dl = wrapAngleDelta(angleL - this.armCirclePrevAngleL);
-      if (Math.abs(dl) <= ARMCIRCLES_MAX_SINGLE_ARM_DELTA) {
-        deltaL = dl;
-        validL = true;
-        this.armCirclePrevAngleL = angleL;
-      }
-      // Si el salto supera el margen, el ángulo previo se deja SIN
-      // actualizar (a diferencia de antes) -- así el giro real que hubo
-      // en este frame no se pierde del todo, se arrastra al siguiente
-      // (ver comentario más arriba, junto a ARMCIRCLES_MAX_SINGLE_ARM_DELTA).
-    } else {
-      // Brazo demasiado pegado al cuerpo para fiarse del ángulo: aquí sí
-      // se actualiza siempre, para no generar un salto falso cuando
-      // vuelva a extenderse.
-      this.armCirclePrevAngleL = angleL;
-    }
-    if (this.armCirclePrevAngleR === null) {
-      this.armCirclePrevAngleR = angleR;
-    } else if (reachOkR) {
-      const dr = wrapAngleDelta(angleR - this.armCirclePrevAngleR);
-      if (Math.abs(dr) <= ARMCIRCLES_MAX_SINGLE_ARM_DELTA) {
-        deltaR = dr;
-        validR = true;
-        this.armCirclePrevAngleR = angleR;
-      }
-    } else {
-      this.armCirclePrevAngleR = angleR;
-    }
-
-    // Promedio solo de los brazos que SÍ se han aceptado este frame --
-    // si solo uno es de fiar, su delta entero es la mejor estimación
-    // disponible (los dos brazos giran a la vez, en teoría al mismo
-    // ritmo), no la mitad de su valor.
-    const validCount = (validL ? 1 : 0) + (validR ? 1 : 0);
-    const avgDelta = validCount > 0 ? (deltaL + deltaR) / validCount : 0;
-
-    if (Math.abs(avgDelta) >= ARMCIRCLES_MIN_ANGULAR_DELTA) {
-      this.armCircleLastProgressAt = now;
-    }
-
-    this.armCircleAccum += avgDelta;
-
-    if (Math.abs(this.armCircleAccum) >= 2 * Math.PI) {
-      // Vuelta completa: el signo del acumulado dice el sentido (ver la
-      // convención documentada junto a las constantes ARMCIRCLES_* —
-      // ángulo decreciente = "forward"/hacia delante).
-      const repDirection = this.armCircleAccum < 0 ? "forward" : "backward";
-      const seconds = (now - this.armCircleRepStartTime) / 1000;
-      if (this.armCirclePhase === null) {
-        // Primera vuelta completa de la serie: el sentido que sea que
-        // hagas primero pasa a ser el "pedido" desde ahora (antes se
-        // exigía "adelante" siempre al arrancar, y si en realidad
-        // girabas al revés se descartaba cada vuelta en silencio, sin
-        // avisar de nada -- reportado como "hacia delante no me deja
-        // nunca, solo hacia atrás").
-        this.armCirclePhase = repDirection;
-      }
-      if (repDirection === this.armCirclePhase) {
-        const counted = this.countRep(
-          seconds, now,
-          this.armCirclePhase === "forward" ? "Círculo adelante" : "Círculo atrás",
-          ARMCIRCLES_MIN_REP_SECONDS
-        );
-        if (counted) {
-          // Sin objetivo de reps por sentido: se deja hacer las que se
-          // quiera en el sentido actual -- el cambio de sentido llega
-          // solo al pararte de verdad (ver ARMCIRCLES_STILL_MS más
-          // arriba), no por llegar a un número concreto.
-          this.armCirclePhaseReps += 1;
-        }
-      }
-      // Se descuenta una vuelta completa del acumulado, no se resetea a
-      // 0 del todo -- por si ya llevabas parte de la siguiente vuelta
-      // encadenada en el mismo frame (giro rápido).
-      this.armCircleAccum -= Math.sign(this.armCircleAccum) * 2 * Math.PI;
-      this.armCircleRepStartTime = now;
-    }
-
-    if (this.debugEl) {
-      this.debugEl.textContent =
-        `sentido pedido: ${this.armCirclePhase === null ? "(por detectar)" : (this.armCirclePhase === "forward" ? "adelante" : "atrás")} (${this.armCirclePhaseReps}) | ` +
-        `acumulado: ${Math.round(this.armCircleAccum * 180 / Math.PI)}° | ` +
-        `delta_izq: ${validL ? (deltaL * 180 / Math.PI).toFixed(1) : "—"}°/f | delta_der: ${validR ? (deltaR * 180 / Math.PI).toFixed(1) : "—"}°/f | ` +
-        `reach_izq=${reachL.toFixed(2)}${reachOkL ? "" : "✗"} reach_der=${reachR.toFixed(2)}${reachOkR ? "" : "✗"} | ` +
-        `quieto desde hace: ${this.armCircleLastProgressAt ? Math.round(now - this.armCircleLastProgressAt) + "ms" : "-"}`;
-    }
-  }
-
-  /**
-   * Inclinaciones laterales de cuello (oreja al hombro) — DE FRENTE a la
-   * cámara, de pie o sentada/o: la nariz se separa del centro (punto
-   * medio de los hombros) hacia un lado, acercando la oreja al hombro,
-   * y vuelve al centro; un vaivén completo (centro -> lado -> centro)
-   * cuenta como una repetición (ver el bloque NECKLATERAL_* de más
-   * arriba para la geometría y cada umbral — primera versión, pendiente
-   * de calibrar con un test en cámara real, mismo patrón que
-   * armcrossstretch/tricepsoverheadstretch/armcircles en su día).
-   *
-   * Pedido explícitamente por el usuario con un vídeo de referencia
-   * (WhatsApp, 2026-09-05): "que detecte cuando la nariz va a un lado
-   * sin que el cuello se mueva de sitio" — por eso, aparte de contar el
-   * vaivén, se vigila el punto medio de los HOMBROS (no de la cara): si
-   * se desplaza más de NECKLATERAL_DRIFT_TOLERANCE_FACTOR mientras
-   * estás a un lado, es que el torso entero se está inclinando en vez
-   * de solo la cabeza/cuello, y se avisa — sin dejar de contar la
-   * repetición (mismo espíritu "se avisa, no se penaliza" que el
-   * sentido equivocado en círculos de brazos).
-   *
-   * Primera prueba real (2026-09-05): tirar la cabeza hacia
-   * delante/abajo (barbilla al pecho) se contaba como repetición -- ese
-   * movimiento también corre algo la nariz en horizontal (no es un eje
-   * puro). Por eso además se compara cuánto CAE la nariz respecto a tu
-   * centro (ver NECKLATERAL_MAX_VERTICAL_FACTOR): si el componente
-   * vertical domina, no se acepta como "ir a un lado" -- esto sí
-   * bloquea la confirmación del lado (a diferencia del desplazamiento
-   * de hombros de arriba, que solo avisa).
-   *
-   * this.state sigue el mismo patrón que jumping jack: null (todavía
-   * sin armar, esperando centrado estable) -> "center" (armado,
-   * esperando que te vayas a un lado) -> "left"/"right" (lado
-   * confirmado, esperando que vuelvas al centro para cerrar el vaivén).
-   */
-  processNeckLateral(lm, now) {
-    const nose = lm[NOSE];
-    const lShoulder = lm[L_SHOULDER], rShoulder = lm[R_SHOULDER];
-
-    const vis = ((nose.visibility ?? 1) + (lShoulder.visibility ?? 1) + (rShoulder.visibility ?? 1)) / 3;
-
-    if (vis < NECKLATERAL_MIN_VISIBILITY) {
-      this.announceStatus("No se te ven bien la cara y los hombros. Ponte de frente a la cámara.");
-      if (this.debugEl) this.debugEl.textContent = "buscando cara y hombros de frente…";
-      this.noteAbsence(now);
-      return;
-    }
-    this.outOfFrameSince = null;
-
-    if (!this.startupVoiceGiven) {
-      this.startupVoiceGiven = true;
-      this.announceStatus(
-        "Cara y hombros a la vista. ¡Listo! Ya puedes empezar. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
-        "startup_ready"
-      );
-    }
-
-    const shoulderMidX = (lShoulder.x + rShoulder.x) / 2;
-    const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
-    const shoulderWidth = Math.hypot(lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y);
-    if (!shoulderWidth) return;
-
-    const rawOffset = (nose.x - shoulderMidX) / shoulderWidth;
-    const rawVerticalOffset = (nose.y - shoulderMidY) / shoulderWidth;
-
-    if (this.state === null) {
-      // Armado: nariz centrada (respecto a los hombros) sostenida
-      // NECKLATERAL_CENTER_STABLE_MS seguidos — fija tu propio "centro"
-      // real como baseline, para no exigir que la nariz esté
-      // perfectamente centrada de fábrica (encuadre de cámara, postura
-      // natural...).
-      if (Math.abs(rawOffset) < NECKLATERAL_ENTER_FACTOR) {
-        if (this.neckLateralStableSince === null) this.neckLateralStableSince = now;
-        if (now - this.neckLateralStableSince >= NECKLATERAL_CENTER_STABLE_MS) {
-          this.state = "center";
-          this.neckLateralStableSince = null;
-          this.neckLateralBaselineOffset = rawOffset;
-          this.neckLateralBaselineVerticalOffset = rawVerticalOffset;
-          this.neckLateralLastTransitionAt = now;
-          this.announceStatus("¡Listo! Oreja al hombro, y vuelta al centro.", "ready_to_go");
-        } else {
-          this.setStatus("Mirando al frente, centrada/o… confirmando (no te muevas)");
-        }
-      } else {
-        this.neckLateralStableSince = null;
-        this.setStatus("Ponte de frente a la cámara, mirando al frente, para empezar.");
-      }
-      if (this.debugEl) {
-        this.debugEl.textContent = `esperando centro… desviación=${rawOffset.toFixed(3)} umbral=±${NECKLATERAL_ENTER_FACTOR.toFixed(3)}`;
-      }
-      return;
-    }
-
-    // Ya armado: parar de completar ningún vaivén NECKLATERAL_STILL_MS
-    // seguidos es la señal de que has terminado la serie (mismo patrón
-    // que JUMPINGJACK_STILL_MS/ARMCIRCLES_STILL_MS).
-    if (this.neckLateralLastTransitionAt !== null && now - this.neckLateralLastTransitionAt >= NECKLATERAL_STILL_MS) {
-      this.closeActiveSet();
-      return;
-    }
-
-    const offset = rawOffset - this.neckLateralBaselineOffset;
-    const verticalOffset = rawVerticalOffset - this.neckLateralBaselineVerticalOffset;
-
-    if (this.state === "center") {
-      // Esperando que la nariz se separe del centro hacia un lado —
-      // igual que jumping jack exige que "piernas abiertas" se sostenga
-      // un rato antes de dar el lado por confirmado (NECKLATERAL_SIDE_STABLE_MS),
-      // para no armar el vaivén con un pico de un frame suelto.
-      // Si la nariz ha caído más de la cuenta (NECKLATERAL_MAX_VERTICAL_FACTOR)
-      // respecto a tu centro, esto es un movimiento hacia delante/abajo
-      // (barbilla al pecho), no hacia un lado -- no cuenta como sideNow
-      // aunque el desplazamiento horizontal por sí solo pareciera
-      // suficiente (ver NECKLATERAL_MAX_VERTICAL_FACTOR para el porqué).
-      const verticalOk = Math.abs(verticalOffset) < NECKLATERAL_MAX_VERTICAL_FACTOR;
-      const sideNow = !verticalOk ? null : offset > NECKLATERAL_ENTER_FACTOR ? "right" : offset < -NECKLATERAL_ENTER_FACTOR ? "left" : null;
-      if (sideNow) {
-        if (this.neckLateralSide !== sideNow) {
-          this.neckLateralSide = sideNow;
-          this.neckLateralSideSince = now;
-        } else if (now - this.neckLateralSideSince >= NECKLATERAL_SIDE_STABLE_MS) {
-          this.state = sideNow;
-          this.repStartTime = now; // la repetición empieza al confirmarse el lado (momento real de llegada, no cuando vuelves al centro)
-          this.neckLateralAnchorX = shoulderMidX; // hombros AHORA MISMO -- lo que se desplacen desde aquí es lo que se vigila
-          this.neckLateralDrifted = false;
-          this.neckLateralSideSince = null;
-        }
-      } else {
-        this.neckLateralSide = null;
-        this.neckLateralSideSince = null;
-      }
-    } else {
-      // state === "left" | "right": lado confirmado, vigilando que el
-      // torso (punto medio de hombros) no se desplace de sitio mientras
-      // esperas a volver al centro.
-      const drift = Math.abs(shoulderMidX - this.neckLateralAnchorX) / shoulderWidth;
-      if (drift > NECKLATERAL_DRIFT_TOLERANCE_FACTOR && !this.neckLateralDrifted) {
-        this.neckLateralDrifted = true;
-      }
-      if (this.neckLateralDrifted) {
-        // Solo texto (setStatus), sin voz -- es una corrección, no algo
-        // imprescindible para seguir contando (la repetición se cuenta
-        // igual, ver más abajo), así que no hace falta interrumpir con
-        // audio cada vez que pasa.
-        this.setStatus("Mueves el cuerpo entero — intenta girar solo la cabeza, sin desplazar los hombros.");
-      }
-      if (Math.abs(offset) < NECKLATERAL_EXIT_FACTOR) {
-        // Vuelta al centro: se cierra el vaivén.
-        this.neckLateralLastTransitionAt = now;
-        this.countRep(
-          (now - this.repStartTime) / 1000, now,
-          this.state === "left" ? "Giro a la izquierda" : "Giro a la derecha",
-          NECKLATERAL_MIN_REP_SECONDS
-        );
-        this.state = "center";
-        this.neckLateralSide = null;
-        this.neckLateralSideSince = null;
-        this.neckLateralAnchorX = null;
-        this.neckLateralDrifted = false;
-      }
-    }
-
-    if (this.debugEl) {
-      this.debugEl.textContent =
-        `estado: ${this.state} | desviación=${offset.toFixed(3)} vertical=${verticalOffset.toFixed(3)}${Math.abs(verticalOffset) >= NECKLATERAL_MAX_VERTICAL_FACTOR ? "✗" : ""} umbral_entrada=±${NECKLATERAL_ENTER_FACTOR.toFixed(3)} umbral_salida=±${NECKLATERAL_EXIT_FACTOR.toFixed(3)} umbral_vertical=${NECKLATERAL_MAX_VERTICAL_FACTOR.toFixed(3)} | ` +
-        `desplazamiento hombros: ${this.neckLateralAnchorX !== null ? (Math.abs(shoulderMidX - this.neckLateralAnchorX) / shoulderWidth).toFixed(3) : "-"}${this.neckLateralDrifted ? " ⚠" : ""} | ` +
-        `quieto desde hace: ${this.neckLateralLastTransitionAt ? Math.round(now - this.neckLateralLastTransitionAt) + "ms" : "-"}`;
-    }
-  }
-
-  /**
-   * Tijeras de brazos — DE FRENTE a la cámara, calentamiento/estiramiento
-   * dinámico: los brazos se extienden en cruz (a los lados) y se cruzan
-   * por delante del pecho, volviendo después a extendidos; un vaivén
-   * completo (extendidos -> cruzados -> extendidos) cuenta como una
-   * repetición (ver el bloque ARMSCISSORS_* de más arriba para la
-   * geometría y cada umbral — primera versión, pendiente de calibrar con
-   * un test en cámara real, mismo patrón que el resto de la familia).
-   *
-   * this.state sigue el mismo patrón que giros de cuello: null (todavía
-   * sin armar, esperando brazos extendidos estables) -> "center"
-   * (armado, esperando que cruces los brazos) -> "crossed" (cruce
-   * confirmado, esperando que vuelvas a extender para cerrar el vaivén).
-   */
-  processArmScissors(lm, now) {
-    const lShoulder = lm[L_SHOULDER], rShoulder = lm[R_SHOULDER];
-    const lWrist = lm[L_WRIST], rWrist = lm[R_WRIST];
-
-    const vis = (
-      (lShoulder.visibility ?? 1) + (rShoulder.visibility ?? 1) +
-      (lWrist.visibility ?? 1) + (rWrist.visibility ?? 1)
-    ) / 4;
-
-    if (vis < ARMSCISSORS_MIN_VISIBILITY) {
-      this.announceStatus("No se te ven bien los hombros y las muñecas. Ponte de frente a la cámara, con los dos brazos en el encuadre.");
-      if (this.debugEl) this.debugEl.textContent = "buscando hombros y muñecas de frente…";
-      this.noteAbsence(now, ARMSCISSORS_OUT_OF_FRAME_MS);
-      return;
-    }
-    this.outOfFrameSince = null;
-
-    if (!this.startupVoiceGiven) {
-      this.startupVoiceGiven = true;
-      this.announceStatus(
-        "Hombros y muñecas a la vista. ¡Listo! Extiende los brazos en cruz y crúzalos por delante. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
-        "startup_ready"
-      );
-    }
-
-    const shoulderWidth = Math.hypot(lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y);
-    if (!shoulderWidth) return;
-
-    const reachL = Math.hypot(lWrist.x - lShoulder.x, lWrist.y - lShoulder.y) / shoulderWidth;
-    const reachR = Math.hypot(rWrist.x - rShoulder.x, rWrist.y - rShoulder.y) / shoulderWidth;
-
-    if (this.state === null) {
-      // Armado: brazos extendidos sostenido ARMSCISSORS_CENTER_STABLE_MS
-      // seguidos, mismo espíritu que el armado de círculos de brazos.
-      const extended = reachL > ARMSCISSORS_MIN_REACH_FACTOR && reachR > ARMSCISSORS_MIN_REACH_FACTOR;
-      if (extended) {
-        if (this.armScissorsCenterStableSince === null) this.armScissorsCenterStableSince = now;
-        if (now - this.armScissorsCenterStableSince >= ARMSCISSORS_CENTER_STABLE_MS) {
-          this.state = "center";
-          this.armScissorsCenterStableSince = null;
-          this.armScissorsLastTransitionAt = now;
-          this.announceStatus("¡Listo! Cruza los brazos por delante, y vuelve a extenderlos.", "ready_to_go");
-        } else {
-          this.setStatus("Brazos extendidos… confirmando (no te muevas)");
-        }
-      } else {
-        this.armScissorsCenterStableSince = null;
-        this.setStatus("Ponte de pie, de frente a la cámara, con los brazos extendidos en cruz, para empezar.");
-      }
-      if (this.debugEl) {
-        this.debugEl.textContent =
-          `esperando brazos extendidos… reach_izq=${reachL.toFixed(2)} reach_der=${reachR.toFixed(2)} umbral=${ARMSCISSORS_MIN_REACH_FACTOR.toFixed(2)}`;
-      }
-      return;
-    }
-
-    // Ya armado: parar de completar ningún vaivén ARMSCISSORS_STILL_MS
-    // seguidos es la señal de que has terminado la serie (mismo patrón
-    // que NECKLATERAL_STILL_MS/ARMCIRCLES_STILL_MS).
-    if (this.armScissorsLastTransitionAt !== null && now - this.armScissorsLastTransitionAt >= ARMSCISSORS_STILL_MS) {
-      this.closeActiveSet();
-      this.armScissorsCrossSince = null;
-      return;
-    }
-
-    // Fracción, en horizontal, de lo que cada muñeca ha recorrido hacia
-    // el hombro contrario (misma fórmula self-relativa que checkArmCrossStretch,
-    // aspect-ratio-independiente y válida sea cual sea la orientación de
-    // la imagen).
-    const crossL = (lWrist.x - lShoulder.x) / (rShoulder.x - lShoulder.x);
-    const crossR = (rWrist.x - rShoulder.x) / (lShoulder.x - rShoulder.x);
-
-    if (this.state === "center") {
-      // Esperando que los dos brazos crucen a la vez — sostenido
-      // ARMSCISSORS_CROSS_STABLE_MS para no armar el vaivén con un pico
-      // de un frame suelto (ruido de tracking).
-      const crossedNow = crossL >= ARMSCISSORS_CROSS_MIN_FRACTION && crossR >= ARMSCISSORS_CROSS_MIN_FRACTION;
-      if (crossedNow) {
-        if (this.armScissorsCrossSince === null) this.armScissorsCrossSince = now;
-        if (now - this.armScissorsCrossSince >= ARMSCISSORS_CROSS_STABLE_MS) {
-          this.state = "crossed";
-          this.repStartTime = now; // la repetición empieza al confirmarse el cruce (momento real de llegada, no cuando vuelves a extender)
-          this.armScissorsCrossSince = null;
-        }
-      } else {
-        this.armScissorsCrossSince = null;
-      }
-    } else {
-      // state === "crossed": cruce confirmado, esperando que las dos
-      // muñecas vuelvan a bajar de ARMSCISSORS_CROSS_EXIT_FRACTION (no se
-      // mide con reach, ver el porqué junto a esa constante) para cerrar
-      // el vaivén.
-      const backToCenter = crossL < ARMSCISSORS_CROSS_EXIT_FRACTION && crossR < ARMSCISSORS_CROSS_EXIT_FRACTION;
-      if (backToCenter) {
-        this.armScissorsLastTransitionAt = now;
-        this.countRep((now - this.repStartTime) / 1000, now, "Cruce de brazos", ARMSCISSORS_MIN_REP_SECONDS);
-        this.state = "center";
-      }
-    }
-
-    if (this.debugEl) {
-      this.debugEl.textContent =
-        `estado: ${this.state} | cruce_izq=${crossL.toFixed(2)} cruce_der=${crossR.toFixed(2)} umbral_cruce=${ARMSCISSORS_CROSS_MIN_FRACTION.toFixed(2)} umbral_salida=${ARMSCISSORS_CROSS_EXIT_FRACTION.toFixed(2)} | reach_izq=${reachL.toFixed(2)} reach_der=${reachR.toFixed(2)} | ` +
-        `quieto desde hace: ${this.armScissorsLastTransitionAt ? Math.round(now - this.armScissorsLastTransitionAt) + "ms" : "-"}`;
-    }
-  }
-
-  /**
-   * Rotación de piernas — DE FRENTE a la cámara, de pie en equilibrio
-   * sobre una pierna: la otra rodilla se levanta y gira alrededor de su
-   * propia cadera (ver el bloque LEGROTATION_* de más arriba para la
-   * geometría y cada umbral — primera versión, pendiente de calibrar
-   * con un test en cámara real, mismo patrón que el resto de la
-   * familia).
-   *
-   * A diferencia del resto de la familia (armcrossstretch/armcircles/
-   * necklateral/armscissors), aquí NO hay una postura de reposo que
-   * exigir entre repeticiones: apoyar el pie en el suelo es justo el
-   * momento normal de cierre de cada subida, no un fallo (pedido
-   * explícitamente por el usuario). this.state solo distingue "todavía
-   * sin armar" (null, esperando de pie estable con las dos piernas
-   * apoyadas) de "armado y vigilando" ("active"); dentro de "active",
-   * legRotationActiveSide (null mientras las dos piernas están
-   * apoyadas, "left"/"right" mientras una está levantada) lleva la
-   * cuenta de la subida en curso.
-   */
-  processLegRotation(lm, now) {
-    const lHip = lm[L_HIP], rHip = lm[R_HIP];
-    const lKnee = lm[L_KNEE], rKnee = lm[R_KNEE];
-    const lAnkle = lm[L_ANKLE], rAnkle = lm[R_ANKLE];
-
-    const vis = (
-      (lHip.visibility ?? 1) + (rHip.visibility ?? 1) +
-      (lKnee.visibility ?? 1) + (rKnee.visibility ?? 1) +
-      (lAnkle.visibility ?? 1) + (rAnkle.visibility ?? 1)
-    ) / 6;
-
-    if (vis < LEGROTATION_MIN_VISIBILITY) {
-      this.announceStatus("No se te ven bien las caderas, las rodillas y los tobillos. Ponte de frente a la cámara, de cuerpo entero.");
-      if (this.debugEl) this.debugEl.textContent = "buscando caderas, rodillas y tobillos de frente…";
-      this.legRotationVisibleSince = null; // corta la racha -- el aviso de "a la vista" exige LEGROTATION_VISIBLE_CONFIRM_MS SEGUIDOS por encima del umbral (ver más abajo)
-      this.noteAbsence(now, LEGROTATION_OUT_OF_FRAME_MS);
-      return;
-    }
-    this.outOfFrameSince = null;
-
-    // Reportado en vivo: el aviso de "a la vista" saltaba con un único
-    // frame suelto que superaba el umbral (p.ej. durante el calentamiento
-    // del modelo, justo después de "Cargando el modelo de seguimiento")
-    // y el instante siguiente volvía a "sin detección" del todo -- ahora
-    // hace falta mantenerse por encima del umbral LEGROTATION_VISIBLE_CONFIRM_MS
-    // seguidos antes de anunciarlo, para no decir que se ve algo que en
-    // realidad no se veía.
-    if (this.legRotationVisibleSince === null) this.legRotationVisibleSince = now;
-    if (!this.startupVoiceGiven && now - this.legRotationVisibleSince >= LEGROTATION_VISIBLE_CONFIRM_MS) {
-      this.startupVoiceGiven = true;
-      this.announceStatus(
-        "Caderas, rodillas y tobillos a la vista. ¡Listo! Levanta una rodilla y gírala. Para terminar una serie, párate quieto unos segundos, o sal del encuadre.",
-        "startup_ready"
-      );
-    }
-
-    // Fracción cadera->rodilla, en vertical, respecto a la longitud real
-    // del muslo (distancia cadera-rodilla, que no cambia al girar la
-    // pierna, es un segmento rígido) -- 1 = pierna colgando recta hacia
-    // abajo (de pie normal), 0 = rodilla a la misma altura que la
-    // cadera. Self-relativa (no depende de lo lejos que estés de la
-    // cámara), mismo espíritu que crossFraction en checkArmCrossStretch.
-    const thighL = Math.hypot(lKnee.x - lHip.x, lKnee.y - lHip.y) || 1;
-    const thighR = Math.hypot(rKnee.x - rHip.x, rKnee.y - rHip.y) || 1;
-    const dropFractionL = (lKnee.y - lHip.y) / thighL;
-    const dropFractionR = (rKnee.y - rHip.y) / thighR;
-
-    if (this.state === null) {
-      // Armado: de pie con las dos piernas apoyadas (ninguna levantada)
-      // sostenido LEGROTATION_STABLE_MS seguidos, mismo espíritu que el
-      // armado del resto de la familia.
-      const bothGrounded = dropFractionL >= LEGROTATION_RAISE_EXIT_FRACTION && dropFractionR >= LEGROTATION_RAISE_EXIT_FRACTION;
-      if (bothGrounded) {
-        if (this.legRotationStableSince === null) this.legRotationStableSince = now;
-        if (now - this.legRotationStableSince >= LEGROTATION_STABLE_MS) {
-          this.state = "active";
-          this.legRotationStableSince = null;
-          this.legRotationActiveSide = null;
-          this.legRotationPrevAngle = null;
-          this.legRotationAccum = 0;
-          this.legRotationRepStartTime = null;
-          this.legRotationLastActivityAt = now;
-          this.announceStatus("¡Listo! Levanta una rodilla y gírala.", "ready_to_go");
-        } else {
-          this.setStatus("De pie, con las dos piernas apoyadas… confirmando (no te muevas)");
-        }
-      } else {
-        this.legRotationStableSince = null;
-        this.setStatus("Ponte de pie, de frente a la cámara, con las dos piernas apoyadas, para empezar.");
-      }
-      if (this.debugEl) {
-        this.debugEl.textContent =
-          `esperando de pie… bajada_izq=${dropFractionL.toFixed(2)} bajada_der=${dropFractionR.toFixed(2)} umbral=${LEGROTATION_RAISE_EXIT_FRACTION.toFixed(2)}`;
-      }
-      return;
-    }
-
-    // Ya armado: sin empezar ninguna subida nueva ni completar ninguna
-    // repetición durante LEGROTATION_STILL_MS seguidos, se interpreta
-    // que has terminado la serie (mismo patrón que ARMCIRCLES_STILL_MS/
-    // NECKLATERAL_STILL_MS/ARMSCISSORS_STILL_MS, con el valor pedido).
-    if (this.legRotationLastActivityAt !== null && now - this.legRotationLastActivityAt >= LEGROTATION_STILL_MS) {
-      this.closeActiveSet();
-      this.legRotationActiveSide = null;
-      this.legRotationPrevAngle = null;
-      this.legRotationAccum = 0;
-      this.legRotationRepStartTime = null;
-      this.legRotationLastCountedSide = null; // serie nueva: vuelve a avisar del lado en la primera repetición que se cuente
-      return;
-    }
-
-    if (this.legRotationActiveSide === null) {
-      // Las dos piernas estaban apoyadas: ¿se ha levantado alguna? Si
-      // las dos parecen levantadas a la vez (raro, normalmente ruido),
-      // se elige la que esté más claramente levantada.
-      const raisedL = dropFractionL < LEGROTATION_RAISE_ENTER_FRACTION;
-      const raisedR = dropFractionR < LEGROTATION_RAISE_ENTER_FRACTION;
-      if (raisedL || raisedR) {
-        const side = (raisedL && raisedR)
-          ? (dropFractionL < dropFractionR ? "left" : "right")
-          : (raisedL ? "left" : "right");
-        this.legRotationActiveSide = side;
-        const knee = side === "left" ? lKnee : rKnee;
-        const hip = side === "left" ? lHip : rHip;
-        this.legRotationPrevAngle = Math.atan2(-(knee.y - hip.y), knee.x - hip.x);
-        this.legRotationAccum = 0;
-        this.legRotationRepStartTime = now;
-        this.legRotationLastActivityAt = now; // subida nueva empezada: cuenta como actividad, aunque el giro todavía no llegue a LEGROTATION_MIN_ROTATION_DEG
-        // Punto medio de caderas AL EMPEZAR esta subida -- referencia
-        // para detectar al cerrarla si el cuerpo entero se ha
-        // desplazado (caminando) en vez de girar la pierna en el sitio
-        // (ver LEGROTATION_MAX_HIP_DRIFT_FACTOR).
-        this.legRotationExcursionHipMidX = (lHip.x + rHip.x) / 2;
-        this.legRotationExcursionHipMidY = (lHip.y + rHip.y) / 2;
-        this.legRotationExcursionHipWidth = Math.hypot(lHip.x - rHip.x, lHip.y - rHip.y) || 1;
-        // Las dos piernas valen igual, en cualquier orden -- pedido
-        // explícitamente: "que funcione para las dos piernas a la vez,
-        // tanto un lado como otro, que sea capaz de diferenciarlo". Se
-        // avisa por voz SOLO cuando el lado cambia respecto a la última
-        // repetición contada (key distinta por lado en announceStatus,
-        // así el cambio se dice casi al momento sin repetir "pierna
-        // izquierda" en cada repetición seguida del mismo lado).
-        if (this.legRotationLastCountedSide !== null && this.legRotationLastCountedSide !== side) {
-          this.announceStatus(
-            side === "left" ? "Pierna izquierda." : "Pierna derecha.",
-            `legrotation_side_${side}`
-          );
-        }
-      }
-      if (this.debugEl) {
-        this.debugEl.textContent =
-          `esperando subida… bajada_izq=${dropFractionL.toFixed(2)} bajada_der=${dropFractionR.toFixed(2)} umbral_subida=${LEGROTATION_RAISE_ENTER_FRACTION.toFixed(2)} | quieto desde hace: ${this.legRotationLastActivityAt ? Math.round(now - this.legRotationLastActivityAt) + "ms" : "-"}`;
-      }
-      return;
-    }
-
-    // legRotationActiveSide !== null: una pierna está en el aire, se le
-    // sigue el ángulo cadera->rodilla frame a frame.
-    const side = this.legRotationActiveSide;
-    const knee = side === "left" ? lKnee : rKnee;
-    const hip = side === "left" ? lHip : rHip;
-    const dropFraction = side === "left" ? dropFractionL : dropFractionR;
-
-    if (dropFraction >= LEGROTATION_RAISE_EXIT_FRACTION) {
-      // La pierna ha vuelto a apoyarse: aquí es donde se decide si lo
-      // girado cuenta como repetición -- apoyar el pie NO es un fallo,
-      // es el cierre normal de la subida (pedido explícitamente: "si el
-      // usuario toca el suelo entre reps no pasa nada").
-      const rotationDeg = Math.abs(this.legRotationAccum) * 180 / Math.PI;
-      // Detección de desplazamiento (caminar hacia/desde la cámara, u
-      // otro sitio, en vez de girar la pierna quieto donde estabas):
-      // reportado en vivo -- "estaba yendo de camino a la silla y la ha
-      // contado". Caminar también levanta la rodilla y el ángulo del
-      // vector cadera->rodilla puede acumular de sobra según cambia la
-      // perspectiva, así que la geometría del giro sola no basta para
-      // descartarlo. Se compara el punto medio de las dos caderas de
-      // AHORA con el que tenía al empezar la subida (ver el bloque de
-      // arriba, en el arranque de la subida), normalizado por el ancho
-      // de cadera medio de los dos instantes (para no depender de si te
-      // has acercado o alejado de la cámara mientras tanto).
-      const hipMidX = (lHip.x + rHip.x) / 2;
-      const hipMidY = (lHip.y + rHip.y) / 2;
-      const hipWidthNow = Math.hypot(lHip.x - rHip.x, lHip.y - rHip.y) || 1;
-      const avgHipWidth = (this.legRotationExcursionHipWidth + hipWidthNow) / 2;
-      const hipDrift = Math.hypot(hipMidX - this.legRotationExcursionHipMidX, hipMidY - this.legRotationExcursionHipMidY) / avgHipWidth;
-      const walked = hipDrift > LEGROTATION_MAX_HIP_DRIFT_FACTOR;
-      if (rotationDeg >= LEGROTATION_MIN_ROTATION_DEG && !walked) {
-        const seconds = (now - this.legRotationRepStartTime) / 1000;
-        // Etiqueta por lado (no genérica) -- se ve en pantalla vía
-        // countRep/setStatus ("¡Rotación pierna derecha 2 de esta
-        // serie!"), para diferenciar de un vistazo qué pierna se acaba
-        // de contar, además del aviso de voz al cambiar de lado (ver
-        // más arriba).
-        const label = side === "left" ? "Rotación pierna izquierda" : "Rotación pierna derecha";
-        if (this.countRep(seconds, now, label, LEGROTATION_MIN_REP_SECONDS)) {
-          this.legRotationLastActivityAt = now;
-          this.legRotationLastCountedSide = side;
-        }
-      } else if (walked && rotationDeg >= LEGROTATION_MIN_ROTATION_DEG) {
-        // Habría contado por el giro, pero el cuerpo se ha desplazado de
-        // sitio -- se avisa (announceStatus ya limita la repetición de
-        // este mismo aviso, ver STATUS_VOICE_REPEAT_GAP_MS) en vez de
-        // fallar en silencio, para que quede claro por qué no ha contado.
-        this.announceStatus("Eso no cuenta, te has desplazado -- quédate en el mismo sitio.", "legrotation_walked");
-      }
-      this.legRotationActiveSide = null;
-      this.legRotationPrevAngle = null;
-      this.legRotationAccum = 0;
-      this.legRotationRepStartTime = null;
-      if (this.debugEl) {
-        this.debugEl.textContent = `pierna ${side === "left" ? "izquierda" : "derecha"} apoyada de nuevo — giro visto: ${rotationDeg.toFixed(0)}° (umbral ${LEGROTATION_MIN_ROTATION_DEG}°) | desplazamiento: ${hipDrift.toFixed(2)} (umbral ${LEGROTATION_MAX_HIP_DRIFT_FACTOR})${walked ? " ⚠ cuerpo desplazado, no cuenta" : ""}`;
-      }
-      return;
-    }
-
-    const angle = Math.atan2(-(knee.y - hip.y), knee.x - hip.x);
-    if (this.legRotationPrevAngle === null) {
-      this.legRotationPrevAngle = angle;
-    } else {
-      const delta = wrapAngleDelta(angle - this.legRotationPrevAngle);
-      if (Math.abs(delta) <= LEGROTATION_MAX_SINGLE_LEG_DELTA) {
-        this.legRotationAccum += delta;
-        this.legRotationPrevAngle = angle;
-        if (Math.abs(delta) >= LEGROTATION_MIN_ANGULAR_DELTA) {
-          this.legRotationLastActivityAt = now;
-        }
-      }
-      // Salto mayor que LEGROTATION_MAX_SINGLE_LEG_DELTA en un frame: se
-      // descarta como fallo puntual de tracking (mismo motivo que
-      // ARMCIRCLES_MAX_SINGLE_ARM_DELTA), sin actualizar el ángulo
-      // previo, para no perder del todo el giro real de este frame.
-    }
-
-    if (this.debugEl) {
-      this.debugEl.textContent =
-        `pierna ${side === "left" ? "izquierda" : "derecha"} levantada | bajada=${dropFraction.toFixed(2)} | ` +
-        `giro acumulado: ${Math.round(Math.abs(this.legRotationAccum) * 180 / Math.PI)}° (umbral ${LEGROTATION_MIN_ROTATION_DEG}°) | ` +
-        `quieto desde hace: ${this.legRotationLastActivityAt ? Math.round(now - this.legRotationLastActivityAt) + "ms" : "-"}`;
-    }
-  }
-
-  /**
-   * Rodillas altas -- DE PERFIL a la cámara, de pie, marchando en el
-   * sitio: se alterna levantar una rodilla y volver a apoyar el pie,
-   * sin pausa entre piernas (ver el bloque KNEERAISE_* de más arriba
-   * para el porqué de cada umbral y de los cuatro puntos pedidos por
-   * el usuario).
-   *
-   * Misma geometría self-relativa que rotación de piernas (fracción
-   * cadera->rodilla respecto al muslo), pero sin seguir ningún giro ni
-   * comprobar desplazamiento de cadera -- aquí solo importa si la
-   * rodilla se ha levantado lo suficiente y ha vuelto a bajar, nada
-   * más. Menos cálculo por fotograma == menos riesgo de perder una
-   * repetición real en un ritmo rápido.
-   *
-   * this.state solo distingue "todavía sin armar" (null, esperando de
-   * pie estable con las dos piernas apoyadas) de "armado y vigilando"
-   * ("active"); dentro de "active", kneeRaiseActiveSide (null mientras
-   * las dos piernas están apoyadas, "left"/"right" mientras una está
-   * levantada) lleva la cuenta de la subida en curso -- igual que
-   * legRotationActiveSide, pero sin lado "pegajoso" entre
-   * repeticiones: no se ha pedido diferenciar left/right aquí, solo
-   * contar el total.
-   *
-   * Apoyar el pie entre repeticiones NO es un fallo -- es el cierre
-   * normal de cada subida, igual que en rotación de piernas.
-   */
-  processKneeRaises(lm, now) {
-    const lHip = lm[L_HIP], rHip = lm[R_HIP];
-    const lKnee = lm[L_KNEE], rKnee = lm[R_KNEE];
-    const lAnkle = lm[L_ANKLE], rAnkle = lm[R_ANKLE];
-
-    const vis = (
-      (lHip.visibility ?? 1) + (rHip.visibility ?? 1) +
-      (lKnee.visibility ?? 1) + (rKnee.visibility ?? 1) +
-      (lAnkle.visibility ?? 1) + (rAnkle.visibility ?? 1)
-    ) / 6;
-
-    if (vis < KNEERAISE_MIN_VISIBILITY) {
-      this.announceStatus("No se te ve bien la cadera, la rodilla y el tobillo. Ponte de perfil a la cámara, con toda la pierna en el encuadre.");
-      if (this.debugEl) this.debugEl.textContent = "buscando cadera, rodilla y tobillo de perfil…";
-      this.kneeRaiseVisibleSince = null; // corta la racha -- el aviso de "a la vista" exige KNEERAISE_VISIBLE_CONFIRM_MS SEGUIDOS por encima del umbral (ver más abajo)
-      this.noteAbsence(now, KNEERAISE_OUT_OF_FRAME_MS);
-      return;
-    }
-    this.outOfFrameSince = null;
-
-    // Un único aviso hablado, combinando "te veo" + "ya puedes empezar"
-    // (mensajes al mínimo, pedido explícitamente) -- igual que
-    // sentadillas, a diferencia de rotación de piernas/jumping jacks
-    // que separan visibilidad y armado en dos avisos.
-    if (this.kneeRaiseVisibleSince === null) this.kneeRaiseVisibleSince = now;
-    if (!this.startupVoiceGiven && now - this.kneeRaiseVisibleSince >= KNEERAISE_VISIBLE_CONFIRM_MS) {
-      this.startupVoiceGiven = true;
-      this.announceStatus(
-        "Cadera, rodilla y tobillo a la vista. ¡Listo! Marca el paso levantando las rodillas. Para terminar, párate quieto un par de segundos, o sal del encuadre.",
-        "startup_ready"
-      );
-    }
-
-    // Fracción cadera->rodilla en vertical, respecto al muslo (segmento
-    // rígido cadera-rodilla, no cambia al levantar la pierna) -- 1 =
-    // pierna colgando recta (de pie normal), 0 = rodilla a la misma
-    // altura que la cadera. Self-relativa (no depende de lo lejos que
-    // estés de la cámara), mismo cálculo que dropFraction en
-    // processLegRotation.
-    const thighL = Math.hypot(lKnee.x - lHip.x, lKnee.y - lHip.y) || 1;
-    const thighR = Math.hypot(rKnee.x - rHip.x, rKnee.y - rHip.y) || 1;
-    const dropFractionL = (lKnee.y - lHip.y) / thighL;
-    const dropFractionR = (rKnee.y - rHip.y) / thighR;
-
-    if (this.state === null) {
-      // Armado: de pie con las dos piernas apoyadas (ninguna levantada)
-      // sostenido KNEERAISE_STABLE_MS seguidos, para no contar media
-      // repetición si entras en encuadre a media zancada.
-      const bothGrounded = dropFractionL >= KNEERAISE_RAISE_EXIT_FRACTION && dropFractionR >= KNEERAISE_RAISE_EXIT_FRACTION;
-      if (bothGrounded) {
-        if (this.kneeRaiseStableSince === null) this.kneeRaiseStableSince = now;
-        if (now - this.kneeRaiseStableSince >= KNEERAISE_STABLE_MS) {
-          this.state = "active";
-          this.kneeRaiseStableSince = null;
-          this.kneeRaiseActiveSide = null;
-          this.kneeRaiseRepStartTime = null;
-          this.kneeRaiseLastActivityAt = now;
-        } else {
-          this.setStatus("De pie, con las dos piernas apoyadas… confirmando (no te muevas)");
-        }
-      } else {
-        this.kneeRaiseStableSince = null;
-        this.setStatus("Ponte de pie, de perfil a la cámara, con las dos piernas apoyadas, para empezar.");
-      }
-      if (this.debugEl) {
-        this.debugEl.textContent =
-          `esperando de pie… bajada_izq=${dropFractionL.toFixed(2)} bajada_der=${dropFractionR.toFixed(2)} umbral=${KNEERAISE_RAISE_EXIT_FRACTION.toFixed(2)}`;
-      }
-      return;
-    }
-
-    // Ya armado: sin empezar ninguna subida nueva ni completar ninguna
-    // repetición durante KNEERAISE_STILL_MS seguidos, se interpreta que
-    // has terminado la serie (mismo patrón que rotación de
-    // piernas/jumping jacks, con un valor más corto porque esto es un
-    // ritmo continuo rápido, no una pausa de equilibrio entre
-    // repeticiones).
-    if (this.kneeRaiseLastActivityAt !== null && now - this.kneeRaiseLastActivityAt >= KNEERAISE_STILL_MS) {
-      this.closeActiveSet();
-      this.kneeRaiseActiveSide = null;
-      this.kneeRaiseRepStartTime = null;
-      return;
-    }
-
-    if (this.kneeRaiseActiveSide === null) {
-      // Las dos piernas estaban apoyadas: ¿se ha levantado alguna? Si
-      // las dos parecen levantadas a la vez (raro, normalmente ruido en
-      // la transición rápida entre piernas), se elige la que esté más
-      // claramente levantada. Sin lado "pegajoso": cualquier pierna
-      // vale para la siguiente subida, sin esperar a que sea la otra ni
-      // avisar por voz de cuál es (no se ha pedido diferenciarlas aquí,
-      // solo contar el total -- a diferencia de rotación de piernas).
-      const raisedL = dropFractionL < KNEERAISE_RAISE_ENTER_FRACTION;
-      const raisedR = dropFractionR < KNEERAISE_RAISE_ENTER_FRACTION;
-      if (raisedL || raisedR) {
-        const side = (raisedL && raisedR)
-          ? (dropFractionL < dropFractionR ? "left" : "right")
-          : (raisedL ? "left" : "right");
-        this.kneeRaiseActiveSide = side;
-        this.kneeRaiseRepStartTime = now;
-        this.kneeRaiseLastActivityAt = now; // subida nueva empezada: ya cuenta como actividad
-      }
-      if (this.debugEl) {
-        this.debugEl.textContent =
-          `esperando subida… bajada_izq=${dropFractionL.toFixed(2)} bajada_der=${dropFractionR.toFixed(2)} umbral_subida=${KNEERAISE_RAISE_ENTER_FRACTION.toFixed(2)} | quieto desde hace: ${this.kneeRaiseLastActivityAt ? Math.round(now - this.kneeRaiseLastActivityAt) + "ms" : "-"}`;
-      }
-      return;
-    }
-
-    // kneeRaiseActiveSide !== null: una pierna está en el aire -- solo
-    // se vigila cuándo vuelve a bajar, sin ángulo ni rotación de por
-    // medio (ver la nota de más arriba sobre por qué, a propósito, para
-    // no arriesgarse a perder ningún fotograma real de la subida en un
-    // ritmo rápido).
-    const side = this.kneeRaiseActiveSide;
-    const dropFraction = side === "left" ? dropFractionL : dropFractionR;
-
-    if (dropFraction >= KNEERAISE_RAISE_EXIT_FRACTION) {
-      const seconds = (now - this.kneeRaiseRepStartTime) / 1000;
-      if (this.countRep(seconds, now, "Rodilla arriba", KNEERAISE_MIN_REP_SECONDS)) {
-        this.kneeRaiseLastActivityAt = now;
-      }
-      this.kneeRaiseActiveSide = null;
-      this.kneeRaiseRepStartTime = null;
-      if (this.debugEl) {
-        this.debugEl.textContent = `pierna ${side === "left" ? "izquierda" : "derecha"} apoyada de nuevo | bajada_izq=${dropFractionL.toFixed(2)} bajada_der=${dropFractionR.toFixed(2)}`;
-      }
-      return;
-    }
-
-    if (this.debugEl) {
-      this.debugEl.textContent =
-        `pierna ${side === "left" ? "izquierda" : "derecha"} levantada | bajada=${dropFraction.toFixed(2)} (umbral_subida ${KNEERAISE_RAISE_ENTER_FRACTION.toFixed(2)}) | quieto desde hace: ${this.kneeRaiseLastActivityAt ? Math.round(now - this.kneeRaiseLastActivityAt) + "ms" : "-"}`;
-    }
-  }
-
-  /**
-   * Talones al gluteo -- DE PERFIL a la camara, de pie, marchando en el
-   * sitio: se alterna llevar el talon hacia el gluteo y volver a apoyar
-   * el pie, sin pausa entre piernas (ver el bloque HEELKICK_* de mas
-   * arriba para el porque de cada umbral, los cuatro puntos pedidos por
-   * el usuario, y por que la geometria es distinta de rodillas altas).
-   *
-   * A diferencia de processKneeRaises (y de v1-v4 de este mismo
-   * ejercicio), NO hay comprobacion de desplazamiento por hueco/ancho
-   * de cadera "de raiz": el angulo cadera-rodilla-tobillo (ver mas
-   * arriba) se compara directo contra HEELKICK_KNEE_ANGLE_ENTER_DEG /
-   * HEELKICK_KNEE_ANGLE_EXIT_DEG, y el filtro de "caminar" (mas abajo,
-   * HEELKICK_MAX_HIP_DRIFT_FACTOR) se aplica aparte, solo al cerrar
-   * cada subida, normalizado por la longitud de la pierna apoyada (no
-   * por el ancho entre las dos caderas, que en perfil es casi cero).
-   * Tampoco hay espera de "de pie quieto" para armar el contador (ver
-   * el comentario junto a `this.state = "active"` mas abajo) -- se
-   * arma en el primer frame visible, para poder empezar rapido desde
-   * el principio.
-   *
-   * El angulo de cada pierna pasa por dos filtros antes de usarse para
-   * nada, en este orden: ratchet (HEELKICK_MAX_ANGLE_DELTA, recorta
-   * saltos imposibles de un fotograma) y LUEGO media movil exponencial
-   * (HEELKICK_ANGLE_SMOOTHING_ALPHA, amortigua el temblor de fotograma
-   * a fotograma que sobrevive al ratchet) -- anadido en v8 tras un
-   * fallo en vivo (2026-09-07): DE PERFIL la pierna mas lejana a la
-   * camara queda parcialmente tapada por el torso todo el ejercicio, no
-   * solo a veces, asi que MediaPipe le da menos confianza y su angulo
-   * tiembla mas que el de la pierna cercana, produciendo alguna
-   * repeticion contada sin haber hecho el movimiento. Misma tecnica que
-   * SCISSOR_SMOOTHING_ALPHA usa en tijeretas para el mismo tipo de
-   * problema (una pierna vista peor que la otra, de perfil).
-   *
-   * Apoyar el pie entre repeticiones NO es un fallo -- es el cierre
-   * normal de cada subida, igual que rodillas altas/rotacion de
-   * piernas.
-   *
-   * v10 (2026-09-07): solo se vigila UNA pierna por serie (la que se ve
-   * mejor al armar), no las dos a la vez -- ver el porque junto a
-   * "this.state = active" mas abajo. Cada ciclo completo de esa pierna
-   * cuenta como DOS repeticiones.
-   */
-  processHeelKicks(lm, now) {
-    const lHip = lm[L_HIP], rHip = lm[R_HIP];
-    const lKnee = lm[L_KNEE], rKnee = lm[R_KNEE];
-    const lAnkle = lm[L_ANKLE], rAnkle = lm[R_ANKLE];
-
-    const vis = (
-      (lHip.visibility ?? 1) + (rHip.visibility ?? 1) +
-      (lKnee.visibility ?? 1) + (rKnee.visibility ?? 1) +
-      (lAnkle.visibility ?? 1) + (rAnkle.visibility ?? 1)
-    ) / 6;
-
-    if (vis < HEELKICK_MIN_VISIBILITY) {
-      this.announceStatus("No se te ve bien la cadera, la rodilla y el tobillo. Ponte de perfil a la camara, con toda la pierna en el encuadre.");
-      if (this.debugEl) this.debugEl.textContent = "buscando cadera, rodilla y tobillo de perfil…";
-      this.heelKickVisibleSince = null; // corta la racha -- el aviso de "a la vista" exige HEELKICK_VISIBLE_CONFIRM_MS SEGUIDOS por encima del umbral (ver mas abajo)
-      this.noteAbsence(now, HEELKICK_OUT_OF_FRAME_MS);
-      return;
-    }
-    this.outOfFrameSince = null;
-
-    // Un unico aviso hablado, combinando "te veo" + "ya puedes empezar"
-    // (mensajes al minimo, pedido explicitamente) -- igual que rodillas
-    // altas/sentadillas.
-    if (this.heelKickVisibleSince === null) this.heelKickVisibleSince = now;
-    if (!this.startupVoiceGiven && now - this.heelKickVisibleSince >= HEELKICK_VISIBLE_CONFIRM_MS) {
-      this.startupVoiceGiven = true;
-      this.announceStatus(
-        "Cadera, rodilla y tobillo a la vista. ¡Listo! Lleva el talón hacia el glúteo, alternando las piernas. Para terminar, párate quieto un par de segundos, o sal del encuadre.",
-        "startup_ready"
-      );
-    }
-
-    // Toda la maquina de estados de aqui en adelante (armado, deteccion
-    // de subida, cierre de repeticion) espera este mismo margen -- no
-    // solo el aviso de voz de mas arriba. Anadido en v7 tras un fallo
-    // en vivo (2026-09-07, build heelkicks-v6): justo al enganchar el
-    // seguimiento (al empezar, o al recuperarlo tras un hueco breve
-    // por ejemplo al reposicionarte) los primeros fotogramas son
-    // ruidosos -- el angulo puede saltar de forma poco realista
-    // mientras MediaPipe todavia esta afinando el ajuste -- y eso
-    // producia repeticiones fantasma de duracion casi nula justo al
-    // empezar o justo tras un hueco de deteccion (confirmado en el
-    // log: una racha de 3 "repeticiones" de 1.7s/0.5s/0.1s nada mas
-    // recuperar el seguimiento tras ~1.3s sin deteccion). NO exige
-    // quedarte quieto (no revive la espera de v1-v5): marchar de
-    // verdad durante este medio segundo no lo rompe, solo exige que el
-    // seguimiento en si sea fiable un rato seguido antes de fiarse de
-    // el.
-    if (now - this.heelKickVisibleSince < HEELKICK_VISIBLE_CONFIRM_MS) {
-      if (this.debugEl) this.debugEl.textContent = "confirmando seguimiento…";
-      return;
-    }
-
-    // Angulo cadera->rodilla->tobillo (grados), una pierna a la vez --
-    // usa la funcion angle() ya existente en este archivo (la misma
-    // que usan las sentadillas: angle(hip, knee, ankle), documentada
-    // como fiable de perfil porque solo usa x/y). 180 grados = pierna
-    // estirada de pie; valores bajos = rodilla muy doblada, talon
-    // cerca del gluteo.
-    //
-    // Sustituye a la fraccion cadera->tobillo (v1-v4) tras un fallo en
-    // vivo (2026-09-07, build heelkicks-v4): esa fraccion necesitaba
-    // comparar el punto medio de las DOS caderas para distinguir
-    // "patear en el sitio" de "caminar" (HEELKICK_MAX_HIP_DRIFT_FACTOR (ya eliminada),
-    // igual que legrotation) -- pero en un ejercicio DE PERFIL a la
-    // camara (pedido explicitamente, para ver cadera, rodilla y
-    // tobillo) las dos caderas caen casi en el mismo punto de la
-    // pantalla, asi que ese "ancho de cadera" usado para normalizar es
-    // practicamente cero, y cualquier ruido minimo se disparaba a un
-    // desplazamiento aparente de varias veces el ancho de cadera --
-    // confirmado en vivo: desplazamientos de hasta 11.30 (umbral 0.8)
-    // en repeticiones hechas completamente en el sitio, rechazando casi
-    // todas ellas. El angulo de una sola pierna no necesita comparar
-    // las dos caderas entre si, asi que no tiene ese problema --
-    // ademas sugerido directamente por el usuario tras el fallo ("no
-    // puedes anadir contar a traves de angulo que hace la rodilla y el
-    // talon junto a la cadera y que sea minimo 90 grados?").
-    const kneeAngleL = angle(lHip, lKnee, lAnkle) ?? 180;
-    const kneeAngleR = angle(rHip, rKnee, rAnkle) ?? 180;
-    let angleL = kneeAngleL;
-    let angleR = kneeAngleR;
-
-    // Mismo limitador de velocidad (ratchet) que la v3 aplicaba a la
-    // fraccion de distancia, ahora en grados: recorta un salto de un
-    // solo fotograma al maximo fisicamente plausible, pero la
-    // referencia SIEMPRE avanza hacia el dato crudo (nunca se congela),
-    // para no repetir el bloqueo permanente de la v2 (ver el
-    // comentario junto a HEELKICK_MAX_ANGLE_DELTA).
-    if (this.heelKickPrevAngleL !== null) {
-      const deltaL = angleL - this.heelKickPrevAngleL;
-      if (Math.abs(deltaL) > HEELKICK_MAX_ANGLE_DELTA) {
-        angleL = this.heelKickPrevAngleL + Math.sign(deltaL) * HEELKICK_MAX_ANGLE_DELTA;
-      }
-    }
-    this.heelKickPrevAngleL = angleL;
-    if (this.heelKickPrevAngleR !== null) {
-      const deltaR = angleR - this.heelKickPrevAngleR;
-      if (Math.abs(deltaR) > HEELKICK_MAX_ANGLE_DELTA) {
-        angleR = this.heelKickPrevAngleR + Math.sign(deltaR) * HEELKICK_MAX_ANGLE_DELTA;
-      }
-    }
-    this.heelKickPrevAngleR = angleR;
-
-    // Suaviza el angulo YA limitado por el ratchet con una media movil
-    // exponencial, una pierna a la vez (ver HEELKICK_ANGLE_SMOOTHING_ALPHA
-    // mas arriba para el porque -- misma tecnica que tijeretas usa para
-    // la pierna que la camara ve peor). angleL/angleR de aqui en
-    // adelante son el valor SUAVIZADO; el ratchet de arriba sigue
-    // trabajando sobre el valor sin suavizar (heelKickPrevAngleL/R), asi
-    // que su propio limite de grados/fotograma no se ve afectado por el
-    // retraso que anade el suavizado.
-    if (this.heelKickSmoothAngleL === null) {
-      this.heelKickSmoothAngleL = angleL;
-    } else {
-      this.heelKickSmoothAngleL += HEELKICK_ANGLE_SMOOTHING_ALPHA * (angleL - this.heelKickSmoothAngleL);
-    }
-    angleL = this.heelKickSmoothAngleL;
-    if (this.heelKickSmoothAngleR === null) {
-      this.heelKickSmoothAngleR = angleR;
-    } else {
-      this.heelKickSmoothAngleR += HEELKICK_ANGLE_SMOOTHING_ALPHA * (angleR - this.heelKickSmoothAngleR);
-    }
-    angleR = this.heelKickSmoothAngleR;
-
-    if (this.state === null) {
-      // Se arma de inmediato, SIN exigir de pie quieto con las dos
-      // piernas apoyadas primero (a diferencia del resto de la familia,
-      // y a diferencia de v1-v5 de este mismo ejercicio) -- fallo
-      // confirmado en vivo (2026-09-07, build heelkicks-v5): al marchar
-      // en el sitio a buen ritmo casi nunca hay un instante en que las
-      // DOS piernas esten completamente estiradas A LA VEZ sostenido un
-      // rato (en cuanto una se apoya la otra ya esta subiendo), asi que
-      // si empezabas rapido desde el principio esa condicion no llegaba
-      // a cumplirse nunca y no se contaba nada; el usuario tenia que
-      // empezar muy despacio (dejando una pausa real con las dos
-      // piernas apoyadas) solo para que armara. La visibilidad ya se ha
-      // confirmado unos frames antes (HEELKICK_VISIBLE_CONFIRM_MS, mas
-      // arriba) asi que no hace falta una espera aparte aqui.
-      this.state = "active";
-      this.heelKickLastActivityAt = now;
-      // Se elige UNA pierna para vigilar TODA esta serie -- cambio de
-      // v10 tras un fallo en vivo (2026-09-07, build heelkicks-v9):
-      // vigilar las dos piernas a la vez (v9) arreglo el "solo cuenta
-      // una pierna" de v8, pero abrio un fallo nuevo -- un solo
-      // fotograma con datos corruptos (las dos rodillas con angulo
-      // crudo cercano a 0 grados a la vez, fisicamente imposible de
-      // pie) bastaba para que las DOS parecieran subir y volver a bajar
-      // casi a la vez, contando dos repeticiones fantasma en menos de
-      // 300ms (confirmado en el registro: reps 25 y 26 de una serie,
-      // justo tras una racha de angulos crudos de 3-16 grados en ambas
-      // piernas a la vez). El usuario pidio la solucion mas simple:
-      // vigilar solo la pierna que mejor se ve, y contar cada uno de
-      // sus ciclos como DOS repeticiones (una por ella, una implicita
-      // por la otra, que alterna con ella) -- menos superficie para
-      // este tipo de fallo que intentar vigilar bien las dos a la vez.
-      // La pierna elegida es la de mayor visibilidad media
-      // (cadera+rodilla+tobillo) en este mismo frame, fija toda la
-      // serie (no cambia si la visibilidad varia a medio ejercicio); se
-      // vuelve a elegir en la siguiente serie.
-      const leftVis = ((lHip.visibility ?? 1) + (lKnee.visibility ?? 1) + (lAnkle.visibility ?? 1)) / 3;
-      const rightVis = ((rHip.visibility ?? 1) + (rKnee.visibility ?? 1) + (rAnkle.visibility ?? 1)) / 3;
-      this.heelKickTrackedSide = rightVis > leftVis ? "right" : "left";
-      this.heelKickUp = false;
-      this.heelKickRepStart = null;
-    }
-
-    // Ya armado: sin empezar ninguna subida nueva ni completar ninguna
-    // repeticion durante HEELKICK_STILL_MS seguidos, se interpreta que
-    // has terminado la serie (mismo patron que rodillas altas).
-    if (this.heelKickLastActivityAt !== null && now - this.heelKickLastActivityAt >= HEELKICK_STILL_MS) {
-      this.closeActiveSet();
-      this.heelKickUp = false;
-      this.heelKickRepStart = null;
-      return;
-    }
-
-    // Solo se procesa la pierna elegida al armar (ver mas arriba) -- la
-    // otra no se mira en absoluto, ni para "subir" ni para "bajar".
-    const side = this.heelKickTrackedSide;
-    const trackedAngle = side === "left" ? angleL : angleR;
-    const trackedRawAngle = side === "left" ? kneeAngleL : kneeAngleR;
-    const sideLabel = side === "left" ? "izquierda" : "derecha";
-
-    if (!this.heelKickUp) {
-      if (trackedAngle <= HEELKICK_KNEE_ANGLE_ENTER_DEG) {
-        this.heelKickUp = true;
-        this.heelKickRepStart = now;
-        this.heelKickLastActivityAt = now; // subida nueva empezada: ya cuenta como actividad
-        // Punto de referencia para detectar "caminar" durante esta
-        // subida (ver HEELKICK_MAX_HIP_DRIFT_FACTOR): punto medio de
-        // las dos caderas ahora mismo, y la longitud de la pierna QUE
-        // SE QUEDA apoyada (no la que patea) como escala.
-        const groundedHip = side === "left" ? rHip : lHip;
-        const groundedAnkle = side === "left" ? rAnkle : lAnkle;
-        this.heelKickExcursionHipMidX = (lHip.x + rHip.x) / 2;
-        this.heelKickExcursionHipMidY = (lHip.y + rHip.y) / 2;
-        this.heelKickExcursionLegScale = Math.hypot(groundedHip.x - groundedAnkle.x, groundedHip.y - groundedAnkle.y) || 1;
-      }
-      if (this.debugEl) {
-        this.debugEl.textContent =
-          `pierna vigilada: ${sideLabel} | apoyada angulo=${trackedAngle.toFixed(0)}°(bruto ${trackedRawAngle.toFixed(0)}°) umbral_subida=${HEELKICK_KNEE_ANGLE_ENTER_DEG}° | quieto desde hace: ${this.heelKickLastActivityAt ? Math.round(now - this.heelKickLastActivityAt) + "ms" : "-"}`;
-      }
-      return;
-    }
-
-    // La pierna vigilada estaba arriba: ¿ha vuelto a estirarse?
-    // Histeresis por encima de HEELKICK_KNEE_ANGLE_ENTER_DEG (hay que
-    // pasar de HEELKICK_KNEE_ANGLE_EXIT_DEG) para que el ruido justo en
-    // el umbral no abra y cierre repeticiones fantasma.
-    if (trackedAngle < HEELKICK_KNEE_ANGLE_EXIT_DEG) {
-      if (this.debugEl) {
-        this.debugEl.textContent =
-          `pierna vigilada: ${sideLabel} | talon arriba angulo=${trackedAngle.toFixed(0)}°(bruto ${trackedRawAngle.toFixed(0)}°) (umbral_bajada ${HEELKICK_KNEE_ANGLE_EXIT_DEG}°) | quieto desde hace: ${this.heelKickLastActivityAt ? Math.round(now - this.heelKickLastActivityAt) + "ms" : "-"}`;
-      }
-      return;
-    }
-
-    const seconds = (now - this.heelKickRepStart) / 1000;
-    const hipMidX = (lHip.x + rHip.x) / 2;
-    const hipMidY = (lHip.y + rHip.y) / 2;
-    const hipDrift = Math.hypot(hipMidX - this.heelKickExcursionHipMidX, hipMidY - this.heelKickExcursionHipMidY);
-    const hipDriftRatio = hipDrift / (this.heelKickExcursionLegScale || 1);
-    this.heelKickUp = false;
-    this.heelKickRepStart = null;
-
-    if (hipDriftRatio > HEELKICK_MAX_HIP_DRIFT_FACTOR) {
-      // Te has movido de sitio de verdad (caminar), no solo pateado en
-      // el sitio -- no cuenta nada, pero se sigue vigilando con
-      // normalidad (no se cierra la serie por esto).
-      this.announceStatus("Eso no cuenta, te has desplazado -- quédate en el mismo sitio.", "heelkick_drift");
-      if (this.debugEl) {
-        this.debugEl.textContent = `pierna vigilada: ${sideLabel} apoyada de nuevo | deriva=${hipDriftRatio.toFixed(2)} (umbral ${HEELKICK_MAX_HIP_DRIFT_FACTOR}) -- rechazada`;
-      }
-      return;
-    }
-
-    // Cada ciclo de la pierna vigilada cuenta como DOS repeticiones --
-    // una por ella, una implicita por la otra pierna, que alterna con
-    // ella (pedido explicitamente por el usuario: "cuenta la pierna que
-    // se ve y vamos contando de 2 en dos"). Dos llamadas normales a
-    // countRep(), no una suma manual: asi el filtro de duracion minima,
-    // el descanso obligatorio entre series y la voz de cada numero
-    // siguen funcionando exactamente igual que en el resto de la
-    // familia, sin duplicar esa logica aqui.
-    if (this.countRep(seconds, now, "Talón al glúteo", HEELKICK_MIN_REP_SECONDS)) {
-      this.heelKickLastActivityAt = now;
-      this.countRep(seconds, now, "Talón al glúteo", HEELKICK_MIN_REP_SECONDS);
-    }
-    if (this.debugEl) {
-      this.debugEl.textContent = `pierna vigilada: ${sideLabel} apoyada de nuevo (+2) | deriva=${hipDriftRatio.toFixed(2)} (umbral ${HEELKICK_MAX_HIP_DRIFT_FACTOR})`;
-    }
-  }
-
-  /**
    * Mensaje de "vuelve a colocarte" propio de cada ejercicio de este
    * grupo (sentadillas y los tres abdominales tumbado) — usado tanto al
    * esperar la primera vez como al reabrir tras cerrar una serie.
@@ -6575,8 +4560,6 @@ class WorkoutSession {
         return "Ponte de pie, de perfil a la cámara, para empezar.";
       case "jumpingjack":
         return "Ponte de pie, de frente a la cámara, con los brazos pegados al cuerpo y los pies juntos, para empezar.";
-      case "armcircles":
-        return "Ponte de pie, de frente a la cámara, con los brazos extendidos, para empezar.";
       case "scissor":
         return "Túmbate boca arriba y levanta los pies a un palmo del suelo para empezar.";
       case "doublecrunch":
@@ -6587,18 +4570,6 @@ class WorkoutSession {
         return "Ponte de perfil a la cámara, agárrate a las paralelas con los brazos estirados, para empezar.";
       case "dumbbellcurl":
         return "Ponte de perfil a la cámara, de pie, con la mancuerna colgando y el brazo estirado, para empezar.";
-      case "necklateral":
-        return "Ponte de frente a la cámara, mirando al frente, para empezar.";
-      case "armscissors":
-        return "Ponte de pie, de frente a la cámara, con los brazos extendidos en cruz, para empezar.";
-      case "legrotation":
-        return "Ponte de pie, de frente a la cámara, con las dos piernas apoyadas, para empezar.";
-      case "kneeraises":
-        return "Ponte de pie, de perfil a la cámara, con las dos piernas apoyadas, para empezar.";
-      case "heelkicks":
-        return "Ponte de pie, de perfil a la cámara, con las dos piernas apoyadas, para empezar.";
-      case "splitsquat":
-        return "Ponte en posición: de perfil, una pierna delante y otra detrás.";
       default:
         return "Ponte en posición para empezar.";
     }
@@ -6667,20 +4638,10 @@ class WorkoutSession {
       if (!this.postureGroundConfirmed) {
         return "Ponte de pie, relajada/o, con los brazos sueltos a los lados (posición standby), para confirmar que te veo.";
       }
-      return this.stretchLastSide
-        ? "Ahora el otro brazo: estíralo hacia el lado contrario, más o menos a la altura del hombro, y agárralo con el otro brazo por el codo, tirando de él hacia el pecho."
+      const suggestedSide = this.stretchLastSide === "left" ? "derecho" : this.stretchLastSide === "right" ? "izquierdo" : null;
+      return suggestedSide
+        ? `Estira el brazo ${suggestedSide} hacia el lado contrario, más o menos a la altura del hombro, y agárralo con el otro brazo por el codo, tirando de él hacia el pecho.`
         : "Estira un brazo hacia el lado contrario, más o menos a la altura del hombro, y agárralo con el otro brazo por el codo, tirando de él hacia el pecho.";
-    }
-    // Estiramiento de tríceps por encima de la cabeza: mismo patrón que
-    // el cruzado de brazo (paso 1 standby, paso 2 sugiere el lado
-    // contrario al último aguantado).
-    if (this.counterKey === "tricepsoverheadstretch") {
-      if (!this.postureGroundConfirmed) {
-        return "Ponte de pie, relajada/o, con los brazos sueltos a los lados (posición standby), para confirmar que te veo.";
-      }
-      return this.stretchLastSide
-        ? "Ahora el otro brazo: dóblalo por el codo, llevando la mano por detrás de la nuca, y con el otro brazo agarra ese codo (no la mano) tirando de él hacia el centro."
-        : "Dobla un brazo por el codo, llevando la mano por detrás de la nuca, y con el otro brazo agarra ese codo (no la mano) tirando de él hacia el centro.";
     }
     return "Ponte en posición de plancha, apoyada/o en los antebrazos, con el cuerpo en línea recta, para empezar.";
   }
@@ -6777,7 +4738,7 @@ class WorkoutSession {
   notePostureOk(now) {
     this.postureInvalidSince = null;
 
-    if (this.postureValidSince === null && this.setClosedAt !== null && now - this.setClosedAt < MIN_REST_MS && !NO_REST_COUNTERS.has(this.counterKey)) {
+    if (this.postureValidSince === null && this.setClosedAt !== null && now - this.setClosedAt < MIN_REST_MS) {
       // Mismo descanso obligatorio que countRep() (ver MIN_REST_MS): no
       // arranca el cronómetro de aguante hasta que pase, aunque vuelvas
       // a colocarte en postura antes de tiempo.
@@ -6800,7 +4761,7 @@ class WorkoutSession {
           ? "Postura correcta. ¡Listo! Aguanta con las rodillas arriba, sin balancearte. Para terminar una serie, suelta la barra o sal del encuadre."
           : this.counterKey === "handstand"
           ? "Postura correcta. ¡Listo! Aguanta el pino, con el abdomen apretado y el cuerpo recto. Para terminar una serie, baja del pino o sal del encuadre."
-          : this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch"
+          : this.counterKey === "armcrossstretch"
           ? "Postura correcta. ¡Listo! Aguanta el estiramiento, sin tirar de golpe. Para terminar, suelta el brazo (vuelve a standby) o sal del encuadre."
           : "Postura correcta. ¡Listo! Aguanta la postura, apretando el abdomen y metiendo el culo hacia dentro, sin dejar caer la cadera. Para terminar una serie, rompe la postura, ponte de pie, sal del encuadre, o levanta un brazo y agita la mano.";
       this.announceStatus(startupTip, "startup_ready", "Listo. En posición.");
@@ -6831,41 +4792,24 @@ class WorkoutSession {
     const delta = (now - this.lastPostureTickTs) / 1000;
     this.lastPostureTickTs = now;
     this.currentHoldSeconds += Math.max(0, delta);
-    // El número en pantalla tiene que corresponder con lo que se dice en
-    // voz alta (más abajo): si hay un targetSeconds, la voz hace cuenta
-    // atrás hasta el objetivo y luego cuenta hacia adelante los segundos
-    // de propina - antes aquí siempre se mostraba currentHoldSeconds
-    // (contando hacia arriba desde 0), así que con objetivo la pantalla y
-    // la voz iban cada una por su lado (voz "30, 29, 28…", pantalla
-    // "0s, 1s, 2s…") - se reportó como confuso. Con targetSeconds, se
-    // muestra lo mismo que se está a punto de anunciar; sin objetivo
-    // (modo freestyle), se mantiene el conteo hacia arriba de siempre.
-    const displaySeconds = this.targetSeconds
-      ? (this.currentHoldSeconds < this.targetSeconds
-          ? Math.max(0, this.targetSeconds - this.currentHoldSeconds)
-          : this.currentHoldSeconds - this.targetSeconds)
-      : this.currentHoldSeconds;
-    if (this.repsEl) this.repsEl.textContent = formatHoldSeconds(displaySeconds);
-    this.setStatus(`Aguantando… ${formatHoldSeconds(displaySeconds)}`);
+    if (this.repsEl) this.repsEl.textContent = formatHoldSeconds(this.currentHoldSeconds);
+    this.setStatus(`Aguantando… ${formatHoldSeconds(this.currentHoldSeconds)}`);
 
     // Cuenta atrás/adelante hablada hacia el objetivo de este tramo
     // (targetSeconds, si el ejercicio viene de un plan o de un circuito
-    // con meta fija). Antes se decía cada segundo entero, pero se
-    // reportó que la voz "no da abasto" leyendo un número cada segundo
-    // (se solapan/se cortan a medias - "veinti u", "ventid", "venti
-    // tr..." en vez de veintiuno/veintidós/veintitrés) - ahora se dice
-    // solo cada 5 segundos (múltiplos de 5), tiempo de sobra para que
-    // termine de decir un número antes del siguiente: cuenta atrás
-    // mientras falta para el objetivo, y en cuanto se alcanza, pasa a
-    // contar hacia ADELANTE los segundos de propina cada 5s — así se
-    // nota de oído que vas por encima del 100%, igual que seguir
-    // oyendo "9", "10" al pasarte de un objetivo de 8 dominadas.
-    // Sustituye a los consejos rotativos mientras dura (ver más abajo):
-    // los dos se hablan por el mismo canal de voz y se pisarían entre sí.
+    // con meta fija) — igual que se dice en voz alta cada repetición en
+    // los ejercicios de repeticiones (speakRep), aquí se dice cada
+    // segundo entero: cuenta atrás mientras falta para el objetivo, y en
+    // cuanto se alcanza, pasa a contar hacia ADELANTE los segundos de
+    // propina — así se nota de oído que vas por encima del 100%, igual
+    // que seguir oyendo "9", "10" al pasarte de un objetivo de 8
+    // dominadas. Sustituye a los consejos rotativos mientras dura (ver
+    // más abajo): los dos se hablan por el mismo canal de voz y se
+    // pisarían entre sí sonando cada segundo.
     if (this.targetSeconds) {
       if (this.currentHoldSeconds < this.targetSeconds) {
         const remaining = Math.ceil(this.targetSeconds - this.currentHoldSeconds);
-        if (remaining >= 1 && remaining % 5 === 0 && remaining !== this.postureCountdownLastSecond) {
+        if (remaining >= 1 && remaining !== this.postureCountdownLastSecond) {
           this.postureCountdownLastSecond = remaining;
           this.speak(numeroEnPalabras(remaining), { flush: true });
         }
@@ -6892,7 +4836,7 @@ class WorkoutSession {
         } catch (e) { /* si el navegador bloquea audio, no pasa nada */ }
       } else {
         const over = Math.floor(this.currentHoldSeconds - this.targetSeconds) + 1;
-        if (over % 5 === 0 && over !== this.postureCountdownLastSecond) {
+        if (over !== this.postureCountdownLastSecond) {
           this.postureCountdownLastSecond = over;
           this.speak(numeroEnPalabras(over), { flush: true });
         }
@@ -6909,7 +4853,7 @@ class WorkoutSession {
     // igual que el tramo "over" de arriba una vez pasado el objetivo —
     // así cualquier aguante se puede seguir de oído, tenga meta o no.
     const heldWhole = Math.floor(this.currentHoldSeconds);
-    if (heldWhole >= 1 && heldWhole % 5 === 0 && heldWhole !== this.postureCountdownLastSecond) {
+    if (heldWhole >= 1 && heldWhole !== this.postureCountdownLastSecond) {
       this.postureCountdownLastSecond = heldWhole;
       this.speak(numeroEnPalabras(heldWhole), { flush: true });
     }
@@ -6943,44 +4887,8 @@ class WorkoutSession {
    * viendo en pantalla igual que siempre (setStatus, más abajo en
    * announceStatus), esto solo acorta lo que se OYE.
    */
-  notePostureBroken(now, reason, rawOk = false) {
-    // Estiramientos (STRETCH_HOLD_COUNTERS): a diferencia de plancha y
-    // compañia, aqui "postura rota" incluye TODO el rato en el que
-    // frame_ok todavia no se ha confirmado 300ms seguidos (ver
-    // STRETCH_FLICKER_STABLE_MS) - asi que el reloj de "llevas
-    // STRETCH_INVALID_STABLE_MS sin conseguirlo, vuelve a standby"
-    // seguia corriendo IGUAL durante una racha de frames ya
-    // geometricamente correctos (frame_ok=si) que solo le faltaban unos
-    // pocos frames para confirmarse. Con un registro real (build v7, ver
-    // notas 2026-09-05) se ve un intento (14.2s-17.3s) que pasa los
-    // primeros ~2.3s totalmente quieto y luego, en los ultimos ~0.7s,
-    // cruza el brazo del todo y llega a frame_ok=si tres frames
-    // seguidos (~cruce=0.53 a 0.72, codo bajando de 156 a 145: la
-    // MISMA pinta que el aguante que si cuenta mas adelante en el
-    // mismo registro) - pero el aviso de "date por vencido" (que llevaba
-    // sonando desde el frame 1 del intento, sin enterarse de que en los
-    // ultimos frames SI se estaba consiguiendo) expiraba practicamente
-    // en el mismo instante, cortando el intento antes de que le diera
-    // tiempo a acumular STRETCH_FLICKER_STABLE_MS de frames buenos
-    // seguidos para confirmarse. Por eso aqui, solo para estos
-    // ejercicios, un frame CRUDO ya correcto (rawOk, aunque el debounce
-    // todavia no lo haya confirmado) reinicia este reloj en vez de
-    // dejarlo correr - asi el margen de STRETCH_INVALID_STABLE_MS es de
-    // verdad "llevas tanto tiempo SIN NI SIQUIERA ACERCARTE", no "llevas
-    // tanto tiempo sin que se confirme del todo", que es una barra much
-    // mas alta y penaliza justo los intentos que van por buen camino.
-    if (rawOk && STRETCH_HOLD_COUNTERS.has(this.counterKey)) {
-      // OJO: a "now", no a null - si se pusiera a null, la comprobacion de
-      // mas abajo (now - this.postureInvalidSince) lo tomaria como 0 y
-      // "now - 0" siempre es >= invalidStableMs, cerrando la serie AHORA
-      // MISMO en cuanto hay un frame bueno (justo lo contrario de lo que
-      // se busca). Poniendolo a "now" reinicia la cuenta atras de
-      // STRETCH_INVALID_STABLE_MS desde este instante, sin disparar el
-      // cierre en este frame.
-      this.postureInvalidSince = now;
-    } else if (this.postureInvalidSince === null) {
-      this.postureInvalidSince = now;
-    }
+  notePostureBroken(now, reason) {
+    if (this.postureInvalidSince === null) this.postureInvalidSince = now;
     this.postureValidSince = null;
     this.lastPostureTickTs = null;
     if (reason) {
@@ -6997,7 +4905,7 @@ class WorkoutSession {
     const invalidStableMs =
       this.counterKey === "kneeholdbar" ? KNEEHOLDBAR_INVALID_STABLE_MS
       : this.counterKey === "handstand" ? HANDSTAND_INVALID_STABLE_MS
-      : this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch" ? STRETCH_INVALID_STABLE_MS
+      : this.counterKey === "armcrossstretch" ? STRETCH_INVALID_STABLE_MS
       : PLANK_INVALID_STABLE_MS;
     if (now - this.postureInvalidSince >= invalidStableMs) {
       this.closeActivePostureSet();
@@ -7045,8 +4953,11 @@ class WorkoutSession {
       this.setClosedAt = performance.now();
       this.restBlockedVoiceGiven = false;
       let waitingMessage;
-      if (this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch") {
-        waitingMessage = "Vuelve a standby (de pie, brazos sueltos) y prueba con el otro brazo.";
+      if (this.counterKey === "armcrossstretch") {
+        const suggestedSide = this.stretchLastSide === "left" ? "derecho" : this.stretchLastSide === "right" ? "izquierdo" : null;
+        waitingMessage = suggestedSide
+          ? `Vuelve a standby (de pie, brazos sueltos) y prueba con el brazo ${suggestedSide}.`
+          : "Vuelve a standby (de pie, brazos sueltos) para el otro lado.";
       } else {
         waitingMessage = this.postureWaitingMessage();
       }
@@ -7103,12 +5014,8 @@ class WorkoutSession {
           this.postureLastOk = null;
           this.postureCandidateOk = null;
           this.postureCandidateSince = null;
-          const stretchReadyMessage =
-            this.counterKey === "tricepsoverheadstretch"
-              ? "¡Bien, en standby! Ahora dobla un brazo por el codo, llevando la mano por detrás de la nuca, y con el otro brazo agarra ese codo (no la mano) tirando de él hacia el centro."
-              : "¡Bien, en standby! Ahora estira un brazo hacia el lado contrario, más o menos a la altura del hombro, y agárralo con el otro brazo por el codo, tirando de él hacia el pecho.";
           this.announceStatus(
-            stretchReadyMessage,
+            "¡Bien, en standby! Ahora estira un brazo hacia el lado contrario, más o menos a la altura del hombro, y agárralo con el otro brazo por el codo, tirando de él hacia el pecho.",
             "stretch_ready",
             "Listo. Estira un brazo y agárralo con el otro."
           );
@@ -7122,7 +5029,7 @@ class WorkoutSession {
       if (this.debugEl) {
         this.debugEl.textContent = `paso 1 de 2: standby — ${standby.ok ? "sí, confirmando" : "todavía no"}`;
       }
-      this.logScissor(`[estiramiento, paso 1] tipo=${this.counterKey} ok=${standby.ok ? "sí" : "no"}`);
+      this.logScissor(`[estiramiento cruzado de brazo, paso 1] ok=${standby.ok ? "sí" : "no"}`);
       return;
     }
 
@@ -7209,11 +5116,9 @@ class WorkoutSession {
         ? checkHandstandPosture(lm)
         : this.counterKey === "armcrossstretch"
         ? checkArmCrossStretch(lm)
-        : this.counterKey === "tricepsoverheadstretch"
-        ? checkTricepsOverheadStretch(lm)
         : checkPlankPosture(lm);
     if (this.counterKey === "sideplank" && check.downSide) this.sidePlankDownSide = check.downSide;
-    if ((this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch") && check.side) this.stretchLastSide = check.side;
+    if (this.counterKey === "armcrossstretch" && check.side) this.stretchLastSide = check.side;
     // Antes este texto tenía los nombres de los campos de checkPlankPosture
     // escritos a mano — para checkSidePlankPosture (campos distintos:
     // hipLift, elbowDrop…) siempre salía en blanco ("-"). Ahora se vuelca
@@ -7240,7 +5145,7 @@ class WorkoutSession {
       const flickerStableMs =
         this.counterKey === "kneeholdbar" ? KNEEHOLDBAR_FLICKER_STABLE_MS
         : this.counterKey === "handstand" ? HANDSTAND_FLICKER_STABLE_MS
-        : this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch" ? STRETCH_FLICKER_STABLE_MS
+        : this.counterKey === "armcrossstretch" ? STRETCH_FLICKER_STABLE_MS
         : POSTURE_FLICKER_STABLE_MS;
       if (now - this.postureCandidateSince >= flickerStableMs) {
         this.postureLastOk = check.ok;
@@ -7266,8 +5171,6 @@ class WorkoutSession {
         ? "pino"
         : this.counterKey === "armcrossstretch"
         ? "estiramiento cruzado de brazo"
-        : this.counterKey === "tricepsoverheadstretch"
-        ? "estiramiento de tríceps por encima de la cabeza"
         : "plancha";
     this.logScissor(
       `[${postureLabel}, paso 2] frame_ok=${check.ok ? "sí" : "no"} confirmado=${this.postureLastOk ? "sí" : "no"} ` +
@@ -7276,7 +5179,7 @@ class WorkoutSession {
     );
 
     if (!this.postureLastOk) {
-      this.notePostureBroken(now, check.reason, check.ok);
+      this.notePostureBroken(now, check.reason);
       return;
     }
     this.notePostureOk(now);
@@ -8672,36 +6575,8 @@ class WorkoutSession {
       this.processSquat(lm, now);
       return;
     }
-    if (this.counterKey === "splitsquat") {
-      this.processSplitSquat(lm, now);
-      return;
-    }
     if (this.counterKey === "jumpingjack") {
       this.processJumpingJack(lm, now);
-      return;
-    }
-    if (this.counterKey === "armcircles") {
-      this.processArmCircles(lm, now);
-      return;
-    }
-    if (this.counterKey === "necklateral") {
-      this.processNeckLateral(lm, now);
-      return;
-    }
-    if (this.counterKey === "armscissors") {
-      this.processArmScissors(lm, now);
-      return;
-    }
-    if (this.counterKey === "legrotation") {
-      this.processLegRotation(lm, now);
-      return;
-    }
-    if (this.counterKey === "kneeraises") {
-      this.processKneeRaises(lm, now);
-      return;
-    }
-    if (this.counterKey === "heelkicks") {
-      this.processHeelKicks(lm, now);
       return;
     }
     if (this.counterKey === "crunch") {
@@ -8965,7 +6840,7 @@ class WorkoutSession {
     const restSeconds = (now - this.lastRepTime) / 1000;
     this.restEl.textContent = this.formatTime(restSeconds);
 
-    if (restSeconds >= REST_ALERT_SECONDS && !this.restAlerted && !NO_REST_COUNTERS.has(this.counterKey)) {
+    if (restSeconds >= REST_ALERT_SECONDS && !this.restAlerted) {
       this.restAlerted = true;
       this.restAlertsTriggered += 1;
       // Han pasado los 1:30 de descanso: a partir de aquí la voz ya

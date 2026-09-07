@@ -131,6 +131,7 @@ _EXERCISE_DIFFICULTY = {
     "leg-raise": "intermediate",
     "side-plank": "intermediate",
     "weighted-squat": "intermediate",
+    "split-squat": "intermediate",  # unilateral + equilibrio -> más exigente que la sentadilla a dos piernas, mismo nivel que sentadillas con peso
     "wall-sit": "intermediate",
     "double-crunch": "advanced",
     "scissor-kick": "advanced",

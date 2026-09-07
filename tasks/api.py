@@ -1139,6 +1139,7 @@ def plan_json(p, detail=False):
 
     def _item(it):
         t = it.current_target()
+        _sessions_to_next_step = it.sessions_to_next_step()
         return {
             "id": it.pk,
             "name": it.display_name,
@@ -1154,6 +1155,15 @@ def plan_json(p, detail=False):
             "target_pace_seconds_per_km": t.get("pace_seconds_per_km"),
             "step": it.current_step(),
             "remaining": it.sessions_to_goal(),
+            # Cuántas sesiones cumplidas más hacen falta para subir de
+            # escalón, y cuántas de esas llevas ya — para que la app
+            # pueda enseñar "3 de 4 sesiones" aunque el objetivo de hoy
+            # todavía no haya subido.
+            "sessions_to_next_step": _sessions_to_next_step,
+            "sessions_into_step": (
+                it.sessions_per_step - _sessions_to_next_step
+                if _sessions_to_next_step is not None else None
+            ),
             "done": t["done"],
             # Para poder rellenar el formulario de edición sin tener que
             # deshacer la progresión — estos son los valores tal cual se
