@@ -1,11 +1,23 @@
 {
   "manifest_version": 3,
   "name": "Libreta — Tiempo en Udemy",
-  "version": "1.0.0",
-  "description": "Cuenta el tiempo real que pasas viendo tus cursos de Udemy con la pestaña en primer plano, y lo manda a tu Libreta de tareas.",
-  "permissions": ["tabs", "idle", "alarms", "storage", "scripting"],
-  "host_permissions": ["*://*.udemy.com/*"],
-  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "version": "1.1.0",
+  "description": "Cuenta el tiempo real que pasas viendo tus cursos de Udemy o leyendo un PDF con la pestana en primer plano, y lo manda a tu Libreta de tareas.",
+  "permissions": [
+    "tabs",
+    "idle",
+    "alarms",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "*://*.udemy.com/*",
+    "file:///*"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"

@@ -19,7 +19,7 @@ async function render() {
 
   const { current } = await chrome.storage.session.get("current");
   if (!current) {
-    content.innerHTML = '<p class="empty">Sin actividad de Udemy detectada ahora mismo.</p>';
+    content.innerHTML = '<p class="empty">Sin actividad detectada ahora mismo.</p>';
     return;
   }
 
@@ -51,21 +51,24 @@ function renderDebug(snap) {
   lines.push(`Ventana del navegador con foco: ${snap.windowFocused ? "sí" : "NO"}`);
   if (snap.tab) {
     lines.push(`Pestaña activa — título: "${snap.tab.title}"`);
-    lines.push(`Pestaña activa — URL: ${snap.tab.url}`);
-    lines.push(`¿Reconocida como Udemy?: ${snap.isUdemyTab ? "sí" : "NO"}`);
+    lines.push(`Pestaña activa — URL: ${snap.tab.url ?? "(oculta — falta el permiso de acceso a archivos)"}`);
+    lines.push(`Tipo de pestaña detectado: ${{ udemy: "Udemy", pdf: "PDF", otro: "ninguno de los dos" }[snap.tabKind]}`);
     lines.push(`¿Suena audio en la pestaña?: ${snap.tab.audible ? "sí" : "no"}`);
   } else {
     lines.push("Pestaña activa: (no se detecta ninguna)");
   }
+  if (snap.noUrlButFileTab) {
+    lines.push('Aviso: hay una pestaña sin URL visible — probablemente un archivo local sin el permiso "acceso a URLs de archivo" activado.');
+  }
   lines.push(`Estado de inactividad (chrome.idle): ${snap.idleState}`);
-  lines.push(`Tareas de Udemy en caché: ${snap.tasksCount}${snap.tasksCacheAgeSeconds !== null ? ` (actualizada hace ${snap.tasksCacheAgeSeconds}s)` : " (nunca se ha cargado)"}`);
+  lines.push(`Tareas trackeables en caché: ${snap.tasksCount}${snap.tasksCacheAgeSeconds !== null ? ` (actualizada hace ${snap.tasksCacheAgeSeconds}s)` : " (nunca se ha cargado)"}`);
   if (snap.tasks.length) {
-    snap.tasks.forEach((t) => lines.push(`   · "${t.title}" — palabra clave: "${t.watch_keyword}"`));
+    snap.tasks.forEach((t) => lines.push(`   · [${t.subcategory}] "${t.title}" — palabra clave: "${t.watch_keyword}"`));
   } else {
-    lines.push("   (ninguna — revisa que la tarea sea de hoy, categoría Estudio, subtipo Curso de Udemy, con palabra clave puesta)");
+    lines.push('   (ninguna — revisa que la tarea sea de hoy: Estudio → "Curso de Udemy", o Enfoque → "Lectura", con palabra clave puesta)');
   }
   lines.push(`Coincidencia encontrada ahora: ${snap.match ? `SÍ — "${snap.match.taskTitle}" (por "${snap.match.keyword}")` : "NO"}`);
-  lines.push(`Sesión en curso: ${snap.currentSession ? snap.currentSession.taskTitle : "ninguna"}`);
+  lines.push(`Sesión en curso: ${snap.currentSession ? `${snap.currentSession.taskTitle} [${snap.currentSession.subcategory}]` : "ninguna"}`);
   debugEl.textContent = lines.join("\n");
 }
 
@@ -82,6 +85,30 @@ toggleDebug.addEventListener("click", (e) => {
   if (debugVisible) refreshDebug();
 });
 
+// ------------------------------------------ aviso de permiso de archivo
+
+const fileAccessWarning = document.getElementById("file-access-warning");
+
+async function refreshFileAccessWarning() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    // Si Chrome no manda "url" para la pestana activa pero SI hay una
+    // pestana (activeTab existe), lo mas probable es que sea un file://
+    // y falte el permiso "acceso a URLs de archivo" -- sin ese permiso
+    // la extension ni siquiera ve la URL, asi que no hay forma de estar
+    // 100% seguros, pero es la senal disponible mas fiable.
+    fileAccessWarning.hidden = !(tab && !tab.url);
+  } catch {
+    fileAccessWarning.hidden = true;
+  }
+}
+
+document.getElementById("open-settings").addEventListener("click", () => {
+  chrome.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` });
+});
+
 render();
+refreshFileAccessWarning();
 setInterval(render, 1000);
 setInterval(refreshDebug, 1000);
+setInterval(refreshFileAccessWarning, 3000);
