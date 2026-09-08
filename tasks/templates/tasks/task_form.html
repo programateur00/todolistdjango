@@ -190,10 +190,10 @@
 
     <div id="udemy-fields">
         <label class="field">
-            <span class="field__label">Palabra clave del curso</span>
+            <span class="field__label" id="watch-keyword-label">Palabra clave del curso</span>
             <input type="text" name="watch_keyword" maxlength="120" value="{{ task.watch_keyword|default:'' }}"
-                placeholder="Ej: Linux">
-            <span class="field__hint">
+                placeholder="Ej: Linux" id="watch-keyword-input">
+            <span class="field__hint" id="watch-keyword-hint">
                 La extensión de Chrome cuenta el tiempo cuando esta palabra aparece en el
                 título de la pestaña de Udemy que tienes activa — así sabe que es este curso
                 y no otro. Usa algo que salga en el nombre del curso, tal cual aparece en Udemy.
@@ -363,6 +363,9 @@
     var studySubcategoryField = document.getElementById('study-subcategory-field');
     var languageFields = document.getElementById('language-fields');
     var udemyFields = document.getElementById('udemy-fields');
+    var watchKeywordLabel = document.getElementById('watch-keyword-label');
+    var watchKeywordInput = document.getElementById('watch-keyword-input');
+    var watchKeywordHint = document.getElementById('watch-keyword-hint');
     var focusTargetField = document.getElementById('focus-target-field');
     var videoSourceField = document.getElementById('video-source-field');
     var sportModeField = document.getElementById('sport-mode-field');
@@ -426,7 +429,30 @@
         var esEstudio = v === 'study';
         studySubcategoryField.style.display = esEstudio ? 'block' : 'none';
         languageFields.style.display = (esEstudio && subSelValue === 'language') ? 'block' : 'none';
-        udemyFields.style.display = esUdemy ? 'block' : 'none';
+        // "Lectura" (Enfoque) puede vigilarse igual que un curso de Udemy,
+        // pero con un PDF: la extensión de Chrome busca esta misma
+        // palabra clave en el nombre del archivo / título de la pestaña
+        // del PDF que tengas en primer plano. Comparte el mismo campo e
+        // input que Udemy, con el texto cambiado, para no duplicar el
+        // HTML ni arriesgarse a mandar dos "watch_keyword" a la vez.
+        var esLectura = esEnfoque && subSelValue === 'reading';
+        udemyFields.style.display = (esUdemy || esLectura) ? 'block' : 'none';
+        if (esLectura) {
+            watchKeywordLabel.textContent = 'Palabra clave del PDF (opcional)';
+            watchKeywordInput.placeholder = 'Ej: clean-code';
+            watchKeywordHint.textContent = 'La extensión de Chrome cuenta el tiempo cuando esta ' +
+                'palabra aparece en el nombre del archivo o el título de la pestaña del PDF que ' +
+                'tienes en primer plano — así sabe que es este libro y no otro. Déjalo en blanco ' +
+                'si no quieres que la extensión vigile ningún PDF para esta tarea (puedes seguir ' +
+                'usando el cronómetro manual, o el plugin de la app móvil, sin rellenarlo).';
+        } else {
+            watchKeywordLabel.textContent = 'Palabra clave del curso';
+            watchKeywordInput.placeholder = 'Ej: Linux';
+            watchKeywordHint.textContent = 'La extensión de Chrome cuenta el tiempo cuando esta ' +
+                'palabra aparece en el título de la pestaña de Udemy que tienes activa — así sabe ' +
+                'que es este curso y no otro. Usa algo que salga en el nombre del curso, tal cual ' +
+                'aparece en Udemy.';
+        }
         var videoEnDeporte = esDeporte && modoActual === 'video';
         videoSourceField.style.display = (esEnfoque || videoEnDeporte) ? 'block' : 'none';
         var fuente = (document.querySelector('[name="video_source"]:checked') || {}).value || 'youtube';
