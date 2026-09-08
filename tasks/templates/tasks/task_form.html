@@ -454,12 +454,17 @@
                 'aparece en Udemy.';
         }
         var videoEnDeporte = esDeporte && modoActual === 'video';
-        videoSourceField.style.display = (esEnfoque || videoEnDeporte) ? 'block' : 'none';
+        // Lectura vigilada por palabra clave no necesita ni tiene sentido
+        // con un vídeo enganchado (ver esLectura más arriba) — se oculta
+        // la opción entera para no confundir con algo que no pinta nada
+        // en "leer un PDF".
+        var esEnfoqueConVideo = esEnfoque && !esLectura;
+        videoSourceField.style.display = (esEnfoqueConVideo || videoEnDeporte) ? 'block' : 'none';
         var fuente = (document.querySelector('[name="video_source"]:checked') || {}).value || 'youtube';
         videoField.style.display =
-            (esEstudio && !esUdemy) || ((esEnfoque || videoEnDeporte) && fuente === 'youtube') ? 'block' : 'none';
+            (esEstudio && !esUdemy) || ((esEnfoqueConVideo || videoEnDeporte) && fuente === 'youtube') ? 'block' : 'none';
         localVideoField.style.display =
-            ((esEnfoque || videoEnDeporte) && fuente === 'local') ? 'block' : 'none';
+            ((esEnfoqueConVideo || videoEnDeporte) && fuente === 'local') ? 'block' : 'none';
 
         // Playlist / vídeos largos: solo tiene sentido para estudiar
         // (clases, cursos, idiomas) — dominadas no vienen en playlists

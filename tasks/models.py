@@ -419,6 +419,14 @@ class Task(models.Model):
         if self.youtube_video_id or self.youtube_playlist_id or self.has_local_video:
             return "video"
         if self.category == self.CATEGORY_WORK:
+            if self.subcategory == self.SUBCATEGORY_READING and (self.watch_keyword or "").strip():
+                # Lectura con palabra clave puesta: la vigila la extensión
+                # de Chrome (PDF en primer plano) exactamente igual que un
+                # curso de Udemy — se completa sola al llegar al objetivo
+                # del día, nada que pulsar aquí. Sin palabra clave, sigue
+                # siendo un Enfoque normal con cronómetro manual (o el
+                # plugin de la app móvil) — no romper eso por defecto.
+                return "auto"
             return "focus"          # temporizador de Enfoque: leer, estudiar, estirar…
         if self.category == self.CATEGORY_STUDY and self.subcategory == self.SUBCATEGORY_UDEMY:
             # Curso de Udemy: se completa sola cuando la extensión de
