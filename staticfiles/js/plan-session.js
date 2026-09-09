@@ -363,7 +363,8 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       <div id="workout-root" class="workout"
            data-save-url="local" data-cancel-url="#" data-exercise-slug="${esc(item.slug)}"
            data-target-sets="${item.target_sets || ""}" data-target-reps="${item.target_reps || ""}"
-           data-counter-key="${esc(item.counter_key || "pullup")}">
+           data-counter-key="${esc(item.counter_key || "pullup")}"
+           data-voice-step="${item.voice_step || 1}">
         <p class="circuit__progress">${esc(progressLabel())}</p>
         <h2 class="circuit__exercise-name">${esc(item.name)}</h2>
         <p class="run-target">Objetivo: <strong>${objetivo}</strong> ${fuente}</p>

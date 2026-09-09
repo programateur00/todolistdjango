@@ -37,19 +37,40 @@
     <a href="{% url 'tasks:task_create' %}" id="quick-add-more" class="quick-add__more">+ detalles</a>
 </form>
 
-{% if category_counts %}
-<nav class="category-filter" aria-label="Filtrar por tipo">
-    <a class="category-chip {% if not active_category %}category-chip--active{% endif %}"
-       href="{% url 'tasks:task_list' %}">
-        Todas <span class="category-chip__count">{{ total_task_count }}</span>
-    </a>
-    {% for c in category_counts %}
-    <a class="category-chip category-chip--{{ c.key }} {% if active_category == c.key %}category-chip--active{% endif %}"
-       href="?cat={{ c.key }}">
-        {{ c.label }} <span class="category-chip__count">{{ c.count }}</span>
-    </a>
-    {% endfor %}
-</nav>
+{% if range_choices or category_counts %}
+<div class="filters">
+    {% if range_choices %}
+    <div class="filter-group">
+        <span class="filter-group__label">Cuándo</span>
+        <nav class="range-filter" aria-label="Filtrar por fecha">
+            {% for r in range_choices %}
+            <a class="range-chip {% if active_range == r.0 %}range-chip--active{% endif %}"
+               href="{% querystring range=r.0 %}">
+                {{ r.1 }}
+            </a>
+            {% endfor %}
+        </nav>
+    </div>
+    {% endif %}
+
+    {% if category_counts %}
+    <div class="filter-group">
+        <span class="filter-group__label">Categoría</span>
+        <nav class="category-filter" aria-label="Filtrar por tipo">
+            <a class="category-chip {% if not active_category %}category-chip--active{% endif %}"
+               href="{% querystring cat=None %}">
+                Todas <span class="category-chip__count">{{ total_task_count }}</span>
+            </a>
+            {% for c in category_counts %}
+            <a class="category-chip category-chip--{{ c.key }} {% if active_category == c.key %}category-chip--active{% endif %}"
+               href="{% querystring cat=c.key %}">
+                {{ c.label }} <span class="category-chip__count">{{ c.count }}</span>
+            </a>
+            {% endfor %}
+        </nav>
+    </div>
+    {% endif %}
+</div>
 {% endif %}
 <script>
 (function(){
@@ -166,8 +187,11 @@
 
 {% if completed_tasks %}
 <section class="task-section task-section--done">
-    <details class="done-details">
+    <details class="done-details"{% if active_range != "today" %} open{% endif %}>
     <summary class="done-summary">Hechas <span class="task-section__count">{{ completed_tasks|length }}</span></summary>
+    {% if completed_capped %}
+    <p class="empty-state">Mostrando las {{ completed_tasks|length }} más recientes de {{ completed_total }}.</p>
+    {% endif %}
     <ul class="task-list">
         {% for task in completed_tasks %}
         <li class="task-card task-card--done">
@@ -190,6 +214,14 @@
                         {% endif %}
                     {% endif %}
                 </p>
+                {% if active_range != "today" %}
+                <div class="task-card__meta">
+                    <span class="meta-pill meta-pill--category meta-pill--{{ task.category }}">{{ task.get_category_display }}</span>
+                    {% if task.completed_at %}
+                        <span class="meta-pill meta-pill--date">{{ task.completed_at|date:"d \d\e M, Y" }}</span>
+                    {% endif %}
+                </div>
+                {% endif %}
             </div>
             <form action="{% url 'tasks:task_delete' task.pk %}" method="post" class="task-card__delete">
                 {% csrf_token %}

@@ -213,18 +213,38 @@ def task_list(request):
     valid_cats = {key for key, _ in Task.CATEGORY_CHOICES}
     active_category = cat if cat in valid_cats else ""
 
+    # Selector Hoy / Esta semana / Este mes / Todas (?range=week, …)
+    rng = request.GET.get("range") or ""
+    valid_ranges = {key for key, _ in Task.RANGE_CHOICES}
+    active_range = rng if rng in valid_ranges else Task.RANGE_TODAY
+
     base_qs = Task.objects.filter(user=get_current_user())
     if active_category:
         base_qs = base_qs.filter(category=active_category)
 
-    # for_today evita que la tarea de mañana (generada al resolver la de
-    # hoy) aparezca ya en la lista y se pueda marcar dos veces.
-    pending_tasks = Task.for_today(base_qs.filter(is_done=False))
-    completed_tasks = Task.completed_today(base_qs)
+    # for_range evita que la tarea de mañana (generada al resolver la de
+    # hoy) aparezca ya en la lista y se pueda marcar dos veces; con
+    # rango "hoy" se comporta exactamente igual que antes.
+    pending_tasks = Task.for_range(base_qs.filter(is_done=False), active_range)
 
-    # Conteos por categoría para los chips de filtro
+    # "Todas" en Hechas puede acumular mucho con años de tareas
+    # repetidas — se limita a las más recientes para que la página no
+    # se dispare de peso, con un aviso en la plantilla si se recorta.
+    COMPLETED_CAP = 200
+    completed_qs = Task.completed_in_range(base_qs, active_range)
+    completed_total = completed_qs.count()
+    completed_tasks = completed_qs[:COMPLETED_CAP] if completed_total > COMPLETED_CAP else completed_qs
+
+    # Conteos por categoría para los chips de filtro: las mismas tareas
+    # que se verían si se aplicara ese filtro con el rango actual, no
+    # el total histórico de tareas que ha tenido esa categoría alguna
+    # vez (eso hacía que el chip dijera "15" cuando al pulsarlo solo
+    # aparecía 1 tarea).
+    all_pending_in_range = Task.for_range(
+        Task.objects.filter(user=get_current_user(), is_done=False), active_range
+    )
     counts = dict(
-        Task.objects.filter(user=get_current_user())
+        all_pending_in_range
         .values_list("category").annotate(n=Count("id")).values_list("category", "n")
     )
     category_counts = [
@@ -235,10 +255,14 @@ def task_list(request):
     return render(request, "tasks/task_list.html", {
         "pending_tasks": pending_tasks,
         "completed_tasks": completed_tasks,
+        "completed_total": completed_total,
+        "completed_capped": completed_total > COMPLETED_CAP,
         "category_choices": Task.CATEGORY_CHOICES,
         "active_category": active_category,
         "category_counts": category_counts,
         "total_task_count": sum(counts.values()),
+        "range_choices": Task.RANGE_CHOICES,
+        "active_range": active_range,
         "weekly": Occurrence.weekly_completion(get_current_user()),
     })
 
@@ -1035,6 +1059,7 @@ def routine_play(request, pk, routine_pk):
             "name": it.exercise.name,
             "mode": it.exercise.mode,
             "counter_key": it.exercise.counter_key,
+            "voice_step": it.exercise.voice_step,
             "work": t["seconds"],
             "rest": it.effective_rest_seconds,
             "target_sets": t["sets"],

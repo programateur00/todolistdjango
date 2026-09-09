@@ -21,7 +21,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-06-rep-voice-step5+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v1+wristrotation-v2+standingquadstretch-v1+hipforwardback-v3";
+const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v1+wristrotation-v2+standingquadstretch-v1+hipforwardback-v3";
 
 // Umbral de movimiento (proporcional al ancho de hombros) para
 // considerar que hay un cambio de estado real y no ruido de la cámara.
@@ -44,7 +44,17 @@ const HANG_MARGIN_FACTOR = 0.08; // cuanto tienen que estar las munecas por enci
 const RELEASE_MARGIN_FACTOR = 0.15;
 const SCALE_TOLERANCE = 0.3; // cuanto puede variar el ancho de hombros (te acercas/alejas) antes de desconfiar del frame
 const MIN_REP_SECONDS = 0.3; // por debajo de esto, se descarta como ruido
-const REP_VOICE_STEP = 5; // la voz solo anuncia multiplos de este numero (5, 10, 15...) en todos los ejercicios -- decirlas todas no daba tiempo a seguir el ritmo real de la serie
+// La voz solo anuncia multiplos de N (N, 2N, 3N...) -- decirlas TODAS no
+// daba tiempo a seguir el ritmo real de la serie en los ejercicios muy
+// rapidos. Antes N=5 era fijo para todos los ejercicios; ahora es por
+// ejercicio (Exercise.config.voice_step, ver voice_step en models.py),
+// leido en el constructor como this.voiceStep desde data-voice-step. Por
+// defecto (sin config, o ejercicio no encontrado) N=1: anuncia cada rep --
+// pensado para ejercicios de fuerza a ritmo controlado (dominadas,
+// fondos, flexiones, sentadillas...). Los pocos de cadencia muy rapida
+// (jumping jacks, circulos de brazos, talones al gluteo, rodillas altas)
+// llevan voice_step=5 puesto por la migracion 0050_set_voice_step_fast_exercises.
+const DEFAULT_VOICE_STEP = 1;
 const HANG_STABLE_MS = 500;   // cuanto tiempo seguido con los brazos en alto para empezar a calibrar
 const ARMS_DOWN_STABLE_MS = 400; // cuanto tiempo seguido con los brazos abajo para dar la serie por terminada (evita falsos positivos por un frame ruidoso)
 const CALIBRATION_MS = 1200;  // tiempo colgado quieto que se usa como referencia
@@ -3095,6 +3105,15 @@ class WorkoutSession {
     this.targetSets = root.dataset.targetSets ? parseInt(root.dataset.targetSets, 10) : null;
     this.targetReps = root.dataset.targetReps ? parseInt(root.dataset.targetReps, 10) : null;
     this.targetAnnounced = false;
+    // Indice de serie (this.sets.length en el momento de avisar) en el
+    // que ya se ha dado el aviso de "objetivo cumplido" (de serie o de
+    // sesion, ver countRep) -- evita repetirlo en cada repeticion extra
+    // dentro de la MISMA serie sin tener que resetear un flag en cada uno
+    // de los sitios donde currentSetReps vuelve a 0 para abrir la
+    // siguiente (closeActiveSet, beginPrep, el cambio de sentido de
+    // armcircles, finish...): this.sets.length cambia solo cuando una
+    // serie se cierra de verdad, en todos esos sitios por igual.
+    this.setGoalAnnouncedAtSetIndex = -1;
     // Objetivo de plancha/plancha lateral/etc. (segundos a aguantar) — ver
     // notePostureOk para la cuenta atrás/adelante hablada que usa esto.
     this.targetSeconds = root.dataset.targetSeconds ? parseInt(root.dataset.targetSeconds, 10) : null;
@@ -3120,6 +3139,11 @@ class WorkoutSession {
     // Qué contador usar. Lo decide el ejercicio (counter_key en el
     // catálogo), no la pantalla.
     this.counterKey = root.dataset.counterKey || "pullup";
+    // Cada cuantas reps habla la voz para ESTE ejercicio (ver
+    // DEFAULT_VOICE_STEP y speakRep mas abajo) -- viene del catalogo
+    // (Exercise.voice_step) via data-voice-step; si no llega nada (NaN,
+    // vacio, challenges.js que no lo manda) cae al valor por defecto.
+    this.voiceStep = parseInt(root.dataset.voiceStep, 10) || DEFAULT_VOICE_STEP;
     this.video = el("workout-video");
     this.canvas = el("workout-canvas");
     this.ctx = this.canvas.getContext("2d");
@@ -3420,6 +3444,14 @@ class WorkoutSession {
     // Ahora se dice UNA vez por descanso y ya está — se entendió a la primera.
     this.restBlockedVoiceGiven = false;
     this.restAlerted = false;
+    // Cierto solo entre el cierre de una serie de dominadas (normales o
+    // de arquero) y el aviso de "descanso acabado" (ver tickRestTimer):
+    // recuerda que hay que decir "cuélgate de la barra para empezar la
+    // siguiente serie" en ESE momento, no nada más cerrar la serie — decirlo
+    // antes no tiene sentido, porque todavía quedan los 90s de descanso
+    // obligatorio por delante (ver MIN_REST_MS) y colgarse ahí sería
+    // justo lo contrario de descansar.
+    this.pendingHangReminder = false;
     // Silencia CUALQUIER voz (avisos, consejos, "te veo"/"no te veo",
     // "¡listo!"...) desde que termina una serie hasta que el reloj de
     // descanso llega a REST_ALERT_SECONDS (1:30). Se pone a true justo
@@ -4368,13 +4400,15 @@ class WorkoutSession {
     // definición (ver countRep, que además pone restVoiceQuiet a false
     // justo antes de llamar aquí).
     //
-    // Solo se anuncia de REP_VOICE_STEP en REP_VOICE_STEP (5, 10, 15…),
-    // en TODOS los ejercicios: decirlas todas no daba tiempo a seguir el
-    // ritmo real de la serie, la voz se quedaba atrás. El contador en
-    // pantalla (repsEl, en countRep) no tiene ese problema — se actualiza
-    // al instante en cada repetición, sin voz — así que el número real
-    // siempre se ve aunque la voz solo marque los múltiplos de 5.
-    if (n % REP_VOICE_STEP !== 0) return;
+    // Solo se anuncia de this.voiceStep en this.voiceStep (con el 1 por
+    // defecto, cada rep; con 5 en los ejercicios de cadencia muy rápida,
+    // 5, 10, 15…): decirlas todas en esos pocos ejercicios no daba tiempo
+    // a seguir el ritmo real de la serie, la voz se quedaba atrás. El
+    // contador en pantalla (repsEl, en countRep) no tiene ese problema —
+    // se actualiza al instante en cada repetición, sin voz — así que el
+    // número real siempre se ve aunque la voz solo marque los múltiplos
+    // de voiceStep.
+    if (n % this.voiceStep !== 0) return;
     speakOut(numeroEnPalabras(n), { rate: 1.1 }); // un poco más rápido que el habla normal, para no quedarse atrás
   }
 
@@ -4404,29 +4438,45 @@ class WorkoutSession {
     this.repsEl.textContent = String(this.currentSetReps);
     this.speakRep(this.currentSetReps);
 
-    // Aviso al llegar al objetivo — una sola vez, y sin parar nada: se
-    // puede seguir contando por encima del 100% si te apetece (se
-    // guarda tal cual, el backend no lo recorta). Es solo un chivatazo,
-    // la decisión de seguir o terminar la tomas tú con el botón.
+    // Aviso al llegar al objetivo — sin parar nada: se puede seguir
+    // contando por encima del objetivo si se quiere (se guarda tal cual,
+    // el backend no lo recorta). Es solo un chivatazo, la decisión de
+    // seguir o terminar la tomas tú con el botón.
+    //
+    // Dos niveles, pedidos explícitamente:
+    //  - Objetivo DE LA SERIE: currentSetReps llega a targetReps dentro
+    //    de una serie que no es la última del objetivo -- "puedes
+    //    descansar o seguir", puede repetirse en cada serie.
+    //  - Objetivo DE LA SESIÓN: currentSetReps llega a targetReps en la
+    //    ÚLTIMA serie del objetivo (this.sets.length + 1 >= targetSets)
+    //    -- sustituye al de serie (no se dan los dos avisos a la vez),
+    //    se anuncia una sola vez en toda la sesión (this.targetAnnounced,
+    //    igual que antes) y conserva el pitido que ya tenía este aviso.
+    //
+    // this.setGoalAnnouncedAtSetIndex evita repetir cualquiera de los
+    // dos avisos en cada repetición extra dentro de la MISMA serie (ver
+    // el comentario junto a su declaración, en el constructor).
     //
     // Va en un aviso APARTE (workout-goal-banner), no solo en el texto
     // de estado normal: ese cambia con cada repetición siguiente y el
     // mensaje del objetivo podía pasar sin que te dieras ni cuenta si no
     // estabas mirando esa línea justo en ese instante. El banner se
     // queda puesto todo lo que quieras, hasta que termines o recalibres.
-    if (this.targetSets && this.targetReps && !this.targetAnnounced) {
-      const meta = this.targetSets * this.targetReps;
-      if (this.reps >= meta) {
+    if (this.targetSets && this.targetReps && this.currentSetReps >= this.targetReps &&
+        this.setGoalAnnouncedAtSetIndex !== this.sets.length) {
+      this.setGoalAnnouncedAtSetIndex = this.sets.length;
+      const isLastSet = !this.targetAnnounced && (this.sets.length + 1 >= this.targetSets);
+      if (isLastSet) {
         this.targetAnnounced = true;
         // Al número ya dicho justo antes le sigue el aviso de meta, sin
         // cancelarlo (flush:false) — cancel() en speakRep() ya se encargó
         // de que no se pisen entre sí.
-        if (this.voiceEnabled) speakOut("¡Objetivo cumplido!", { flush: false });
+        if (this.voiceEnabled) speakOut("Objetivo de la sesión cumplido. Puedes seguir si quieres o terminar la sesión.", { flush: false });
         if (this.goalBannerEl) {
           this.goalBannerEl.hidden = false;
-          this.goalBannerEl.textContent = `🎯 ¡Objetivo cumplido! (${meta}) Sigue si quieres, o termina cuando acabes.`;
+          this.goalBannerEl.textContent = "🎯 ¡Objetivo de la sesión cumplido! Puedes seguir si quieres, o terminar la sesión.";
         }
-        this.setStatus(`🎯 ¡Objetivo cumplido (${meta})!`);
+        this.setStatus("🎯 ¡Objetivo de la sesión cumplido!");
         try {
           const ctx = new (window.AudioContext || window.webkitAudioContext)();
           [0, 0.14].forEach((t, i) => {
@@ -4440,6 +4490,14 @@ class WorkoutSession {
             osc.stop(ctx.currentTime + t + 0.13);
           });
         } catch (e) { /* si el navegador bloquea audio, no pasa nada */ }
+        return true;
+      } else {
+        if (this.voiceEnabled) speakOut("Objetivo de la serie cumplido. Puedes descansar o seguir.", { flush: false });
+        if (this.goalBannerEl) {
+          this.goalBannerEl.hidden = false;
+          this.goalBannerEl.textContent = "🎯 ¡Objetivo de la serie cumplido! Puedes descansar o seguir.";
+        }
+        this.setStatus("🎯 ¡Objetivo de la serie cumplido!");
         return true;
       }
     }
@@ -10316,7 +10374,12 @@ class WorkoutSession {
           // va antes de silenciar la voz (restVoiceQuiet), no después.
           // setClosedAt lo marca beginPrep() justo debajo (currentSetReps
           // todavía es > 0 en este punto).
-          this.announceSetComplete(`Serie de ${closedReps}`, "Cuélgate otra vez para empezar la siguiente.");
+          // El "cuélgate otra vez" ya NO se dice aquí — se dice cuando el
+          // descanso obligatorio de verdad termina (ver tickRestTimer /
+          // pendingHangReminder): decirlo ahora, con 90s de descanso todavía
+          // por delante, no tiene sentido.
+          this.pendingHangReminder = true;
+          this.announceSetComplete(`Serie de ${closedReps}`, "");
           this.restVoiceQuiet = true;
           this.beginPrep();
           return;
@@ -11002,7 +11065,12 @@ class WorkoutSession {
           // va antes de silenciar la voz (restVoiceQuiet), no después.
           // setClosedAt lo marca beginPrep() justo debajo (currentSetReps
           // todavía es > 0 en este punto).
-          this.announceSetComplete(`Serie de ${closedReps}`, "Cuélgate otra vez para empezar la siguiente.");
+          // El "cuélgate otra vez" ya NO se dice aquí — se dice cuando el
+          // descanso obligatorio de verdad termina (ver tickRestTimer /
+          // pendingHangReminder): decirlo ahora, con 90s de descanso todavía
+          // por delante, no tiene sentido.
+          this.pendingHangReminder = true;
+          this.announceSetComplete(`Serie de ${closedReps}`, "");
           this.restVoiceQuiet = true;
           this.beginPrep();
           return;
@@ -11094,7 +11162,12 @@ class WorkoutSession {
       // puede volver a hablar (este mismo aviso incluido).
       this.restVoiceQuiet = false;
       beep();
-      this.announceStatus("⏰ ¡Descanso acabado! Volviendo a calibrar para la siguiente serie…");
+      if (this.pendingHangReminder) {
+        this.pendingHangReminder = false;
+        this.announceStatus("⏰ ¡Descanso acabado! Cuélgate de la barra para empezar la siguiente serie…");
+      } else {
+        this.announceStatus("⏰ ¡Descanso acabado! Volviendo a calibrar para la siguiente serie…");
+      }
       this.beginPrep();
     }
   }

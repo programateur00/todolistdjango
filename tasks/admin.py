@@ -27,11 +27,18 @@ class OccurrenceAdmin(admin.ModelAdmin):
 
 @admin.register(Exercise)
 class ExerciseAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "mode", "counter_key", "is_active", "order")
+    list_display = ("name", "slug", "mode", "counter_key", "voice_step_display", "is_active", "order")
     list_filter = ("mode", "is_active")
     search_fields = ("name", "slug")
     prepopulated_fields = {"slug": ("name",)}
     list_per_page = 50
+
+    @admin.display(description="Voz cuenta de")
+    def voice_step_display(self, obj):
+        # Cada cuantas reps anuncia la voz (ver Exercise.voice_step) --
+        # editable aqui mismo cambiando el campo "config" a {"voice_step": 5}
+        # (o quitandolo/poniendolo a 1) sin tocar codigo.
+        return f"{obj.voice_step} en {obj.voice_step}"
 
 
 @admin.register(SavedVideo)

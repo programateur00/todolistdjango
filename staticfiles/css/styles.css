@@ -207,7 +207,7 @@ button { font-family:var(--font-b); cursor:pointer; }
 /* Tarjetas: al pasar el ratón, suben un poco y se iluminan con un brillo
    naranja oscuro a juego con el tema — el mismo gesto en todas, para
    que la app entera se sienta viva de la misma forma. */
-.task-card, .plan-card, .stats-card, .streak-card, .category-chip {
+.task-card, .plan-card, .stats-card, .streak-card, .category-chip, .range-chip {
   transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
 }
 .task-card:hover, .plan-card:hover, .stats-card:hover, .streak-card:hover {
@@ -215,7 +215,7 @@ button { font-family:var(--font-b); cursor:pointer; }
   box-shadow: 0 14px 28px -14px rgba(184,66,15,.55), var(--shadow);
   border-color: var(--ember-deep);
 }
-.category-chip:hover { transform: translateY(-1px); }
+.category-chip:hover, .range-chip:hover { transform: translateY(-1px); }
 
 .task-card { display:flex; align-items:center; gap:10px; background:var(--paper);
   border:1px solid var(--line); border-radius:var(--radius); padding:10px 10px 10px 8px;
@@ -479,14 +479,41 @@ button { font-family:var(--font-b); cursor:pointer; }
 .category-option--other:has(input:checked)    { background:var(--other); border-color:var(--other); }
 .category-option--avoid:has(input:checked)    { background:var(--bone); border-color:var(--bone); }
 
-.category-filter { display:flex; flex-wrap:wrap; gap:6px; margin:18px 0 6px; }
-.category-chip { display:inline-flex; align-items:center; gap:6px; padding:6px 12px;
-  border:1px solid var(--line); border-radius:999px; background:var(--paper);
+/* Dos filtros distintos (rango de fecha + categoría) uno debajo del
+   otro: cada uno con su etiqueta y su propio estilo de chip, para que
+   a simple vista se note que son dos cosas separadas y no un batiburrillo
+   de botones. */
+.filters { display:flex; flex-direction:column; gap:14px; margin:18px 0 6px; }
+.filter-group { display:flex; flex-direction:column; gap:6px; min-width:0; }
+.filter-group__label { font-size:11px; font-weight:600; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--bone-faded); }
+
+/* Selector Hoy/Semana/Mes/Todas: control segmentado (un único "raíl"
+   con las opciones dentro), para que se lea como un único selector de
+   una sola cosa a la vez — a diferencia de las categorías, que son
+   chips sueltos. */
+.range-filter { display:flex; gap:2px; background:var(--paper); border:1px solid var(--line);
+  border-radius:999px; padding:3px; width:fit-content; max-width:100%;
+  overflow-x:auto; scrollbar-width:none; }
+.range-filter::-webkit-scrollbar { display:none; }
+.range-chip { flex:0 0 auto; white-space:nowrap; padding:6px 13px; border-radius:999px;
   font-size:12px; color:var(--bone-faded); transition:all .15s; }
+.range-chip:hover { color:var(--ember); }
+.range-chip--active { background:var(--bone); color:var(--paper); font-weight:600; }
+
+/* Chips de categoría: más compactos que antes y en una sola fila con
+   scroll horizontal si no caben — así nunca se parten en dos líneas
+   feas, sea cual sea el ancho de pantalla. */
+.category-filter { display:flex; flex-wrap:nowrap; gap:5px; margin:0; overflow-x:auto;
+  scrollbar-width:none; padding-bottom:2px; }
+.category-filter::-webkit-scrollbar { display:none; }
+.category-chip { flex:0 0 auto; white-space:nowrap; display:inline-flex; align-items:center; gap:5px; padding:5px 10px;
+  border:1px solid var(--line); border-radius:999px; background:var(--paper);
+  font-size:11px; color:var(--bone-faded); transition:all .15s; }
 .category-chip:hover { border-color:var(--ember); color:var(--ember); }
 .category-chip--active { background:var(--bone); color:var(--paper); border-color:var(--bone); }
-.category-chip__count { background:rgba(255,255,255,.10); padding:0 6px; border-radius:999px;
-  font-size:11px; font-weight:600; }
+.category-chip__count { background:rgba(255,255,255,.10); padding:0 5px; border-radius:999px;
+  font-size:10px; font-weight:600; }
 .category-chip--active .category-chip__count { background:rgba(0,0,0,.14); }
 
 .meta-pill--category { font-weight:600; }

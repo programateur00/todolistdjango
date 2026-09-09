@@ -16,6 +16,7 @@
      data-cancel-url="{% url 'tasks:task_list' %}"
      data-exercise-slug="{{ exercise.slug }}"
      data-counter-key="{{ exercise.counter_key|default:'pullup' }}"
+     data-voice-step="{{ exercise.voice_step }}"
      data-target-sets="{{ target.target_sets|default:'' }}"
      data-target-reps="{{ target.target_reps|default:'' }}"
      data-target-seconds="{{ target.target_seconds|default:'' }}"

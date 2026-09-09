@@ -952,6 +952,96 @@ class Task(models.Model):
             models.Q(completed_at__date=today) | models.Q(completed_at__isnull=True)
         )
 
+    # ── Selector Hoy / Esta semana / Este mes / Todas (pantalla de Tareas) ──
+    #
+    # Un único control que amplía la ventana en ambas secciones a la vez:
+    # en Pendientes hacia delante (qué más entra), en Hechas hacia atrás
+    # (qué más se ha completado). for_today/completed_today de arriba
+    # siguen existiendo tal cual (las usa RANGE_TODAY) para no tocar el
+    # comportamiento por defecto que ya había.
+
+    RANGE_TODAY = "today"
+    RANGE_WEEK = "week"
+    RANGE_MONTH = "month"
+    RANGE_ALL = "all"
+
+    RANGE_CHOICES = [
+        (RANGE_TODAY, "Hoy"),
+        (RANGE_WEEK, "Esta semana"),
+        (RANGE_MONTH, "Este mes"),
+        (RANGE_ALL, "Todas"),
+    ]
+
+    @classmethod
+    def _week_bounds(cls, today):
+        """Lunes a domingo de la semana de `today` — mismo criterio que
+        Occurrence.weekly_completion, para que "esta semana" signifique
+        siempre lo mismo en toda la app."""
+        start = today - timedelta(days=today.weekday())
+        return start, start + timedelta(days=6)
+
+    @classmethod
+    def _month_bounds(cls, today):
+        """Día 1 al último día del mes de `today`."""
+        start = today.replace(day=1)
+        if start.month == 12:
+            next_month = start.replace(year=start.year + 1, month=1)
+        else:
+            next_month = start.replace(month=start.month + 1)
+        return start, next_month - timedelta(days=1)
+
+    @classmethod
+    def for_range(cls, qs=None, range_key=RANGE_TODAY):
+        """
+        Pendientes según el rango elegido (Hoy/Semana/Mes/Todas).
+
+        Las vencidas y las que no tienen fecha se ven SIEMPRE, en
+        cualquier rango: ampliar la ventana es para asomarte a lo que
+        viene, no para esconder lo que ya tocaba. Lo único que cambia
+        entre rangos es hasta qué fecha futura se deja entrar.
+        """
+        base = qs if qs is not None else cls.objects.all()
+        if range_key == cls.RANGE_ALL:
+            return base
+
+        today = timezone.localtime(timezone.now()).date()
+        if range_key == cls.RANGE_WEEK:
+            _, limit = cls._week_bounds(today)
+        elif range_key == cls.RANGE_MONTH:
+            _, limit = cls._month_bounds(today)
+        else:
+            limit = today  # RANGE_TODAY (y cualquier valor no reconocido)
+
+        return base.filter(
+            models.Q(due_date__isnull=True) | models.Q(due_date__lte=limit)
+        )
+
+    @classmethod
+    def completed_in_range(cls, qs=None, range_key=RANGE_TODAY):
+        """
+        Hechas según el mismo selector, mirando hacia atrás por
+        completed_at. Una tarea sin completed_at (dato antiguo/atípico)
+        se sigue colando siempre, igual que hacía completed_today.
+        """
+        base = qs if qs is not None else cls.objects.all()
+        base = base.filter(is_done=True)
+
+        today = timezone.localtime(timezone.now()).date()
+        if range_key == cls.RANGE_ALL:
+            start = end = None
+        elif range_key == cls.RANGE_WEEK:
+            start, end = cls._week_bounds(today)
+        elif range_key == cls.RANGE_MONTH:
+            start, end = cls._month_bounds(today)
+        else:
+            start = end = today  # RANGE_TODAY
+
+        if start is not None:
+            base = base.filter(
+                models.Q(completed_at__date__range=(start, end)) | models.Q(completed_at__isnull=True)
+            )
+        return base.order_by("-completed_at", "-created_at")
+
     @classmethod
     def expire_overdue(cls, dry_run=False):
         """
@@ -1087,6 +1177,24 @@ class Exercise(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def voice_step(self):
+        """
+        Cada cuántas repeticiones habla la voz (ver DEFAULT_VOICE_STEP/
+        speakRep en workout.js). Por defecto 1 (anuncia cada rep) --
+        pensado para ejercicios de fuerza a ritmo controlado (dominadas,
+        fondos, flexiones, sentadillas...). Los pocos ejercicios de
+        cadencia muy rápida (jumping jacks, círculos de brazos, talones
+        al glúteo, rodillas altas) llevan config={"voice_step": 5} para
+        que la voz no se quede atrás del ritmo real -- pedido
+        explícitamente por el usuario, ajustable desde el admin sin
+        tocar código.
+        """
+        try:
+            return int(self.config.get("voice_step", 1)) or 1
+        except (AttributeError, TypeError, ValueError):
+            return 1
 
 
 class Routine(models.Model):
@@ -1899,6 +2007,7 @@ class Plan(models.Model):
                 "name": it.display_name,
                 "mode": it.exercise.mode,
                 "counter_key": it.exercise.counter_key,
+                "voice_step": it.exercise.voice_step,
                 "target_sets": t["sets"],
                 "target_reps": t["reps"],
                 "target_weight_kg": t["weight_kg"],

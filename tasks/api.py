@@ -170,6 +170,7 @@ def _routine_item_json(i):
         "name": i.exercise.name,
         "mode": i.exercise.mode,
         "counter_key": i.exercise.counter_key,
+        "voice_step": i.exercise.voice_step,
         "order": i.order,
         "work": t["seconds"],
         "rest": i.effective_rest_seconds,
