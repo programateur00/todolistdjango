@@ -21,7 +21,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-06-rep-voice-step5+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10";
+const WORKOUT_JS_BUILD = "2026-09-06-rep-voice-step5+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v1+wristrotation-v2+standingquadstretch-v1+hipforwardback-v3";
 
 // Umbral de movimiento (proporcional al ancho de hombros) para
 // considerar que hay un cambio de estado real y no ruido de la cámara.
@@ -84,7 +84,7 @@ const OUT_OF_FRAME_STABLE_MS = 1200;
 // les aplica el cierre por salir del encuadre de arriba, y también el
 // cierre por ponerte de pie en el caso de los abdominales tumbado (ver
 // ON_GROUND_STABLE_MS más abajo).
-const GROUND_STYLE_COUNTERS = new Set(["squat", "splitsquat", "crunch", "legraise", "situp", "scissor", "doublecrunch", "pushup", "dip", "inclinepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks"]);
+const GROUND_STYLE_COUNTERS = new Set(["squat", "splitsquat", "crunch", "legraise", "situp", "scissor", "doublecrunch", "pushup", "dip", "inclinepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "wristrotation", "hipforwardback"]);
 // Plancha / plancha lateral: a diferencia del resto de GROUND_STYLE_COUNTERS
 // (que cuentan repeticiones), aquí se cuenta TIEMPO aguantando la postura
 // — el cierre de serie no es "te has puesto de pie o has salido del
@@ -97,20 +97,20 @@ const GROUND_STYLE_COUNTERS = new Set(["squat", "splitsquat", "crunch", "legrais
 // pie, salir del encuadre, agitar la mano) ya rompen la postura por sí
 // solas. Por eso plank/sideplank no viven en GROUND_STYLE_COUNTERS ni
 // comparten su lógica de cierre.
-const CAMERA_POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch", "tricepsoverheadstretch"]);
+const CAMERA_POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
 // Calentamientos y estiramientos (Exercise.body_area="warmup": jumping
 // jacks, estiramiento cruzado de brazo…): pedido explicitamente no forzar
 // el descanso obligatorio (MIN_REST_MS) entre series/lados aqui - no tiene
 // sentido "descansar" entre un lado y el otro de un estiramiento, ni entre
 // series de un calentamiento, que es precisamente para lo contrario
 // (activarse antes de la sesion de verdad). Ver countRep()/notePostureOk().
-const NO_REST_COUNTERS = new Set(["jumpingjack", "armcrossstretch", "tricepsoverheadstretch", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks"]);
+const NO_REST_COUNTERS = new Set(["jumpingjack", "armcrossstretch", "tricepsoverheadstretch", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "seatedhamstringstretch", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "wristrotation", "standingquadstretch", "hipforwardback"]);
 // Para el aviso hablado corto de "ponte en posición" (ver
 // notePostureBroken): estos tres se hacen de perfil (de lado a la
 // cámara), así que ese aviso añade "de perfil" — el resto de
 // CAMERA_POSTURE_COUNTERS (kneehold en barra, de frente; pino, sin
 // restricción de orientación) usa el genérico a secas.
-const PROFILE_POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit"]);
+const PROFILE_POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "seatedhamstringstretch"]);
 // Vaivén de la mano para terminar una serie sin ponerte de pie ni salir
 // del encuadre — ver checkWaveGesture. Solo para GROUND_STYLE_COUNTERS:
 // ya se pueden cerrar poniéndote de pie o saliendo del encuadre, esto es
@@ -770,6 +770,176 @@ const NECKLATERAL_MIN_REP_SECONDS = 0.15; // sustituye al MIN_REP_SECONDS generi
 const NECKLATERAL_STILL_MS = 4000; // sin completar ningún vaivén durante esto: se interpreta que has terminado y se cierra la serie sola (mismo patrón que JUMPINGJACK_STILL_MS/ARMCIRCLES_STILL_MS, con más margen porque este es un movimiento lento de cuello, no un salto o un giro de brazo entero)
 const NECKLATERAL_DRIFT_TOLERANCE_FACTOR = 0.12; // cuánto puede desplazarse el punto medio de los hombros (respecto a donde estaba al salir del centro) antes de avisar de que el cuerpo se está inclinando en vez de solo girar/inclinar la cabeza -- se avisa, no se penaliza (misma filosofía que el sentido equivocado en círculos de brazos): la repetición se sigue contando igual
 
+// NECKTURN_*: giro de cabeza a los lados -- DISTINTO de NECKLATERAL_*
+// (que es una INCLINACIÓN, oreja hacia el hombro): aquí la cabeza GIRA
+// sobre el eje vertical del cuello (como decir "no" con la cabeza), de
+// frente a la cámara, de pie o sentada/o -- mira hacia un lado y vuelve
+// a mirar al frente; un vaivén completo (centro -> lado -> centro)
+// cuenta como una repetición (ver processNeckTurn). Pedido explícitamente
+// como ejercicio nuevo y separado, con un vídeo de referencia (WhatsApp,
+// grabado 2026-09-04, subido 2026-09-08): "que también cuenten según el
+// movimiento de la nariz de un lado a otro" y "esperar mirando al frente
+// para la siguiente serie" -- ambas cosas ya las resuelve, sin cambios,
+// la misma mecánica de necklateral (armar el contador exige centrarte
+// primero, y closeActiveSet() vuelve a pedir centro al cerrar la serie).
+// Misma geometría de base que necklateral (desplazamiento horizontal de
+// la nariz respecto al punto medio de los hombros, normalizado por el
+// ancho de hombros) y mismos valores ya calibrados ahí -- reutilizados
+// como punto de partida razonable bajo constantes propias e
+// independientes (girar de verdad suele desplazar la nariz TANTO o más
+// que inclinar la cabeza, así que debería ir bien igual) -- primera
+// versión de este ejercicio, pendiente de confirmar con una prueba real
+// en cámara.
+const NECKTURN_MIN_VISIBILITY = 0.4; // visibilidad media de nariz+hombros exigida para fiarse del frame (mismo umbral que NECKLATERAL_MIN_VISIBILITY)
+const NECKTURN_ENTER_FACTOR = 0.16; // la nariz tiene que separarse del punto medio de los hombros al menos esto de veces el ancho de hombros para contar "ha llegado a un lado" (mismo umbral que NECKLATERAL_ENTER_FACTOR)
+const NECKTURN_MAX_VERTICAL_FACTOR = 0.12; // cuánto puede "caer" la nariz (respecto a los hombros, ya descontado tu propio centro) para que un desplazamiento siga contando como ir HACIA UN LADO y no hacia delante/abajo (barbilla al pecho) -- mismo umbral y mismo motivo que NECKLATERAL_MAX_VERTICAL_FACTOR
+const NECKTURN_EXIT_FACTOR = 0.05; // tiene que volver a estar más cerca del centro que esto para cerrar el vaivén y contar la repetición (histéresis, mismo umbral que NECKLATERAL_EXIT_FACTOR)
+const NECKTURN_CENTER_STABLE_MS = 500; // mirando al frente y quieta/o sostenido esto antes de armar el contador -- fija tu propio "centro" real como baseline (mismo valor que NECKLATERAL_CENTER_STABLE_MS)
+const NECKTURN_SIDE_STABLE_MS = 100; // el lado tiene que sostenerse esto seguido antes de confirmarse -- filtra un pico de un frame suelto (ruido de tracking), no un giro de verdad (mismo valor que NECKLATERAL_SIDE_STABLE_MS)
+const NECKTURN_MIN_REP_SECONDS = 0.15; // sustituye al MIN_REP_SECONDS genérico (0.3s) SOLO para este ejercicio, mismo motivo y mismo valor que NECKLATERAL_MIN_REP_SECONDS
+const NECKTURN_STILL_MS = 4000; // sin completar ningún vaivén durante esto: se interpreta que has terminado y se cierra la serie sola (mismo valor que NECKLATERAL_STILL_MS)
+const NECKTURN_DRIFT_TOLERANCE_FACTOR = 0.12; // cuánto puede desplazarse el punto medio de los hombros (respecto a donde estaba al salir del centro) antes de avisar de que el cuerpo entero se está girando/desplazando en vez de solo la cabeza -- se avisa, no se penaliza (mismo espíritu que NECKLATERAL_DRIFT_TOLERANCE_FACTOR)
+
+// NECKCIRCLE_*: círculo completo de cuello -- de pie o sentada/o, de
+// frente a la cámara: la cabeza dibuja un círculo completo (de frente,
+// hacia un lado, barbilla al pecho, hacia el otro lado, y hacia atrás/
+// arriba de vuelta al frente), en cualquier sentido (horario o
+// antihorario) -- una vuelta completa cuenta como una repetición (ver
+// processNeckCircles). Mismo principio de ángulo acumulado que
+// ARMCIRCLES_* (wrapAngleDelta sobre el ángulo de un vector, sumando el
+// delta de cada fotograma hasta llegar a ±2π), pero aquí el vector no es
+// hombro->muñeca sino punto-medio-de-hombros->nariz, y a diferencia de
+// círculos de brazos NO hay bloqueo de sentido (armCirclePhase): aquí
+// cualquiera de los dos sentidos cuenta siempre, sin tener que completar
+// antes el otro ni pararte para cambiar -- pedido explícitamente por el
+// usuario ("que también cuenten si los hago en sentido contrario").
+// Pedido con un vídeo de referencia (WhatsApp, 2026-09-04): de pie, de
+// frente a la cámara, la cabeza da una vuelta completa alrededor del
+// cuello. Primera versión, pendiente de calibrar con un test en cámara
+// real, mismo patrón que el resto de la familia.
+const NECKCIRCLE_MIN_VISIBILITY = 0.4; // visibilidad media de nariz+hombros exigida para fiarse del frame (mismo umbral que NECKLATERAL_MIN_VISIBILITY)
+const NECKCIRCLE_CENTER_ENTER_FACTOR = 0.16; // para armar, la nariz tiene que estar dentro de esto (veces el ancho de hombros) del centro -- de frente y quieta/o, no a mitad de un giro (mismo umbral que NECKLATERAL_ENTER_FACTOR)
+const NECKCIRCLE_CENTER_STABLE_MS = 500; // de frente y quieta/o sostenido esto antes de armar el contador (mismo valor que NECKLATERAL_CENTER_STABLE_MS)
+const NECKCIRCLE_MIN_ANGULAR_DELTA = 0.02; // radianes por frame por debajo de esto se consideran ruido de tracking, no giro de verdad (mismo umbral que ARMCIRCLES_MIN_ANGULAR_DELTA/LEGROTATION_MIN_ANGULAR_DELTA)
+const NECKCIRCLE_MAX_SINGLE_FRAME_DELTA = 2.4; // radianes (~137°) por frame: un salto puntual mayor que esto se descarta como fallo de tracking, no giro real (mismo valor y motivo que ARMCIRCLES_MAX_SINGLE_ARM_DELTA/LEGROTATION_MAX_SINGLE_LEG_DELTA)
+const NECKCIRCLE_STILL_MS = 4000; // sin progreso angular de verdad durante esto: se interpreta que has terminado y se cierra la serie sola (mismo patrón que NECKLATERAL_STILL_MS, más margen que ARMCIRCLES_STILL_MS porque el cuello gira más despacio que un brazo)
+const NECKCIRCLE_OUT_OF_FRAME_MS = 3000; // mismo motivo que ARMCIRCLES_OUT_OF_FRAME_MS: girando la cabeza de verdad también se pierde algo de confianza de tracking por el propio movimiento, no solo al salirte del encuadre
+const NECKCIRCLE_MIN_REP_SECONDS = 1.0; // una vuelta completa por debajo de esto es un salto de ángulo mal calculado (ruido), no un círculo de cuello de verdad hecho a mano -- más alto que ARMCIRCLES_MIN_REP_SECONDS (0.5) porque un giro de cuello es forzosamente más lento que uno de brazo
+
+// NECKHALFTURN_*: media vuelta de cuello -- de pie o sentada/o, de
+// frente a la cámara: la cabeza va de un lado (oreja hacia el hombro) al
+// otro pasando por el centro con la barbilla hacia el pecho, SIN seguir
+// hasta completar el círculo entero (sin llegar a inclinar la cabeza
+// hacia atrás) -- pedido explícitamente como "que pare a la mitad", con
+// un segundo vídeo de referencia (WhatsApp, 2026-09-04) para
+// diferenciarlo del círculo completo de arriba.
+//
+// v1 (mismo mecanismo que NECKCIRCLE_*, un umbral fijo de π acumulado en
+// cualquier sentido) contaba una repetición de más al final de una serie
+// real (2026-09-08): tras la última repetición de verdad, el usuario se
+// quedó quieto/a cerca del extremo, y el ruido de tracking siguió
+// arrastrando el ángulo acumulado lentamente en el MISMO sentido -- sin
+// llegar a cambiar de sentido en ningún momento -- hasta cruzar π igual
+// que si hubiera sido una repetición real. v2 cambia el criterio por
+// completo: ya NO se cuenta al llegar a un ángulo acumulado fijo, sino
+// cada vez que se CONFIRMA un cambio de sentido (parar e invertir el
+// giro, pedido explícitamente por el usuario: "haz que cuente una rep
+// cada vez que paro y cambio de direccion") -- así que seguir girando
+// sin parar en el mismo sentido, por mucho que acumule, ya NUNCA cuenta
+// de más. El cambio de sentido se confirma cuando el movimiento en el
+// sentido contrario se sostiene NECKHALFTURN_REVERSE_STABLE_MS seguidos
+// (filtra un simple temblor, no una inversión de verdad), y solo cuenta
+// si el vaivén que se cierra giró al menos NECKHALFTURN_MIN_SWING_RAD
+// (filtra una inversión real pero minúscula, no un vaivén completo).
+// Sigue sin haber bloqueo de sentido: el primer movimiento de cada
+// vaivén, en cualquier sentido, es válido -- pedido explícitamente por
+// el usuario ("que también cuenten si los hago en sentido contrario").
+const NECKHALFTURN_MIN_VISIBILITY = 0.4; // visibilidad media de nariz+hombros exigida para fiarse del frame (mismo umbral que NECKCIRCLE_MIN_VISIBILITY/NECKLATERAL_MIN_VISIBILITY)
+const NECKHALFTURN_CENTER_ENTER_FACTOR = 0.16; // para armar, la nariz tiene que estar dentro de esto (veces el ancho de hombros) del centro (mismo umbral que NECKCIRCLE_CENTER_ENTER_FACTOR)
+const NECKHALFTURN_CENTER_STABLE_MS = 500; // de frente y quieta/o sostenido esto antes de armar el contador (mismo valor que NECKCIRCLE_CENTER_STABLE_MS)
+const NECKHALFTURN_MIN_ANGULAR_DELTA = 0.02; // radianes por frame por debajo de esto se consideran ruido de tracking, no giro de verdad ni posible cambio de sentido (mismo umbral que NECKCIRCLE_MIN_ANGULAR_DELTA)
+const NECKHALFTURN_MAX_SINGLE_FRAME_DELTA = 2.4; // radianes (~137°) por frame: un salto puntual mayor que esto se descarta como fallo de tracking (mismo valor que NECKCIRCLE_MAX_SINGLE_FRAME_DELTA)
+const NECKHALFTURN_STILL_MS = 4000; // sin progreso angular de verdad durante esto: se interpreta que has terminado y se cierra la serie sola (mismo valor que NECKCIRCLE_STILL_MS/NECKLATERAL_STILL_MS)
+const NECKHALFTURN_OUT_OF_FRAME_MS = 3000; // mismo motivo que NECKCIRCLE_OUT_OF_FRAME_MS
+const NECKHALFTURN_MIN_REP_SECONDS = 0.5; // una media vuelta por debajo de esto es ruido, no un vaivén de verdad hecho a mano
+const NECKHALFTURN_REVERSE_STABLE_MS = 150; // movimiento en el sentido contrario sostenido esto antes de confirmar un cambio de sentido de verdad -- filtra un temblor de un solo fotograma cerca del punto más girado (mismo espíritu que NECKLATERAL_SIDE_STABLE_MS/HIPLATERAL_SIDE_STABLE_MS, algo más largo porque aquí el movimiento es continuo y suave, no un gesto que se sostiene de golpe)
+const NECKHALFTURN_MIN_SWING_RAD = Math.PI / 3; // ~60°: el vaivén que se cierra al confirmarse un cambio de sentido tiene que haber girado al menos esto para contar como repetición -- filtra una inversión real pero minúscula (un ligero rebote cerca del extremo) sin exigir llegar exactamente a los 180° del vídeo de referencia
+
+// HIPLATERAL_*: balanceo lateral de cadera -- de frente a la cámara, de
+// pie, con los pies bien separados (más que el ancho de cadera) y SIN
+// moverlos del sitio: la cadera se desplaza de un lado a otro y vuelve
+// al centro; un vaivén completo (centro -> lado -> centro) cuenta como
+// una repetición (ver processHipLateral). Mismo espíritu de vaivén
+// centro/lado que NECKLATERAL_*, pero aquí el punto que se mueve es la
+// CADERA (no la nariz) y la referencia fija es el punto medio de los
+// TOBILLOS (no los hombros) -- los pies tienen que quedarse plantados
+// mientras la cadera va de un lado a otro, así que aquí es el
+// desplazamiento de los TOBILLOS el que se vigila y se avisa si de más
+// (ver HIPLATERAL_FEET_DRIFT_TOLERANCE_FACTOR), igual que NECKLATERAL
+// vigila los hombros. Pedido por el usuario con un vídeo de referencia
+// propio (subido 2026-09-07): pies en el suelo, con una distancia entre
+// ellos más ancha que la cadera, sin moverse, la cadera va de un lado a
+// otro.
+//
+// v2/v3 (mismo día, a partir de la primera prueba real en cámara):
+// reportados dos problemas. (a) mover la cadera hacia delante y hacia
+// atrás (sin ir a ningún lado) se contaba como repetición válida -- el
+// umbral en X por sí solo no distingue un desplazamiento lateral de uno
+// en profundidad; añadido un chequeo sobre la coordenada Z de MediaPipe
+// (ver HIPLATERAL_MAX_DEPTH_FACTOR, primera vez que este proyecto usa
+// profundidad, mismo espíritu que el chequeo vertical de
+// NECKLATERAL_MAX_VERTICAL_FACTOR). (b) la primera "repetición" contada
+// no era de verdad, porque salía de estar aún colocándote -- v2 había
+// probado a sustituir el requisito de partida por manos en la cadera +
+// pies a la distancia de los codos, pero se ha vuelto (v3) a la postura
+// simple de siempre (pies más anchos que la cadera) a petición del
+// usuario; en su lugar se ha alargado HIPLATERAL_CENTER_STABLE_MS
+// (500ms -> 1500ms) para exigir más tiempo realmente quieto antes de
+// armar el contador -- mismo mecanismo (una espera más larga antes de
+// armar) que ya usa el resto de la familia para este mismo problema.
+const HIPLATERAL_MIN_VISIBILITY = 0.4; // visibilidad media de cadera+tobillos exigida para fiarse del frame
+const HIPLATERAL_MIN_STANCE_FACTOR = 1.15; // los tobillos tienen que estar separados al menos esto de veces el ancho de cadera para considerar la postura "pies bien separados" (más ancho que la cadera, pedido explícitamente) -- por debajo de esto se avisa de que hay que abrir más los pies, sin llegar a armar el contador
+const HIPLATERAL_ENTER_FACTOR = 0.12; // la cadera tiene que separarse del punto medio de los tobillos al menos esto de veces el ancho de la base (tobillo a tobillo) para contar "ha llegado a un lado"
+const HIPLATERAL_EXIT_FACTOR = 0.04; // tiene que volver a estar más cerca del centro que esto para cerrar el vaivén y contar la repetición (histéresis, mismo espíritu que NECKLATERAL_EXIT_FACTOR)
+const HIPLATERAL_CENTER_STABLE_MS = 1500; // centrada/o y quieta/o sostenido esto antes de armar el contador -- fija tu propio "centro" real como baseline; subido de 500 a 1500 (v3) porque 500ms dejaba que la primera "repetición" saliera de estar aún colocándote/ajustando los pies, no de un balanceo de verdad (reportado en la primera prueba real, 2026-09-07)
+const HIPLATERAL_SIDE_STABLE_MS = 100; // el lado tiene que sostenerse esto seguido antes de confirmarse -- filtra un pico de un frame suelto (ruido de tracking), no un balanceo de verdad (mismo espíritu que NECKLATERAL_SIDE_STABLE_MS)
+const HIPLATERAL_MIN_REP_SECONDS = 0.2; // un vaivén completo por debajo de esto es ruido, no un balanceo de verdad
+const HIPLATERAL_STILL_MS = 4000; // sin completar ningún vaivén durante esto: se interpreta que has terminado y se cierra la serie sola (mismo patrón que NECKLATERAL_STILL_MS)
+const HIPLATERAL_FEET_DRIFT_TOLERANCE_FACTOR = 0.15; // cuánto puede desplazarse el punto medio de los tobillos (respecto a donde estaba al confirmarse el lado) antes de avisar de que los pies se están moviendo del sitio en vez de quedarse quietos mientras solo la cadera se balancea -- a diferencia de NECKLATERAL_DRIFT_TOLERANCE_FACTOR (que solo avisa sin bloquear), aquí superarlo también bloquea que el vaivén cuente como repetición al volver al centro: se detectó en una prueba real que, al terminar una serie y caminar hacia la cámara con las manos fuera de la cadera, ese desplazamiento de pies se contaba igualmente como repetición válida (2026-09-07)
+const HIPLATERAL_MAX_DEPTH_FACTOR = 0.35; // cuánto puede alejarse/acercarse la cadera de la cámara (eje Z de MediaPipe, relativo a tu propia profundidad de referencia fijada al armar, normalizado por el ancho de la base) para que un desplazamiento en X siga contando como ir HACIA UN LADO -- reportado en la primera prueba real (2026-09-07): mover la cadera hacia delante y hacia atrás se contaba como repetición válida, porque ese movimiento también corre algo la cadera en horizontal (ruido/perspectiva de cámara), aunque el movimiento real sea sobre todo en profundidad. Por encima de este umbral el vaivén NO se confirma como lateral (mismo espíritu que NECKLATERAL_MAX_VERTICAL_FACTOR con la nariz cayendo hacia delante/abajo) -- primera vez que este proyecto usa la coordenada z, pendiente de calibrar con un test en cámara real
+const HIPLATERAL_GEOMETRY_SMOOTHING_ALPHA = 0.3; // media móvil exponencial (mismo valor que SCISSOR_SMOOTHING_ALPHA/DIP_SHOULDER_SMOOTHING_ALPHA) aplicada a hipMidX/hipMidZ/hipWidth/ankleMidX/stanceWidth ANTES de comparar nada -- en la segunda prueba real (2026-09-07) hipWidth (cadera casi de frente, muy poca separación en x/y) llegó a saltar entre 0.008 y 0.09 de un fotograma a otro por puro ruido de tracking, y como la comprobación de "pies bien separados" se hacía cada fotograma sin ningún margen, un solo fotograma ruidoso bastaba para desarmar un vaivén que ya llevaba varios segundos armado (nunca llegaba a confirmarse un lado). Suavizar las cinco magnitudes de golpe, igual que se hace con la altura de tobillos en tijeretas, amortigua ese ruido sin esconder un cambio real y sostenido de postura.
+
+// HIPFORWARDBACK_*: cadera adelante y atrás -- de pie, DE PERFIL a la
+// cámara (a diferencia de HIPLATERAL_*, que pide de frente), pies
+// quietos en el suelo: la cadera se lleva hacia delante y hacia atrás,
+// volviendo cada vez al centro. Mismo mecanismo de vaivén con
+// histéresis que HIPLATERAL_* (armar sobre un centro estable, entrar a
+// un umbral, salir a uno más corto), pero rotado 90°: lo que en
+// HIPLATERAL_* era el eje bueno para "a un lado" (X, de frente) y el
+// eje ruidoso para "delante/atrás" (Z, de frente -- ver
+// HIPLATERAL_MAX_DEPTH_FACTOR) se intercambian al ponerse de perfil, así
+// que aquí "delante/atrás" se mide limpio en X sin tocar Z para nada.
+// Normalizado por la longitud cadera-tobillo (no por el ancho de la
+// base tobillo-tobillo, que de perfil se solapa casi a cero -- mismo
+// motivo que HEELKICK_MAX_HIP_DRIFT_FACTOR). De perfil las dos
+// caderas/tobillos casi se solapan en la imagen, así que solo se
+// vigila un lado, elegido UNA vez al armar según cuál se vea mejor y
+// fijo el resto de la serie (mismo criterio que "elegida UNA pierna"
+// en talones al glúteo v10). Primera versión, umbrales sin probar en
+// cámara real todavía -- pendientes de calibrar con un test real, mismo
+// patrón que el resto de la familia.
+const HIPFORWARDBACK_MIN_VISIBILITY = 0.4; // visibilidad media de cadera+tobillo (del lado vigilado) exigida para fiarse del frame (mismo umbral que el resto de la familia)
+const HIPFORWARDBACK_ENTER_FACTOR = 0.06; // BAJADO de 0.12 (v1, copiado sin más de HIPLATERAL_ENTER_FACTOR) a 0.06 en v2 tras una prueba real (2026-09-08): con 0.12 nunca llegó a contar ni una repetición -- el registro en vivo mostró la desviación real, moviendo la cadera adelante/atrás a propósito, tocando techo entre 0.09 y 0.11 (nunca cruzando 0.12), mientras que de pie sin más (ruido/ajuste de postura) se quedaba entre 0.01 y 0.05. El hip hinge de este ejercicio mueve la cadera bastante menos, en proporción a la longitud de la pierna, que el balanceo lateral de cadera (para el que sí valía 0.12) -- normal, son amplitudes de movimiento distintas. 0.06 deja margen holgado a los dos lados de esa separación observada; pendiente de confirmar con otra prueba real.
+const HIPFORWARDBACK_EXIT_FACTOR = 0.02; // BAJADO de 0.04 a la vez que HIPFORWARDBACK_ENTER_FACTOR (v2), manteniendo la misma proporción 1:3 entre umbral de salida y de entrada que HIPLATERAL_EXIT_FACTOR/HIPLATERAL_ENTER_FACTOR
+const HIPFORWARDBACK_CENTER_STABLE_MS = 1500; // centrada/o y quieta/o sostenido esto antes de armar el contador -- fija tu propio "centro" real como baseline (mismo valor y motivo que HIPLATERAL_CENTER_STABLE_MS)
+const HIPFORWARDBACK_DIRECTION_STABLE_MS = 100; // delante/atrás tiene que sostenerse esto seguido antes de confirmarse -- filtra un pico de un frame suelto, no un vaivén de verdad (mismo espíritu que HIPLATERAL_SIDE_STABLE_MS)
+const HIPFORWARDBACK_MIN_REP_SECONDS = 0.2; // un vaivén completo por debajo de esto es ruido, no un vaivén de verdad (mismo valor que HIPLATERAL_MIN_REP_SECONDS)
+const HIPFORWARDBACK_STILL_MS = 4000; // sin completar ningún vaivén durante esto: se interpreta que has terminado y se cierra la serie sola (mismo valor que HIPLATERAL_STILL_MS)
+const HIPFORWARDBACK_FEET_DRIFT_TOLERANCE_FACTOR = 0.15; // cuánto puede desplazarse el tobillo vigilado (respecto a donde estaba al confirmarse delante/atrás), en fracción de la longitud de la pierna, antes de que el vaivén en curso no cuente como repetición al volver al centro -- mismo mecanismo y valor que HIPLATERAL_FEET_DRIFT_TOLERANCE_FACTOR
+const HIPFORWARDBACK_GEOMETRY_SMOOTHING_ALPHA = 0.3; // media móvil exponencial aplicada a la posición X de cadera y tobillo y a la longitud de la pierna ANTES de comparar nada -- mismo valor y motivo que HIPLATERAL_GEOMETRY_SMOOTHING_ALPHA
+const HIPFORWARDBACK_PROFILE_MAX_HIP_WIDTH_FACTOR = 0.35; // separación aparente cadera-cadera (Math.hypot, en X e Y), en fracción de la longitud de la pierna vigilada, por ENCIMA de la cual se considera que ya NO estás de perfil sino girándote hacia la cámara -- de perfil de verdad las dos caderas casi se solapan en la imagen (mismo razonamiento que ya usa esta familia para normalizar por longitud de pierna en vez de anchura de base). Pedido explícito del usuario tras una prueba real (2026-09-08): las últimas repeticiones de una serie se contaron mientras se acercaba caminando a la cámara (dejando de estar de perfil), y no quiere que eso cuente. Cifra de partida sin contrastar todavía con un giro real medido en cámara -- pendiente de calibrar.
+const HIPFORWARDBACK_PROFILE_CONFIRM_MS = 250; // el giro hacia la cámara (por encima de HIPFORWARDBACK_PROFILE_MAX_HIP_WIDTH_FACTOR) tiene que sostenerse esto seguido antes de actuar -- filtra un pico de un fotograma suelto por ruido de tracking, no un giro de verdad (mismo espíritu que HIPFORWARDBACK_DIRECTION_STABLE_MS, algo más largo porque aquí conviene más margen antes de invalidar una repetición o desarmar)
+
 // ARMSCISSORS_*: tijeras de brazos -- de pie, de frente a la cámara,
 // calentamiento/estiramiento dinámico: los dos brazos se extienden en
 // cruz (a los lados, como una T) y luego se cruzan por delante del
@@ -930,6 +1100,129 @@ const HEELKICK_OUT_OF_FRAME_MS = 3000; // mismo motivo que KNEERAISE_OUT_OF_FRAM
 const HEELKICK_VISIBLE_CONFIRM_MS = 500; // mismo motivo que KNEERAISE_VISIBLE_CONFIRM_MS/LEGROTATION_VISIBLE_CONFIRM_MS: exige mantenerse por encima de HEELKICK_MIN_VISIBILITY este rato seguido antes de anunciar "a la vista", para no decir que se ve algo que en realidad no se veia con un solo frame suelto
 const HEELKICK_MAX_ANGLE_DELTA = 90; // avance maximo (en grados del angulo cadera-rodilla-tobillo) permitido POR FOTOGRAMA -- ratchet, no filtro de "congelar": la referencia SIEMPRE avanza hacia el dato crudo, como maximo esta cantidad por fotograma, en vez de quedarse fija en el ultimo valor bueno (mismo mecanismo que HEELKICK_MAX_FRAME_DELTA usaba en v3 para la fraccion de distancia -- ver el historial en memoria sobre por que un filtro de "congelar" bloqueaba repeticiones reales y rapidas en este ejercicio explosivo). Cifra pendiente de calibrar con mas pruebas en camara real.
 const HEELKICK_ANGLE_SMOOTHING_ALPHA = 0.5; // media movil exponencial aplicada DESPUES del ratchet de arriba, una pierna a la vez -- misma tecnica que SCISSOR_SMOOTHING_ALPHA en tijeretas, para la pierna que la camara ve peor. De perfil, la pierna MAS LEJANA a la camara queda parcialmente tapada por el torso durante todo el ejercicio (no solo a veces), asi que MediaPipe le da una confianza mas baja y su angulo tiembla bastante mas que el de la pierna cercana aunque el ratchet ya recorte los saltos imposibles -- eso es lo que produce repeticiones fantasma sin haber hecho el movimiento y la sensacion de que "solo cuenta la pierna que se ve mejor". Alpha mas alto que el 0.3 de tijeretas (que es un ejercicio mucho mas lento) para no introducir demasiado retraso en un ejercicio explosivo. Cifra de partida sin calibrar con datos reales todavia.
+
+// ---------------------------------------------------------------------
+// Rotacion de brazo sujetando el codo -- de pie, de frente a la
+// camara: una mano agarra el codo del otro brazo (por delante, cerca
+// del cuerpo) y ese otro brazo empieza a girar en circulos alrededor
+// del codo (el antebrazo traza la circunferencia, el codo se queda
+// mas o menos fijo, sujeto por la otra mano). Pedido por el usuario
+// con dos videos de referencia (WhatsApp, grabados 2026-09-04): uno
+// ensena un brazo, el otro el contrario -- mismo ejercicio, mano
+// espejada, asi que un solo contador vale para los dos brazos sin
+// duplicar nada (pedido explicitamente: "que sirva para las dos
+// manos asi nos ahorramos hacer 2 ejercicios").
+//
+// "Es muy facil" (palabras del usuario): sin postura de reposo previa
+// que confirmar, sin angulo de codo que exigir -- basta con que la
+// otra mano este agarrando el codo del brazo que gira. Se comprueban
+// los dos lados posibles (izquierdo gira/derecho agarra, o al reves)
+// y vale cualquiera de los dos, igual que checkArmCrossStretch en su
+// dia; a diferencia de ese estiramiento (isometrico, un aguante
+// cuenta como serie), aqui se cuenta por repeticiones -- cada vuelta
+// completa (360 grados) del antebrazo alrededor del codo, en
+// cualquier sentido, sin bloqueo de sentido (mismo mecanismo que
+// circulos de cuello: wrapAngleDelta acumulado sobre el vector
+// codo->muneca, ver processForearmRotation). Se puede cambiar de
+// brazo en cualquier momento sin cerrar la serie (mismo espiritu que
+// rotacion de piernas, avisando por voz solo cuando el lado cambia de
+// verdad).
+//
+// Primera version, umbrales sin probar en camara real todavia --
+// pendiente de calibrar con un test real, mismo patron que el resto
+// de la familia.
+// ---------------------------------------------------------------------
+const FOREARMROTATION_MIN_VISIBILITY = 0.4; // visibilidad media de hombros+codos+munecas exigida para fiarse del frame (mismo umbral que el resto de la familia)
+const FOREARMROTATION_GRAB_MAX_FACTOR = 1.6; // muneca de la mano que agarra, a lo sumo esto de veces el ancho de hombros de distancia del codo del brazo que gira -- umbral amplio, primer valor sin calibrar (a medio camino entre STRETCH_GRAB_MAX_FACTOR=2.4, pensado para codo-a-codo del estiramiento cruzado, y el umbral bastante mas estricto de isquiotibiales sentado=0.8, muneca-a-tobillo)
+const FOREARMROTATION_MIN_REACH_FACTOR = 0.25; // la muneca del brazo que gira tiene que estar al menos esto de veces el ancho de hombros lejos de SU PROPIO codo para fiarse del angulo (evita acumular ruido con el antebrazo pegado al codo, radio casi cero) -- mas bajo que ARMCIRCLES_MIN_REACH_FACTOR (0.45) porque aqui el "radio" es el antebrazo, mas corto que el brazo entero extendido
+const FOREARMROTATION_STABLE_MS = 400; // agarre sostenido esto antes de armar el contador (mismo espiritu que ARMCIRCLES_ARM_STABLE_MS/ARMSCISSORS_CENTER_STABLE_MS)
+const FOREARMROTATION_GRAB_BREAK_MS = 800; // el agarre tiene que fallar seguido esto (no un solo fotograma suelto de ruido de tracking) antes de darlo por soltado de verdad -- mismo motivo que el resto de la familia con sus propios *_STABLE_MS de histeresis
+const FOREARMROTATION_MIN_ANGULAR_DELTA = 0.02; // radianes por fotograma por debajo de esto se consideran ruido de tracking, no giro de verdad (mismo umbral que ARMCIRCLES_MIN_ANGULAR_DELTA/NECKCIRCLE_MIN_ANGULAR_DELTA)
+const FOREARMROTATION_MAX_SINGLE_FRAME_DELTA = 2.4; // radianes (~137 grados) por fotograma: un salto puntual mayor que esto se descarta como fallo de tracking, no giro real (mismo valor que ARMCIRCLES_MAX_SINGLE_ARM_DELTA/LEGROTATION_MAX_SINGLE_LEG_DELTA/NECKCIRCLE_MAX_SINGLE_FRAME_DELTA)
+const FOREARMROTATION_MIN_REP_SECONDS = 0.4; // una vuelta completa por debajo de esto es un salto de angulo mal calculado (ruido), no un circulo de verdad hecho a mano
+const FOREARMROTATION_STILL_MS = 3000; // sin agarre valido en ningun brazo ni giro de verdad durante esto: se interpreta que has terminado y se cierra la serie sola (mismo patron que ARMSCISSORS_STILL_MS/ARMCIRCLES_STILL_MS)
+const FOREARMROTATION_OUT_OF_FRAME_MS = 3000; // mismo motivo que ARMCIRCLES_OUT_OF_FRAME_MS: girando de verdad el antebrazo tambien baja la confianza de MediaPipe por motion blur, no solo al salirte del encuadre
+
+// WRISTROTATION_*: rotación de muñecas con los dedos entrelazados -- de
+// pie o sentada/o, de frente a la cámara: manos juntas, dedos
+// entrelazados como al rezar, delante del pecho/barbilla, y las dos
+// muñecas giran juntas dibujando un círculo (el conjunto de manos se
+// desplaza en círculo -- eso es justo lo que se ve, y lo que se puede
+// medir, con landmarks de pose; no hay landmarks de dedos individuales
+// en este modelo). Pedido con un vídeo de referencia (WhatsApp, grabado
+// 2026-09-04, subido 2026-09-08).
+//
+// Mismo mecanismo que círculos de cuello/brazos (wrapAngleDelta sobre
+// el ángulo de un vector, acumulando el delta de cada fotograma hasta
+// llegar a ±2π = una repetición), aquí sobre el vector
+// punto-medio-de-hombros->punto-medio-de-muñecas, sin bloqueo de
+// sentido (cualquiera de los dos sentidos cuenta, mismo espíritu que
+// NECKCIRCLE_*/FOREARMROTATION_*). Esto es precisamente lo que
+// distingue "dar vueltas" de "ir de un lado a otro" que pidió el
+// usuario explícitamente: un vaivén de lado a lado nunca completa una
+// vuelta entera -- el ángulo avanza y luego retrocede sobre el mismo
+// arco, así que el acumulado con signo nunca llega a 2π y no cuenta
+// nada, mientras que un círculo de verdad sí lo completa. No hace
+// falta ninguna lógica aparte para diferenciarlos, es la misma
+// protección ya probada en círculos de cuello/brazos/rotación de
+// piernas.
+//
+// Manos juntas: al contrario que círculos de cuello (que no tiene nada
+// que "agarrar"), aquí SÍ hay una postura que mantener durante todo el
+// giro -- las dos muñecas cerca la una de la otra (proxy de dedos
+// entrelazados, que un modelo de pose no ve). Se comprueba igual que
+// el agarre de FOREARMROTATION_* (con su misma histéresis de soltado,
+// WRISTROTATION_TOGETHER_BREAK_MS) en vez de exigirlo con un
+// posturechecker aislado, porque aquí se cuenta por repeticiones
+// (mode="pose"), no por aguante (mode="timed").
+//
+// Sobre landmarks 3D (world landmarks) de MediaPipe: el modelo de pose
+// que usa este proyecto (PoseLandmarker, ver poseLandmarker.detectForVideo)
+// sí los expone (result.worldLandmarks), pero NINGÚN ejercicio de esta
+// familia los usa todavía -- todos calculan ángulos sobre los landmarks
+// normalizados de imagen (x,y en 2D), incluida esta primera versión.
+// En el vídeo de referencia (manos delante del pecho, giro casi de cara
+// a la cámara) el círculo en 2D ya se ve completo y limpio, así que se
+// empieza igual que el resto de la familia: primera versión sencilla en
+// 2D, pendiente de calibrar con un test real. Si un test real muestra
+// que el plano del círculo no es lo bastante frontal (el círculo se
+// aplana en pantalla y se confunde con un vaivén), ahí sí merecería la
+// pena pasar a world landmarks para un ángulo fiable pase lo que pase
+// la orientación de la cámara -- de momento, sin probar en cámara real,
+// sería una complicación sin base.
+const WRISTROTATION_MIN_VISIBILITY = 0.4; // visibilidad media de hombros+muñecas exigida para fiarse del frame (mismo umbral que el resto de la familia)
+const WRISTROTATION_TOGETHER_MAX_FACTOR = 0.35; // distancia muñeca-muñeca, a lo sumo esto de veces el ancho de hombros, para considerar las manos "juntas" -- primer valor sin calibrar, pendiente de test real
+const WRISTROTATION_TOGETHER_STABLE_MS = 400; // manos juntas sostenido esto antes de armar el contador (mismo espíritu que ARMCIRCLES_ARM_STABLE_MS/FOREARMROTATION_STABLE_MS)
+const WRISTROTATION_TOGETHER_BREAK_MS = 800; // las manos tienen que separarse seguido esto (no un solo fotograma suelto de ruido) antes de darlo por soltado de verdad (mismo valor y motivo que FOREARMROTATION_GRAB_BREAK_MS)
+// v2 (primer test en cámara real, 2026-09-08): el ángulo acumulado NUNCA
+// se acercaba a 360° pese a que el usuario giraba las manos de verdad sin
+// parar -- se quedaba oscilando en una banda de ~30° (p.ej. 130°-160°) y
+// terminaba cerrándose por WRISTROTATION_STILL_MS sin contar ni una sola
+// repetición. Causa: a diferencia de círculos de cuello (donde la nariz SÍ
+// gira alrededor del eje real cuello-hombro) o círculos de brazos (donde
+// la muñeca SÍ gira alrededor del hombro real), aquí las manos juntas NO
+// giran alrededor de ningún punto anatómico -- dibujan un círculo pequeño
+// y propio delante del pecho, con centro en el aire. Anclar el ángulo al
+// punto medio de hombros (muy alejado de ese círculo real) hace que el
+// vector barra solo un arco estrecho en vez de una vuelta completa, por
+// pura geometría (igual que un compás con el pie clavado lejos del centro
+// del círculo que quieres medir). Arreglo: en vez de un ancla fija, se
+// estima el CENTRO del propio círculo con una media móvil exponencial
+// (EMA) muy lenta de la posición de las manos, y se mide el ángulo de
+// (mano - centro) en vez de (mano - hombro). Con una rotación real
+// sostenida esto converge matemáticamente a seguir barriendo la vuelta
+// completa a la misma velocidad angular que el giro real (filtro paso-alto
+// de primer orden sobre una señal periódica: conserva la frecuencia,
+// solo cambia fase/amplitud) -- y de propina seguimos rechazando por
+// construcción cualquier "ir de un lado a otro": ese movimiento tampoco
+// completa una vuelta alrededor de SU propio centro estimado.
+const WRISTROTATION_CENTER_EMA_ALPHA = 0.02; // fracción hacia la posición actual de las manos que se mezcla en el centro estimado CADA FOTOGRAMA -- deliberadamente lento (a ~30fps, constante de tiempo de más de 1s) para que el centro no persiga la propia mano (eso colapsaría el radio a ~0 y el ángulo a ruido puro) sino que se asiente en el centro real del círculo que estás dibujando
+const WRISTROTATION_MIN_RADIUS_FACTOR = 0.02; // el radio actual (distancia mano-centro_estimado) tiene que ser al menos esto de veces el ancho de hombros para fiarse del ángulo -- umbral bajo a propósito porque justo al armar (y en cualquier cambio real de dirección) el radio puede ser legítimamente pequeño mientras el centro EMA todavía se está asentando
+const WRISTROTATION_MIN_ANGULAR_DELTA = 0.02; // radianes por fotograma por debajo de esto se consideran ruido de tracking, no giro de verdad (mismo umbral que el resto de la familia)
+const WRISTROTATION_MAX_SINGLE_FRAME_DELTA = 2.4; // radianes (~137°) por fotograma: un salto puntual mayor que esto se descarta como fallo de tracking, no giro real (mismo valor que el resto de la familia)
+const WRISTROTATION_STILL_MS = 2500; // sin progreso angular de verdad durante esto: se interpreta que has terminado y se cierra la serie sola (mismo valor que ARMCIRCLES_STILL_MS -- un giro de muñecas es rápido, como un brazo, no lento como un cuello)
+const WRISTROTATION_OUT_OF_FRAME_MS = 3000; // mismo motivo que el resto de la familia: girando de verdad las muñecas también baja la confianza de MediaPipe por motion blur, no solo al salirte del encuadre
+const WRISTROTATION_MIN_REP_SECONDS = 0.4; // una vuelta completa por debajo de esto es un salto de ángulo mal calculado (ruido), no un círculo de verdad hecho a mano (mismo valor que FOREARMROTATION_MIN_REP_SECONDS)
 
 // Ángulo2 - ángulo1 normalizado a (-π, π] — necesario porque un ángulo
 // que pasa de 179° a -179° en un frame ha girado solo 2°, no casi 360°
@@ -1109,6 +1402,7 @@ const DOUBLECRUNCH_TUCK_MAX_FACTOR = 0.7;   // rodilla cerca del hombro -> rodil
 // los índices de landmarks ni la función de ángulo.
 export const NOSE = 0, L_SHOULDER = 11, R_SHOULDER = 12, L_ELBOW = 13, R_ELBOW = 14, L_WRIST = 15, R_WRIST = 16;
 export const L_HIP = 23, R_HIP = 24, L_KNEE = 25, R_KNEE = 26, L_ANKLE = 27, R_ANKLE = 28;
+export const L_FOOT_INDEX = 31, R_FOOT_INDEX = 32; // punta del pie -- usado solo por el estiramiento de isquiotibiales sentado, para medir "agarrar el pie" a lo largo del segmento tobillo-punta, no solo en el tobillo
 
 /**
  * Ángulo (en grados) en el punto b, formado por los puntos a-b-c. Se usa
@@ -1141,6 +1435,25 @@ export function tiltFromHorizontal(a, b) {
   const dx = b.x - a.x, dy = b.y - a.y;
   if (!dx && !dy) return null;
   return (Math.atan2(Math.abs(dy), Math.abs(dx)) * 180) / Math.PI;
+}
+
+/**
+ * Distancia mínima (2D) del punto p al SEGMENTO a-b (no a la recta
+ * infinita) -- se usa para "agarrar el pie" como cualquier punto entre
+ * el tobillo y la punta del pie (ver checkSeatedHamstringStretch), no
+ * solo el tobillo en sí: agarrar más adelante, hacia los dedos, cuenta
+ * igual. t se recorta a [0,1] para quedarse dentro del segmento -- una
+ * mano por delante de la punta del pie da distancia a la punta (t=1),
+ * una mano por detrás del tobillo (hacia la rodilla) da distancia al
+ * tobillo (t=0), nunca "menos" por salirse del segmento.
+ */
+export function distanceToSegment(p, a, b) {
+  const abx = b.x - a.x, aby = b.y - a.y;
+  const lenSq = abx * abx + aby * aby;
+  let t = lenSq ? ((p.x - a.x) * abx + (p.y - a.y) * aby) / lenSq : 0;
+  t = Math.min(1, Math.max(0, t));
+  const projX = a.x + t * abx, projY = a.y + t * aby;
+  return Math.hypot(p.x - projX, p.y - projY);
 }
 
 // ── Plancha / plancha lateral: comprobación de postura ─────────────────
@@ -2053,7 +2366,7 @@ const DEFAULT_STRETCH_TARGET_SECONDS = 30;
 // o circuito), arrancan igualmente con una cuenta atrás por defecto en
 // vez de contar libremente desde 0 - ver el constructor de
 // WorkoutSession, más abajo.
-const STRETCH_HOLD_COUNTERS = new Set(["armcrossstretch", "tricepsoverheadstretch"]);
+const STRETCH_HOLD_COUNTERS = new Set(["armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
 
 /**
  * Paso 1 de cualquier estiramiento: posición "standby" - de pie,
@@ -2322,6 +2635,225 @@ export function checkTricepsOverheadStretch(lm) {
       "der-alturaCodo": rightBends.debug.alturaCodo,
       "der-munecaCabeza": rightBends.debug.munecaCabeza,
       "der-agarre": rightBends.debug.agarre,
+    },
+  };
+}
+
+// Estiramiento de isquiotibiales sentado: tercero de la familia de
+// estiramientos ISOMÉTRICOS con cámara (ver el comentario junto a
+// checkArmCrossStretch para el porqué de la familia y el patrón de dos
+// pasos). Reutiliza tal cual checkStandbyPosture como paso 1 — de pie,
+// relajada/o, exactamente igual que los dos anteriores; solo cambia el
+// paso 2, que aquí se hace SENTADO EN EL SUELO (transición de pie a
+// sentado entre paso 1 y paso 2, mismo espíritu que plancha, que pasa
+// de tumbado boca arriba a boca abajo).
+//
+// A DIFERENCIA del cruzado de brazo/tríceps (de frente, para ver los
+// dos brazos a la vez), este se pide DE PERFIL a la cámara: hace falta
+// medir el ángulo cadera-rodilla-tobillo de la pierna que se estira
+// (ver angle(), pensada para verse bien "de perfil" — de frente, una
+// pierna apuntando hacia la cámara sale escorzada y el ángulo es puro
+// ruido), igual que sentadillas/silla en pared/rodillas altas/talones
+// al glúteo.
+//
+// Se comprueban las dos piernas posibles (izquierda estirada/derecha
+// estirada) y se devuelve la primera que encaje — igual razón que en
+// checkArmCrossStretch: alternar pierna sin lógica aparte, cada aguante
+// cuenta como una serie aparte (STRETCH_HOLD_COUNTERS).
+//
+// Geometría: la pierna que se estira tiene que quedar (1) casi recta
+// (ángulo cadera-rodilla-tobillo alto) y (2) a la altura del suelo — la
+// cadera casi a la misma altura en la imagen que el tobillo de esa
+// pierna, para distinguir "sentada/o en el suelo con la pierna
+// estirada" de, por ejemplo, quedarte de pie e inclinarte a tocarte la
+// punta del pie (que también deja la rodilla recta y la mano cerca del
+// tobillo, pero con la cadera bien por encima) — y (3) alguna de las
+// dos muñecas cerca del tobillo de esa pierna, agarrando el pie/tobillo
+// para forzar el estiramiento (no importa cuál de las dos manos, igual
+// que checkArmCrossStretch no exige un brazo concreto).
+//
+// Umbrales de partida, sin probar en cámara real todavía (mismo caso
+// que tuvieron cruzado de brazo/tríceps al añadirse) — pendientes de
+// ajustar según lo que se reporte probándolos de verdad delante de la
+// cámara.
+const STRETCH_HAMSTRING_MIN_VISIBILITY = 0.3; // algo más permisivo que STRETCH_MIN_VISIBILITY (0.4): de perfil, la pierna/mano del lado más lejano a la cámara queda parcialmente tapada por el propio cuerpo
+const STRETCH_HAMSTRING_KNEE_MIN_DEG = 120; // v2: bajado de 150 (primer registro real, 2026-09-06) — igual que STRETCH_ARM_CROSS_MIN_ELBOW_DEG (90, mismo motivo: tirar del pie con la mano dobla la pierna algo más de lo esperado incluso en aguantes que sí valen), aguantes con buena pinta en el registro real oscilaban 120-180° frame a frame, así que 150 cortaba de forma intermitente ("a veces cuenta a veces no") exactamente lo que se buscaba contar
+const STRETCH_HAMSTRING_HIP_ANKLE_MAX_FACTOR = 1.8; // v2: subido de 1.1 (primer registro real, 2026-09-06) — sentada/o de perfil e inclinándote hacia delante para agarrar el pie, la cadera se separa del suelo/tobillo más de lo previsto; sigue muy por debajo de las "varias veces el ancho de hombros" que da estar de pie, así que no debería colar standing como si fuera el estiramiento
+const STRETCH_HAMSTRING_GRAB_MAX_FACTOR = 0.8; // v3: bajado de 2.4 (prueba real 2026-09-07: con la mano entre la rodilla y la cadera -- muy lejos del pie -- seguía dando ok). El v2 igualaba este umbral al de cruzado de brazo/tríceps, pero ahí la distancia es muñeca-codo (antebrazo); aquí es muñeca-tobillo a lo largo de TODA la pierna, una escala mucho mayor, así que el mismo factor no significa lo mismo -- necesita su propio umbral, mucho más ajustado (mano de verdad cerca del pie/tobillo). v4: pedido explícito del usuario -- "que sea a partir del tobillo, no el tobillo en concreto": la distancia ya no se mide al tobillo como PUNTO, sino al SEGMENTO tobillo-punta del pie (ver distanceToSegment/L_FOOT_INDEX/R_FOOT_INDEX), así que agarrar más adelante hacia los dedos también cuenta, no solo justo el tobillo
+
+export function checkSeatedHamstringStretch(lm) {
+  const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
+  const lH = lm[L_HIP], rH = lm[R_HIP];
+  const lK = lm[L_KNEE], rK = lm[R_KNEE];
+  const lA = lm[L_ANKLE], rA = lm[R_ANKLE];
+  const lF = lm[L_FOOT_INDEX], rF = lm[R_FOOT_INDEX];
+  const lW = lm[L_WRIST], rW = lm[R_WRIST];
+
+  if ([lS, rS, lH, rH, lK, rK, lA, rA].some((p) => (p.visibility ?? 1) < STRETCH_HAMSTRING_MIN_VISIBILITY)) {
+    return {
+      ok: false,
+      reason: "No se te ve entera/o. Siéntate de perfil a la cámara, algo alejada/o, para que se vean la cadera, las rodillas y los tobillos de las dos piernas.",
+      debug: { fail: "vis" },
+    };
+  }
+
+  const shoulderWidth = Math.hypot(lS.x - rS.x, lS.y - rS.y);
+  if (!shoulderWidth) {
+    return { ok: false, reason: "No se te ve entera/o. Ponte de perfil a la cámara.", debug: { fail: "vis" } };
+  }
+
+  // Segmento tobillo->punta del pie para medir "agarre": si la punta del
+  // pie no se ve bien (oclusión de perfil, calzado que MediaPipe no capta
+  // tan fiable como el tobillo), el segmento colapsa al propio tobillo
+  // (mismo comportamiento que antes) en vez de fallar por un landmark
+  // nuevo que no formaba parte de la comprobación de visibilidad general.
+  function footSegmentEnd(ankle, footIndex) {
+    return (footIndex.visibility ?? 1) >= STRETCH_HAMSTRING_MIN_VISIBILITY ? footIndex : ankle;
+  }
+
+  function evalSide(hip, knee, ankle, footIndex) {
+    const kneeAngle = angle(hip, knee, ankle);
+    const hipAnkleOffset = Math.abs(hip.y - ankle.y) / shoulderWidth;
+    const footEnd = footSegmentEnd(ankle, footIndex);
+    const grabDistL = (lW.visibility ?? 1) >= STRETCH_HAMSTRING_MIN_VISIBILITY
+      ? distanceToSegment(lW, ankle, footEnd) / shoulderWidth
+      : null;
+    const grabDistR = (rW.visibility ?? 1) >= STRETCH_HAMSTRING_MIN_VISIBILITY
+      ? distanceToSegment(rW, ankle, footEnd) / shoulderWidth
+      : null;
+    const grabDist = [grabDistL, grabDistR].filter((d) => d !== null).sort((a, b) => a - b)[0] ?? null;
+    const ok =
+      kneeAngle !== null && kneeAngle >= STRETCH_HAMSTRING_KNEE_MIN_DEG &&
+      hipAnkleOffset <= STRETCH_HAMSTRING_HIP_ANKLE_MAX_FACTOR &&
+      grabDist !== null && grabDist <= STRETCH_HAMSTRING_GRAB_MAX_FACTOR;
+    return {
+      ok,
+      debug: {
+        rodilla: kneeAngle === null ? null : kneeAngle.toFixed(0),
+        caderaSuelo: hipAnkleOffset.toFixed(2),
+        agarre: grabDist === null ? null : grabDist.toFixed(2),
+      },
+    };
+  }
+
+  const leftExtends = evalSide(lH, lK, lA, lF);  // pierna izquierda estirada
+  const rightExtends = evalSide(rH, rK, rA, rF); // pierna derecha estirada
+
+  if (leftExtends.ok) return { ok: true, side: "left", debug: leftExtends.debug };
+  if (rightExtends.ok) return { ok: true, side: "right", debug: rightExtends.debug };
+
+  return {
+    ok: false,
+    reason: "Siéntate en el suelo con una pierna estirada del todo y la otra doblada, e inclínate hacia delante para agarrarte el pie o el tobillo de la pierna estirada con la mano.",
+    debug: {
+      "izq-rodilla": leftExtends.debug.rodilla,
+      "izq-caderaSuelo": leftExtends.debug.caderaSuelo,
+      "izq-agarre": leftExtends.debug.agarre,
+      "der-rodilla": rightExtends.debug.rodilla,
+      "der-caderaSuelo": rightExtends.debug.caderaSuelo,
+      "der-agarre": rightExtends.debug.agarre,
+    },
+  };
+}
+
+// Cuádriceps de pie (standing quad stretch): cuarto de la familia de
+// estiramientos ISOMÉTRICOS con cámara (ver el comentario junto a
+// checkArmCrossStretch para el porqué de la familia y el patrón de dos
+// pasos). Reutiliza tal cual checkStandbyPosture como paso 1 — de pie,
+// relajada/o, igual que los tres anteriores.
+//
+// A DIFERENCIA de los tres anteriores, aquí NO se mide ningún ángulo ni
+// distancia de la pierna que se dobla ni del brazo que agarra por
+// detrás — pedido explícitamente DE FRENTE a la cámara (a diferencia del
+// isquiotibiales sentado, que pide perfil), y de frente, tanto el tramo
+// rodilla-tobillo de la pierna doblada hacia atrás como el antebrazo que
+// la sujeta por detrás de la espalda quedan tapados por el propio
+// cuerpo, así que MediaPipe no puede darles una posición fiable. En vez
+// de pelear contra eso con geometría poco fiable, se usa la propia caída
+// de confianza (landmark.visibility) como LA señal: si la rodilla de una
+// pierna se sigue viendo pero su tobillo "desaparece" (visibilidad muy
+// baja) mientras la pierna de apoyo se queda recta y alguna muñeca
+// también "desaparece" (el brazo que agarra por detrás), es que estás en
+// el estiramiento.
+//
+// Se comprueban las dos piernas posibles (izquierda doblada/derecha
+// doblada) y se devuelve la primera que encaje — misma razón que el
+// resto de la familia: alternar pierna sin lógica aparte, cada aguante
+// cuenta como una serie aparte (STRETCH_HOLD_COUNTERS). No se exige que
+// la mano que agarra sea del mismo lado que la pierna doblada ni la
+// contraria — vale cualquiera de las dos, igual que checkArmCrossStretch
+// no exige un brazo concreto.
+//
+// Umbrales de partida, sin probar en cámara real todavía (mismo caso que
+// tuvo el resto de la familia al añadirse) — pendientes de ajustar según
+// lo que se reporte probándolos de verdad delante de la cámara.
+const STRETCH_QUAD_MIN_VISIBILITY = 0.4; // hombros y caderas: exigidos visibles con normalidad, para confirmar que se te ve de frente antes de mirar nada más
+const STRETCH_QUAD_STANDING_KNEE_MIN_DEG = 150; // pierna de APOYO (la que no se dobla): ángulo cadera-rodilla-tobillo, casi recta, de pie
+const STRETCH_QUAD_FOLDED_KNEE_MIN_VISIBILITY = 0.4; // rodilla de la pierna que se dobla hacia atrás: tiene que SEGUIR viéndose (solo desaparece de ahí para abajo, no la pierna entera)
+const STRETCH_QUAD_ANKLE_MAX_VISIBILITY = 0.3; // tobillo de esa misma pierna: tiene que "desaparecer" -- visibilidad claramente por debajo de la de la rodilla, oculto detrás del propio cuerpo
+const STRETCH_QUAD_WRIST_MAX_VISIBILITY = 0.3; // la muñeca que sujeta el pie por detrás de la espalda también se oculta -- no importa cuál de las dos manos, igual que el agarre en el resto de la familia
+
+/**
+ * Paso 2 del cuádriceps de pie: una pierna se dobla por la rodilla hacia
+ * atrás, llevando el talón hacia el glúteo, agarrada por detrás de la
+ * espalda con una mano, mientras la otra pierna aguanta de pie, recta.
+ * De frente a la cámara — ver el comentario junto a esta función para el
+ * porqué de usar visibilidad en vez de geometría aquí.
+ */
+export function checkStandingQuadStretch(lm) {
+  const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
+  const lH = lm[L_HIP], rH = lm[R_HIP];
+  const lK = lm[L_KNEE], rK = lm[R_KNEE];
+  const lA = lm[L_ANKLE], rA = lm[R_ANKLE];
+  const lW = lm[L_WRIST], rW = lm[R_WRIST];
+
+  if ([lS, rS, lH, rH].some((p) => (p.visibility ?? 1) < STRETCH_QUAD_MIN_VISIBILITY)) {
+    return {
+      ok: false,
+      reason: "No se te ve entera/o. Ponte de frente a la cámara, algo alejada/o, para que se vean los hombros y las caderas enteros.",
+      debug: { fail: "vis" },
+    };
+  }
+
+  const grabWristVanished = (lW.visibility ?? 1) <= STRETCH_QUAD_WRIST_MAX_VISIBILITY || (rW.visibility ?? 1) <= STRETCH_QUAD_WRIST_MAX_VISIBILITY;
+
+  function evalSide(standHip, standKnee, standAnkle, foldKnee, foldAnkle) {
+    const standLegVisible =
+      (standKnee.visibility ?? 1) >= STRETCH_QUAD_MIN_VISIBILITY &&
+      (standAnkle.visibility ?? 1) >= STRETCH_QUAD_MIN_VISIBILITY;
+    const standKneeAngle = standLegVisible ? angle(standHip, standKnee, standAnkle) : null;
+    const standingStraight = standKneeAngle !== null && standKneeAngle >= STRETCH_QUAD_STANDING_KNEE_MIN_DEG;
+    const foldedKneeVisible = (foldKnee.visibility ?? 1) >= STRETCH_QUAD_FOLDED_KNEE_MIN_VISIBILITY;
+    const ankleVanished = (foldAnkle.visibility ?? 1) <= STRETCH_QUAD_ANKLE_MAX_VISIBILITY;
+    const ok = standingStraight && foldedKneeVisible && ankleVanished && grabWristVanished;
+    return {
+      ok,
+      debug: {
+        piernaApoyo: standKneeAngle === null ? null : standKneeAngle.toFixed(0),
+        rodillaDoblada: (foldKnee.visibility ?? 1).toFixed(2),
+        tobilloDoblado: (foldAnkle.visibility ?? 1).toFixed(2),
+      },
+    };
+  }
+
+  const leftFolds = evalSide(rH, rK, rA, lK, lA);  // pierna izquierda doblada hacia atrás, apoyada en la derecha
+  const rightFolds = evalSide(lH, lK, lA, rK, rA); // pierna derecha doblada hacia atrás, apoyada en la izquierda
+
+  if (leftFolds.ok) return { ok: true, side: "left", debug: leftFolds.debug };
+  if (rightFolds.ok) return { ok: true, side: "right", debug: rightFolds.debug };
+
+  return {
+    ok: false,
+    reason: "De pie y de frente a la cámara, dobla una rodilla llevando el talón hacia el glúteo por detrás, y agárrate el pie con la mano por detrás de la espalda, aguantando el equilibrio con la pierna contraria.",
+    debug: {
+      "izq-apoyo": leftFolds.debug.piernaApoyo,
+      "izq-rodilla": leftFolds.debug.rodillaDoblada,
+      "izq-tobillo": leftFolds.debug.tobilloDoblado,
+      "der-apoyo": rightFolds.debug.piernaApoyo,
+      "der-rodilla": rightFolds.debug.rodillaDoblada,
+      "der-tobillo": rightFolds.debug.tobilloDoblado,
+      munecaIzq: (lW.visibility ?? 1).toFixed(2),
+      munecaDer: (rW.visibility ?? 1).toFixed(2),
     },
   };
 }
@@ -2779,6 +3311,26 @@ class WorkoutSession {
     this.neckLateralAnchorX = null;          // giros de cuello: punto medio de hombros (x) al confirmarse el lado, para medir cuánto se desplaza el torso durante el vaivén (ver NECKLATERAL_DRIFT_TOLERANCE_FACTOR)
     this.neckLateralDrifted = false;         // giros de cuello: si el torso se ha desplazado más de la cuenta durante el vaivén en curso (se avisa, no se penaliza -- ver processNeckLateral)
     this.neckLateralLastTransitionAt = null; // giros de cuello: performance.now() del último vaivén completado (o del armado), para cerrar la serie sola si te paras (ver NECKLATERAL_STILL_MS)
+    this.neckTurnStableSince = null;      // giro de cabeza a los lados: desde cuándo llevas la nariz centrada seguido, sin armar aún (ver NECKTURN_CENTER_STABLE_MS)
+    this.neckTurnBaselineOffset = 0;      // giro de cabeza a los lados: desviación nariz/hombros que se considera "centro" -- se fija al armar (ver processNeckTurn), mismo concepto que neckLateralBaselineOffset
+    this.neckTurnBaselineVerticalOffset = 0; // giro de cabeza a los lados: idem que neckTurnBaselineOffset pero en vertical (ver NECKTURN_MAX_VERTICAL_FACTOR)
+    this.neckTurnSide = null;             // giro de cabeza a los lados: "left" | "right" mientras se confirma un lado (antes de que se sostenga NECKTURN_SIDE_STABLE_MS), null en el centro
+    this.neckTurnSideSince = null;        // giro de cabeza a los lados: desde cuándo llevas el lado actual sostenido, sin confirmar aún (ver NECKTURN_SIDE_STABLE_MS)
+    this.neckTurnAnchorX = null;          // giro de cabeza a los lados: punto medio de hombros (x) al confirmarse el lado, para medir cuánto se desplaza el torso durante el vaivén (ver NECKTURN_DRIFT_TOLERANCE_FACTOR)
+    this.neckTurnDrifted = false;         // giro de cabeza a los lados: si el torso se ha desplazado más de la cuenta durante el vaivén en curso (se avisa, no se penaliza -- ver processNeckTurn)
+    this.neckTurnLastTransitionAt = null; // giro de cabeza a los lados: performance.now() del último vaivén completado (o del armado), para cerrar la serie sola si te paras (ver NECKTURN_STILL_MS)
+    this.neckCirclePrevAngle = null;      // círculos de cuello: último ángulo (radianes) del vector hombros->nariz, para calcular el delta del frame (ver NECKCIRCLE_* y processNeckCircles)
+    this.neckCircleAccum = 0;             // círculos de cuello: ángulo acumulado (con signo) desde la última vuelta contada -- al llegar a ±2π se cuenta una repetición, en cualquier sentido (sin bloqueo de sentido, a diferencia de círculos de brazos)
+    this.neckCircleCenterStableSince = null; // círculos de cuello: desde cuándo llevas la cabeza centrada y quieta seguido, sin armar aún (ver NECKCIRCLE_CENTER_STABLE_MS)
+    this.neckCircleLastProgressAt = null; // círculos de cuello: performance.now() del último frame con giro de verdad (por encima de NECKCIRCLE_MIN_ANGULAR_DELTA) -- para cerrar la serie sola si te paras (ver NECKCIRCLE_STILL_MS)
+    this.neckCircleRepStartTime = null;   // círculos de cuello: performance.now() de cuándo empezó la vuelta en curso, para el filtro de ruido NECKCIRCLE_MIN_REP_SECONDS
+    this.neckHalfTurnPrevAngle = null;      // media vuelta de cuello: idem que neckCirclePrevAngle, para processNeckHalfTurn
+    this.neckHalfTurnAccum = 0;             // media vuelta de cuello: ángulo acumulado (con signo) del vaivén EN CURSO (desde el último cambio de sentido confirmado, o desde que se armó) -- se compara con NECKHALFTURN_MIN_SWING_RAD al confirmarse el siguiente cambio de sentido (ver v2 en el comentario de NECKHALFTURN_*)
+    this.neckHalfTurnDirection = null;      // media vuelta de cuello: 1 | -1 | null -- sentido CONFIRMADO del vaivén en curso; null hasta el primer movimiento de verdad de la serie
+    this.neckHalfTurnReverseSince = null;   // media vuelta de cuello: performance.now() desde cuándo llevas moviéndote en el sentido contrario al confirmado, sin confirmar aún el cambio (ver NECKHALFTURN_REVERSE_STABLE_MS) -- null mientras sigues en el mismo sentido
+    this.neckHalfTurnCenterStableSince = null; // media vuelta de cuello: desde cuándo llevas la cabeza centrada y quieta seguido, sin armar aún (ver NECKHALFTURN_CENTER_STABLE_MS)
+    this.neckHalfTurnLastProgressAt = null; // media vuelta de cuello: performance.now() del último frame con giro de verdad -- para cerrar la serie sola si te paras (ver NECKHALFTURN_STILL_MS)
+    this.neckHalfTurnRepStartTime = null;   // media vuelta de cuello: performance.now() de cuándo empezó el vaivén en curso, para el filtro de ruido NECKHALFTURN_MIN_REP_SECONDS
     this.armScissorsCenterStableSince = null; // tijeras de brazos: desde cuándo llevas los dos brazos extendidos seguido, sin armar aún (ver ARMSCISSORS_CENTER_STABLE_MS)
     this.armScissorsCrossSince = null;        // tijeras de brazos: desde cuándo llevas los brazos cruzados seguido, sin confirmar aún (ver ARMSCISSORS_CROSS_STABLE_MS)
     this.armScissorsLastTransitionAt = null;  // tijeras de brazos: performance.now() del último vaivén completado (o del armado), para cerrar la serie sola si te paras (ver ARMSCISSORS_STILL_MS)
@@ -2810,6 +3362,50 @@ class WorkoutSession {
     this.heelKickPrevAngleR = null;      // talones al gluteo: idem, pierna derecha
     this.heelKickSmoothAngleL = null;    // talones al gluteo: angulo (grados, pierna izquierda) YA suavizado con media movil exponencial, tras el ratchet -- para amortiguar el temblor de la pierna que la camara ve peor (ver HEELKICK_ANGLE_SMOOTHING_ALPHA)
     this.heelKickSmoothAngleR = null;    // talones al gluteo: idem, pierna derecha
+    this.hipLateralStableSince = null;      // balanceo lateral de cadera: desde cuándo llevas la cadera centrada (y los pies bien separados) seguido, sin armar aún (ver HIPLATERAL_CENTER_STABLE_MS)
+    this.hipLateralBaselineOffset = 0;      // balanceo lateral de cadera: desviación cadera/tobillos que se considera "centro" -- se fija al armar (ver processHipLateral), para no exigir que la cadera esté perfectamente centrada de fábrica
+    this.hipLateralBaselineDepth = 0;       // balanceo lateral de cadera: profundidad (z) de la cadera que se considera "centro" -- se fija al armar, para detectar si te alejas/acercas de la cámara en vez de ir a un lado (ver HIPLATERAL_MAX_DEPTH_FACTOR)
+    this.hipLateralSide = null;             // balanceo lateral de cadera: "left" | "right" mientras se confirma un lado (antes de que se sostenga HIPLATERAL_SIDE_STABLE_MS), null en el centro
+    this.hipLateralSideSince = null;        // balanceo lateral de cadera: desde cuándo llevas el lado actual sostenido, sin confirmar aún (ver HIPLATERAL_SIDE_STABLE_MS)
+    this.hipLateralAnkleAnchorX = null;     // balanceo lateral de cadera: punto medio de tobillos (x) al confirmarse el lado, para medir cuánto se desplazan los pies durante el vaivén (ver HIPLATERAL_FEET_DRIFT_TOLERANCE_FACTOR)
+    this.hipLateralFeetDrifted = false;     // balanceo lateral de cadera: si los pies se han desplazado más de la cuenta durante el vaivén en curso (se avisa, no se penaliza -- ver processHipLateral)
+    this.hipLateralLastTransitionAt = null; // balanceo lateral de cadera: performance.now() del último vaivén completado (o del armado), para cerrar la serie sola si te paras (ver HIPLATERAL_STILL_MS)
+    this.hipLateralSmoothHipMidX = null;    // balanceo lateral de cadera: hipMidX YA suavizado con media móvil exponencial (ver HIPLATERAL_GEOMETRY_SMOOTHING_ALPHA) -- amortigua el temblor de un solo fotograma para no desarmar el vaivén por ruido
+    this.hipLateralSmoothHipMidZ = null;    // balanceo lateral de cadera: idem, hipMidZ
+    this.hipLateralSmoothHipWidth = null;   // balanceo lateral de cadera: idem, hipWidth (la magnitud más pequeña y más ruidosa de las cinco -- la que más lo necesita)
+    this.hipLateralSmoothAnkleMidX = null;  // balanceo lateral de cadera: idem, ankleMidX
+    this.hipLateralSmoothStanceWidth = null; // balanceo lateral de cadera: idem, stanceWidth
+    this.hipForwardBackTrackedSide = null;  // cadera adelante/atrás: "left" | "right" -- qué lado (cadera+tobillo) se vigila, elegido UNA VEZ al armar según cuál se ve mejor (mismo criterio que heelKickTrackedSide)
+    this.hipForwardBackStableSince = null;  // cadera adelante/atrás: desde cuándo llevas la cadera centrada seguido, sin armar aún (ver HIPFORWARDBACK_CENTER_STABLE_MS)
+    this.hipForwardBackBaselineOffset = 0;  // cadera adelante/atrás: desviación cadera/tobillo que se considera "centro" -- se fija al armar
+    this.hipForwardBackFacingSign = 1;      // cadera adelante/atrás: +1 | -1, fijado al armar (nariz respecto al punto medio de hombros), para etiquetar "adelante"/"atrás" con sentido anatómico real y no solo izquierda/derecha de pantalla -- heurística de primera versión
+    this.hipForwardBackDirection = null;    // cadera adelante/atrás: "front" | "back" mientras se confirma, null en el centro
+    this.hipForwardBackDirectionSince = null; // cadera adelante/atrás: desde cuándo llevas la dirección actual sostenida, sin confirmar aún (ver HIPFORWARDBACK_DIRECTION_STABLE_MS)
+    this.hipForwardBackAnkleAnchorX = null; // cadera adelante/atrás: X del tobillo vigilado al confirmarse delante/atrás, para medir cuánto se desplazan los pies durante el vaivén (ver HIPFORWARDBACK_FEET_DRIFT_TOLERANCE_FACTOR)
+    this.hipForwardBackFeetDrifted = false; // cadera adelante/atrás: si los pies se han desplazado más de la cuenta durante el vaivén en curso (se avisa, no se penaliza -- ver processHipForwardBack)
+    this.hipForwardBackLastTransitionAt = null; // cadera adelante/atrás: performance.now() del último vaivén completado (o del armado), para cerrar la serie sola si te paras (ver HIPFORWARDBACK_STILL_MS)
+    this.hipForwardBackSmoothHipX = null;   // cadera adelante/atrás: X de la cadera vigilada YA suavizada con media móvil exponencial (ver HIPFORWARDBACK_GEOMETRY_SMOOTHING_ALPHA)
+    this.hipForwardBackSmoothAnkleX = null; // cadera adelante/atrás: idem, X del tobillo vigilado
+    this.hipForwardBackSmoothLegLength = null; // cadera adelante/atrás: idem, longitud cadera-tobillo (normalizador -- ver HIPFORWARDBACK_ENTER_FACTOR)
+    this.hipForwardBackSmoothHipWidth = null; // cadera adelante/atrás: separación cadera-cadera (Math.hypot XY) YA suavizada con media móvil exponencial -- señal de "¿sigo de perfil?" (ver HIPFORWARDBACK_PROFILE_MAX_HIP_WIDTH_FACTOR)
+    this.hipForwardBackNotProfileSince = null; // cadera adelante/atrás: desde cuándo llevas la separación cadera-cadera por encima del umbral de perfil seguido, sin confirmar aún (ver HIPFORWARDBACK_PROFILE_CONFIRM_MS)
+    this.hipForwardBackTurnedAway = false; // cadera adelante/atrás: si te has girado hacia la cámara (perdiendo la posición de perfil) durante el vaivén en curso -- igual que hipForwardBackFeetDrifted, invalida la repetición al volver al centro en vez de contarla (ver processHipForwardBack)
+    this.forearmRotationStableSince = null;      // rotacion de brazo (codo sujeto): desde cuando llevas un agarre valido seguido, sin armar aun (ver FOREARMROTATION_STABLE_MS)
+    this.forearmRotationActiveSide = null;        // rotacion de brazo (codo sujeto): "left" | "right" -- que brazo gira ahora mismo, null mientras no esta armado
+    this.forearmRotationGrabBrokenSince = null;   // rotacion de brazo (codo sujeto): performance.now() desde cuando el agarre del brazo activo lleva fallando seguido, sin darlo aun por soltado de verdad (ver FOREARMROTATION_GRAB_BREAK_MS)
+    this.forearmRotationPrevAngle = null;         // rotacion de brazo (codo sujeto): ultimo angulo local (radianes) del vector codo->muneca del brazo activo, para calcular el delta del frame (ver FOREARMROTATION_* y processForearmRotation)
+    this.forearmRotationAccum = 0;                // rotacion de brazo (codo sujeto): angulo acumulado (con signo) desde la ultima vuelta completa contada -- al llegar a +-2*PI se cuenta una repeticion, en cualquier sentido (sin bloqueo de sentido, igual que circulos de cuello)
+    this.forearmRotationLastActivityAt = null;    // rotacion de brazo (codo sujeto): performance.now() del ultimo agarre armado/repeticion contada/cambio de brazo -- para cerrar la serie sola si pasan FOREARMROTATION_STILL_MS sin nada
+    this.forearmRotationRepStartTime = null;      // rotacion de brazo (codo sujeto): performance.now() de cuando empezo la vuelta en curso, para el filtro de ruido FOREARMROTATION_MIN_REP_SECONDS
+    this.forearmRotationLastCountedSide = null;   // rotacion de brazo (codo sujeto): "left" | "right" -- lado de la ULTIMA repeticion contada, para avisar por voz solo cuando el brazo activo cambia de verdad (mismo mecanismo que legRotationLastCountedSide); se resetea a null en cada serie nueva
+    this.wristRotationTogetherStableSince = null; // rotación de muñecas: desde cuándo llevas las manos juntas seguido, sin armar aún (ver WRISTROTATION_TOGETHER_STABLE_MS)
+    this.wristRotationBrokenSince = null;          // rotación de muñecas: performance.now() desde cuándo las manos llevan separadas seguido, sin darlo aún por roto de verdad (ver WRISTROTATION_TOGETHER_BREAK_MS)
+    this.wristRotationPrevAngle = null;            // rotación de muñecas: último ángulo local (radianes) del vector punto-medio-de-hombros->punto-medio-de-muñecas, para calcular el delta del frame (ver WRISTROTATION_* y processWristRotation)
+    this.wristRotationAccum = 0;                   // rotación de muñecas: ángulo acumulado (con signo) desde la última vuelta completa contada -- al llegar a ±2π se cuenta una repetición, en cualquier sentido (sin bloqueo de sentido, igual que círculos de cuello)
+    this.wristRotationLastActivityAt = null;       // rotación de muñecas: performance.now() del último frame con manos juntas armadas/giro de verdad/repetición contada -- para cerrar la serie sola si pasan WRISTROTATION_STILL_MS sin nada
+    this.wristRotationRepStartTime = null;         // rotación de muñecas: performance.now() de cuándo empezó la vuelta en curso, para el filtro de ruido WRISTROTATION_MIN_REP_SECONDS
+    this.wristRotationCenterX = null;               // rotación de muñecas (v2): centro estimado (EMA lenta, ver WRISTROTATION_CENTER_EMA_ALPHA) del círculo que dibujan las manos juntas -- null hasta que se arma, momento en que se siembra con la posición inicial de las manos
+    this.wristRotationCenterY = null;               // rotación de muñecas (v2): idem, coordenada Y
 
     this.sessionStart = null;
     this.lastRepTime = null;
@@ -3307,6 +3903,72 @@ class WorkoutSession {
       this.neckLateralDrifted = false;
       this.neckLateralLastTransitionAt = null;
       this.setStatus("Ponte de frente a la cámara, mirando al frente, para empezar.");
+    } else if (this.counterKey === "neckturn") {
+      // Igual que necklateral: nada que calibrar de una barra o de tu
+      // altura, el umbral es proporcional al ancho de hombros. Solo
+      // hace falta esperar a verte mirando al frente y quieta/o, para
+      // fijar tu propio "centro" real (baseline) antes de empezar a
+      // contar vaivenes.
+      this.prepping = false;
+      this.state = null;
+      this.neckTurnStableSince = null;
+      this.neckTurnBaselineOffset = 0;
+      this.neckTurnBaselineVerticalOffset = 0;
+      this.neckTurnSide = null;
+      this.neckTurnSideSince = null;
+      this.neckTurnAnchorX = null;
+      this.neckTurnDrifted = false;
+      this.neckTurnLastTransitionAt = null;
+      this.setStatus("Ponte de frente a la cámara, mirando al frente, para empezar.");
+    } else if (this.counterKey === "neckcircles") {
+      // Tampoco hay nada que calibrar: el ángulo es relativo a tus
+      // propios hombros, no depende de la distancia a la cámara. Solo
+      // hace falta esperar a verte de frente y con la cabeza centrada,
+      // para no arrancar a mitad de un círculo.
+      this.prepping = false;
+      this.state = null;
+      this.neckCirclePrevAngle = null;
+      this.neckCircleAccum = 0;
+      this.neckCircleCenterStableSince = null;
+      this.neckCircleLastProgressAt = null;
+      this.neckCircleRepStartTime = null;
+      this.setStatus("Ponte de frente a la cámara, mirando al frente, para empezar.");
+    } else if (this.counterKey === "neckhalfturn") {
+      // Igual que círculos de cuello: nada que calibrar, solo esperar a
+      // verte de frente y con la cabeza centrada.
+      this.prepping = false;
+      this.state = null;
+      this.neckHalfTurnPrevAngle = null;
+      this.neckHalfTurnAccum = 0;
+      this.neckHalfTurnDirection = null;
+      this.neckHalfTurnReverseSince = null;
+      this.neckHalfTurnCenterStableSince = null;
+      this.neckHalfTurnLastProgressAt = null;
+      this.neckHalfTurnRepStartTime = null;
+      this.setStatus("Ponte de frente a la cámara, mirando al frente, para empezar.");
+    } else if (this.counterKey === "hiplateral") {
+      // Tampoco hay nada que calibrar de la distancia a la cámara: los
+      // umbrales son proporcionales al ancho de la base de apoyo
+      // (tobillo a tobillo), no a lo lejos que estés de la cámara. Solo
+      // hace falta esperar a verte de pie, con los pies bien separados
+      // y la cadera centrada y quieta, para fijar tu propio "centro"
+      // real (baseline) antes de empezar a contar vaivenes.
+      this.prepping = false;
+      this.state = null;
+      this.hipLateralStableSince = null;
+      this.hipLateralBaselineOffset = 0;
+      this.hipLateralBaselineDepth = 0;
+      this.hipLateralSide = null;
+      this.hipLateralSideSince = null;
+      this.hipLateralAnkleAnchorX = null;
+      this.hipLateralFeetDrifted = false;
+      this.hipLateralLastTransitionAt = null;
+      this.hipLateralSmoothHipMidX = null;
+      this.hipLateralSmoothHipMidZ = null;
+      this.hipLateralSmoothHipWidth = null;
+      this.hipLateralSmoothAnkleMidX = null;
+      this.hipLateralSmoothStanceWidth = null;
+      this.setStatus("Ponte de frente a la cámara, con los pies bien separados, para empezar.");
     } else if (this.counterKey === "armscissors") {
       // Tampoco hay nada que calibrar: los umbrales son proporcionales
       // al ancho de hombros, no a la distancia a la cámara. Solo hace
@@ -3371,6 +4033,64 @@ class WorkoutSession {
       this.heelKickSmoothAngleR = null;
       this.heelKickPrevAngleR = null;
       this.setStatus("Ponte de pie, de perfil a la cámara, con las dos piernas apoyadas, para empezar.");
+    } else if (this.counterKey === "forearmrotation") {
+      // Tampoco hay nada que calibrar: los umbrales son proporcionales
+      // al ancho de hombros, no a la distancia a la cámara. Solo hace
+      // falta esperar a ver un agarre válido en cualquiera de los dos
+      // brazos, para no arrancar a mitad de un giro.
+      this.prepping = false;
+      this.state = null;
+      this.forearmRotationStableSince = null;
+      this.forearmRotationActiveSide = null;
+      this.forearmRotationGrabBrokenSince = null;
+      this.forearmRotationPrevAngle = null;
+      this.forearmRotationAccum = 0;
+      this.forearmRotationLastActivityAt = null;
+      this.forearmRotationRepStartTime = null;
+      this.forearmRotationLastCountedSide = null;
+      this.setStatus("Agarra el codo de un brazo con la otra mano, cerca del cuerpo, para empezar.");
+    } else if (this.counterKey === "wristrotation") {
+      // Tampoco hay nada que calibrar: los umbrales son proporcionales
+      // al ancho de hombros, no a la distancia a la cámara. Solo hace
+      // falta esperar a verte con las manos juntas, para no arrancar a
+      // mitad de un giro.
+      this.prepping = false;
+      this.state = null;
+      this.wristRotationTogetherStableSince = null;
+      this.wristRotationBrokenSince = null;
+      this.wristRotationPrevAngle = null;
+      this.wristRotationAccum = 0;
+      this.wristRotationLastActivityAt = null;
+      this.wristRotationRepStartTime = null;
+      this.wristRotationCenterX = null;
+      this.wristRotationCenterY = null;
+      this.setStatus("Junta las manos con los dedos entrelazados, delante del pecho, para empezar.");
+    } else if (this.counterKey === "hipforwardback") {
+      // Tampoco hay nada que calibrar de la distancia a la cámara: los
+      // umbrales son proporcionales a la longitud de la pierna del lado
+      // vigilado, no a lo lejos que estés de la cámara. Solo hace falta
+      // esperar a verte de pie, de perfil, con la cadera centrada y
+      // quieta, para fijar tu propio "centro" real (baseline) antes de
+      // empezar a contar vaivenes -- mismo mecanismo que hiplateral,
+      // rotado a de perfil (ver HIPFORWARDBACK_* más arriba).
+      this.prepping = false;
+      this.state = null;
+      this.hipForwardBackTrackedSide = null;
+      this.hipForwardBackStableSince = null;
+      this.hipForwardBackBaselineOffset = 0;
+      this.hipForwardBackFacingSign = 1;
+      this.hipForwardBackDirection = null;
+      this.hipForwardBackDirectionSince = null;
+      this.hipForwardBackAnkleAnchorX = null;
+      this.hipForwardBackFeetDrifted = false;
+      this.hipForwardBackLastTransitionAt = null;
+      this.hipForwardBackSmoothHipX = null;
+      this.hipForwardBackSmoothAnkleX = null;
+      this.hipForwardBackSmoothLegLength = null;
+      this.hipForwardBackSmoothHipWidth = null;
+      this.hipForwardBackNotProfileSince = null;
+      this.hipForwardBackTurnedAway = false;
+      this.setStatus("Ponte de perfil a la cámara, de pie, con la cadera centrada, para empezar.");
     } else if (this.counterKey === "crunch") {
       // Tampoco hay nada que calibrar: se mide el hombro frente a la
       // cadera, en proporción al muslo — ningún valor depende de la
@@ -5741,6 +6461,965 @@ class WorkoutSession {
   }
 
   /**
+   * Giro de cabeza a los lados — DE FRENTE a la cámara, de pie o
+   * sentada/o: la cabeza GIRA sobre el eje vertical del cuello (como
+   * decir "no" con la cabeza, sin inclinarla), mirando hacia un lado y
+   * volviendo a mirar al frente; un vaivén completo (centro -> lado ->
+   * centro) cuenta como una repetición (ver el bloque NECKTURN_* de más
+   * arriba para la geometría y cada umbral).
+   *
+   * DISTINTO de processNeckLateral (movilidad lateral de cuello): ese
+   * ejercicio es una inclinación (oreja hacia el hombro); este es un
+   * giro puro, sin inclinar la cabeza ni completar ninguna
+   * circunferencia (a diferencia de processNeckCircles/
+   * processNeckHalfTurn). Misma geometría de base que processNeckLateral
+   * (desplazamiento horizontal de la nariz respecto al punto medio de
+   * los hombros) reutilizada tal cual bajo constantes/campos propios —
+   * primera versión de este ejercicio, pendiente de calibrar con un
+   * test en cámara real.
+   *
+   * this.state sigue el mismo patrón que processNeckLateral: null
+   * (todavía sin armar, esperando centrado estable) -> "center" (armado,
+   * esperando que gires hacia un lado) -> "left"/"right" (lado
+   * confirmado, esperando que vuelvas a mirar al frente para cerrar el
+   * vaivén).
+   */
+  processNeckTurn(lm, now) {
+    const nose = lm[NOSE];
+    const lShoulder = lm[L_SHOULDER], rShoulder = lm[R_SHOULDER];
+
+    const vis = ((nose.visibility ?? 1) + (lShoulder.visibility ?? 1) + (rShoulder.visibility ?? 1)) / 3;
+
+    if (vis < NECKTURN_MIN_VISIBILITY) {
+      this.announceStatus("No se te ven bien la cara y los hombros. Ponte de frente a la cámara.");
+      if (this.debugEl) this.debugEl.textContent = "buscando cara y hombros de frente…";
+      this.noteAbsence(now);
+      return;
+    }
+    this.outOfFrameSince = null;
+
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Cara y hombros a la vista. ¡Listo! Ya puedes empezar. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
+        "startup_ready"
+      );
+    }
+
+    const shoulderMidX = (lShoulder.x + rShoulder.x) / 2;
+    const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
+    const shoulderWidth = Math.hypot(lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y);
+    if (!shoulderWidth) return;
+
+    const rawOffset = (nose.x - shoulderMidX) / shoulderWidth;
+    const rawVerticalOffset = (nose.y - shoulderMidY) / shoulderWidth;
+
+    if (this.state === null) {
+      // Armado: nariz centrada (respecto a los hombros) sostenida
+      // NECKTURN_CENTER_STABLE_MS seguidos — fija tu propio "centro"
+      // real como baseline, para no exigir que la nariz esté
+      // perfectamente centrada de fábrica (encuadre de cámara, postura
+      // natural...).
+      if (Math.abs(rawOffset) < NECKTURN_ENTER_FACTOR) {
+        if (this.neckTurnStableSince === null) this.neckTurnStableSince = now;
+        if (now - this.neckTurnStableSince >= NECKTURN_CENTER_STABLE_MS) {
+          this.state = "center";
+          this.neckTurnStableSince = null;
+          this.neckTurnBaselineOffset = rawOffset;
+          this.neckTurnBaselineVerticalOffset = rawVerticalOffset;
+          this.neckTurnLastTransitionAt = now;
+          this.announceStatus("¡Listo! Mira hacia un lado, y vuelve a mirar al frente.", "ready_to_go");
+        } else {
+          this.setStatus("Mirando al frente, centrada/o… confirmando (no te muevas)");
+        }
+      } else {
+        this.neckTurnStableSince = null;
+        this.setStatus("Ponte de frente a la cámara, mirando al frente, para empezar.");
+      }
+      if (this.debugEl) {
+        this.debugEl.textContent = `esperando centro… desviación=${rawOffset.toFixed(3)} umbral=±${NECKTURN_ENTER_FACTOR.toFixed(3)}`;
+      }
+      return;
+    }
+
+    // Ya armado: parar de completar ningún vaivén NECKTURN_STILL_MS
+    // seguidos es la señal de que has terminado la serie (mismo patrón
+    // que NECKLATERAL_STILL_MS).
+    if (this.neckTurnLastTransitionAt !== null && now - this.neckTurnLastTransitionAt >= NECKTURN_STILL_MS) {
+      this.closeActiveSet();
+      return;
+    }
+
+    const offset = rawOffset - this.neckTurnBaselineOffset;
+    const verticalOffset = rawVerticalOffset - this.neckTurnBaselineVerticalOffset;
+
+    if (this.state === "center") {
+      // Esperando que la nariz se separe del centro hacia un lado —
+      // igual que necklateral, exige que "girada/o hacia un lado" se
+      // sostenga un rato antes de dar el lado por confirmado
+      // (NECKTURN_SIDE_STABLE_MS), para no armar el vaivén con un pico
+      // de un frame suelto. Si la nariz ha caído más de la cuenta
+      // (NECKTURN_MAX_VERTICAL_FACTOR) respecto a tu centro, esto es un
+      // movimiento hacia delante/abajo (barbilla al pecho), no un giro
+      // hacia un lado -- no cuenta como sideNow aunque el desplazamiento
+      // horizontal por sí solo pareciera suficiente.
+      const verticalOk = Math.abs(verticalOffset) < NECKTURN_MAX_VERTICAL_FACTOR;
+      const sideNow = !verticalOk ? null : offset > NECKTURN_ENTER_FACTOR ? "right" : offset < -NECKTURN_ENTER_FACTOR ? "left" : null;
+      if (sideNow) {
+        if (this.neckTurnSide !== sideNow) {
+          this.neckTurnSide = sideNow;
+          this.neckTurnSideSince = now;
+        } else if (now - this.neckTurnSideSince >= NECKTURN_SIDE_STABLE_MS) {
+          this.state = sideNow;
+          this.repStartTime = now; // la repetición empieza al confirmarse el lado (momento real de llegada, no cuando vuelves al centro)
+          this.neckTurnAnchorX = shoulderMidX; // hombros AHORA MISMO -- lo que se desplacen desde aquí es lo que se vigila
+          this.neckTurnDrifted = false;
+          this.neckTurnSideSince = null;
+        }
+      } else {
+        this.neckTurnSide = null;
+        this.neckTurnSideSince = null;
+      }
+    } else {
+      // state === "left" | "right": lado confirmado, vigilando que el
+      // torso (punto medio de hombros) no se desplace de sitio mientras
+      // esperas a volver a mirar al frente.
+      const drift = Math.abs(shoulderMidX - this.neckTurnAnchorX) / shoulderWidth;
+      if (drift > NECKTURN_DRIFT_TOLERANCE_FACTOR && !this.neckTurnDrifted) {
+        this.neckTurnDrifted = true;
+      }
+      if (this.neckTurnDrifted) {
+        // Solo texto (setStatus), sin voz -- es una corrección, no algo
+        // imprescindible para seguir contando (la repetición se cuenta
+        // igual, ver más abajo), así que no hace falta interrumpir con
+        // audio cada vez que pasa.
+        this.setStatus("Mueves el cuerpo entero — intenta girar solo la cabeza, sin desplazar los hombros.");
+      }
+      if (Math.abs(offset) < NECKTURN_EXIT_FACTOR) {
+        // Vuelta al centro: se cierra el vaivén.
+        this.neckTurnLastTransitionAt = now;
+        this.countRep(
+          (now - this.repStartTime) / 1000, now,
+          this.state === "left" ? "Giro a la izquierda" : "Giro a la derecha",
+          NECKTURN_MIN_REP_SECONDS
+        );
+        this.state = "center";
+        this.neckTurnSide = null;
+        this.neckTurnSideSince = null;
+        this.neckTurnAnchorX = null;
+        this.neckTurnDrifted = false;
+      }
+    }
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `estado: ${this.state} | desviación=${offset.toFixed(3)} vertical=${verticalOffset.toFixed(3)}${Math.abs(verticalOffset) >= NECKTURN_MAX_VERTICAL_FACTOR ? "✗" : ""} umbral_entrada=±${NECKTURN_ENTER_FACTOR.toFixed(3)} umbral_salida=±${NECKTURN_EXIT_FACTOR.toFixed(3)} umbral_vertical=${NECKTURN_MAX_VERTICAL_FACTOR.toFixed(3)} | ` +
+        `desplazamiento hombros: ${this.neckTurnAnchorX !== null ? (Math.abs(shoulderMidX - this.neckTurnAnchorX) / shoulderWidth).toFixed(3) : "-"}${this.neckTurnDrifted ? " ⚠" : ""} | ` +
+        `quieto desde hace: ${this.neckTurnLastTransitionAt ? Math.round(now - this.neckTurnLastTransitionAt) + "ms" : "-"}`;
+    }
+  }
+
+  /**
+   * Círculo completo de cuello — DE FRENTE a la cámara, de pie o
+   * sentada/o: la cabeza da una vuelta entera alrededor del cuello (de
+   * frente, hacia un lado, barbilla al pecho, hacia el otro lado, y
+   * hacia atrás/arriba de vuelta al frente); una vuelta completa cuenta
+   * como una repetición (ver el bloque NECKCIRCLE_* de más arriba para
+   * la geometría y cada umbral — primera versión, pendiente de calibrar
+   * con un test en cámara real, mismo patrón que armcircles en su día).
+   *
+   * Mismo mecanismo que processArmCircles (ángulo acumulado del vector
+   * punto-medio-de-hombros->nariz, wrapAngleDelta por fotograma, una
+   * repetición cada ±2π), pero SIN el bloqueo de sentido de círculos de
+   * brazos (armCirclePhase): aquí cualquiera de los dos sentidos
+   * (horario o antihorario) cuenta siempre, sin tener que completar
+   * antes el otro ni pararte para cambiar de sentido — pedido
+   * explícitamente por el usuario ("que también cuenten si los hago en
+   * sentido contrario").
+   *
+   * this.state solo distingue "todavía sin armar" (null, esperando de
+   * frente y centrada/o estable) de "armado y contando" ("active"),
+   * igual que círculos de brazos.
+   */
+  processNeckCircles(lm, now) {
+    const nose = lm[NOSE];
+    const lShoulder = lm[L_SHOULDER], rShoulder = lm[R_SHOULDER];
+
+    const vis = ((nose.visibility ?? 1) + (lShoulder.visibility ?? 1) + (rShoulder.visibility ?? 1)) / 3;
+
+    if (vis < NECKCIRCLE_MIN_VISIBILITY) {
+      this.announceStatus("No se te ven bien la cara y los hombros. Ponte de frente a la cámara.");
+      if (this.debugEl) this.debugEl.textContent = "buscando cara y hombros de frente…";
+      this.noteAbsence(now, NECKCIRCLE_OUT_OF_FRAME_MS);
+      return;
+    }
+    this.outOfFrameSince = null;
+
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Cara y hombros a la vista. ¡Listo! Empieza a girar la cabeza, en el sentido que prefieras. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
+        "startup_ready"
+      );
+    }
+
+    const shoulderMidX = (lShoulder.x + rShoulder.x) / 2;
+    const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
+    const shoulderWidth = Math.hypot(lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y);
+    if (!shoulderWidth) return;
+
+    if (this.state === null) {
+      // Armado: cabeza centrada (nariz cerca del punto medio de
+      // hombros) sostenido NECKCIRCLE_CENTER_STABLE_MS seguidos — para
+      // no arrancar a mitad de un giro (mismo espíritu que el armado de
+      // círculos de brazos, pero comprobando "de frente" en vez de
+      // "brazos extendidos").
+      const centered = Math.abs((nose.x - shoulderMidX) / shoulderWidth) < NECKCIRCLE_CENTER_ENTER_FACTOR;
+      if (centered) {
+        if (this.neckCircleCenterStableSince === null) this.neckCircleCenterStableSince = now;
+        if (now - this.neckCircleCenterStableSince >= NECKCIRCLE_CENTER_STABLE_MS) {
+          this.state = "active";
+          this.neckCircleCenterStableSince = null;
+          this.neckCirclePrevAngle = Math.atan2(-(nose.y - shoulderMidY), nose.x - shoulderMidX);
+          this.neckCircleAccum = 0;
+          this.neckCircleLastProgressAt = now;
+          this.neckCircleRepStartTime = now;
+          this.announceStatus("¡Listo! Empieza a girar la cabeza.", "ready_to_go");
+        } else {
+          this.setStatus("Mirando al frente, centrada/o… confirmando (no te muevas)");
+        }
+      } else {
+        this.neckCircleCenterStableSince = null;
+        this.setStatus("Ponte de frente a la cámara, mirando al frente, para empezar.");
+      }
+      if (this.debugEl) {
+        this.debugEl.textContent = "esperando cabeza centrada…";
+      }
+      return;
+    }
+
+    // state === "active": ya armado, se acumula ángulo cada frame.
+
+    // Parar de girar NECKCIRCLE_STILL_MS seguidos es la señal de que has
+    // terminado la serie (mismo patrón que ARMCIRCLES_STILL_MS).
+    if (this.neckCircleLastProgressAt !== null && now - this.neckCircleLastProgressAt >= NECKCIRCLE_STILL_MS) {
+      this.closeActiveSet();
+      this.neckCirclePrevAngle = null;
+      this.neckCircleAccum = 0;
+      return;
+    }
+
+    const angle = Math.atan2(-(nose.y - shoulderMidY), nose.x - shoulderMidX);
+
+    let delta = 0;
+    if (this.neckCirclePrevAngle === null) {
+      this.neckCirclePrevAngle = angle;
+    } else {
+      const d = wrapAngleDelta(angle - this.neckCirclePrevAngle);
+      if (Math.abs(d) <= NECKCIRCLE_MAX_SINGLE_FRAME_DELTA) {
+        delta = d;
+        this.neckCirclePrevAngle = angle;
+      }
+      // Si el salto supera el margen, se descarta como fallo puntual de
+      // tracking y el ángulo previo NO se actualiza (mismo motivo que
+      // ARMCIRCLES_MAX_SINGLE_ARM_DELTA): el giro real de este frame se
+      // arrastra al siguiente en vez de perderse del todo.
+    }
+
+    if (Math.abs(delta) >= NECKCIRCLE_MIN_ANGULAR_DELTA) {
+      this.neckCircleLastProgressAt = now;
+    }
+
+    this.neckCircleAccum += delta;
+
+    if (Math.abs(this.neckCircleAccum) >= 2 * Math.PI) {
+      // Vuelta completa, en cualquier sentido -- a diferencia de
+      // círculos de brazos, aquí no hay que comprobar que el sentido
+      // coincida con uno "pedido": todo giro completo cuenta.
+      const seconds = (now - this.neckCircleRepStartTime) / 1000;
+      this.countRep(seconds, now, "Círculo completo de cuello", NECKCIRCLE_MIN_REP_SECONDS);
+      // Se descuenta una vuelta completa del acumulado, no se resetea a
+      // 0 del todo -- por si ya llevabas parte de la siguiente vuelta
+      // encadenada en el mismo frame (mismo motivo que armCircleAccum).
+      this.neckCircleAccum -= Math.sign(this.neckCircleAccum) * 2 * Math.PI;
+      this.neckCircleRepStartTime = now;
+    }
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `acumulado: ${Math.round(this.neckCircleAccum * 180 / Math.PI)}° | delta: ${(delta * 180 / Math.PI).toFixed(1)}°/f | ` +
+        `quieto desde hace: ${this.neckCircleLastProgressAt ? Math.round(now - this.neckCircleLastProgressAt) + "ms" : "-"}`;
+    }
+  }
+
+  /**
+   * Media vuelta de cuello — DE FRENTE a la cámara, de pie o sentada/o:
+   * la cabeza va de un lado al otro pasando por el centro con la
+   * barbilla hacia el pecho, SIN llegar a completar el círculo entero
+   * (sin inclinar la cabeza hacia atrás) — pedido explícitamente como
+   * "que pare a la mitad", con un segundo vídeo de referencia (WhatsApp,
+   * 2026-09-04) para diferenciarlo del círculo completo de arriba (ver
+   * el bloque NECKHALFTURN_* de más arriba para el porqué del cambio a
+   * v2, contando por CAMBIO DE SENTIDO en vez de por ángulo acumulado
+   * fijo — pedido explícitamente por el usuario: "haz que cuente una
+   * rep cada vez que paro y cambio de direccion").
+   *
+   * Mismo vector que processNeckCircles (punto-medio-de-hombros->nariz,
+   * wrapAngleDelta por fotograma), pero en vez de acumular hasta un
+   * ángulo fijo, aquí se seguye el sentido del vaivén EN CURSO
+   * (neckHalfTurnDirection) y se cuenta una repetición cuando el
+   * movimiento en el sentido CONTRARIO se sostiene
+   * NECKHALFTURN_REVERSE_STABLE_MS seguidos (cambio de sentido
+   * confirmado, no un temblor de un fotograma) Y el vaivén que se
+   * cierra giró al menos NECKHALFTURN_MIN_SWING_RAD. Sin bloqueo de
+   * sentido: el primer movimiento de cada vaivén, en cualquier sentido,
+   * es válido — pedido explícitamente por el usuario ("que también
+   * cuenten si los hago en sentido contrario"). Sin diferenciación de
+   * lado en la voz (mismo espíritu minimalista que rodillas altas):
+   * solo se anuncia el número de repeticiones.
+   */
+  processNeckHalfTurn(lm, now) {
+    const nose = lm[NOSE];
+    const lShoulder = lm[L_SHOULDER], rShoulder = lm[R_SHOULDER];
+
+    const vis = ((nose.visibility ?? 1) + (lShoulder.visibility ?? 1) + (rShoulder.visibility ?? 1)) / 3;
+
+    if (vis < NECKHALFTURN_MIN_VISIBILITY) {
+      this.announceStatus("No se te ven bien la cara y los hombros. Ponte de frente a la cámara.");
+      if (this.debugEl) this.debugEl.textContent = "buscando cara y hombros de frente…";
+      this.noteAbsence(now, NECKHALFTURN_OUT_OF_FRAME_MS);
+      return;
+    }
+    this.outOfFrameSince = null;
+
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Cara y hombros a la vista. ¡Listo! Lleva la cabeza de un lado a otro pasando por el centro, en cualquier sentido. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
+        "startup_ready"
+      );
+    }
+
+    const shoulderMidX = (lShoulder.x + rShoulder.x) / 2;
+    const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
+    const shoulderWidth = Math.hypot(lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y);
+    if (!shoulderWidth) return;
+
+    if (this.state === null) {
+      const centered = Math.abs((nose.x - shoulderMidX) / shoulderWidth) < NECKHALFTURN_CENTER_ENTER_FACTOR;
+      if (centered) {
+        if (this.neckHalfTurnCenterStableSince === null) this.neckHalfTurnCenterStableSince = now;
+        if (now - this.neckHalfTurnCenterStableSince >= NECKHALFTURN_CENTER_STABLE_MS) {
+          this.state = "active";
+          this.neckHalfTurnCenterStableSince = null;
+          this.neckHalfTurnPrevAngle = Math.atan2(-(nose.y - shoulderMidY), nose.x - shoulderMidX);
+          this.neckHalfTurnAccum = 0;
+          this.neckHalfTurnDirection = null;
+          this.neckHalfTurnReverseSince = null;
+          this.neckHalfTurnLastProgressAt = now;
+          this.neckHalfTurnRepStartTime = now;
+          this.announceStatus("¡Listo! Empieza a mover la cabeza de un lado a otro.", "ready_to_go");
+        } else {
+          this.setStatus("Mirando al frente, centrada/o… confirmando (no te muevas)");
+        }
+      } else {
+        this.neckHalfTurnCenterStableSince = null;
+        this.setStatus("Ponte de frente a la cámara, mirando al frente, para empezar.");
+      }
+      if (this.debugEl) {
+        this.debugEl.textContent = "esperando cabeza centrada…";
+      }
+      return;
+    }
+
+    if (this.neckHalfTurnLastProgressAt !== null && now - this.neckHalfTurnLastProgressAt >= NECKHALFTURN_STILL_MS) {
+      this.closeActiveSet();
+      this.neckHalfTurnPrevAngle = null;
+      this.neckHalfTurnAccum = 0;
+      this.neckHalfTurnDirection = null;
+      this.neckHalfTurnReverseSince = null;
+      return;
+    }
+
+    const angle = Math.atan2(-(nose.y - shoulderMidY), nose.x - shoulderMidX);
+
+    let delta = 0;
+    if (this.neckHalfTurnPrevAngle === null) {
+      this.neckHalfTurnPrevAngle = angle;
+    } else {
+      const d = wrapAngleDelta(angle - this.neckHalfTurnPrevAngle);
+      if (Math.abs(d) <= NECKHALFTURN_MAX_SINGLE_FRAME_DELTA) {
+        delta = d;
+        this.neckHalfTurnPrevAngle = angle;
+      }
+    }
+
+    // Un movimiento de verdad (por encima del ruido de tracking) es lo
+    // único que cuenta para seguir el sentido del vaivén o detectar un
+    // cambio de sentido -- un delta minúsculo no es ni "seguir igual"
+    // ni "invertir", así que se ignora del todo (ver v2 en el
+    // comentario de NECKHALFTURN_* para el porqué de este cambio).
+    if (Math.abs(delta) >= NECKHALFTURN_MIN_ANGULAR_DELTA) {
+      this.neckHalfTurnLastProgressAt = now;
+
+      const deltaSign = Math.sign(delta);
+
+      if (this.neckHalfTurnDirection === null) {
+        // Primer movimiento de verdad de la serie (o del vaivén que
+        // sigue a una repetición ya contada): fija el sentido de este
+        // vaivén, sea cual sea -- sin bloqueo de sentido.
+        this.neckHalfTurnDirection = deltaSign;
+        this.neckHalfTurnAccum = delta;
+        this.neckHalfTurnReverseSince = null;
+      } else if (deltaSign === this.neckHalfTurnDirection) {
+        // Sigues en el mismo sentido: acumula, y olvida cualquier amago
+        // de cambio de sentido que no haya llegado a confirmarse.
+        this.neckHalfTurnAccum += delta;
+        this.neckHalfTurnReverseSince = null;
+      } else {
+        // Moviéndote en el sentido contrario -- posible cambio de
+        // sentido, pero hace falta que se sostenga
+        // NECKHALFTURN_REVERSE_STABLE_MS seguidos (no el pico de un
+        // solo fotograma) antes de confirmarlo.
+        if (this.neckHalfTurnReverseSince === null) {
+          this.neckHalfTurnReverseSince = now;
+        } else if (now - this.neckHalfTurnReverseSince >= NECKHALFTURN_REVERSE_STABLE_MS) {
+          // Cambio de sentido confirmado: cuenta la media vuelta que
+          // acabas de completar, siempre que hayas girado lo
+          // suficiente (NECKHALFTURN_MIN_SWING_RAD) -- filtra una
+          // inversión real pero minúscula, no un vaivén de verdad.
+          if (Math.abs(this.neckHalfTurnAccum) >= NECKHALFTURN_MIN_SWING_RAD) {
+            const seconds = (now - this.neckHalfTurnRepStartTime) / 1000;
+            this.countRep(seconds, now, "Media vuelta de cuello", NECKHALFTURN_MIN_REP_SECONDS);
+          }
+          // Empieza a vigilar el vaivén nuevo, en el sentido que
+          // acabas de confirmar -- se cuente o no la repetición
+          // anterior.
+          this.neckHalfTurnDirection = deltaSign;
+          this.neckHalfTurnAccum = delta;
+          this.neckHalfTurnReverseSince = null;
+          this.neckHalfTurnRepStartTime = now;
+        }
+      }
+    }
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `sentido: ${this.neckHalfTurnDirection === null ? "-" : (this.neckHalfTurnDirection > 0 ? "+" : "-")} | acumulado vaivén: ${Math.round(this.neckHalfTurnAccum * 180 / Math.PI)}° | delta: ${(delta * 180 / Math.PI).toFixed(1)}°/f | ` +
+        `invirtiendo desde hace: ${this.neckHalfTurnReverseSince ? Math.round(now - this.neckHalfTurnReverseSince) + "ms" : "-"} | ` +
+        `quieto desde hace: ${this.neckHalfTurnLastProgressAt ? Math.round(now - this.neckHalfTurnLastProgressAt) + "ms" : "-"}`;
+    }
+  }
+
+  /**
+   * Balanceo lateral de cadera — DE FRENTE a la cámara, de pie, con los
+   * pies bien separados (más que el ancho de cadera) y SIN moverlos del
+   * sitio: la cadera se desplaza de un lado a otro y vuelve al centro;
+   * un vaivén completo (centro -> lado -> centro) cuenta como una
+   * repetición (ver el bloque HIPLATERAL_* de más arriba para la
+   * geometría y cada umbral).
+   *
+   * Antes de armar, además de esperar a que la cadera esté centrada, se
+   * exige que la base de apoyo (tobillo a tobillo) sea más ancha que la
+   * cadera (HIPLATERAL_MIN_STANCE_FACTOR) -- pedido explícitamente por
+   * el usuario -- sostenida HIPLATERAL_CENTER_STABLE_MS seguidos (subida
+   * a 1500ms en v3 para que la primera "repetición" no salga de estar
+   * aún colocándote, ver el comentario junto a esa constante). Mientras
+   * un lado está confirmado se vigila que el punto medio de los
+   * tobillos no se desplace (HIPLATERAL_FEET_DRIFT_TOLERANCE_FACTOR):
+   * los pies tienen que quedarse plantados, solo la cadera se mueve --
+   * si se superan, el vaivén NO cuenta como repetición al volver al
+   * centro, y hay que re-armar desde cero (a diferencia de giros de
+   * cuello, donde el mismo desplazamiento solo avisa sin bloquear --
+   * aquí hacía falta bloquear de verdad: se detectó que al terminar
+   * una serie y caminar hacia la cámara con las manos fuera de la
+   * cadera, ese desplazamiento se contaba igualmente como repetición
+   * válida, reportado en una prueba real, 2026-09-07). Además, para
+   * confirmar un lado hace falta que el
+   * desplazamiento sea sobre todo lateral y no en profundidad
+   * (HIPLATERAL_MAX_DEPTH_FACTOR) -- mover la cadera hacia delante y
+   * hacia atrás, sin ir a ningún lado, NO cuenta (reportado en la
+   * primera prueba real, 2026-09-07).
+   *
+   * this.state sigue el mismo patrón que giros de cuello: null (todavía
+   * sin armar, esperando pies separados + cadera centrada estable) ->
+   * "center" (armado, esperando que la cadera se vaya a un lado) ->
+   * "left"/"right" (lado confirmado, esperando que vuelva al centro
+   * para cerrar el vaivén).
+   */
+  processHipLateral(lm, now) {
+    const lHip = lm[L_HIP], rHip = lm[R_HIP];
+    const lAnkle = lm[L_ANKLE], rAnkle = lm[R_ANKLE];
+
+    const vis = ((lHip.visibility ?? 1) + (rHip.visibility ?? 1) + (lAnkle.visibility ?? 1) + (rAnkle.visibility ?? 1)) / 4;
+
+    if (vis < HIPLATERAL_MIN_VISIBILITY) {
+      this.announceStatus("No se te ven bien la cadera y los pies. Ponte de frente a la cámara, de cuerpo entero.");
+      if (this.debugEl) this.debugEl.textContent = "buscando cadera y tobillos de frente…";
+      this.noteAbsence(now);
+      return;
+    }
+    this.outOfFrameSince = null;
+
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Cadera y pies a la vista. ¡Listo! Ya puedes empezar. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
+        "startup_ready"
+      );
+    }
+
+    const rawHipMidX = (lHip.x + rHip.x) / 2;
+    const rawHipMidZ = (lHip.z + rHip.z) / 2;
+    const rawHipWidth = Math.hypot(lHip.x - rHip.x, lHip.y - rHip.y);
+    const rawAnkleMidX = (lAnkle.x + rAnkle.x) / 2;
+    const rawStanceWidth = Math.hypot(lAnkle.x - rAnkle.x, lAnkle.y - rAnkle.y);
+    if (!rawStanceWidth || !rawHipWidth) return;
+
+    // Suavizado (media móvil exponencial, ver HIPLATERAL_GEOMETRY_SMOOTHING_
+    // ALPHA): un solo fotograma con hipWidth/stanceWidth raras (ruido de
+    // tracking, sobre todo con la cadera casi de frente) no debe poder
+    // desarmar un vaivén ya en marcha ni disparar sideNow por su cuenta.
+    if (this.hipLateralSmoothHipMidX === null) {
+      this.hipLateralSmoothHipMidX = rawHipMidX;
+      this.hipLateralSmoothHipMidZ = rawHipMidZ;
+      this.hipLateralSmoothHipWidth = rawHipWidth;
+      this.hipLateralSmoothAnkleMidX = rawAnkleMidX;
+      this.hipLateralSmoothStanceWidth = rawStanceWidth;
+    } else {
+      this.hipLateralSmoothHipMidX += HIPLATERAL_GEOMETRY_SMOOTHING_ALPHA * (rawHipMidX - this.hipLateralSmoothHipMidX);
+      this.hipLateralSmoothHipMidZ += HIPLATERAL_GEOMETRY_SMOOTHING_ALPHA * (rawHipMidZ - this.hipLateralSmoothHipMidZ);
+      this.hipLateralSmoothHipWidth += HIPLATERAL_GEOMETRY_SMOOTHING_ALPHA * (rawHipWidth - this.hipLateralSmoothHipWidth);
+      this.hipLateralSmoothAnkleMidX += HIPLATERAL_GEOMETRY_SMOOTHING_ALPHA * (rawAnkleMidX - this.hipLateralSmoothAnkleMidX);
+      this.hipLateralSmoothStanceWidth += HIPLATERAL_GEOMETRY_SMOOTHING_ALPHA * (rawStanceWidth - this.hipLateralSmoothStanceWidth);
+    }
+    const hipMidX = this.hipLateralSmoothHipMidX;
+    const hipMidZ = this.hipLateralSmoothHipMidZ;
+    const hipWidth = this.hipLateralSmoothHipWidth;
+    const ankleMidX = this.hipLateralSmoothAnkleMidX;
+    const stanceWidth = this.hipLateralSmoothStanceWidth;
+
+    if (stanceWidth < hipWidth * HIPLATERAL_MIN_STANCE_FACTOR) {
+      // Pies demasiado juntos -- no se arma el contador hasta que se
+      // separen más que la cadera (pedido explícitamente por el
+      // usuario). Se reinicia cualquier armado a medias para no dejar
+      // "centro" fijado con una base de apoyo que ya no vale.
+      this.state = null;
+      this.hipLateralStableSince = null;
+      this.setStatus("Separa más los pies -- más ancho que la cadera -- para empezar.");
+      if (this.debugEl) this.debugEl.textContent = `pies muy juntos: base=${stanceWidth.toFixed(3)} cadera=${hipWidth.toFixed(3)} (necesitas ≥${(hipWidth * HIPLATERAL_MIN_STANCE_FACTOR).toFixed(3)})`;
+      return;
+    }
+
+    const rawOffset = (hipMidX - ankleMidX) / stanceWidth;
+
+    if (this.state === null) {
+      // Armado: cadera centrada (respecto a los tobillos) sostenida
+      // HIPLATERAL_CENTER_STABLE_MS seguidos, con los pies ya separados
+      // más que la cadera -- fija tu propio "centro" real (posición Y
+      // profundidad) como baseline, para no exigir que la cadera esté
+      // perfectamente centrada de fábrica.
+      if (Math.abs(rawOffset) < HIPLATERAL_ENTER_FACTOR) {
+        if (this.hipLateralStableSince === null) this.hipLateralStableSince = now;
+        if (now - this.hipLateralStableSince >= HIPLATERAL_CENTER_STABLE_MS) {
+          this.state = "center";
+          this.hipLateralStableSince = null;
+          this.hipLateralBaselineOffset = rawOffset;
+          this.hipLateralBaselineDepth = hipMidZ;
+          this.hipLateralLastTransitionAt = now;
+          this.announceStatus("¡Listo! Lleva la cadera a un lado, y vuelta al centro, sin mover los pies ni inclinarte hacia delante o atrás.", "ready_to_go");
+        } else {
+          this.setStatus("Pies separados, cadera centrada… confirmando (no te muevas)");
+        }
+      } else {
+        this.hipLateralStableSince = null;
+        this.setStatus("Ponte de frente a la cámara, con la cadera centrada, para empezar.");
+      }
+      if (this.debugEl) {
+        this.debugEl.textContent = `esperando centro… desviación=${rawOffset.toFixed(3)} umbral=±${HIPLATERAL_ENTER_FACTOR.toFixed(3)} base=${stanceWidth.toFixed(3)} cadera=${hipWidth.toFixed(3)}`;
+      }
+      return;
+    }
+
+    // Ya armado: parar de completar ningún vaivén HIPLATERAL_STILL_MS
+    // seguidos es la señal de que has terminado la serie (mismo patrón
+    // que NECKLATERAL_STILL_MS).
+    if (this.hipLateralLastTransitionAt !== null && now - this.hipLateralLastTransitionAt >= HIPLATERAL_STILL_MS) {
+      this.closeActiveSet();
+      return;
+    }
+
+    const offset = rawOffset - this.hipLateralBaselineOffset;
+    const depthOffset = (hipMidZ - this.hipLateralBaselineDepth) / stanceWidth;
+
+    if (this.state === "center") {
+      // Esperando que la cadera se separe del centro hacia un lado --
+      // igual que giros de cuello, exige que el lado se sostenga un
+      // rato (HIPLATERAL_SIDE_STABLE_MS) antes de confirmarse, para no
+      // armar el vaivén con un pico de un frame suelto. Si la cadera se
+      // ha alejado/acercado de la cámara más de la cuenta
+      // (HIPLATERAL_MAX_DEPTH_FACTOR) respecto a tu profundidad de
+      // referencia, esto es un movimiento hacia delante/atrás, no hacia
+      // un lado -- no cuenta como sideNow aunque el desplazamiento
+      // horizontal por sí solo pareciera suficiente (reportado en la
+      // primera prueba real, 2026-09-07).
+      const depthOk = Math.abs(depthOffset) < HIPLATERAL_MAX_DEPTH_FACTOR;
+      const sideNow = !depthOk ? null : offset > HIPLATERAL_ENTER_FACTOR ? "right" : offset < -HIPLATERAL_ENTER_FACTOR ? "left" : null;
+      if (sideNow) {
+        if (this.hipLateralSide !== sideNow) {
+          this.hipLateralSide = sideNow;
+          this.hipLateralSideSince = now;
+        } else if (now - this.hipLateralSideSince >= HIPLATERAL_SIDE_STABLE_MS) {
+          this.state = sideNow;
+          this.repStartTime = now; // la repetición empieza al confirmarse el lado (momento real de llegada, no cuando vuelves al centro)
+          this.hipLateralAnkleAnchorX = ankleMidX; // tobillos AHORA MISMO -- lo que se desplacen desde aquí es lo que se vigila
+          this.hipLateralFeetDrifted = false;
+          this.hipLateralSideSince = null;
+        }
+      } else {
+        this.hipLateralSide = null;
+        this.hipLateralSideSince = null;
+      }
+    } else {
+      // state === "left" | "right": lado confirmado, vigilando que los
+      // pies (punto medio de tobillos) no se desplacen de sitio
+      // mientras esperas a volver al centro.
+      const feetDrift = Math.abs(ankleMidX - this.hipLateralAnkleAnchorX) / stanceWidth;
+      if (feetDrift > HIPLATERAL_FEET_DRIFT_TOLERANCE_FACTOR && !this.hipLateralFeetDrifted) {
+        this.hipLateralFeetDrifted = true;
+      }
+      if (this.hipLateralFeetDrifted) {
+        // Solo texto (setStatus), sin voz -- es una corrección, no algo
+        // imprescindible para seguir contando (la repetición se cuenta
+        // igual, ver más abajo), mismo espíritu que el desplazamiento
+        // de hombros en giros de cuello.
+        this.setStatus("Mueves los pies -- déjalos plantados, balancea solo la cadera.");
+      }
+      if (Math.abs(offset) < HIPLATERAL_EXIT_FACTOR) {
+        // Vuelta al centro: se cierra el vaivén -- pero si los pies se
+        // han desplazado más de la cuenta (hipLateralFeetDrifted, ver
+        // arriba) esto no es un balanceo de cadera de verdad sino que
+        // te has movido/caminado, así que no cuenta como repetición:
+        // se reinicia a "sin armar" para obligar a recolocarse y volver
+        // a confirmar la postura de partida (reportado en una prueba
+        // real, 2026-09-07: al terminar una serie y caminar hacia la
+        // cámara con las manos fuera de la cadera, este desplazamiento
+        // se contaba igualmente como repetición válida).
+        this.hipLateralLastTransitionAt = now;
+        if (this.hipLateralFeetDrifted) {
+          this.state = null;
+          this.hipLateralStableSince = null;
+          this.hipLateralSide = null;
+          this.hipLateralSideSince = null;
+          this.hipLateralAnkleAnchorX = null;
+          this.hipLateralFeetDrifted = false;
+          this.setStatus("Te has movido de sitio -- ponte de frente de nuevo, con los pies bien separados, para seguir.");
+        } else {
+          this.countRep(
+            (now - this.repStartTime) / 1000, now,
+            this.state === "left" ? "Cadera a la izquierda" : "Cadera a la derecha",
+            HIPLATERAL_MIN_REP_SECONDS
+          );
+          this.state = "center";
+          this.hipLateralSide = null;
+          this.hipLateralSideSince = null;
+          this.hipLateralAnkleAnchorX = null;
+          this.hipLateralFeetDrifted = false;
+        }
+      }
+    }
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `estado: ${this.state} | desviación=${offset.toFixed(3)} profundidad=${depthOffset.toFixed(3)}${Math.abs(depthOffset) >= HIPLATERAL_MAX_DEPTH_FACTOR ? "✗" : ""} umbral_entrada=±${HIPLATERAL_ENTER_FACTOR.toFixed(3)} umbral_salida=±${HIPLATERAL_EXIT_FACTOR.toFixed(3)} umbral_profundidad=${HIPLATERAL_MAX_DEPTH_FACTOR.toFixed(3)} | ` +
+        `base=${stanceWidth.toFixed(3)} cadera=${hipWidth.toFixed(3)} | ` +
+        `desplazamiento pies: ${this.hipLateralAnkleAnchorX !== null ? (Math.abs(ankleMidX - this.hipLateralAnkleAnchorX) / stanceWidth).toFixed(3) : "-"}${this.hipLateralFeetDrifted ? " ⚠" : ""} | ` +
+        `quieto desde hace: ${this.hipLateralLastTransitionAt ? Math.round(now - this.hipLateralLastTransitionAt) + "ms" : "-"}`;
+    }
+  }
+
+  /**
+   * Cadera adelante y atrás — DE PERFIL a la cámara (a diferencia de
+   * processHipLateral, que pide de frente), de pie, con los pies
+   * quietos en el suelo: la cadera se lleva hacia delante y hacia
+   * atrás, volviendo cada vez al centro (ver el bloque HIPFORWARDBACK_*
+   * de más arriba para la geometría y cada umbral).
+   *
+   * De perfil las dos caderas/tobillos casi se solapan en la imagen
+   * (mismo problema que talones al glúteo/rodillas altas), así que solo
+   * se vigila un lado (cadera+tobillo), elegido UNA vez al armar según
+   * cuál se ve mejor y fijo el resto de la serie (this.hipForwardBackTrackedSide
+   * — mismo criterio que heelKickTrackedSide). El desplazamiento
+   * cadera-tobillo se normaliza por la propia longitud cadera-tobillo,
+   * no por una anchura de base tobillo-tobillo (que de perfil sería
+   * casi cero).
+   *
+   * v3 (2026-09-08, pedido explícito del usuario tras una prueba real):
+   * dos cambios.
+   *   1) Ya NO hace falta ver hombros ni nariz -- todo el ejercicio
+   *      (visibilidad, geometría del vaivén Y el sentido "adelante" real)
+   *      se calcula solo con cadera+tobillo+punta del pie (L_FOOT_INDEX/
+   *      R_FOOT_INDEX, mismos landmarks que ya usa el estiramiento de
+   *      isquiotibiales sentado), nunca con hombros/nariz.
+   *   2) Se exige estar de perfil de VERDAD, no solo tener la cadera
+   *      centrada: si la separación aparente cadera-cadera (que de
+   *      perfil casi se solapa) crece por encima de
+   *      HIPFORWARDBACK_PROFILE_MAX_HIP_WIDTH_FACTOR sostenido
+   *      HIPFORWARDBACK_PROFILE_CONFIRM_MS (te has girado hacia la
+   *      cámara, por ejemplo acercándote caminando), no se arma el
+   *      contador, y si ya estaba armado el vaivén en curso NO cuenta
+   *      como repetición al volver al centro (this.hipForwardBackTurnedAway,
+   *      mismo mecanismo que hipForwardBackFeetDrifted) -- exactamente
+   *      el caso reportado: las últimas repeticiones de una serie se
+   *      contaron mientras el usuario se acercaba a la cámara, dejando
+   *      de estar de perfil.
+   *
+   * this.state sigue el mismo patrón que processHipLateral: null
+   * (todavía sin armar, esperando cadera centrada estable Y de perfil)
+   * -> "center" (armado, esperando que la cadera se vaya a delante o
+   * atrás) -> "front"/"back" (dirección confirmada, esperando que
+   * vuelva al centro para cerrar el vaivén).
+   */
+  processHipForwardBack(lm, now) {
+    const lHip = lm[L_HIP], rHip = lm[R_HIP];
+    const lAnkle = lm[L_ANKLE], rAnkle = lm[R_ANKLE];
+
+    const visL = ((lHip.visibility ?? 1) + (lAnkle.visibility ?? 1)) / 2;
+    const visR = ((rHip.visibility ?? 1) + (rAnkle.visibility ?? 1)) / 2;
+    const vis = Math.max(visL, visR);
+
+    if (vis < HIPFORWARDBACK_MIN_VISIBILITY) {
+      this.announceStatus("No se te ven bien la cadera y el tobillo. Ponte de perfil a la cámara, de cuerpo entero.");
+      if (this.debugEl) this.debugEl.textContent = "buscando cadera y tobillo de perfil…";
+      this.noteAbsence(now);
+      return;
+    }
+    this.outOfFrameSince = null;
+
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Cadera y tobillo a la vista. ¡Listo! Ya puedes empezar. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
+        "startup_ready"
+      );
+    }
+
+    // Lado a vigilar: el elegido al armar (this.hipForwardBackTrackedSide),
+    // o mientras tanto el que mejor se ve ahora mismo (ver el comentario
+    // de la función para el porqué de fijarlo solo una vez).
+    const side = this.hipForwardBackTrackedSide ?? (visL >= visR ? "left" : "right");
+    const hip = side === "left" ? lHip : rHip;
+    const ankle = side === "left" ? lAnkle : rAnkle;
+    const foot = side === "left" ? lm[L_FOOT_INDEX] : lm[R_FOOT_INDEX];
+
+    const rawHipX = hip.x;
+    const rawAnkleX = ankle.x;
+    const rawLegLength = Math.hypot(hip.x - ankle.x, hip.y - ankle.y);
+    if (!rawLegLength) return;
+
+    // Separación aparente cadera-cadera (ver el bloque HIPFORWARDBACK_
+    // PROFILE_* de más arriba): de perfil de verdad casi se solapan, de
+    // frente crece mucho respecto a la longitud de la pierna -- es la
+    // señal de "¿sigo de perfil?", calculada con caderas nada más (no
+    // hace falta ver hombros para esto).
+    const rawHipWidth = Math.hypot(lHip.x - rHip.x, lHip.y - rHip.y);
+
+    // Suavizado (media móvil exponencial, ver HIPFORWARDBACK_GEOMETRY_
+    // SMOOTHING_ALPHA): un solo fotograma ruidoso no debe poder desarmar
+    // un vaivén ya en marcha ni disparar una dirección por su cuenta.
+    if (this.hipForwardBackSmoothHipX === null) {
+      this.hipForwardBackSmoothHipX = rawHipX;
+      this.hipForwardBackSmoothAnkleX = rawAnkleX;
+      this.hipForwardBackSmoothLegLength = rawLegLength;
+      this.hipForwardBackSmoothHipWidth = rawHipWidth;
+    } else {
+      this.hipForwardBackSmoothHipX += HIPFORWARDBACK_GEOMETRY_SMOOTHING_ALPHA * (rawHipX - this.hipForwardBackSmoothHipX);
+      this.hipForwardBackSmoothAnkleX += HIPFORWARDBACK_GEOMETRY_SMOOTHING_ALPHA * (rawAnkleX - this.hipForwardBackSmoothAnkleX);
+      this.hipForwardBackSmoothLegLength += HIPFORWARDBACK_GEOMETRY_SMOOTHING_ALPHA * (rawLegLength - this.hipForwardBackSmoothLegLength);
+      this.hipForwardBackSmoothHipWidth += HIPFORWARDBACK_GEOMETRY_SMOOTHING_ALPHA * (rawHipWidth - this.hipForwardBackSmoothHipWidth);
+    }
+    const hipX = this.hipForwardBackSmoothHipX;
+    const ankleX = this.hipForwardBackSmoothAnkleX;
+    const legLength = this.hipForwardBackSmoothLegLength;
+    const hipWidth = this.hipForwardBackSmoothHipWidth;
+
+    const rawOffset = (hipX - ankleX) / legLength;
+
+    // ¿Sigo de perfil? -- separación cadera-cadera respecto a la pierna,
+    // sostenida HIPFORWARDBACK_PROFILE_CONFIRM_MS seguidos por encima del
+    // umbral antes de actuar (filtra un pico suelto de ruido de tracking).
+    const hipWidthRatio = hipWidth / legLength;
+    if (hipWidthRatio > HIPFORWARDBACK_PROFILE_MAX_HIP_WIDTH_FACTOR) {
+      if (this.hipForwardBackNotProfileSince === null) this.hipForwardBackNotProfileSince = now;
+    } else {
+      this.hipForwardBackNotProfileSince = null;
+    }
+    const notProfileConfirmed =
+      this.hipForwardBackNotProfileSince !== null &&
+      now - this.hipForwardBackNotProfileSince >= HIPFORWARDBACK_PROFILE_CONFIRM_MS;
+
+    if (this.state === null) {
+      // Armado: cadera centrada (respecto al tobillo) sostenida
+      // HIPFORWARDBACK_CENTER_STABLE_MS seguidos, Y de perfil de verdad
+      // (notProfileConfirmed) -- fija tu propio "centro" real como
+      // baseline, para no exigir que la cadera esté perfectamente
+      // centrada de fábrica.
+      if (Math.abs(rawOffset) < HIPFORWARDBACK_ENTER_FACTOR && !notProfileConfirmed) {
+        if (this.hipForwardBackStableSince === null) this.hipForwardBackStableSince = now;
+        if (now - this.hipForwardBackStableSince >= HIPFORWARDBACK_CENTER_STABLE_MS) {
+          this.state = "center";
+          this.hipForwardBackStableSince = null;
+          this.hipForwardBackTrackedSide = side; // fijado a partir de aquí, ver el comentario de la función
+          this.hipForwardBackBaselineOffset = rawOffset;
+          // Sentido "hacia delante" real: la punta del pie sobresale del
+          // tobillo hacia el lado al que apunta el pie (mismo lado al
+          // que se mira, de pie normal) -- se fija una vez, al armar,
+          // para poder anunciar "adelante"/"atrás" con sentido anatómico
+          // y no solo izquierda/derecha de pantalla. Solo cadera/tobillo/
+          // pie, sin hombros ni nariz (v3). Heurística sin contrastar
+          // todavía en cámara real -- si sale al revés, cifra a invertir.
+          this.hipForwardBackFacingSign = Math.sign(foot.x - ankleX) || 1;
+          this.hipForwardBackLastTransitionAt = now;
+          this.announceStatus("¡Listo! Lleva la cadera hacia delante o hacia atrás, y vuelta al centro, sin mover los pies.", "ready_to_go");
+        } else {
+          this.setStatus("De perfil, cadera centrada… confirmando (no te muevas)");
+        }
+      } else {
+        this.hipForwardBackStableSince = null;
+        this.setStatus(
+          notProfileConfirmed
+            ? "Ponte de perfil (de lado) a la cámara, no de frente, para empezar."
+            : "Ponte de perfil a la cámara, de pie, con la cadera centrada, para empezar."
+        );
+      }
+      if (this.debugEl) {
+        this.debugEl.textContent = `esperando centro… desviación=${rawOffset.toFixed(3)} umbral=±${HIPFORWARDBACK_ENTER_FACTOR.toFixed(3)} perfil=${hipWidthRatio.toFixed(3)}(máx ${HIPFORWARDBACK_PROFILE_MAX_HIP_WIDTH_FACTOR})${notProfileConfirmed ? " ✗" : ""} lado=${side}`;
+      }
+      return;
+    }
+
+    // Ya armado: parar de completar ningún vaivén HIPFORWARDBACK_STILL_MS
+    // seguidos es la señal de que has terminado la serie (mismo patrón
+    // que HIPLATERAL_STILL_MS).
+    if (this.hipForwardBackLastTransitionAt !== null && now - this.hipForwardBackLastTransitionAt >= HIPFORWARDBACK_STILL_MS) {
+      this.closeActiveSet();
+      return;
+    }
+
+    // Te has girado hacia la cámara estando ya armado y en el centro
+    // (todavía sin empezar un vaivén nuevo): se desarma del todo, en vez
+    // de esperar a que completes un vaivén que ni siquiera has empezado
+    // -- este es justo el caso reportado (te acercas caminando entre
+    // repetición y repetición, o al terminar, y se vuelve a armar solo).
+    if (this.state === "center" && notProfileConfirmed) {
+      this.state = null;
+      this.hipForwardBackStableSince = null;
+      this.hipForwardBackDirection = null;
+      this.hipForwardBackDirectionSince = null;
+      this.hipForwardBackAnkleAnchorX = null;
+      this.hipForwardBackFeetDrifted = false;
+      this.hipForwardBackTurnedAway = false;
+      this.setStatus("Te has girado hacia la cámara -- ponte de perfil de nuevo para seguir.");
+      if (this.debugEl) this.debugEl.textContent = `desarmado: girado hacia la cámara (perfil=${hipWidthRatio.toFixed(3)})`;
+      return;
+    }
+
+    const offset = (rawOffset - this.hipForwardBackBaselineOffset) * this.hipForwardBackFacingSign;
+
+    if (this.state === "center") {
+      // Esperando que la cadera se separe del centro hacia delante o
+      // hacia atrás -- exige que la dirección se sostenga un rato
+      // (HIPFORWARDBACK_DIRECTION_STABLE_MS) antes de confirmarse, para
+      // no armar el vaivén con un pico de un frame suelto.
+      const dirNow = offset > HIPFORWARDBACK_ENTER_FACTOR ? "front" : offset < -HIPFORWARDBACK_ENTER_FACTOR ? "back" : null;
+      if (dirNow) {
+        if (this.hipForwardBackDirection !== dirNow) {
+          this.hipForwardBackDirection = dirNow;
+          this.hipForwardBackDirectionSince = now;
+        } else if (now - this.hipForwardBackDirectionSince >= HIPFORWARDBACK_DIRECTION_STABLE_MS) {
+          this.state = dirNow;
+          this.repStartTime = now; // la repetición empieza al confirmarse la dirección (momento real de llegada, no cuando vuelves al centro)
+          this.hipForwardBackAnkleAnchorX = ankleX; // tobillo AHORA MISMO -- lo que se desplace desde aquí es lo que se vigila
+          this.hipForwardBackFeetDrifted = false;
+          this.hipForwardBackTurnedAway = false;
+          this.hipForwardBackDirectionSince = null;
+        }
+      } else {
+        this.hipForwardBackDirection = null;
+        this.hipForwardBackDirectionSince = null;
+      }
+    } else {
+      // state === "front" | "back": dirección confirmada, vigilando que
+      // el tobillo no se desplace de sitio, y que sigas de perfil,
+      // mientras esperas a volver al centro.
+      const feetDrift = Math.abs(ankleX - this.hipForwardBackAnkleAnchorX) / legLength;
+      if (feetDrift > HIPFORWARDBACK_FEET_DRIFT_TOLERANCE_FACTOR && !this.hipForwardBackFeetDrifted) {
+        this.hipForwardBackFeetDrifted = true;
+      }
+      if (notProfileConfirmed && !this.hipForwardBackTurnedAway) {
+        this.hipForwardBackTurnedAway = true;
+      }
+      if (this.hipForwardBackFeetDrifted || this.hipForwardBackTurnedAway) {
+        // Solo texto (setStatus), sin voz -- es una corrección, no algo
+        // que interrumpa a media repetición (la decisión de contarla o
+        // no se toma al volver al centro, ver más abajo), mismo espíritu
+        // que el desplazamiento de pies en balanceo lateral de cadera.
+        this.setStatus(
+          this.hipForwardBackTurnedAway
+            ? "Te has girado hacia la cámara -- ponte de perfil (esta repetición no contará)."
+            : "Mueves los pies -- déjalos plantados, balancea solo la cadera."
+        );
+      }
+      if (Math.abs(offset) < HIPFORWARDBACK_EXIT_FACTOR) {
+        // Vuelta al centro: se cierra el vaivén -- pero si los pies se
+        // han desplazado más de la cuenta (hipForwardBackFeetDrifted) o
+        // has dejado de estar de perfil (hipForwardBackTurnedAway, ver
+        // arriba) esto no es un vaivén de verdad sino que te has
+        // movido/girado hacia la cámara, así que no cuenta como
+        // repetición: se reinicia a "sin armar" para obligar a
+        // recolocarse y volver a confirmar la postura de partida (mismo
+        // mecanismo que processHipLateral).
+        this.hipForwardBackLastTransitionAt = now;
+        if (this.hipForwardBackFeetDrifted || this.hipForwardBackTurnedAway) {
+          const wasTurnedAway = this.hipForwardBackTurnedAway;
+          this.state = null;
+          this.hipForwardBackStableSince = null;
+          this.hipForwardBackDirection = null;
+          this.hipForwardBackDirectionSince = null;
+          this.hipForwardBackAnkleAnchorX = null;
+          this.hipForwardBackFeetDrifted = false;
+          this.hipForwardBackTurnedAway = false;
+          this.setStatus(
+            wasTurnedAway
+              ? "Te has girado hacia la cámara -- ponte de perfil de nuevo, con los pies quietos, para seguir."
+              : "Te has movido de sitio -- ponte de perfil de nuevo, con los pies quietos, para seguir."
+          );
+        } else {
+          this.countRep(
+            (now - this.repStartTime) / 1000, now,
+            this.state === "front" ? "Cadera adelante" : "Cadera atrás",
+            HIPFORWARDBACK_MIN_REP_SECONDS
+          );
+          this.state = "center";
+          this.hipForwardBackDirection = null;
+          this.hipForwardBackDirectionSince = null;
+          this.hipForwardBackAnkleAnchorX = null;
+          this.hipForwardBackFeetDrifted = false;
+          this.hipForwardBackTurnedAway = false;
+        }
+      }
+    }
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `estado: ${this.state} | lado=${this.hipForwardBackTrackedSide} desviación=${offset.toFixed(3)} umbral_entrada=±${HIPFORWARDBACK_ENTER_FACTOR.toFixed(3)} umbral_salida=±${HIPFORWARDBACK_EXIT_FACTOR.toFixed(3)} | ` +
+        `perfil=${hipWidthRatio.toFixed(3)}(máx ${HIPFORWARDBACK_PROFILE_MAX_HIP_WIDTH_FACTOR})${this.hipForwardBackTurnedAway ? " ✗" : ""} | ` +
+        `desplazamiento pies: ${this.hipForwardBackAnkleAnchorX !== null ? (Math.abs(ankleX - this.hipForwardBackAnkleAnchorX) / legLength).toFixed(3) : "-"}${this.hipForwardBackFeetDrifted ? " ⚠" : ""} | ` +
+        `quieto desde hace: ${this.hipForwardBackLastTransitionAt ? Math.round(now - this.hipForwardBackLastTransitionAt) + "ms" : "-"}`;
+    }
+  }
+
+  /**
    * Tijeras de brazos — DE FRENTE a la cámara, calentamiento/estiramiento
    * dinámico: los brazos se extienden en cruz (a los lados) y se cruzan
    * por delante del pecho, volviendo después a extendidos; un vaivén
@@ -6559,6 +8238,372 @@ class WorkoutSession {
   }
 
   /**
+   * Rotación de brazo sujetando el codo — ver el bloque
+   * FOREARMROTATION_* de más arriba para la geometría y el porqué de
+   * cada umbral (primera versión, pendiente de calibrar con un test en
+   * cámara real, mismo patrón que el resto de la familia).
+   *
+   * Vale cualquiera de los dos brazos (uno gira, el otro agarra el
+   * codo) y se puede cambiar de brazo sin cerrar la serie — this.state
+   * solo distingue "todavía sin armar" (null, esperando un agarre
+   * válido en cualquiera de los dos lados) de "armado y contando"
+   * ("active"); dentro de "active", forearmRotationActiveSide
+   * ("left"/"right") dice qué brazo gira ahora mismo.
+   */
+  processForearmRotation(lm, now) {
+    const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
+    const lE = lm[L_ELBOW], rE = lm[R_ELBOW];
+    const lW = lm[L_WRIST], rW = lm[R_WRIST];
+
+    const vis = (
+      (lS.visibility ?? 1) + (rS.visibility ?? 1) +
+      (lE.visibility ?? 1) + (rE.visibility ?? 1) +
+      (lW.visibility ?? 1) + (rW.visibility ?? 1)
+    ) / 6;
+
+    if (vis < FOREARMROTATION_MIN_VISIBILITY) {
+      this.announceStatus("No se te ven bien los hombros, los codos y las muñecas. Ponte de frente a la cámara, con los dos brazos en el encuadre.");
+      if (this.debugEl) this.debugEl.textContent = "buscando hombros, codos y muñecas de frente…";
+      this.noteAbsence(now, FOREARMROTATION_OUT_OF_FRAME_MS);
+      return;
+    }
+    this.outOfFrameSince = null;
+
+    const shoulderWidth = Math.hypot(lS.x - rS.x, lS.y - rS.y);
+    if (!shoulderWidth) return;
+
+    // Agarre válido: la muñeca de UNA mano cerca del codo del brazo
+    // CONTRARIO (self-relativo al ancho de hombros, no a la distancia a
+    // la cámara — mismo cálculo que grabDist en checkArmCrossStretch).
+    const grabLeftRotates = Math.hypot(rW.x - lE.x, rW.y - lE.y) / shoulderWidth <= FOREARMROTATION_GRAB_MAX_FACTOR;  // brazo izquierdo gira, mano derecha agarra su codo
+    const grabRightRotates = Math.hypot(lW.x - rE.x, lW.y - rE.y) / shoulderWidth <= FOREARMROTATION_GRAB_MAX_FACTOR; // brazo derecho gira, mano izquierda agarra su codo
+
+    if (this.state === null) {
+      if (!this.startupVoiceGiven) {
+        this.startupVoiceGiven = true;
+        this.announceStatus(
+          "Hombros, codos y muñecas a la vista. ¡Listo! Agarra el codo de un brazo con la otra mano y empieza a girar ese brazo. Vale cualquiera de los dos, y puedes cambiar de brazo cuando quieras. Para terminar una serie, párate quieto unos segundos, o sal del encuadre.",
+          "startup_ready"
+        );
+      }
+      const side = grabLeftRotates ? "left" : grabRightRotates ? "right" : null;
+      if (side !== null) {
+        if (this.forearmRotationStableSince === null) this.forearmRotationStableSince = now;
+        if (now - this.forearmRotationStableSince >= FOREARMROTATION_STABLE_MS) {
+          this.state = "active";
+          this.forearmRotationStableSince = null;
+          this.forearmRotationActiveSide = side;
+          this.forearmRotationGrabBrokenSince = null;
+          const elbow = side === "left" ? lE : rE;
+          const wrist = side === "left" ? lW : rW;
+          this.forearmRotationPrevAngle = Math.atan2(-(wrist.y - elbow.y), wrist.x - elbow.x);
+          this.forearmRotationAccum = 0;
+          this.forearmRotationLastActivityAt = now;
+          this.forearmRotationRepStartTime = now;
+          if (this.forearmRotationLastCountedSide !== null && this.forearmRotationLastCountedSide !== side) {
+            this.announceStatus(side === "left" ? "Brazo izquierdo." : "Brazo derecho.", `forearmrotation_side_${side}`);
+          }
+          this.announceStatus("¡Listo! Empieza a girar el brazo.", "ready_to_go");
+        } else {
+          this.setStatus("Agarrando el codo… confirmando (no te muevas)");
+        }
+      } else {
+        this.forearmRotationStableSince = null;
+        this.setStatus("Agarra el codo de un brazo con la otra mano, cerca del cuerpo, para empezar.");
+      }
+      if (this.debugEl) {
+        this.debugEl.textContent = `esperando agarre… agarre_izq_gira=${grabLeftRotates} agarre_der_gira=${grabRightRotates} umbral=${FOREARMROTATION_GRAB_MAX_FACTOR.toFixed(2)}`;
+      }
+      return;
+    }
+
+    // state === "active": sin ningún agarre válido (en ningún lado) ni
+    // giro de verdad durante FOREARMROTATION_STILL_MS seguidos, se
+    // interpreta que has terminado (mismo patrón que ARMSCISSORS_STILL_MS
+    // /ARMCIRCLES_STILL_MS).
+    if (this.forearmRotationLastActivityAt !== null && now - this.forearmRotationLastActivityAt >= FOREARMROTATION_STILL_MS) {
+      this.closeActiveSet();
+      this.forearmRotationActiveSide = null;
+      this.forearmRotationPrevAngle = null;
+      this.forearmRotationAccum = 0;
+      this.forearmRotationRepStartTime = null;
+      this.forearmRotationGrabBrokenSince = null;
+      this.forearmRotationLastCountedSide = null; // serie nueva: vuelve a avisar del lado en la primera repetición que se cuente
+      return;
+    }
+
+    const side = this.forearmRotationActiveSide;
+    const grabbedNow = side === "left" ? grabLeftRotates : grabRightRotates;
+
+    if (!grabbedNow) {
+      // El agarre del brazo activo se ha soltado — no es un fallo
+      // inmediato (un fotograma suelto de ruido de tracking no cuenta,
+      // ver FOREARMROTATION_GRAB_BREAK_MS): mientras tanto se sigue
+      // acumulando el giro con normalidad (se cae al bloque de más
+      // abajo sin volver), por si vuelve a agarrar en el mismo instante.
+      if (this.forearmRotationGrabBrokenSince === null) this.forearmRotationGrabBrokenSince = now;
+      if (now - this.forearmRotationGrabBrokenSince >= FOREARMROTATION_GRAB_BREAK_MS) {
+        // Agarre soltado de verdad: ¿ha cambiado al otro brazo? Se
+        // permite cambiar de brazo sin cerrar la serie (pedido
+        // explícitamente, "que sirva para las dos manos") — solo si el
+        // OTRO lado agarra ya de verdad; si no, se espera sin perder el
+        // progreso acumulado por si retoma el mismo brazo enseguida.
+        const otherSide = side === "left" ? "right" : "left";
+        const otherGrabbed = otherSide === "left" ? grabLeftRotates : grabRightRotates;
+        if (otherGrabbed) {
+          this.forearmRotationActiveSide = otherSide;
+          this.forearmRotationGrabBrokenSince = null;
+          const elbow = otherSide === "left" ? lE : rE;
+          const wrist = otherSide === "left" ? lW : rW;
+          this.forearmRotationPrevAngle = Math.atan2(-(wrist.y - elbow.y), wrist.x - elbow.x);
+          this.forearmRotationAccum = 0;
+          this.forearmRotationRepStartTime = now;
+          this.forearmRotationLastActivityAt = now;
+          if (this.forearmRotationLastCountedSide !== null && this.forearmRotationLastCountedSide !== otherSide) {
+            this.announceStatus(otherSide === "left" ? "Brazo izquierdo." : "Brazo derecho.", `forearmrotation_side_${otherSide}`);
+          }
+        }
+        // Ninguno de los dos agarra: se sigue esperando (sin cerrar la
+        // serie todavía, ver FOREARMROTATION_STILL_MS más arriba) sin
+        // tocar el ángulo acumulado, por si retoma el agarre enseguida.
+        if (this.debugEl) {
+          this.debugEl.textContent = `agarre soltado (brazo ${side === "left" ? "izquierdo" : "derecho"}) | quieto desde hace: ${Math.round(now - this.forearmRotationLastActivityAt)}ms`;
+        }
+        return;
+      }
+    } else {
+      this.forearmRotationGrabBrokenSince = null;
+    }
+
+    const elbow = side === "left" ? lE : rE;
+    const wrist = side === "left" ? lW : rW;
+    const reach = Math.hypot(wrist.x - elbow.x, wrist.y - elbow.y);
+    const reachOk = reach > FOREARMROTATION_MIN_REACH_FACTOR * shoulderWidth;
+
+    const angle = Math.atan2(-(wrist.y - elbow.y), wrist.x - elbow.x);
+    if (this.forearmRotationPrevAngle === null) {
+      this.forearmRotationPrevAngle = angle;
+    } else if (reachOk) {
+      const delta = wrapAngleDelta(angle - this.forearmRotationPrevAngle);
+      if (Math.abs(delta) <= FOREARMROTATION_MAX_SINGLE_FRAME_DELTA) {
+        this.forearmRotationAccum += delta;
+        this.forearmRotationPrevAngle = angle;
+        if (Math.abs(delta) >= FOREARMROTATION_MIN_ANGULAR_DELTA) {
+          this.forearmRotationLastActivityAt = now;
+        }
+      }
+      // Salto mayor que FOREARMROTATION_MAX_SINGLE_FRAME_DELTA en un
+      // fotograma: se descarta como fallo puntual de tracking (mismo
+      // motivo que ARMCIRCLES_MAX_SINGLE_ARM_DELTA), sin actualizar el
+      // ángulo previo, para no perder del todo el giro real de este
+      // fotograma.
+    } else {
+      // Antebrazo demasiado pegado al codo para fiarse del ángulo (radio
+      // casi cero): se actualiza igualmente el ángulo previo, para no
+      // generar un salto falso cuando vuelva a extenderse.
+      this.forearmRotationPrevAngle = angle;
+    }
+
+    if (Math.abs(this.forearmRotationAccum) >= 2 * Math.PI) {
+      const seconds = (now - this.forearmRotationRepStartTime) / 1000;
+      const label = side === "left" ? "Giro brazo izquierdo" : "Giro brazo derecho";
+      if (this.countRep(seconds, now, label, FOREARMROTATION_MIN_REP_SECONDS)) {
+        this.forearmRotationLastActivityAt = now;
+        this.forearmRotationLastCountedSide = side;
+      }
+      this.forearmRotationAccum -= Math.sign(this.forearmRotationAccum) * 2 * Math.PI;
+      this.forearmRotationRepStartTime = now;
+    }
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `brazo ${side === "left" ? "izquierdo" : "derecho"} girando | giro acumulado: ${Math.round(Math.abs(this.forearmRotationAccum) * 180 / Math.PI)}°/360° | ` +
+        `quieto desde hace: ${this.forearmRotationLastActivityAt ? Math.round(now - this.forearmRotationLastActivityAt) + "ms" : "-"}`;
+    }
+  }
+
+  /**
+   * Rotación de muñecas con los dedos entrelazados — de pie o
+   * sentada/o, de frente a la cámara: manos juntas, dedos entrelazados
+   * como al rezar, delante del pecho/barbilla, girando juntas en
+   * círculo (ver el bloque WRISTROTATION_* de más arriba para la
+   * geometría, el porqué de cada umbral, y el razonamiento sobre por
+   * qué esto ya distingue "dar vueltas" de "ir de un lado a otro" sin
+   * lógica aparte — primera versión, pendiente de calibrar con un test
+   * en cámara real, mismo patrón que el resto de la familia).
+   *
+   * Mismo mecanismo que processNeckCircles (ángulo acumulado del
+   * vector punto-medio-de-hombros->punto medio de muñecas,
+   * wrapAngleDelta por fotograma, una repetición cada ±2π, sin bloqueo
+   * de sentido), con el añadido de que aquí SÍ hay una postura que
+   * mantener durante todo el giro (manos juntas) — comprobada con la
+   * misma histéresis de soltado que el agarre de processForearmRotation
+   * (WRISTROTATION_TOGETHER_BREAK_MS), para no cortar la serie por un
+   * solo fotograma de tracking ruidoso separando las manos un instante.
+   */
+  processWristRotation(lm, now) {
+    const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
+    const lW = lm[L_WRIST], rW = lm[R_WRIST];
+
+    const vis = (
+      (lS.visibility ?? 1) + (rS.visibility ?? 1) +
+      (lW.visibility ?? 1) + (rW.visibility ?? 1)
+    ) / 4;
+
+    if (vis < WRISTROTATION_MIN_VISIBILITY) {
+      this.announceStatus("No se te ven bien los hombros y las muñecas. Ponte de frente a la cámara, con las manos en el encuadre.");
+      if (this.debugEl) this.debugEl.textContent = "buscando hombros y muñecas de frente…";
+      this.noteAbsence(now, WRISTROTATION_OUT_OF_FRAME_MS);
+      return;
+    }
+    this.outOfFrameSince = null;
+
+    const shoulderMidX = (lS.x + rS.x) / 2;
+    const shoulderMidY = (lS.y + rS.y) / 2;
+    const shoulderWidth = Math.hypot(lS.x - rS.x, lS.y - rS.y);
+    if (!shoulderWidth) return;
+
+    const handMidX = (lW.x + rW.x) / 2;
+    const handMidY = (lW.y + rW.y) / 2;
+    const wristDist = Math.hypot(lW.x - rW.x, lW.y - rW.y);
+    const together = wristDist <= WRISTROTATION_TOGETHER_MAX_FACTOR * shoulderWidth;
+
+    if (this.state === null) {
+      if (!this.startupVoiceGiven) {
+        this.startupVoiceGiven = true;
+        this.announceStatus(
+          "Hombros y muñecas a la vista. ¡Listo! Junta las manos con los dedos entrelazados, delante del pecho, y empieza a girarlas en círculo. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
+          "startup_ready"
+        );
+      }
+      if (together) {
+        if (this.wristRotationTogetherStableSince === null) this.wristRotationTogetherStableSince = now;
+        if (now - this.wristRotationTogetherStableSince >= WRISTROTATION_TOGETHER_STABLE_MS) {
+          this.state = "active";
+          this.wristRotationTogetherStableSince = null;
+          this.wristRotationBrokenSince = null;
+          // v2: no hay ángulo fiable todavía -- el centro se siembra en la
+          // posición actual de las manos (radio 0) y se deja que el EMA se
+          // asiente en el centro real del círculo con las primeras vueltas
+          // (ver el bloque WRISTROTATION_CENTER_EMA_ALPHA de más arriba).
+          this.wristRotationCenterX = handMidX;
+          this.wristRotationCenterY = handMidY;
+          this.wristRotationPrevAngle = null;
+          this.wristRotationAccum = 0;
+          this.wristRotationLastActivityAt = now;
+          this.wristRotationRepStartTime = now;
+          this.announceStatus("¡Listo! Empieza a girar las muñecas.", "ready_to_go");
+        } else {
+          this.setStatus("Manos juntas… confirmando (no te muevas)");
+        }
+      } else {
+        this.wristRotationTogetherStableSince = null;
+        this.setStatus("Junta las manos con los dedos entrelazados, delante del pecho, para empezar.");
+      }
+      if (this.debugEl) {
+        this.debugEl.textContent = `esperando manos juntas… distancia_muñecas=${wristDist.toFixed(3)} umbral=${(WRISTROTATION_TOGETHER_MAX_FACTOR * shoulderWidth).toFixed(3)}`;
+      }
+      return;
+    }
+
+    // state === "active": sin manos juntas de verdad ni giro de verdad
+    // durante WRISTROTATION_STILL_MS seguidos, se interpreta que has
+    // terminado (mismo patrón que ARMCIRCLES_STILL_MS/FOREARMROTATION_STILL_MS).
+    if (this.wristRotationLastActivityAt !== null && now - this.wristRotationLastActivityAt >= WRISTROTATION_STILL_MS) {
+      this.closeActiveSet();
+      this.wristRotationPrevAngle = null;
+      this.wristRotationAccum = 0;
+      this.wristRotationRepStartTime = null;
+      this.wristRotationBrokenSince = null;
+      this.wristRotationCenterX = null;
+      this.wristRotationCenterY = null;
+      return;
+    }
+
+    if (!together) {
+      // Manos separadas — no es un fallo inmediato (un fotograma suelto
+      // de ruido de tracking no cuenta, ver WRISTROTATION_TOGETHER_BREAK_MS):
+      // mientras tanto se sigue acumulando el giro con normalidad (se
+      // cae al bloque de más abajo sin volver), por si vuelven a
+      // juntarse en el mismo instante.
+      if (this.wristRotationBrokenSince === null) this.wristRotationBrokenSince = now;
+      if (now - this.wristRotationBrokenSince >= WRISTROTATION_TOGETHER_BREAK_MS) {
+        // Manos separadas de verdad: se espera sin cerrar la serie
+        // todavía (ver WRISTROTATION_STILL_MS más arriba) ni tocar el
+        // ángulo acumulado, por si vuelves a juntarlas enseguida.
+        if (this.debugEl) {
+          this.debugEl.textContent = `manos separadas | quieto desde hace: ${Math.round(now - this.wristRotationLastActivityAt)}ms`;
+        }
+        return;
+      }
+    } else {
+      this.wristRotationBrokenSince = null;
+    }
+
+    // v2: el centro del círculo NO es un punto anatómico fijo (a
+    // diferencia de círculos de cuello/brazos) -- se re-estima cada
+    // fotograma con una EMA lenta hacia la posición actual de las manos
+    // (ver el porqué en el bloque WRISTROTATION_CENTER_EMA_ALPHA de más
+    // arriba). Esto se hace SIEMPRE en estado activo (haya o no radio
+    // fiable todavía), para que el centro converja de verdad.
+    if (this.wristRotationCenterX === null) {
+      this.wristRotationCenterX = handMidX;
+      this.wristRotationCenterY = handMidY;
+    } else {
+      this.wristRotationCenterX += (handMidX - this.wristRotationCenterX) * WRISTROTATION_CENTER_EMA_ALPHA;
+      this.wristRotationCenterY += (handMidY - this.wristRotationCenterY) * WRISTROTATION_CENTER_EMA_ALPHA;
+    }
+
+    const reach = Math.hypot(handMidX - this.wristRotationCenterX, handMidY - this.wristRotationCenterY);
+    const reachOk = reach > WRISTROTATION_MIN_RADIUS_FACTOR * shoulderWidth;
+
+    const angle = Math.atan2(-(handMidY - this.wristRotationCenterY), handMidX - this.wristRotationCenterX);
+    let delta = 0;
+    if (this.wristRotationPrevAngle === null) {
+      this.wristRotationPrevAngle = angle;
+    } else if (reachOk) {
+      const d = wrapAngleDelta(angle - this.wristRotationPrevAngle);
+      if (Math.abs(d) <= WRISTROTATION_MAX_SINGLE_FRAME_DELTA) {
+        delta = d;
+        this.wristRotationPrevAngle = angle;
+      }
+      // Salto mayor que WRISTROTATION_MAX_SINGLE_FRAME_DELTA en un
+      // fotograma: se descarta como fallo puntual de tracking (mismo
+      // motivo que ARMCIRCLES_MAX_SINGLE_ARM_DELTA), sin actualizar el
+      // ángulo previo, para no perder del todo el giro real de este
+      // fotograma.
+    } else {
+      // Radio (distancia mano-centro_estimado) todavía demasiado
+      // pequeño para fiarse del ángulo -- normal justo al armar o justo
+      // tras un cambio real de dirección, mientras el centro EMA se
+      // asienta: se actualiza igualmente el ángulo previo, para no
+      // generar un salto falso cuando el radio vuelva a ser fiable.
+      this.wristRotationPrevAngle = angle;
+    }
+
+    if (Math.abs(delta) >= WRISTROTATION_MIN_ANGULAR_DELTA) {
+      this.wristRotationLastActivityAt = now;
+    }
+
+    this.wristRotationAccum += delta;
+
+    if (Math.abs(this.wristRotationAccum) >= 2 * Math.PI) {
+      const seconds = (now - this.wristRotationRepStartTime) / 1000;
+      if (this.countRep(seconds, now, "Círculo completo de muñecas", WRISTROTATION_MIN_REP_SECONDS)) {
+        this.wristRotationLastActivityAt = now;
+      }
+      this.wristRotationAccum -= Math.sign(this.wristRotationAccum) * 2 * Math.PI;
+      this.wristRotationRepStartTime = now;
+    }
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `manos juntas girando | acumulado: ${Math.round(Math.abs(this.wristRotationAccum) * 180 / Math.PI)}°/360° | delta: ${(delta * 180 / Math.PI).toFixed(1)}°/f | ` +
+        `quieto desde hace: ${this.wristRotationLastActivityAt ? Math.round(now - this.wristRotationLastActivityAt) + "ms" : "-"}`;
+    }
+  }
+
+  /**
    * Mensaje de "vuelve a colocarte" propio de cada ejercicio de este
    * grupo (sentadillas y los tres abdominales tumbado) — usado tanto al
    * esperar la primera vez como al reabrir tras cerrar una serie.
@@ -6589,6 +8634,14 @@ class WorkoutSession {
         return "Ponte de perfil a la cámara, de pie, con la mancuerna colgando y el brazo estirado, para empezar.";
       case "necklateral":
         return "Ponte de frente a la cámara, mirando al frente, para empezar.";
+      case "neckcircles":
+        return "Ponte de frente a la cámara, mirando al frente, para empezar.";
+      case "neckhalfturn":
+        return "Ponte de frente a la cámara, mirando al frente, para empezar.";
+      case "neckturn":
+        return "Ponte de frente a la cámara, mirando al frente, para empezar.";
+      case "hiplateral":
+        return "Ponte de frente a la cámara, con los pies bien separados, para empezar.";
       case "armscissors":
         return "Ponte de pie, de frente a la cámara, con los brazos extendidos en cruz, para empezar.";
       case "legrotation":
@@ -6597,6 +8650,10 @@ class WorkoutSession {
         return "Ponte de pie, de perfil a la cámara, con las dos piernas apoyadas, para empezar.";
       case "heelkicks":
         return "Ponte de pie, de perfil a la cámara, con las dos piernas apoyadas, para empezar.";
+      case "forearmrotation":
+        return "Agarra el codo de un brazo con la otra mano, cerca del cuerpo, para empezar.";
+      case "wristrotation":
+        return "Junta las manos con los dedos entrelazados, delante del pecho, para empezar.";
       case "splitsquat":
         return "Ponte en posición: de perfil, una pierna delante y otra detrás.";
       default:
@@ -6681,6 +8738,25 @@ class WorkoutSession {
       return this.stretchLastSide
         ? "Ahora el otro brazo: dóblalo por el codo, llevando la mano por detrás de la nuca, y con el otro brazo agarra ese codo (no la mano) tirando de él hacia el centro."
         : "Dobla un brazo por el codo, llevando la mano por detrás de la nuca, y con el otro brazo agarra ese codo (no la mano) tirando de él hacia el centro.";
+    }
+    // Estiramiento de isquiotibiales sentado: mismo patrón (paso 1
+    // standby, paso 2 sugiere la pierna contraria a la última
+    // aguantada), pero paso 2 es sentado en el suelo, no de pie.
+    if (this.counterKey === "seatedhamstringstretch") {
+      if (!this.postureGroundConfirmed) {
+        return "Ponte de pie, relajada/o, con los brazos sueltos a los lados (posición standby), para confirmar que te veo.";
+      }
+      return this.stretchLastSide
+        ? "Ahora la otra pierna: siéntate de perfil en el suelo, estírala del todo y dobla la otra, e inclínate hacia delante para agarrarte el pie o el tobillo con la mano."
+        : "Siéntate de perfil en el suelo, con una pierna estirada del todo y la otra doblada, e inclínate hacia delante para agarrarte el pie o el tobillo de la pierna estirada con la mano.";
+    }
+    if (this.counterKey === "standingquadstretch") {
+      if (!this.postureGroundConfirmed) {
+        return "Ponte de pie, relajada/o, con los brazos sueltos a los lados (posición standby), para confirmar que te veo.";
+      }
+      return this.stretchLastSide
+        ? "Ahora la otra pierna: dobla la rodilla llevando el talón hacia el glúteo por detrás, y agárrate el pie con la mano por detrás de la espalda, de frente a la cámara."
+        : "De pie y de frente a la cámara, dobla una rodilla llevando el talón hacia el glúteo por detrás, y agárrate el pie con la mano por detrás de la espalda, aguantando el equilibrio con la pierna contraria.";
     }
     return "Ponte en posición de plancha, apoyada/o en los antebrazos, con el cuerpo en línea recta, para empezar.";
   }
@@ -6802,6 +8878,10 @@ class WorkoutSession {
           ? "Postura correcta. ¡Listo! Aguanta el pino, con el abdomen apretado y el cuerpo recto. Para terminar una serie, baja del pino o sal del encuadre."
           : this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch"
           ? "Postura correcta. ¡Listo! Aguanta el estiramiento, sin tirar de golpe. Para terminar, suelta el brazo (vuelve a standby) o sal del encuadre."
+          : this.counterKey === "seatedhamstringstretch"
+          ? "Postura correcta. ¡Listo! Aguanta el estiramiento, sin tirar de golpe. Para terminar, suelta el pie (vuelve a standby) o sal del encuadre."
+          : this.counterKey === "standingquadstretch"
+          ? "Postura correcta. ¡Listo! Aguanta el estiramiento, sin tirar de golpe. Para terminar, suelta el pie (vuelve a standby) o sal del encuadre."
           : "Postura correcta. ¡Listo! Aguanta la postura, apretando el abdomen y metiendo el culo hacia dentro, sin dejar caer la cadera. Para terminar una serie, rompe la postura, ponte de pie, sal del encuadre, o levanta un brazo y agita la mano.";
       this.announceStatus(startupTip, "startup_ready", "Listo. En posición.");
     }
@@ -6997,7 +9077,7 @@ class WorkoutSession {
     const invalidStableMs =
       this.counterKey === "kneeholdbar" ? KNEEHOLDBAR_INVALID_STABLE_MS
       : this.counterKey === "handstand" ? HANDSTAND_INVALID_STABLE_MS
-      : this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch" ? STRETCH_INVALID_STABLE_MS
+      : this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch" || this.counterKey === "seatedhamstringstretch" || this.counterKey === "standingquadstretch" ? STRETCH_INVALID_STABLE_MS
       : PLANK_INVALID_STABLE_MS;
     if (now - this.postureInvalidSince >= invalidStableMs) {
       this.closeActivePostureSet();
@@ -7047,6 +9127,8 @@ class WorkoutSession {
       let waitingMessage;
       if (this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch") {
         waitingMessage = "Vuelve a standby (de pie, brazos sueltos) y prueba con el otro brazo.";
+      } else if (this.counterKey === "seatedhamstringstretch" || this.counterKey === "standingquadstretch") {
+        waitingMessage = "Vuelve a standby (de pie, brazos sueltos) y prueba con la otra pierna.";
       } else {
         waitingMessage = this.postureWaitingMessage();
       }
@@ -7106,6 +9188,10 @@ class WorkoutSession {
           const stretchReadyMessage =
             this.counterKey === "tricepsoverheadstretch"
               ? "¡Bien, en standby! Ahora dobla un brazo por el codo, llevando la mano por detrás de la nuca, y con el otro brazo agarra ese codo (no la mano) tirando de él hacia el centro."
+              : this.counterKey === "seatedhamstringstretch"
+              ? "¡Bien, en standby! Ahora siéntate de perfil en el suelo, con una pierna estirada del todo y la otra doblada, e inclínate hacia delante para agarrarte el pie o el tobillo de la pierna estirada con la mano."
+              : this.counterKey === "standingquadstretch"
+              ? "¡Bien, en standby! Ahora, de frente a la cámara, dobla una rodilla llevando el talón hacia el glúteo por detrás, y agárrate el pie con la mano por detrás de la espalda, aguantando el equilibrio con la pierna contraria."
               : "¡Bien, en standby! Ahora estira un brazo hacia el lado contrario, más o menos a la altura del hombro, y agárralo con el otro brazo por el codo, tirando de él hacia el pecho.";
           this.announceStatus(
             stretchReadyMessage,
@@ -7211,9 +9297,13 @@ class WorkoutSession {
         ? checkArmCrossStretch(lm)
         : this.counterKey === "tricepsoverheadstretch"
         ? checkTricepsOverheadStretch(lm)
+        : this.counterKey === "seatedhamstringstretch"
+        ? checkSeatedHamstringStretch(lm)
+        : this.counterKey === "standingquadstretch"
+        ? checkStandingQuadStretch(lm)
         : checkPlankPosture(lm);
     if (this.counterKey === "sideplank" && check.downSide) this.sidePlankDownSide = check.downSide;
-    if ((this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch") && check.side) this.stretchLastSide = check.side;
+    if ((this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch" || this.counterKey === "seatedhamstringstretch" || this.counterKey === "standingquadstretch") && check.side) this.stretchLastSide = check.side;
     // Antes este texto tenía los nombres de los campos de checkPlankPosture
     // escritos a mano — para checkSidePlankPosture (campos distintos:
     // hipLift, elbowDrop…) siempre salía en blanco ("-"). Ahora se vuelca
@@ -7240,7 +9330,7 @@ class WorkoutSession {
       const flickerStableMs =
         this.counterKey === "kneeholdbar" ? KNEEHOLDBAR_FLICKER_STABLE_MS
         : this.counterKey === "handstand" ? HANDSTAND_FLICKER_STABLE_MS
-        : this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch" ? STRETCH_FLICKER_STABLE_MS
+        : this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch" || this.counterKey === "seatedhamstringstretch" || this.counterKey === "standingquadstretch" ? STRETCH_FLICKER_STABLE_MS
         : POSTURE_FLICKER_STABLE_MS;
       if (now - this.postureCandidateSince >= flickerStableMs) {
         this.postureLastOk = check.ok;
@@ -7268,6 +9358,10 @@ class WorkoutSession {
         ? "estiramiento cruzado de brazo"
         : this.counterKey === "tricepsoverheadstretch"
         ? "estiramiento de tríceps por encima de la cabeza"
+        : this.counterKey === "seatedhamstringstretch"
+        ? "estiramiento de isquiotibiales sentado"
+        : this.counterKey === "standingquadstretch"
+        ? "estiramiento de cuádriceps de pie"
         : "plancha";
     this.logScissor(
       `[${postureLabel}, paso 2] frame_ok=${check.ok ? "sí" : "no"} confirmado=${this.postureLastOk ? "sí" : "no"} ` +
@@ -8688,6 +10782,22 @@ class WorkoutSession {
       this.processNeckLateral(lm, now);
       return;
     }
+    if (this.counterKey === "neckturn") {
+      this.processNeckTurn(lm, now);
+      return;
+    }
+    if (this.counterKey === "neckcircles") {
+      this.processNeckCircles(lm, now);
+      return;
+    }
+    if (this.counterKey === "neckhalfturn") {
+      this.processNeckHalfTurn(lm, now);
+      return;
+    }
+    if (this.counterKey === "hiplateral") {
+      this.processHipLateral(lm, now);
+      return;
+    }
     if (this.counterKey === "armscissors") {
       this.processArmScissors(lm, now);
       return;
@@ -8702,6 +10812,18 @@ class WorkoutSession {
     }
     if (this.counterKey === "heelkicks") {
       this.processHeelKicks(lm, now);
+      return;
+    }
+    if (this.counterKey === "forearmrotation") {
+      this.processForearmRotation(lm, now);
+      return;
+    }
+    if (this.counterKey === "wristrotation") {
+      this.processWristRotation(lm, now);
+      return;
+    }
+    if (this.counterKey === "hipforwardback") {
+      this.processHipForwardBack(lm, now);
       return;
     }
     if (this.counterKey === "crunch") {

@@ -20,6 +20,7 @@ import {
   angle,
   checkPlankPosture, checkSidePlankPosture, checkWallSitPosture,
   checkKneeHoldBarPosture, checkHandstandPosture, checkArmCrossStretch, checkTricepsOverheadStretch,
+  checkSeatedHamstringStretch, checkStandingQuadStretch,
   speakOut, numeroEnPalabras, isVoiceEnabled,
 } from "./workout.js";
 // De dónde sale MediaPipe (versión + rutas a los ficheros locales)
@@ -106,7 +107,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   // postura en vez de contar repeticiones. Ver checkPlankPosture /
   // checkSidePlankPosture / checkWallSitPosture / checkKneeHoldBarPosture /
   // checkHandstandPosture más abajo.
-  const POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch", "tricepsoverheadstretch"]);
+  const POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
 
   function runCurrent() {
     const item = current();
@@ -207,6 +208,10 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         ? checkArmCrossStretch
         : item.counter_key === "tricepsoverheadstretch"
         ? checkTricepsOverheadStretch
+        : item.counter_key === "seatedhamstringstretch"
+        ? checkSeatedHamstringStretch
+        : item.counter_key === "standingquadstretch"
+        ? checkStandingQuadStretch
         : checkPlankPosture;
 
     playerHost.innerHTML = `

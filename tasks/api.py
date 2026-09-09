@@ -21,6 +21,7 @@ import unicodedata
 import uuid
 from functools import wraps
 
+from django.db import transaction
 from django.db.models import Q, Sum
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404
@@ -530,17 +531,28 @@ def task_mark_by_series(request, series_id, action):
     resolviendo el día que toque, indefinidamente, sin depender de que
     se reabra la app para "refrescarla".
     """
-    task = get_object_or_404(
-        tasks_qs().filter(is_done=False), series_id=series_id
-    )
-    if action == "done":
-        task.mark_done()
-    elif action == "not-done":
-        task.mark_not_done()
-    elif action == "failed":
-        task.mark_failed()
-    else:
-        return JsonResponse({"ok": False, "error": "Acción desconocida"}, status=400)
+    # select_for_update() + atomic(): dos peticiones para la MISMA serie
+    # que llegaran casi a la vez (dos dispositivos, o la cola offline
+    # reenviando de golpe tras recuperar red) podían, sin este bloqueo,
+    # leer las dos "la pendiente es la de hoy" antes de que ninguna
+    # hubiera terminado de resolverla — la segunda repetía el done() de
+    # la primera en vez de encontrarse ya con la de mañana. Con la fila
+    # bloqueada, la segunda espera a que la primera termine (y su commit
+    # haya creado ya la siguiente tarea) antes de mirar cuál es "la
+    # pendiente actual", así que a lo sumo resuelve UN día por petición
+    # real que haya llegado — igual que por uuid concreto.
+    with transaction.atomic():
+        task = get_object_or_404(
+            tasks_qs().filter(is_done=False).select_for_update(), series_id=series_id
+        )
+        if action == "done":
+            task.mark_done()
+        elif action == "not-done":
+            task.mark_not_done()
+        elif action == "failed":
+            task.mark_failed()
+        else:
+            return JsonResponse({"ok": False, "error": "Acción desconocida"}, status=400)
     return JsonResponse({"ok": True, "task": task_json(task)})
 
 
