@@ -283,6 +283,15 @@ button { font-family:var(--font-b); cursor:pointer; }
 .stats-card__rate  { font-family:var(--font-mono); font-weight:700; font-size:16px; color:var(--amber); flex-shrink:0; }
 .stats-bar { height:8px; background:var(--ember-soft); border-radius:999px; overflow:hidden; margin-bottom:10px; }
 .stats-bar__done { height:100%; background:var(--gold); border-radius:999px; }
+
+/* Minibarra de progreso de hoy en tareas que se completan solas
+   (Lectura/Udemy vía pc_usage, Running vía distancia/pasos) — ver
+   Task.auto_progress. Más fina que .stats-bar porque vive dentro de
+   una tarjeta de la lista, no en su propia sección. */
+.task-progress { margin-top:8px; }
+.task-progress__bar { height:5px; background:var(--ember-soft); border-radius:999px; overflow:hidden; }
+.task-progress__done { height:100%; background:var(--gold); border-radius:999px; transition:width .3s ease; }
+.task-progress__label { display:block; margin-top:4px; font-size:11px; font-family:var(--font-mono); color:var(--bone-faded); }
 .stats-card__counts { display:flex; gap:8px; flex-wrap:wrap; }
 .count-pill { font-size:11px; padding:3px 10px; border-radius:999px; font-weight:500; }
 .count-pill--done     { background:var(--gold-soft); color:var(--gold); }

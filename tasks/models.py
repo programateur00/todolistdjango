@@ -5,6 +5,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.db import models
+from django.db.models import Sum
 from django.utils import timezone
 
 # Formatos aceptados al pegar un vídeo de YouTube (RoutineItem.youtube_video_id):
@@ -446,6 +447,79 @@ class Task(models.Model):
             # se completa sola al importar de Health Connect.
             return "auto"
         return None
+
+    @property
+    def auto_progress(self):
+        """
+        Progreso de HOY hacia el objetivo de una tarea que se completa
+        sola (workout_kind "auto": Lectura con extensión/Curso de Udemy
+        vía TimerSession.SOURCE_PC_USAGE, o "distance": Running vía
+        WorkoutSession) — para poder enseñar una minibarra en la lista
+        sin mandar al usuario a comprobarlo en otro sitio.
+
+        Devuelve None si la tarea no es de este tipo, ya está resuelta,
+        o no tiene ningún objetivo numérico que medir (sin objetivo no
+        hay "cuánto falta" que dibujar). En otro caso, un dict con pct
+        (0-100, recortado por arriba), y label ya formateado para la
+        plantilla.
+
+        Mismo criterio de "hoy" y de qué sesiones cuentan que usan
+        api.focus_save (pc_usage) y api.workout_import_running/
+        _plan_context al decidir si marcar la tarea hecha — si cambia
+        ahí, hay que cambiarlo aquí también para que la barra no
+        prometa algo distinto de lo que realmente hace falta.
+        """
+        kind = self.workout_kind
+        if kind not in ("auto", "distance") or self.is_done or self.expired:
+            return None
+        hoy = timezone.localtime(timezone.now()).date()
+
+        if kind == "auto":
+            if not self.target_minutes:
+                return None
+            minutos_hoy = TimerSession.objects.filter(
+                user=self.user, series_id=self.series_id,
+                source=TimerSession.SOURCE_PC_USAGE,
+                recorded_at__date=hoy, deleted_at__isnull=True,
+            ).aggregate(m=Sum("minutes"))["m"] or 0
+            pct = min(100, round(100 * minutos_hoy / self.target_minutes))
+            return {
+                "pct": pct,
+                "label": f"{minutos_hoy}/{self.target_minutes} min",
+            }
+
+        # kind == "distance": running, por distancia o por pasos —
+        # el ritmo mínimo (si lo hay) solo filtra qué sesiones cuentan,
+        # no tiene su propia barra.
+        if not self.target_distance_km and not self.target_steps:
+            return None
+        sesiones_hoy = WorkoutSession.objects.filter(
+            user=self.user, series_id=self.series_id,
+            recorded_at__date=hoy, deleted_at__isnull=True,
+        )
+        if self.target_distance_km:
+            max_pace = self.max_pace_seconds_per_km
+            km_hoy = 0.0
+            for ws in sesiones_hoy:
+                if not ws.distance_km:
+                    continue
+                if max_pace is not None and (
+                    ws.pace_seconds_per_km is None or ws.pace_seconds_per_km > max_pace
+                ):
+                    continue
+                km_hoy += ws.distance_km
+            pct = min(100, round(100 * km_hoy / self.target_distance_km))
+            return {
+                "pct": pct,
+                "label": f"{km_hoy:.1f}/{self.target_distance_km:g} km",
+            }
+
+        pasos_hoy = sesiones_hoy.aggregate(p=Sum("steps"))["p"] or 0
+        pct = min(100, round(100 * pasos_hoy / self.target_steps))
+        return {
+            "pct": pct,
+            "label": f"{pasos_hoy}/{self.target_steps} pasos",
+        }
 
     @property
     def is_avoid(self):

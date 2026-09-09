@@ -137,6 +137,16 @@
                         <span class="meta-pill meta-pill--capability" title="Soporta seguimiento de postura (MediaPipe)">📷 pose</span>
                     {% endif %}
                 </div>
+                {% if task.workout_kind == "auto" or task.workout_kind == "distance" %}
+                {% with progress=task.auto_progress %}
+                {% if progress %}
+                <div class="task-progress" title="Progreso de hoy hacia el objetivo">
+                    <div class="task-progress__bar"><div class="task-progress__done" style="width:{{ progress.pct }}%"></div></div>
+                    <span class="task-progress__label">{{ progress.label }} · {{ progress.pct }}%</span>
+                </div>
+                {% endif %}
+                {% endwith %}
+                {% endif %}
             </a>
 
             <form action="{% url 'tasks:task_delete' task.pk %}" method="post" class="task-card__delete">
