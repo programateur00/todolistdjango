@@ -54,17 +54,17 @@ class Task(models.Model):
     CATEGORY_STUDY = "study"
     CATEGORY_SPORT = "sport"
     CATEGORY_WORK = "work"
-    CATEGORY_PERSONAL = "personal"
-    CATEGORY_OTHER = "other"
     CATEGORY_AVOID = "avoid"
 
+    # "Personal" y "Otro" existieron sin usarse nunca (cero tareas reales
+    # en ninguna de las dos) — se quitaron para no ofrecer más opciones
+    # de las que hacen falta. Si algún día hace falta un cajón de sastre,
+    # General ya cubre "tarea suelta sin extras".
     CATEGORY_CHOICES = [
         (CATEGORY_GENERAL, "General"),
         (CATEGORY_STUDY, "Estudio"),
         (CATEGORY_SPORT, "Deporte"),
-        (CATEGORY_WORK, "Enfoque"),
-        (CATEGORY_PERSONAL, "Personal"),
-        (CATEGORY_OTHER, "Otro"),
+        (CATEGORY_WORK, "Lectura"),
         (CATEGORY_AVOID, "Antitarea"),
     ]
 
@@ -72,23 +72,28 @@ class Task(models.Model):
     # Útil para que la UI sepa si mostrar el botón de iniciar timer,
     # el panel de cámara de MediaPipe, etc.
     #
-    # CATEGORY_WORK ("Enfoque") era antes "Trabajo" sin ningún extra
-    # construido — se reutiliza el mismo hueco (misma clave "work" en la
-    # base de datos, así las tareas que ya tuvieras no se mueven de
-    # categoría) para el temporizador manual: leer, estudiar, estirar…
-    # cualquier cosa que quieras cronometrar sin que sea deporte.
+    # CATEGORY_WORK ("Lectura", antes "Enfoque") era antes "Trabajo" sin
+    # ningún extra construido — se reutiliza el mismo hueco (misma clave
+    # "work" en la base de datos, así las tareas que ya tuvieras no se
+    # mueven de categoría). Al principio cronometraba cualquier cosa
+    # (leer, estudiar, estirar…), pero "Estudio" y "Estiramientos" nunca
+    # se llegaron a usar de verdad (ya cubiertos por Estudio normal y por
+    # Deporte → cámara respectivamente), así que se dejó solo en Lectura.
+    #
+    # General no tiene entrada aquí a propósito: el cronómetro ahí es
+    # opcional por tarea (ver Task.wants_timer), no algo que dependa de
+    # la categoría entera — por eso lo decide workout_kind() mirando el
+    # campo, no esta tabla.
     CATEGORY_CAPABILITIES = {
         CATEGORY_GENERAL: [],
         # "timer"/"app_usage": para "Curso de Udemy" (ver
-        # SUBCATEGORY_UDEMY) — cronómetro igual que Enfoque, y tiempo real
+        # SUBCATEGORY_UDEMY) — cronómetro igual que Lectura, y tiempo real
         # medido en el PC (TimerSession.SOURCE_PC_USAGE) en vez de a mano.
         # "Idiomas" (SUBCATEGORY_LANGUAGE) no usa ninguna de las dos, va
         # por su propio mecanismo de vídeos secuenciados (CourseModule).
         CATEGORY_STUDY: ["timer", "app_usage"],
         CATEGORY_SPORT: ["timer", "pose_tracking"],
         CATEGORY_WORK: ["timer", "app_usage"],
-        CATEGORY_PERSONAL: [],
-        CATEGORY_OTHER: [],
         CATEGORY_AVOID: [],
     }
 
@@ -109,20 +114,21 @@ class Task(models.Model):
         (SUBCATEGORY_WARMUP, "Estiramientos y calentamientos"),
     ]
 
-    # Subcategorías de "Enfoque": qué se está cronometrando. Todas
-    # comparten el mismo temporizador manual (ver TimerSession); solo
-    # "Lectura" puede además usar el tiempo real en una app externa
-    # (Adobe, Kindle…) cuando hay plugin nativo instalado — ver
-    # TimerSession.SOURCE_APP_USAGE.
+    # Subcategoría de "Lectura" (CATEGORY_WORK): de momento solo hay una
+    # — "Estudio", "Estiramientos" y "Otro" existieron pero nunca se
+    # usaron de verdad (Estudio ya tiene su propia categoría, y los
+    # estiramientos se hacen por cámara en Deporte), así que se quitaron.
+    # Se deja como lista de un elemento (en vez de un valor suelto) para
+    # que Task.subcategory, el formulario y time_stats seguir montándose
+    # igual que antes, sin casos especiales.
+    #
+    # Puede además usar el tiempo real en una app externa (Adobe,
+    # Kindle…) cuando hay plugin nativo instalado — ver
+    # TimerSession.SOURCE_APP_USAGE — o en el PC vía la extensión de
+    # Chrome — ver TimerSession.SOURCE_PC_USAGE y watch_keyword.
     SUBCATEGORY_READING = "reading"
-    SUBCATEGORY_STUDY_SESSION = "study_session"
-    SUBCATEGORY_STRETCH = "stretch"
-    SUBCATEGORY_FOCUS_OTHER = "focus_other"
     FOCUS_SUBCATEGORY_CHOICES = [
         (SUBCATEGORY_READING, "Lectura"),
-        (SUBCATEGORY_STUDY_SESSION, "Estudio"),
-        (SUBCATEGORY_STRETCH, "Estiramientos"),
-        (SUBCATEGORY_FOCUS_OTHER, "Otro"),
     ]
 
     # Subcategorías de "Estudio": de momento solo "Idiomas" — un curso con
@@ -160,13 +166,12 @@ class Task(models.Model):
     ]
 
     title = models.CharField(max_length=255)
-    # Columna heredada de una fase muy anterior del proyecto — ya no se
-    # usa para nada, pero sigue existiendo como NOT NULL en bases de
-    # datos ya desplegadas (la tuya incluida), y por eso hace falta que
-    # el modelo la conozca: si Django no la incluye al crear una tarea,
-    # SQLite la rechaza por violar esa restricción. default=False para
-    # que cualquier creación (incluida la de Plan.sync_task()) la
-    # rellene sola sin que nadie tenga que acordarse de ella.
+    # Nace en una fase muy anterior del proyecto sin llegar a usarse —
+    # revivido para "General": marca si esta tarea suelta quiere
+    # cronómetro (ver workout_kind) en vez de ser una tarea normal de
+    # marcar hecha/no hecha a mano. default=False para que cualquier
+    # creación (incluida la de Plan.sync_task(), que nunca lo pone a
+    # True) la rellene sola sin que nadie tenga que acordarse de ella.
     wants_timer = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
     category = models.CharField(
@@ -418,6 +423,12 @@ class Task(models.Model):
         # Fuera de Deporte, un vídeo puesto define la tarea entera.
         if self.youtube_video_id or self.youtube_playlist_id or self.has_local_video:
             return "video"
+        if self.category == self.CATEGORY_GENERAL:
+            # Cronómetro opcional para una tarea suelta cualquiera — ver
+            # wants_timer (campo que existía sin usarse desde hace mucho,
+            # reutilizado aquí en vez de añadir uno nuevo). Sin marcar,
+            # General se queda como lista de tareas de toda la vida.
+            return "focus" if self.wants_timer else None
         if self.category == self.CATEGORY_WORK:
             if self.subcategory == self.SUBCATEGORY_READING and (self.watch_keyword or "").strip():
                 # Lectura con palabra clave puesta: la vigila la extensión
@@ -2701,7 +2712,7 @@ class TimerSession(models.Model):
 
     @property
     def subcategory_label(self):
-        return dict(Task.FOCUS_SUBCATEGORY_CHOICES).get(self.subcategory, "Enfoque")
+        return dict(Task.FOCUS_SUBCATEGORY_CHOICES).get(self.subcategory, "Lectura")
 
     def __str__(self):
         return f"{self.subcategory_label} — {self.minutes} min ({self.recorded_at:%Y-%m-%d %H:%M})"

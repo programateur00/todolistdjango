@@ -283,6 +283,7 @@ def task_create(request):
                 interval=request.POST.get("interval") or 1,
                 custom_days=",".join(request.POST.getlist("custom_days")),
                 is_important=bool(request.POST.get("is_important")),
+                wants_timer=bool(request.POST.get("wants_timer")),
                 avoid_question=request.POST.get("avoid_question", "").strip()[:120],
                 avoid_success_label=request.POST.get("avoid_success_label", "").strip()[:32],
                 avoid_fail_label=request.POST.get("avoid_fail_label", "").strip()[:32],
@@ -334,6 +335,7 @@ def task_edit(request, pk):
         task.interval = request.POST.get("interval") or 1
         task.custom_days = ",".join(request.POST.getlist("custom_days"))
         task.is_important = bool(request.POST.get("is_important"))
+        task.wants_timer = bool(request.POST.get("wants_timer"))
         task.avoid_question = request.POST.get("avoid_question", "").strip()[:120]
         task.avoid_success_label = request.POST.get("avoid_success_label", "").strip()[:32]
         task.avoid_fail_label = request.POST.get("avoid_fail_label", "").strip()[:32]
@@ -692,18 +694,20 @@ def task_cooldown(request, pk):
     })
 
 
-# ------------------------------------------------------------- enfoque
+# ------------------------------------------------------------- lectura / cronometro suelto
 
 def task_focus(request, pk):
     """
-    Pantalla del temporizador de una tarea de Enfoque (leer, estudiar,
-    estirar…). El cronómetro es JS puro en la plantilla — aquí solo se
-    enseña el objetivo, si lo hay.
+    Pantalla del temporizador de una tarea de Lectura (category="work")
+    o de una tarea de General con cronómetro (Task.wants_timer). El
+    cronómetro es JS puro en la plantilla — aquí solo se enseña el
+    objetivo, si lo hay.
 
-    Solo para el subtipo Estudio: además del temporizador, se ofrece
-    seguir un vídeo — se elige aquí, cada vez, igual que en tren
-    superior/inferior. Con ?video=<id> se va directo al vídeo; sin él
-    (y sin ?mode=timer) se enseña primero el selector.
+    El antiguo subtipo "Estudio" de esta categoría (antes de reducirla a
+    solo Lectura) ofrecía además un selector de vídeos guardados — se
+    quitó junto con el subtipo al no haber ninguna tarea real usándolo;
+    tasks/templates/tasks/task_focus_mode.html se queda sin usar por si
+    hiciera falta recuperar la idea más adelante.
     """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
     video_id = request.GET.get("video")
@@ -716,12 +720,6 @@ def task_focus(request, pk):
             "task": task, "video_id": video_id,
             "playlist_id": "", "target_minutes": None, "target_video_count": None, "has_local_video": False,
         })
-
-    if task.subcategory == Task.SUBCATEGORY_STUDY_SESSION and request.GET.get("mode") != "timer":
-        videos_qs = SavedVideo.objects.filter(
-            user=get_current_user(), scope=SavedVideo.SCOPE_STUDY, deleted_at__isnull=True,
-        )
-        return render(request, "tasks/task_focus_mode.html", {"task": task, "videos": videos_qs})
 
     return render(request, "tasks/task_focus.html", {"task": task})
 
@@ -1188,7 +1186,7 @@ def stats_delete_series(request, series_id):
 # ─────────────────────────────────────────────────────────────────────
 
 # Contadores que existen de verdad en workout.js.
-COUNTERS = {"pullup", "dip", "pushup", "squat", "splitsquat", "crunch", "legraise", "situp", "doublecrunch", "scissor", "archerpullup", "inclinepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks"}
+COUNTERS = {"pullup", "dip", "pushup", "squat", "splitsquat", "crunch", "legraise", "situp", "doublecrunch", "scissor", "archerpullup", "inclinepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "wristrotation", "hipforwardback"}
 
 # Ejercicios "timed" (se aguantan, no se cuentan en repeticiones) que
 # workout.js sabe seguir con cámara comprobando la postura — plancha,
@@ -1196,7 +1194,7 @@ COUNTERS = {"pullup", "dip", "pushup", "squat", "splitsquat", "crunch", "legrais
 # task_workout: a estos, a diferencia del resto de "timed" (bicicleta…),
 # sí se les deja entrar en el entreno individual de una tarea con cámara
 # encendida, no solo dentro de un circuito.
-POSTURE_COUNTERS = {"plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch", "tricepsoverheadstretch"}
+POSTURE_COUNTERS = {"plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"}
 
 
 def _plans_qs():

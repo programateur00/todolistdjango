@@ -1,5 +1,5 @@
 """
-Tiempo real acumulado por tipo de tarea — Deporte y Enfoque, sumando
+Tiempo real acumulado por tipo de tarea — Deporte y Lectura, sumando
 WorkoutSession.session_duration_seconds y TimerSession.minutes.
 
 No distingue tareas que cuentan para un Plan de tareas sueltas
@@ -27,18 +27,20 @@ from .models import Task, TimerSession, WorkoutSession
 # primero que no se supera es "next_badge_hours".
 ACHIEVEMENT_THRESHOLDS_HOURS = [10, 50, 100, 250, 500, 1000, 2500, 5000, 10000]
 
-# Clave interna → etiqueta a enseñar. La clave de Enfoque sigue el
+# Clave interna → etiqueta a enseñar. La clave de Lectura sigue el
 # patrón "focus_<subcategoría>" para no chocar nunca con "sport".
 BUCKET_LABELS = {
     "sport": "Deporte",
-    "focus_reading": "Enfoque · Lectura",
-    "focus_study_session": "Enfoque · Estudio",
-    "focus_stretch": "Enfoque · Estiramientos",
-    "focus_focus_other": "Enfoque · Otro",
+    "focus_reading": "Lectura",
     # "Idiomas" (SUBCATEGORY_LANGUAGE) no tiene bucket aquí a propósito:
     # no genera TimerSession, va por CourseModule/Occurrence — no hay
     # tiempo real que sumar, solo vídeos vistos.
     "study_udemy": "Estudio · Curso de Udemy",
+    # Cronómetro opcional de una tarea de General (Task.wants_timer) —
+    # esas TimerSession llevan subcategory="" porque General no tiene
+    # subcategoría, así que no salen del bucle de FOCUS_SUBCATEGORY_CHOICES
+    # de más abajo y necesitan su propio bucket a mano.
+    "general_timer": "General",
 }
 
 
@@ -82,14 +84,22 @@ def time_totals(user):
             "this_year": minutes_year * 60,
         }
     # "Curso de Udemy" vive en category=study (ver Task.SUBCATEGORY_UDEMY)
-    # pero también usa TimerSession igual que Enfoque — mismo cálculo,
-    # bucket aparte para no mezclarlo con Deporte/Enfoque en la tarjeta.
+    # pero también usa TimerSession igual que Lectura — mismo cálculo,
+    # bucket aparte para no mezclarlo con Deporte/Lectura en la tarjeta.
     udemy_timers = timers.filter(subcategory=Task.SUBCATEGORY_UDEMY)
     udemy_minutes_all = _sum_field(udemy_timers, "minutes")
     udemy_minutes_year = _sum_field(udemy_timers.filter(recorded_at__gte=year_start), "minutes")
     seconds_by_bucket["study_udemy"] = {
         "all_time": udemy_minutes_all * 60,
         "this_year": udemy_minutes_year * 60,
+    }
+    # Cronómetro opcional de General (ver BUCKET_LABELS más arriba).
+    general_timers = timers.filter(subcategory="")
+    general_minutes_all = _sum_field(general_timers, "minutes")
+    general_minutes_year = _sum_field(general_timers.filter(recorded_at__gte=year_start), "minutes")
+    seconds_by_bucket["general_timer"] = {
+        "all_time": general_minutes_all * 60,
+        "this_year": general_minutes_year * 60,
     }
 
     buckets = {}

@@ -4,7 +4,7 @@
 
 <header class="topbar">
     <div class="topbar__title">
-        <span class="topbar__eyebrow">enfoque</span>
+        <span class="topbar__eyebrow">{% if task.category == "work" %}lectura{% else %}cronómetro{% endif %}</span>
         <h1>{{ task.title }}</h1>
     </div>
     <a href="{% url 'tasks:task_list' %}" class="stats-link">← Volver</a>
