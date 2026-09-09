@@ -1042,6 +1042,77 @@ class Task(models.Model):
             )
         return base.order_by("-completed_at", "-created_at")
 
+    # Cuántas fechas se enseñan sueltas antes de esconder el resto tras
+    # un "+N más" — ver project_pending_series.
+    PROJECTION_PREVIEW = 8
+    # Red de seguridad para no iterar sin fin si algo en next_due_date()
+    # fuera raro (mismo espíritu que el tope de expire_overdue).
+    PROJECTION_MAX_ITER = 60
+
+    @classmethod
+    def project_pending_series(cls, tasks, range_key):
+        """
+        Sección "Por generar": para cada tarea repetida en `tasks`
+        (normalmente pending_tasks ya filtradas), calcula qué más se
+        generaría durante el rango elegido — SIN crear ninguna Task
+        real. Usa la misma cuenta que _spawn_next()/next_due_date()
+        para saber cuándo tocaría la siguiente, pero aquí es solo una
+        simulación de cara al usuario: así no se reintroduce el riesgo
+        de duplicados que el spawn de una en una evita a propósito.
+
+        "Todas" no tiene un límite de calendario en el que parar de
+        contar — ahí, si la tarea sigue repitiéndose, se marca
+        infinite=True en vez de intentar enumerar fechas para siempre.
+        """
+        today = timezone.localtime(timezone.now()).date()
+        if range_key == cls.RANGE_WEEK:
+            _, limit = cls._week_bounds(today)
+        elif range_key == cls.RANGE_MONTH:
+            _, limit = cls._month_bounds(today)
+        else:
+            limit = None  # RANGE_ALL (o "today", que no debería llegar aquí)
+
+        rows = []
+        for task in tasks:
+            if task.repeat == cls.REPEAT_NONE or not task.due_date:
+                continue
+
+            if limit is None:
+                shadow = cls(
+                    due_date=task.due_date, repeat=task.repeat, interval=task.interval,
+                    custom_days=task.custom_days, series_start_date=task.series_start_date,
+                )
+                if shadow.next_due_date() is None:
+                    continue  # ej. "personalizado" sin días marcados: no repite de verdad
+                rows.append({
+                    "task": task, "infinite": True,
+                    "preview_dates": [], "extra_dates": [], "extra_count": 0,
+                })
+                continue
+
+            dates = []
+            cursor = max(task.due_date, today)
+            for _ in range(cls.PROJECTION_MAX_ITER):
+                shadow = cls(
+                    due_date=cursor, repeat=task.repeat, interval=task.interval,
+                    custom_days=task.custom_days, series_start_date=task.series_start_date,
+                )
+                nxt = shadow.next_due_date()
+                if nxt is None or nxt > limit:
+                    break
+                dates.append(nxt)
+                cursor = nxt
+
+            if not dates:
+                continue
+            rows.append({
+                "task": task, "infinite": False,
+                "preview_dates": dates[:cls.PROJECTION_PREVIEW],
+                "extra_dates": dates[cls.PROJECTION_PREVIEW:],
+                "extra_count": max(0, len(dates) - cls.PROJECTION_PREVIEW),
+            })
+        return rows
+
     @classmethod
     def expire_overdue(cls, dry_run=False):
         """

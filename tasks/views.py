@@ -227,6 +227,14 @@ def task_list(request):
     # rango "hoy" se comporta exactamente igual que antes.
     pending_tasks = Task.for_range(base_qs.filter(is_done=False), active_range)
 
+    # "Por generar": qué más se generaría de las tareas repetidas
+    # durante el rango elegido (sin crear nada real todavía). No aplica
+    # a "hoy" porque ahí no hay nada más que asomar más allá de hoy.
+    projected_series = (
+        Task.project_pending_series(pending_tasks, active_range)
+        if active_range != Task.RANGE_TODAY else []
+    )
+
     # "Todas" en Hechas puede acumular mucho con años de tareas
     # repetidas — se limita a las más recientes para que la página no
     # se dispare de peso, con un aviso en la plantilla si se recorta.
@@ -254,6 +262,7 @@ def task_list(request):
 
     return render(request, "tasks/task_list.html", {
         "pending_tasks": pending_tasks,
+        "projected_series": projected_series,
         "completed_tasks": completed_tasks,
         "completed_total": completed_total,
         "completed_capped": completed_total > COMPLETED_CAP,
@@ -284,6 +293,16 @@ def task_create(request):
             )
         else:
             client_uuid = _read_client_uuid(request)
+            repeat = request.POST.get("repeat", Task.REPEAT_NONE)
+            due_date = request.POST.get("due_date") or None
+            if due_date is None and repeat != Task.REPEAT_NONE:
+                # Una tarea repetida necesita una fecha desde la que
+                # calcular la siguiente (ver Task.next_due_date /
+                # _spawn_next) — sin fecha se queda pillada la primera
+                # vez que se resuelve, aunque diga "se repite". Si no se
+                # pone ninguna, se usa hoy como punto de partida en vez
+                # de dejarla coja.
+                due_date = timezone.localtime(timezone.now()).date()
             task = Task(
                 title=title,
                 notes=request.POST.get("notes", "").strip(),
@@ -301,9 +320,9 @@ def task_create(request):
                 target_steps=_read_target_steps(request),
                 target_distance_km=_read_target_distance_km(request),
                 max_pace_seconds_per_km=_read_max_pace(request),
-                due_date=request.POST.get("due_date") or None,
+                due_date=due_date,
                 due_time=due_time,
-                repeat=request.POST.get("repeat", Task.REPEAT_NONE),
+                repeat=repeat,
                 interval=request.POST.get("interval") or 1,
                 custom_days=",".join(request.POST.getlist("custom_days")),
                 is_important=bool(request.POST.get("is_important")),
@@ -353,9 +372,15 @@ def task_edit(request, pk):
         task.target_steps = _read_target_steps(request)
         task.target_distance_km = _read_target_distance_km(request)
         task.max_pace_seconds_per_km = _read_max_pace(request)
-        task.due_date = request.POST.get("due_date") or None
-        task.due_time = request.POST.get("due_time") or None
         task.repeat = request.POST.get("repeat", Task.REPEAT_NONE)
+        due_date = request.POST.get("due_date") or None
+        if due_date is None and task.repeat != Task.REPEAT_NONE:
+            # Mismo motivo que en task_create: una tarea repetida sin
+            # fecha se queda pillada en cuanto se resuelve una vez, así
+            # que si no se pone ninguna se usa hoy como punto de partida.
+            due_date = timezone.localtime(timezone.now()).date()
+        task.due_date = due_date
+        task.due_time = request.POST.get("due_time") or None
         task.interval = request.POST.get("interval") or 1
         task.custom_days = ",".join(request.POST.getlist("custom_days"))
         task.is_important = bool(request.POST.get("is_important"))

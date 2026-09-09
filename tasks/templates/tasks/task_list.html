@@ -185,6 +185,37 @@
     {% endif %}
 </section>
 
+{% if projected_series %}
+<section class="task-section">
+    <h2 class="task-section__title">Por generar <span class="task-section__count">{{ projected_series|length }}</span></h2>
+    <p class="projected-hint">Todavía no existen como tareas de verdad — se crearán solas cuando les toque. Es solo un vistazo a lo que viene.</p>
+    <ul class="projected-list">
+        {% for row in projected_series %}
+        <li class="projected-item">
+            <span class="projected-item__title">{{ row.task.title }}</span>
+            {% if row.infinite %}
+            <span class="projected-item__infinite" title="Se repite sin fecha de fin">🔁 ∞</span>
+            {% else %}
+            <div class="projected-item__dates">
+                {% for d in row.preview_dates %}<span class="meta-pill meta-pill--date">{{ d|date:"d \d\e M" }}</span>{% endfor %}
+                {% if row.extra_count %}
+                <input type="checkbox" id="proj-more-{{ row.task.pk }}" class="projected-toggle" hidden>
+                <label for="proj-more-{{ row.task.pk }}" class="projected-more-btn projected-more-btn--show">{{ row.extra_count }} más</label>
+                <div class="projected-more__dates">
+                    <div class="projected-more__pills">
+                        {% for d in row.extra_dates %}<span class="meta-pill meta-pill--date">{{ d|date:"d \d\e M" }}</span>{% endfor %}
+                    </div>
+                    <label for="proj-more-{{ row.task.pk }}" class="projected-more-btn projected-more-btn--hide">Ocultar</label>
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}
+
 {% if completed_tasks %}
 <section class="task-section task-section--done">
     <details class="done-details"{% if active_range != "today" %} open{% endif %}>

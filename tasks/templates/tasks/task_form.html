@@ -358,7 +358,18 @@
         intervalField.style.display = v === 'none'   ? 'none'  : 'block';
         if(units[v]) intervalUnit.textContent = units[v];
     }
-    radios.forEach(function(r){ r.addEventListener('change', update); });
+    radios.forEach(function(r){
+        r.addEventListener('change', function(){
+            update();
+            // El rótulo de la fecha depende también de si se repite (ver
+            // updateSubcategory, más abajo). No se llama desde dentro de
+            // update() porque en la carga inicial se ejecutaría antes de
+            // que las variables que usa updateSubcategory (subcategoryField,
+            // avoidFields...) estén asignadas -- solo hace falta en cambios
+            // posteriores del usuario, cuando la página ya está montada.
+            if (typeof updateSubcategory === 'function') updateSubcategory();
+        });
+    });
     update();
 
     var subcategoryField = document.getElementById('subcategory-field');
@@ -483,16 +494,23 @@
         videoTargetCountField.style.display = (esEstudio && !esUdemy) ? 'block' : 'none';
         avoidFields.style.display = v === 'avoid' ? 'block' : 'none';
 
-        // Una antitarea no "vence": se te pregunta. Y como se repite a
-        // diario, la fecha es solo el punto de partida, no un final.
+        // Una antitarea no "vence": se te pregunta. Y en cuanto una tarea
+        // se repite (sea antitarea o no), la fecha deja de ser un final
+        // para pasar a ser solo el punto de partida desde el que se
+        // calcula la siguiente — por eso el rótulo cambia también con
+        // cualquier repetición, no solo con antitareas.
         var esAnti = v === 'avoid';
+        var repeatValue = (document.querySelector('[data-repeat-toggle]:checked') || {}).value || 'none';
+        var seRepite = repeatValue !== 'none';
         document.querySelector('[data-label-date]').textContent =
-            esAnti ? 'Empieza el' : 'Fecha de vencimiento';
+            (esAnti || seRepite) ? 'Empieza el' : 'Fecha de vencimiento';
         document.querySelector('[data-label-time]').textContent =
             esAnti ? 'Hora del aviso' : 'Hora límite';
         var hd = document.querySelector('[data-hint-date]');
-        hd.hidden = !esAnti;
-        hd.textContent = esAnti ? 'Si la repites, sigue indefinidamente.' : '';
+        hd.hidden = !(esAnti || seRepite);
+        hd.textContent = esAnti
+            ? 'Si la repites, sigue indefinidamente.'
+            : (seRepite ? 'Si la dejas en blanco, se usa hoy como fecha de inicio.' : '');
         document.querySelector('[data-hint-time]').textContent = esAnti
             ? 'A esta hora te preguntamos si has caído.'
             : 'Si pasa sin marcarla → auto no hecha. También es la hora del aviso.';

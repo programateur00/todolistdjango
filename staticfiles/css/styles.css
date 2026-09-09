@@ -201,6 +201,41 @@ button { font-family:var(--font-b); cursor:pointer; }
 .done-details:not([open]) > .task-list { display:none; }
 .empty-state { color:var(--bone-faded); font-size:14px; padding:20px 4px; font-style:italic; }
 
+/* ── Por generar (previsión de repeticiones futuras) ──────────────────
+   Fechas que TODAVÍA no existen como tarea real — se calculan a partir
+   de la configuración de repetición, sin tocar la base de datos. Por
+   eso no llevan ninguna acción (nada que marcar, nada que borrar):
+   son solo un vistazo a lo que viene, distinto a paréntesis de una
+   tarjeta de tarea normal. */
+.projected-hint { font-size:12px; color:var(--bone-faded); margin:-6px 0 12px; }
+.projected-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+.projected-item { background:var(--paper); border:1px dashed var(--line); border-radius:var(--radius);
+  padding:10px 14px; }
+.projected-item__title { display:block; font-size:14px; font-weight:600; margin-bottom:6px; }
+.projected-item__infinite { font-size:19px; color:var(--bone-faded); }
+.projected-item__dates { display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+
+/* Truco sin JavaScript: un checkbox oculto + dos <label> apuntando al
+   mismo id. Cerrado se ve el label "+N más"; al marcarse (clic en
+   cualquiera de los dos labels) se esconde ese botón, aparecen las
+   fechas de más, y al final de esas fechas sale el label "Ocultar" —
+   así el botón para cerrar queda pegado a lo que vas a cerrar, no
+   arriba del todo con la sección seleccionada, se ve mejor. */
+.projected-toggle { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+.projected-more-btn { cursor:pointer; font-size:11px; color:var(--bone-faded);
+  padding:2px 8px; border-radius:999px; border:1px dashed var(--line); transition:all .15s; }
+.projected-more-btn:hover { border-color:var(--ember); color:var(--ember); }
+.projected-more-btn::before { content:"+ "; }
+.projected-more-btn--hide::before { content:"− "; }
+/* "Ocultar" siempre en su propia línea, empezando en el mismo sitio
+   (a la izquierda) donde estaba el botón "+N más" que se pulsó -- así
+   no hay que mover el ratón para encontrarlo, se queda a mano. */
+.projected-more__dates { display:none; flex-direction:column; align-items:flex-start;
+  gap:6px; margin-top:6px; flex-basis:100%; }
+.projected-more__pills { display:flex; flex-wrap:wrap; gap:4px; }
+.projected-toggle:checked ~ .projected-more-btn--show { display:none; }
+.projected-toggle:checked ~ .projected-more__dates { display:flex; }
+
 /* ── Task cards ─────────────────────────────────────────────────────── */
 .task-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
 
