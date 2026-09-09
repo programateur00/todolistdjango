@@ -350,6 +350,14 @@ def task_edit(request, pk):
             return redirect(reverse("tasks:task_list"))
     return render(request, "tasks/task_form.html", {
         "task": task,
+        # task_form.html usa initial_title como argumento del filtro
+        # `default` en el campo de título (ver task_create) -- un
+        # argumento de filtro que falta lanza VariableDoesNotExist sin
+        # capturar (a diferencia de una variable normal, que se resuelve
+        # a "") y tira la página entera con un 500. Aquí task.title
+        # siempre existe, así que este valor nunca se usa de verdad --
+        # solo evita que falte la clave en el contexto.
+        "initial_title": task.title,
         "repeat_choices": Task.REPEAT_CHOICES,
         "weekdays": Task.WEEKDAYS,
         "category_choices": Task.CATEGORY_CHOICES,
