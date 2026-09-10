@@ -25,17 +25,12 @@
 </section>
 {% endif %}
 
-{% if messages %}
-<ul class="flash-list">{% for m in messages %}<li class="flash">{{ m }}</li>{% endfor %}</ul>
-{% endif %}
-
-<form class="quick-add" action="{% url 'tasks:task_create' %}" method="post" id="quick-add-form">
-    {% csrf_token %}
-    <input type="text" name="title" id="quick-add-input" class="quick-add__input" placeholder="Añadir una tarea…" required maxlength="255">
-    <input type="hidden" name="category" id="quick-add-category" value="general">
-    <button type="submit" class="quick-add__button">Añadir</button>
-    <a href="{% url 'tasks:task_create' %}" id="quick-add-more" class="quick-add__more">+ detalles</a>
-</form>
+{# Los mensajes ahora se pintan una sola vez, en base.html, para que #}
+{# valga en cualquier página (formularios incluidos) y no solo aquí. #}
+<div class="quick-add" id="quick-add-form">
+    <input type="text" id="quick-add-input" class="quick-add__input" placeholder="Añadir una tarea…" maxlength="255">
+    <button type="button" class="quick-add__button" id="quick-add-button">Añadir</button>
+</div>
 
 {% if range_choices or category_counts %}
 <div class="filters">
@@ -75,11 +70,15 @@
 <script>
 (function(){
     var input = document.getElementById('quick-add-input');
-    var link  = document.getElementById('quick-add-more');
-    var base  = link.getAttribute('href');
-    link.addEventListener('click', function(e){
+    var btn   = document.getElementById('quick-add-button');
+    var base  = "{% url 'tasks:task_create' %}";
+    function goToForm(){
         var v = input.value.trim();
-        if(v){ e.preventDefault(); window.location.href = base + '?title=' + encodeURIComponent(v); }
+        window.location.href = v ? (base + '?title=' + encodeURIComponent(v)) : base;
+    }
+    btn.addEventListener('click', goToForm);
+    input.addEventListener('keydown', function(e){
+        if (e.key === 'Enter') { e.preventDefault(); goToForm(); }
     });
 })();
 </script>

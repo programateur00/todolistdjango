@@ -83,14 +83,16 @@
             </label>
             {% endfor %}
         </div>
-        <span class="field__hint">
-            Define qué extras tendrá la tarea. <em>Deporte</em> → temporizador + seguimiento con cámara (MediaPipe).
-            <em>Lectura</em> → temporizador manual (o automático, con la extensión de Chrome/app móvil) para lo que estés leyendo.
-            <em>Antitarea</em> → algo que NO quieres hacer (ej. "no fumar"): ponle hora límite
-            por la noche y, si no tocas nada antes de esa hora, cuenta como éxito — solo hace
-            falta marcar algo si caes. <em>Estudio</em> → sin extras. <em>General</em> → sin extras,
-            con cronómetro opcional (ver abajo).
-        </span>
+        <details class="hint-details">
+            <summary>¿qué cambia según el tipo?</summary>
+            <ul class="field__hint">
+                <li><em>Deporte</em> → temporizador + cámara.</li>
+                <li><em>Lectura</em> → temporizador manual o automático.</li>
+                <li><em>Antitarea</em> → algo que NO quieres hacer: pon hora límite y, si no tocas nada antes, cuenta como éxito.</li>
+                <li><em>Estudio</em> → sin extras.</li>
+                <li><em>General</em> → cronómetro opcional (ver abajo).</li>
+            </ul>
+        </details>
     </fieldset>
 
     <label class="field field--inline" id="general-timer-field">
@@ -133,9 +135,7 @@
             </label>
             {% endfor %}
         </div>
-        <span class="field__hint">
-            Filtra qué ejercicios se ofrecen al entrenar (dominadas para tren superior, etc). Solo aplica a tareas de Deporte.
-        </span>
+        <span class="field__hint">Filtra qué ejercicios se ofrecen al entrenar.</span>
     </fieldset>
 
     {# Lectura ya no tiene nada que elegir (era la única opción real de #}
@@ -167,14 +167,15 @@
             </label>
             {% endfor %}
         </div>
-        <span class="field__hint">
-            Siempre hace falta algo concreto enlazado para que la tarea se pueda
-            comprobar y se cierre sola al terminarlo — "Idiomas" también pide un vídeo o
-            playlist, igual que YouTube. Udemy es la única excepción: sin curso puesto es
-            un hábito de "pasar tiempo estudiando en Udemy" que nunca se cierra solo. Para
-            seguir un curso de Udemy concreto hasta acabarlo, créalo como plan de Estudio
-            en vez de tarea suelta.
-        </span>
+        <details class="hint-details">
+            <summary>¿por qué hace falta algo enlazado?</summary>
+            <span class="field__hint">
+                Para que la tarea se pueda comprobar y cerrarse sola al terminarlo —
+                "Idiomas" también pide vídeo o playlist. Udemy es la única excepción: sin
+                curso puesto es un hábito de "pasar tiempo en Udemy" que nunca se cierra
+                solo (para seguir un curso concreto hasta acabarlo, créalo como plan).
+            </span>
+        </details>
     </fieldset>
 
     <div id="language-fields">
@@ -199,23 +200,27 @@
             <span class="field__label">Palabra clave del PDF (opcional)</span>
             <input type="text" name="watch_keyword" maxlength="120" value="{{ task.watch_keyword|default:'' }}"
                 placeholder="Ej: clean-code">
-            <span class="field__hint">
-                La extensión de Chrome cuenta el tiempo cuando esta palabra aparece en el
-                nombre del archivo o el título de la pestaña del PDF que tienes en primer
-                plano — así sabe que es este libro y no otro. Déjalo en blanco si no quieres
-                que la extensión vigile ningún PDF concreto para esta tarea.
-            </span>
+            <details class="hint-details">
+                <summary>¿cómo lo detecta?</summary>
+                <span class="field__hint">
+                    La extensión de Chrome cuenta el tiempo cuando esta palabra aparece en
+                    el nombre del archivo o el título de la pestaña del PDF en primer plano.
+                    En blanco = no vigila ningún PDF concreto.
+                </span>
+            </details>
         </label>
     </div>
 
     <div id="udemy-generic-hint" class="field">
-        <span class="field__hint">
-            Hábito genérico, sin curso concreto: la extensión de Chrome cuenta el tiempo
-            mientras tengas cualquier curso de Udemy sonando en primer plano. Al no seguir
-            un curso en particular, esta tarea no se cierra sola — sigue apareciendo cada
-            día, como Deporte. Para seguir un curso de Udemy concreto hasta acabarlo (y que
-            se cierre solo al terminarlo), créalo como plan de Estudio en vez de tarea suelta.
-        </span>
+        <span class="field__hint">Hábito genérico: cuenta el tiempo en cualquier curso de Udemy, nunca se cierra solo.</span>
+        <details class="hint-details">
+            <summary>¿por qué no se cierra?</summary>
+            <span class="field__hint">
+                Al no seguir un curso en particular, esta tarea sigue apareciendo cada día,
+                como Deporte. Para seguir un curso concreto hasta acabarlo, créalo como
+                plan de Estudio en vez de tarea suelta.
+            </span>
+        </details>
     </div>
 
     <label class="field focus-target-field" id="focus-target-field">
@@ -263,11 +268,7 @@
                 {% endfor %}
             </select>
         </label>
-        <span class="field__hint">
-            La tarea se completa sola cuando importes una actividad que llegue a esa
-            distancia a ese ritmo o mejor. Es lo que separa correr de andar: elige un
-            paseo si lo que quieres es caminar.
-        </span>
+        <span class="field__hint">Se completa sola al importar una actividad que llegue a esa distancia/ritmo.</span>
         <label class="field">
             <span class="field__label">…o pasos (para caminar)</span>
             <input type="number" name="target_steps" min="1" inputmode="numeric"
@@ -293,15 +294,16 @@
     </fieldset>
 
     <label class="field" id="video-field">
-        <span class="field__label">Vídeo de YouTube (opcional)</span>
+        <span class="field__label" data-label-video>Vídeo de YouTube (opcional)</span>
         <input type="text" name="youtube_video_id" placeholder="https://youtube.com/watch?v=…"
                value="{{ task.youtube_video_id|default:'' }}">
-        <span class="field__hint">
-            Si pones un vídeo, esta tarea deja de lado el selector de ejercicios (o el
-            temporizador, si es de Enfoque): al darle a play se va directa al vídeo, y al
-            terminarlo se marca hecha ella sola. Déjalo en blanco para que la tarea funcione
-            como siempre.
-        </span>
+        <details class="hint-details">
+            <summary>¿qué cambia si pongo uno?</summary>
+            <span class="field__hint">
+                La tarea deja de lado el selector de ejercicios (o el temporizador): al
+                darle a play va directa al vídeo, y al terminarlo se marca hecha sola.
+            </span>
+        </details>
     </label>
 
     <div class="field" id="local-video-field">
@@ -331,12 +333,13 @@
         <input type="number" name="video_target_minutes" min="1" max="6000"
                placeholder="Ej: 20 (para un vídeo de 40h, o para una playlist)"
                value="{{ task.target_minutes|default:'' }}">
-        <span class="field__hint">
-            Se da por hecha al acumular ese tiempo viendo de verdad (sin contar pausas
-            ni cuando sales de la app), aunque el vídeo o la lista sigan. En blanco = hay
-            que verlo/verla entera (o usa el campo de abajo, para una playlist por número
-            de vídeos en vez de por tiempo).
-        </span>
+        <details class="hint-details">
+            <summary>¿cómo cuenta el tiempo?</summary>
+            <span class="field__hint">
+                Se da por hecha al acumular ese tiempo viendo de verdad (sin pausas ni
+                salir de la app). En blanco = hay que verlo/verla entera.
+            </span>
+        </details>
     </label>
 
     <label class="field" id="video-target-count-field">
@@ -400,6 +403,12 @@
     var videoField = document.getElementById('video-field');
     var localVideoField = document.getElementById('local-video-field');
     var playlistField = document.getElementById('playlist-field');
+    var videoInput = videoField.querySelector('input[name="youtube_video_id"]');
+    var playlistInput = playlistField.querySelector('input[name="youtube_playlist_id"]');
+    // Se recalcula en cada updateSubcategory() -- lo lee el listener de
+    // submit, más abajo, para saber si hace falta exigir vídeo/playlist
+    // ahora mismo (solo Estudio · YouTube e Idiomas, nunca Udemy).
+    var requiresYoutubeLink = false;
     var videoTargetMinutesField = document.getElementById('video-target-minutes-field');
     var videoTargetCountField = document.getElementById('video-target-count-field');
     var categoryRadios = document.querySelectorAll('[data-category-toggle]');
@@ -482,6 +491,15 @@
         var fuente = (document.querySelector('[name="video_source"]:checked') || {}).value || 'youtube';
         videoField.style.display =
             (esEstudio && !esUdemy) || ((esEnfoqueConVideo || videoEnDeporte) && fuente === 'youtube') ? 'block' : 'none';
+        // "YouTube" e Idiomas SIEMPRE necesitan un vídeo o una playlist
+        // -- si no, la tarea no tiene forma de saber qué estudiar ni de
+        // cerrarse sola al terminarlo (ver Task.study_link_error en el
+        // backend, que exige justo esto mismo). Udemy queda fuera: es la
+        // única excepción, a propósito (ver esUdemy más arriba).
+        requiresYoutubeLink = esEstudio && !esUdemy;
+        if (!requiresYoutubeLink) videoInput.setCustomValidity('');
+        document.querySelector('[data-label-video]').textContent =
+            requiresYoutubeLink ? 'Vídeo de YouTube' : 'Vídeo de YouTube (opcional)';
         localVideoField.style.display =
             ((esEnfoqueConVideo || videoEnDeporte) && fuente === 'local') ? 'block' : 'none';
 
@@ -550,6 +568,25 @@
     // misma clave por tarea) — así lo que se elige aquí ya está listo
     // cuando se abra el vídeo por primera vez, sin tener que volver a
     // elegirlo. File System Access API: solo Chrome/Edge.
+    [videoInput, playlistInput].forEach(function (input) {
+        input.addEventListener('input', function () { videoInput.setCustomValidity(''); });
+    });
+
+    // El navegador ya bloquea el envío si falta título u hora (son
+    // required de verdad) -- esto añade la misma barrera para "vídeo o
+    // playlist" cuando hace falta, que al ser un "uno de los dos" no se
+    // puede expresar con un simple required en cada input por separado.
+    document.querySelector('.task-form').addEventListener('submit', function (e) {
+        if (requiresYoutubeLink && !videoInput.value.trim() && !playlistInput.value.trim()) {
+            videoInput.setCustomValidity(
+                'Pon un vídeo o una playlist de YouTube — hace falta saber qué vas a ' +
+                'estudiar para poder comprobarlo y cerrar la tarea sola al terminarlo.'
+            );
+            e.preventDefault();
+            this.reportValidity();
+        }
+    });
+
     var clientUuidInput = document.getElementById('client-uuid-input');
     var hasLocalVideoInput = document.getElementById('has-local-video-input');
     var pickBtn = document.getElementById('pick-local-file-btn');

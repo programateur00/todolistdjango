@@ -10,14 +10,7 @@
     </div>
 </header>
 
-{% if messages %}
-    <ul class="flash-list">
-        {% for message in messages %}
-            <li class="flash">{{ message }}</li>
-        {% endfor %}
-    </ul>
-{% endif %}
-
+{# Los mensajes ahora se pintan una sola vez, en base.html. #}
 <section class="task-section">
     <h2 class="task-section__title">Pendientes <span class="task-section__count">{{ all_pending|length }}</span></h2>
     {% if all_pending %}

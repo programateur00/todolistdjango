@@ -42,35 +42,51 @@
         <input type="hidden" name="plan_type" value="{{ plan.plan_type }}">
         <span class="field__hint">El tipo no se puede cambiar una vez creado el plan — crea uno nuevo si necesitas otro.</span>
         {% else %}
-        <span class="field__hint">
-            Deporte: objetivos con progresión (ejercicios, running). Estudio: un
-            vídeo, playlist o temporizador que se completa cada día. General: un
-            hábito cualquiera, sin más.
-        </span>
+        <details class="hint-details">
+            <summary>¿en qué se diferencian?</summary>
+            <ul class="field__hint">
+                <li><em>Deporte</em> → objetivos con progresión (ejercicios, running).</li>
+                <li><em>Estudio</em> → un vídeo, playlist o temporizador que se completa cada día.</li>
+                <li><em>General</em> → un hábito cualquiera, sin más.</li>
+            </ul>
+        </details>
         {% endif %}
     </fieldset>
 
-    <label class="field" id="study-subtype-field">
-        <span class="field__label">Materia (opcional)</span>
-        <select name="study_subtype" class="study-subtype-select" {% if plan %}disabled{% endif %}>
-            <option value="">Hábito simple — sin materia concreta</option>
+    <fieldset class="field" id="study-subtype-field">
+        <legend class="field__label">Materia (opcional)</legend>
+        <div class="repeat-options">
+            <label class="repeat-option">
+                <input type="radio" name="study_subtype" value="" class="study-subtype-radio"
+                    {% if not plan.study_subtype %}checked{% endif %}
+                    {% if plan %}disabled{% endif %}>
+                <span>Hábito simple</span>
+            </label>
             {% for value, label in study_subtype_choices %}
             {% if value != 'general' %}
-            <option value="{{ value }}" {% if plan.study_subtype == value %}selected{% endif %}>{{ label }}</option>
+            <label class="repeat-option">
+                <input type="radio" name="study_subtype" value="{{ value }}" class="study-subtype-radio"
+                    {% if plan.study_subtype == value %}checked{% endif %}
+                    {% if plan %}disabled{% endif %}>
+                <span>{{ label }}</span>
+            </label>
             {% endif %}
             {% endfor %}
-        </select>
+        </div>
         {% if plan %}
         <input type="hidden" name="study_subtype" value="{{ plan.study_subtype }}">
         <span class="field__hint">No se puede cambiar una vez creado — crea un plan nuevo si necesitas otro.</span>
         {% else %}
-        <span class="field__hint">
-            Idiomas: el plan se basa en llegar a un nivel MCER de un idioma concreto — el
-            siguiente paso asigna cursos ya verificados del catálogo (sin IA) para revisarlos
-            antes de guardar el plan.
-        </span>
+        <details class="hint-details">
+            <summary>¿qué hace "Idiomas"?</summary>
+            <span class="field__hint">
+                El plan se basa en llegar a un nivel MCER de un idioma concreto — el
+                siguiente paso asigna cursos ya verificados del catálogo (sin IA) para
+                revisarlos antes de guardar el plan.
+            </span>
+        </details>
         {% endif %}
-    </label>
+    </fieldset>
 
     <div id="language-fields">
         <label class="field">
@@ -81,10 +97,7 @@
                 <option value="{{ lang }}" {% if plan.language_name == lang %}selected{% endif %}>{{ lang|capfirst }}</option>
                 {% endfor %}
             </select>
-            <span class="field__hint">
-                Solo salen los idiomas con algún curso ya verificado en el catálogo —
-                añade más con <code>add_course_playlist</code> y aparecerán aquí solos.
-            </span>
+            <span class="field__hint">Solo idiomas con algún curso ya verificado en el catálogo.</span>
         </label>
 
         <div class="field-row">
@@ -119,11 +132,13 @@
                 </label>
                 {% endfor %}
             </div>
-            <span class="field__hint">
-                Marca todos los que sepas — se ofrecen los cursos explicados en cualquiera de
-                ellos, más los neutros (nunca uno pensado para hablantes de un idioma distinto
-                a los que marques aquí). Solo salen los idiomas nativos que ya usa algún curso.
-            </span>
+            <details class="hint-details">
+                <summary>¿para qué sirve esto?</summary>
+                <span class="field__hint">
+                    Se ofrecen los cursos explicados en cualquiera de los que marques, más
+                    los neutros (nunca uno pensado para hablantes de un idioma distinto).
+                </span>
+            </details>
         </fieldset>
 
         <div class="field" id="daily-minutes-field">
@@ -171,10 +186,7 @@
             <input type="hidden" name="language_daily_minutes" id="language-daily-minutes-value"
                 value="{{ plan.language_daily_minutes|default:'' }}">
             <p class="field__hint" id="daily-minutes-error" hidden>Elige cuántos minutos quieres ver al día.</p>
-            <span class="field__hint">
-                Si al llegar al objetivo al vídeo le queda poco (≤15 min), lo dejamos
-                terminar solo; si le queda mucho, se corta ahí.
-            </span>
+            <span class="field__hint">Si al vídeo le quedan ≤15 min, lo dejamos terminar; si no, se corta ahí.</span>
         </div>
 
         <label class="field">
@@ -185,61 +197,85 @@
     </div>
 
     <div id="study-video-fields">
-        <p class="field__hint">
-            Pon uno de los tres — hace falta saber qué vas a estudiar para que el plan
-            pueda comprobarlo y cerrarse solo al terminarlo.
+        <fieldset class="field" id="study-source-field">
+            <legend class="field__label">¿Qué vas a estudiar?</legend>
+            <div class="repeat-options">
+                <label class="repeat-option">
+                    <input type="radio" name="study_source" value="udemy" class="study-source-radio"
+                        {% if study_headline.watch_keyword or not study_headline.youtube_video_id and not study_headline.youtube_playlist_id %}checked{% endif %}>
+                    <span>Curso de Udemy</span>
+                </label>
+                <label class="repeat-option">
+                    <input type="radio" name="study_source" value="video" class="study-source-radio"
+                        {% if study_headline.youtube_video_id and not study_headline.watch_keyword %}checked{% endif %}>
+                    <span>Vídeo de YouTube</span>
+                </label>
+                <label class="repeat-option">
+                    <input type="radio" name="study_source" value="playlist" class="study-source-radio"
+                        {% if study_headline.youtube_playlist_id and not study_headline.watch_keyword %}checked{% endif %}>
+                    <span>Playlist de YouTube</span>
+                </label>
+            </div>
+            <span class="field__hint">
+                Hace falta saber qué vas a estudiar para que el plan pueda comprobarlo y
+                cerrarse solo al terminarlo.
+            </span>
+        </fieldset>
+        <p class="field__hint field__hint--error" id="study-video-fields-error" hidden>
+            Pon uno de los tres — palabra clave de Udemy, vídeo o playlist de YouTube.
         </p>
-        <label class="field">
+
+        <label class="field" id="study-source-udemy-field">
             <span class="field__label">Curso de Udemy — palabra clave</span>
             <input type="text" name="watch_keyword" value="{{ study_headline.watch_keyword|default:'' }}"
                 placeholder="Un trozo único del título del curso en Udemy, ej. \'Excel\'">
-            <span class="field__hint">
-                Si pones esto, la tarea diaria sale como Curso de Udemy: la extensión de
-                Chrome cuenta el tiempo con la pestaña en primer plano y detecta ella sola
-                cuándo terminas el curso — no hace falta vídeo ni playlist para esto, y el
-                plan se cierra solo (con tu recompensa, si le pusiste una) al terminarlo.
-            </span>
+            <details class="hint-details">
+                <summary>¿cómo lo detecta?</summary>
+                <span class="field__hint">
+                    La extensión de Chrome cuenta el tiempo con la pestaña en primer plano y
+                    detecta ella sola cuándo terminas el curso — el plan se cierra solo (con
+                    tu recompensa, si le pusiste una) al terminarlo.
+                </span>
+            </details>
         </label>
-        <label class="field">
-            <span class="field__label">…o vídeo de YouTube</span>
+        <label class="field" id="study-source-video-field">
+            <span class="field__label">Vídeo de YouTube</span>
             <input type="text" name="youtube_video_id" value="{{ study_headline.youtube_video_id|default:'' }}"
                 placeholder="Pega la URL o el ID del vídeo">
         </label>
-        <label class="field">
-            <span class="field__label">…o playlist de YouTube</span>
+        <label class="field" id="study-source-playlist-field">
+            <span class="field__label">Playlist de YouTube</span>
             <input type="text" name="youtube_playlist_id" value="{{ study_headline.youtube_playlist_id|default:'' }}"
                 placeholder="Pega la URL o el ID de la playlist — cualquiera, no hace falta que sea de idiomas">
-            <span class="field__hint">
-                Cualquier playlist vale (un curso de ajedrez, tu lista de "ver más tarde"...):
-                cada día la tarea enseña el siguiente vídeo sin visto, sin volver siempre al
-                principio — para eso hace falta poner minutos o vídeos al día, aquí abajo.
-            </span>
+            <details class="hint-details">
+                <summary>¿cómo avanza la playlist?</summary>
+                <span class="field__hint">
+                    Cualquier playlist vale (un curso de ajedrez, tu lista de "ver más
+                    tarde"...): cada día la tarea enseña el siguiente vídeo sin ver, sin
+                    volver siempre al principio — para eso hace falta poner minutos o
+                    vídeos al día, aquí abajo.
+                </span>
+            </details>
         </label>
+
         <div class="field-row">
             <label class="field">
                 <span class="field__label">Minutos al día</span>
                 <input type="number" name="target_minutes" min="1"
                     value="{{ study_headline.target_minutes|default:'' }}">
             </label>
-            <label class="field">
+            <label class="field" id="study-source-video-count-field">
                 <span class="field__label">…o vídeos al día</span>
                 <input type="number" name="target_video_count" min="1"
                     value="{{ study_headline.target_video_count|default:'' }}">
             </label>
         </div>
-        <span class="field__hint">
-            Con playlist puesta, pon uno de los dos — si pones vídeos al día, ese manda sobre
-            los minutos. Sin vídeo ni playlist, en blanco = sesión libre sin objetivo fijo (solo
-            marcar hecho/no hecho cada día, como Enfoque).
-        </span>
+        <span class="field__hint">Con playlist, uno de los dos — vídeos al día manda sobre minutos.</span>
     </div>
 
-    <p class="field__hint" id="items-next-step-hint">
-        Deporte: el ejercicio y su progresión se añaden en el siguiente paso, después
-        de crear el plan. General no necesita ningún objetivo aparte — es solo un
-        hábito que cumples o no cada día. Idioma revisa y confirma el temario del
-        catálogo antes de guardar el plan (siguiente paso).
-    </p>
+    <p class="field__hint" id="next-step-hint-sport" hidden>El ejercicio se añade en el siguiente paso.</p>
+    <p class="field__hint" id="next-step-hint-general" hidden>Nada más que añadir — es solo un hábito diario.</p>
+    <p class="field__hint" id="next-step-hint-language" hidden>El temario del catálogo se confirma en el siguiente paso.</p>
 
     <div class="field-row">
         <label class="field">
@@ -281,10 +317,7 @@
         <input type="checkbox" name="is_active" {% if plan.is_active or not plan %}checked{% endif %}>
         <span class="field__label">Plan activo</span>
     </label>
-    <span class="field__hint">
-        Si está activo, sus objetivos mandan sobre los del circuito al entrenar.
-        Si lo pausas, vuelves a entrenar a tu aire.
-    </span>
+    <span class="field__hint">Activo: sus objetivos mandan al entrenar. Pausado: entrenas a tu aire.</span>
 
     <label class="field">
         <span class="field__label">Recompensa al cerrar el ciclo (opcional)</span>
@@ -301,11 +334,20 @@
 <script>
 (function () {
     var studySubtypeField = document.getElementById("study-subtype-field");
-    var studySubtypeSelect = document.querySelector(".study-subtype-select");
+    var studySubtypeRadios = document.querySelectorAll(".study-subtype-radio");
     var languageFields = document.getElementById("language-fields");
     var languageInputs = languageFields.querySelectorAll("input, select");
     var studyVideoFields = document.getElementById("study-video-fields");
     var studyVideoInputs = studyVideoFields.querySelectorAll("input, select");
+    var studyVideoFieldsError = document.getElementById("study-video-fields-error");
+    var studySourceRadios = document.querySelectorAll(".study-source-radio");
+    var watchKeywordField = document.getElementById("study-source-udemy-field");
+    var studyVideoField = document.getElementById("study-source-video-field");
+    var studyPlaylistField = document.getElementById("study-source-playlist-field");
+    var studyVideoCountField = document.getElementById("study-source-video-count-field");
+    var watchKeywordInput = studyVideoFields.querySelector('input[name="watch_keyword"]');
+    var studyVideoInput = studyVideoFields.querySelector('input[name="youtube_video_id"]');
+    var studyPlaylistInput = studyVideoFields.querySelector('input[name="youtube_playlist_id"]');
     var planTypeRadios = document.querySelectorAll(".plan-type-radio");
     // Semanas: sale para Deporte y Estudio · Hábito simple (ahí sí es un
     // plazo real), pero no para Estudio · Idiomas -- el curso termina al
@@ -313,6 +355,9 @@
     // así que pedir un número de semanas ahí solo confunde.
     var weeksField = document.getElementById("weeks-field");
     var weeksInput = document.getElementById("weeks-input");
+    var nextStepHintSport = document.getElementById("next-step-hint-sport");
+    var nextStepHintGeneral = document.getElementById("next-step-hint-general");
+    var nextStepHintLanguage = document.getElementById("next-step-hint-language");
 
     function selectedValue(radios) {
         for (var i = 0; i < radios.length; i++) {
@@ -321,10 +366,35 @@
         return "";
     }
 
+    // De los tres campos de "¿Qué vas a estudiar?" (Udemy/vídeo/playlist)
+    // solo se enseña y se manda el que toca según el toggle -- los otros
+    // dos se ocultan Y se deshabilitan (si no, un valor viejo escrito
+    // antes de cambiar de pestaña viajaría igual al servidor sin que se
+    // vea, aunque ya no aplique).
+    function refreshStudySource() {
+        var source = selectedValue(studySourceRadios) || "udemy";
+        watchKeywordField.style.display = source === "udemy" ? "block" : "none";
+        watchKeywordInput.disabled = source !== "udemy";
+        studyVideoField.style.display = source === "video" ? "block" : "none";
+        studyVideoInput.disabled = source !== "video";
+        studyPlaylistField.style.display = source === "playlist" ? "block" : "none";
+        studyPlaylistInput.disabled = source !== "playlist";
+        // "...o vídeos al día" solo tiene sentido con una playlist -- un
+        // vídeo suelto o un curso de Udemy no tienen "vídeos", y dejarlo
+        // siempre a la vista invitaba a rellenarlo sin que sirviera de nada.
+        studyVideoCountField.style.display = source === "playlist" ? "block" : "none";
+    }
+
     function refresh() {
-        var isStudy = selectedValue(planTypeRadios) === "study";
-        var isLanguage = isStudy && studySubtypeSelect.value === "language";
+        var planTypeValue = selectedValue(planTypeRadios);
+        var isStudy = planTypeValue === "study";
+        var isLanguage = isStudy && selectedValue(studySubtypeRadios) === "language";
         var isStudyGeneral = isStudy && !isLanguage;
+        // Antes salían los tres avisos a la vez, sin importar el tipo
+        // elegido -- solo el que toca según lo de arriba.
+        nextStepHintSport.hidden = planTypeValue !== "sport";
+        nextStepHintGeneral.hidden = planTypeValue !== "general";
+        nextStepHintLanguage.hidden = !isLanguage;
 
         // display, no el atributo `hidden` — con las clases .field del
         // resto de la app, `hidden` se queda sin efecto (una regla de
@@ -333,17 +403,22 @@
         studySubtypeField.style.display = isStudy ? "block" : "none";
         languageFields.style.display = isLanguage ? "block" : "none";
         studyVideoFields.style.display = isStudyGeneral ? "block" : "none";
+        if (!isStudyGeneral) studyVideoFieldsError.hidden = true;
         // Los inputs deshabilitados no se envían — bien cuando el campo
         // está oculto porque no aplica (plan_type ≠ study, o materia ≠
         // idiomas), pero mal si es un plan de Idiomas ya creado, donde SÍ
-        // deben mandarse aunque el select que decidió la materia esté
-        // bloqueado. Por eso esto va aparte de studySubtypeSelect/plan-type-radio.
+        // deben mandarse aunque el radio que decidió la materia esté
+        // bloqueado. Por eso esto va aparte de studySubtypeRadios/plan-type-radio.
         for (var i = 0; i < languageInputs.length; i++) {
             languageInputs[i].disabled = !isLanguage;
         }
         for (var j = 0; j < studyVideoInputs.length; j++) {
             studyVideoInputs[j].disabled = !isStudyGeneral;
         }
+        // El paso de arriba acaba de rehabilitar los tres inputs de
+        // fuente a la vez si isStudyGeneral -- esto vuelve a dejar
+        // deshabilitados los dos que no tocan según el toggle.
+        if (isStudyGeneral) refreshStudySource();
         weeksField.style.display = isLanguage ? "none" : "block";
         weeksInput.disabled = isLanguage;
     }
@@ -351,7 +426,12 @@
     for (var i = 0; i < planTypeRadios.length; i++) {
         planTypeRadios[i].addEventListener("change", refresh);
     }
-    studySubtypeSelect.addEventListener("change", refresh);
+    for (var i = 0; i < studySubtypeRadios.length; i++) {
+        studySubtypeRadios[i].addEventListener("change", refresh);
+    }
+    for (var i = 0; i < studySourceRadios.length; i++) {
+        studySourceRadios[i].addEventListener("change", refreshStudySource);
+    }
     refresh();
 
     // --------------------------------------------- minutos/día (idiomas)
@@ -414,12 +494,24 @@
     // El input real que viaja al servidor es type=hidden — el navegador
     // no valida "required" en campos ocultos, así que el mínimo (elegir
     // algún valor) se comprueba a mano justo antes de enviar.
+    [watchKeywordInput, studyVideoInput, studyPlaylistInput].forEach(function (input) {
+        input.addEventListener("input", function () { studyVideoFieldsError.hidden = true; });
+    });
+
     document.querySelector("form.task-form").addEventListener("submit", function (e) {
-        var isLanguage = selectedValue(planTypeRadios) === "study" && studySubtypeSelect.value === "language";
+        var isStudy = selectedValue(planTypeRadios) === "study";
+        var isLanguage = isStudy && selectedValue(studySubtypeRadios) === "language";
+        var isStudyGeneral = isStudy && !isLanguage;
         if (isLanguage && !dailyMinutesValue.value) {
             e.preventDefault();
             dailyMinutesError.hidden = false;
             dailyMinutesError.scrollIntoView({ behavior: "smooth", block: "center" });
+            return;
+        }
+        if (isStudyGeneral && !watchKeywordInput.value.trim() && !studyVideoInput.value.trim() && !studyPlaylistInput.value.trim()) {
+            e.preventDefault();
+            studyVideoFieldsError.hidden = false;
+            studyVideoFieldsError.scrollIntoView({ behavior: "smooth", block: "center" });
         }
     });
 })();

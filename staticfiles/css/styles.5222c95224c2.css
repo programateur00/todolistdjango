@@ -387,20 +387,6 @@ button { font-family:var(--font-b); cursor:pointer; }
 .field__label { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--bone-faded); font-weight:600; }
 .field__hint  { font-size:11px; color:var(--bone-faded); margin-top:2px; }
 .field__hint--error { color:var(--danger); font-weight:600; }
-/* Explicaciones largas, plegadas por defecto -- mucho texto siempre
-   visible cansa de leer. El resumen es el único texto que se ve hasta
-   que se abre. */
-.hint-details { margin:8px 0 6px; }
-.hint-details summary { cursor:pointer; color:var(--ember); font-size:11px;
-  list-style:none; }
-.hint-details summary::-webkit-details-marker { display:none; }
-.hint-details summary::marker { display:none; content:""; }
-.hint-details[open] { margin-bottom:12px; }
-.hint-details[open] summary { margin-bottom:6px; }
-.hint-details .field__hint { margin-top:0; }
-.hint-details ul { margin:0; padding-left:16px; }
-.hint-details li { margin-bottom:3px; }
-.hint-details li:last-child { margin-bottom:0; }
 .field input[type="text"],
 .field input[type="date"],
 .field input[type="time"],

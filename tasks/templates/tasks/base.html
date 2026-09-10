@@ -38,7 +38,18 @@
             </div>
         </div>
     </nav>
-    <div class="page">{% block content %}{% endblock %}</div>
+    <div class="page">
+        {% if messages %}
+        {# Un solo sitio para esto, válido en TODAS las páginas -- antes #}
+        {# solo task_list.html pintaba los mensajes, así que un error al #}
+        {# guardar un formulario (tarea/plan) se quedaba en cola sin #}
+        {# enseñarse hasta la próxima vez que se cargara la lista de #}
+        {# tareas, dejando al usuario sin saber por qué no se había #}
+        {# guardado nada. #}
+        <ul class="flash-list">{% for m in messages %}<li class="flash flash--{{ m.tags }}">{{ m }}</li>{% endfor %}</ul>
+        {% endif %}
+        {% block content %}{% endblock %}
+    </div>
     <p class="credits">
         Ilustraciones de ejercicios: <strong>Everkinetic</strong> (CC BY-SA 3.0).
     </p>
