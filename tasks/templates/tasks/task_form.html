@@ -152,12 +152,12 @@
     </div>
 
     <fieldset class="field subcategory-field" id="study-subcategory-field">
-        <legend class="field__label">¿De qué trata?</legend>
+        <legend class="field__label">¿Qué vas a estudiar?</legend>
         <div class="repeat-options">
             <label class="repeat-option">
                 <input type="radio" name="subcategory" value="" id="study-subcategory-none"
                     {% if not task or task.subcategory not in study_subcategory_values %}checked{% endif %}>
-                <span>Estudio (sin más)</span>
+                <span>YouTube (vídeo o playlist)</span>
             </label>
             {% for value, label in study_subcategory_choices %}
             <label class="repeat-option">
@@ -168,9 +168,12 @@
             {% endfor %}
         </div>
         <span class="field__hint">
-            "Idiomas" solo le añade contexto a esta tarea suelta (qué idioma y qué nivel)
-            — para un curso de verdad, organizado por nivel y con varios vídeos, usa un
-            plan de Estudio · Idiomas en vez de una tarea suelta.
+            Siempre hace falta algo concreto enlazado para que la tarea se pueda
+            comprobar y se cierre sola al terminarlo — "Idiomas" también pide un vídeo o
+            playlist, igual que YouTube. Udemy es la única excepción: sin curso puesto es
+            un hábito de "pasar tiempo estudiando en Udemy" que nunca se cierra solo. Para
+            seguir un curso de Udemy concreto hasta acabarlo, créalo como plan de Estudio
+            en vez de tarea suelta.
         </span>
     </fieldset>
 
@@ -193,15 +196,26 @@
 
     <div id="udemy-fields">
         <label class="field">
-            <span class="field__label" id="watch-keyword-label">Palabra clave del curso</span>
+            <span class="field__label">Palabra clave del PDF (opcional)</span>
             <input type="text" name="watch_keyword" maxlength="120" value="{{ task.watch_keyword|default:'' }}"
-                placeholder="Ej: Linux" id="watch-keyword-input">
-            <span class="field__hint" id="watch-keyword-hint">
+                placeholder="Ej: clean-code">
+            <span class="field__hint">
                 La extensión de Chrome cuenta el tiempo cuando esta palabra aparece en el
-                título de la pestaña de Udemy que tienes activa — así sabe que es este curso
-                y no otro. Usa algo que salga en el nombre del curso, tal cual aparece en Udemy.
+                nombre del archivo o el título de la pestaña del PDF que tienes en primer
+                plano — así sabe que es este libro y no otro. Déjalo en blanco si no quieres
+                que la extensión vigile ningún PDF concreto para esta tarea.
             </span>
         </label>
+    </div>
+
+    <div id="udemy-generic-hint" class="field">
+        <span class="field__hint">
+            Hábito genérico, sin curso concreto: la extensión de Chrome cuenta el tiempo
+            mientras tengas cualquier curso de Udemy sonando en primer plano. Al no seguir
+            un curso en particular, esta tarea no se cierra sola — sigue apareciendo cada
+            día, como Deporte. Para seguir un curso de Udemy concreto hasta acabarlo (y que
+            se cierre solo al terminarlo), créalo como plan de Estudio en vez de tarea suelta.
+        </span>
     </div>
 
     <label class="field focus-target-field" id="focus-target-field">
@@ -376,9 +390,7 @@
     var studySubcategoryField = document.getElementById('study-subcategory-field');
     var languageFields = document.getElementById('language-fields');
     var udemyFields = document.getElementById('udemy-fields');
-    var watchKeywordLabel = document.getElementById('watch-keyword-label');
-    var watchKeywordInput = document.getElementById('watch-keyword-input');
-    var watchKeywordHint = document.getElementById('watch-keyword-hint');
+    var udemyGenericHint = document.getElementById('udemy-generic-hint');
     var focusTargetField = document.getElementById('focus-target-field');
     var generalTimerField = document.getElementById('general-timer-field');
     var wantsTimerInput = document.getElementById('wants-timer-input');
@@ -454,23 +466,12 @@
         // input que Udemy, con el texto cambiado, para no duplicar el
         // HTML ni arriesgarse a mandar dos "watch_keyword" a la vez.
         var esLectura = esEnfoque && subSelValue === 'reading';
-        udemyFields.style.display = (esUdemy || esLectura) ? 'block' : 'none';
-        if (esLectura) {
-            watchKeywordLabel.textContent = 'Palabra clave del PDF (opcional)';
-            watchKeywordInput.placeholder = 'Ej: clean-code';
-            watchKeywordHint.textContent = 'La extensión de Chrome cuenta el tiempo cuando esta ' +
-                'palabra aparece en el nombre del archivo o el título de la pestaña del PDF que ' +
-                'tienes en primer plano — así sabe que es este libro y no otro. Déjalo en blanco ' +
-                'si no quieres que la extensión vigile ningún PDF para esta tarea (puedes seguir ' +
-                'usando el cronómetro manual, o el plugin de la app móvil, sin rellenarlo).';
-        } else {
-            watchKeywordLabel.textContent = 'Palabra clave del curso';
-            watchKeywordInput.placeholder = 'Ej: Linux';
-            watchKeywordHint.textContent = 'La extensión de Chrome cuenta el tiempo cuando esta ' +
-                'palabra aparece en el título de la pestaña de Udemy que tienes activa — así sabe ' +
-                'que es este curso y no otro. Usa algo que salga en el nombre del curso, tal cual ' +
-                'aparece en Udemy.';
-        }
+        // Udemy freestyle ya NO lleva palabra clave -- es el habito
+        // generico (ver _study_link_error en el backend) -- asi que
+        // enseña solo el aviso, nunca el input. Lectura sigue con su
+        // input de siempre, sin cambios.
+        udemyFields.style.display = esLectura ? 'block' : 'none';
+        udemyGenericHint.style.display = esUdemy ? 'block' : 'none';
         var videoEnDeporte = esDeporte && modoActual === 'video';
         // Lectura vigilada por palabra clave no necesita ni tiene sentido
         // con un vídeo enganchado (ver esLectura más arriba) — se oculta

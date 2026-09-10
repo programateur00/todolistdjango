@@ -7,10 +7,18 @@ la app móvil, con `source=pc_usage` en vez de `app_usage`. Hay dos
 tipos de pestaña trackeable, cada uno emparejado con un tipo de tarea:
 
 - **Udemy** — tarea de categoría Estudio, subtipo "Curso de Udemy".
-  Si el título de la pestaña de udemy.com coincide con la palabra
-  clave de la tarea, cuenta tiempo. Además comprueba cada minuto si
-  Udemy reporta el curso al 100% y, si es así, cierra la tarea entera
-  (no solo el día) sin esperar a que llegues a un número de horas.
+  Cuenta tiempo mientras la pestaña de udemy.com está sonando
+  (chrome.tabs.audible) — estar en el Q&A, las reseñas o el temario
+  del curso sin el vídeo reproduciéndose NO cuenta, solo se trackea
+  mientras se oye la clase. Hay dos formas de tener una tarea de
+  Udemy: **con palabra clave** (viene de un Plan) — cuenta solo ESE
+  curso, y cada minuto comprueba si Udemy lo reporta al 100% para
+  cerrar la tarea entera (no solo el día) en cuanto se termina; **sin
+  palabra clave** (tarea suelta / freestyle) — hábito genérico, cuenta
+  el tiempo en CUALQUIER pestaña de udemy.com, sin curso concreto ni
+  cierre automático. Si las dos existen a la vez, la palabra clave
+  específica siempre gana sobre el hábito genérico, para que nunca se
+  pisen ni sumen el mismo rato dos veces.
 - **Lectura de un PDF** — tarea de categoría Enfoque, subtipo
   "Lectura". Si el título de la pestaña activa es un `.pdf` (local o
   de una web) y coincide con la palabra clave de la tarea, cuenta

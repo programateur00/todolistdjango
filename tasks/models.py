@@ -240,13 +240,25 @@ class Task(models.Model):
     )
     playlist_start_index = models.PositiveIntegerField(
         null=True, blank=True,
-        help_text="Solo con youtube_playlist_id, en un objetivo de Estudio · Hábito simple "
-                   "con seguimiento de progreso (ver PlanItem.playlist_videos_cache): en qué "
-                   "posición de la lista (0 = el primero) hay que empezar a reproducir hoy, "
-                   "para no volver siempre al principio de la playlist. En blanco = empezar "
-                   "por el principio, como antes de que existiera esto (playlist sin "
-                   "seguimiento, o un vídeo/playlist sueltos fuera de un plan).",
+        help_text="Solo con youtube_playlist_id: en qué posición de la lista (0 = el "
+                   "primero) hay que empezar a reproducir hoy, para no volver siempre al "
+                   "principio de la playlist. Lo mantienen al día tanto Plan.sync_task() "
+                   "(objetivos de Plan) como _spawn_next() (tareas sueltas repetidas), "
+                   "usando playlist_videos_cache de abajo. En blanco = empezar por el "
+                   "principio (playlist sin seguimiento, o recién puesta).",
     )
+    # Caché de la playlist de arriba, propia de esta tarea (independiente
+    # de PlanItem.playlist_videos_cache: una tarea suelta no tiene
+    # PlanItem detrás) -- misma idea y mismo formato: la lista ORDENADA
+    # de vídeos que tenía la playlist la última vez que se sincronizó,
+    # con su duración -- [{"video_id": "...", "duration_seconds": 933}, ...].
+    # Se rellena en sync_playlist_videos(), llamado al guardar la tarea
+    # (vista o API) cuando youtube_playlist_id está puesto -- es lo que
+    # permite saber "¿esto era el último vídeo de la lista?" para cerrar
+    # la tarea sola (ver finish_recurring_series) y arrastrar la
+    # posición día a día en vez de reiniciar la playlist cada vez.
+    playlist_videos_cache = models.JSONField(default=list, blank=True)
+    playlist_synced_at = models.DateTimeField(null=True, blank=True)
     # Cómo se completa una tarea de Deporte. Se elige al crearla, no cada
     # vez que se entrena: es una decisión de "qué es esta tarea", no de
     # "qué me apetece hoy". Qué modos valen depende del subtipo — el
@@ -678,6 +690,91 @@ class Task(models.Model):
             self.youtube_playlist_id = m.group(1) if m else raw_pl
         super().save(*args, **kwargs)
 
+    def sync_playlist_videos(self):
+        """
+        Refresca playlist_videos_cache desde la API de YouTube -- mismo
+        mecanismo que PlanItem.sync_playlist_videos(), pero para una
+        tarea suelta (sin Plan detrás). Se llama SOLO al guardar la
+        tarea (vista o API) cuando youtube_playlist_id está puesto o ha
+        cambiado -- nunca en cada carga de la lista, que sería
+        demasiado caro/lento llamando a la API de YouTube ahí.
+
+        Sin youtube_playlist_id, limpia la caché (por si la tarea tenía
+        una playlist antes y se ha quitado). Si la API de YouTube falla
+        (sin YOUTUBE_API_KEY, cuota agotada, sin conexión...), se deja
+        la caché tal cual estaba -- sin caché, la tarea simplemente no
+        puede detectar "último vídeo" y se comporta como antes de que
+        existiera esto (la playlist entera, sin cierre automático).
+        """
+        from .youtube_search import YouTubeSearchError, get_videos_details, list_playlist_items
+
+        if not self.youtube_playlist_id:
+            if self.playlist_videos_cache or self.playlist_synced_at:
+                self.playlist_videos_cache = []
+                self.playlist_synced_at = None
+                self.save(update_fields=["playlist_videos_cache", "playlist_synced_at"])
+            return
+
+        try:
+            items = list_playlist_items(self.youtube_playlist_id, max_results=500)
+            video_ids = [it["video_id"] for it in items if it.get("video_id")]
+            details = get_videos_details(video_ids) if video_ids else {}
+        except YouTubeSearchError:
+            return
+
+        cache = []
+        for vid in video_ids:
+            d = details.get(vid) or {}
+            if d.get("embeddable") is False:
+                continue
+            cache.append({"video_id": vid, "duration_seconds": d.get("duration_seconds")})
+
+        self.playlist_videos_cache = cache
+        self.playlist_synced_at = timezone.now()
+        self.save(update_fields=["playlist_videos_cache", "playlist_synced_at"])
+
+    def study_link_error(self):
+        """
+        Una tarea suelta (freestyle) de Estudio sin nada de verdad
+        enlazado es indistinguible de una tarea General -- nunca hay
+        forma de comprobar que se ha hecho ni de cerrarla sola cuando
+        se acaba. Devuelve el mensaje de error, o None si esta bien.
+
+        Udemy es la unica excepcion a proposito: en freestyle NUNCA
+        lleva palabra clave (eso es cosa de un Plan) -- una tarea
+        suelta de Udemy es el habito generico "pasar tiempo estudiando
+        en Udemy", que la extension de Chrome ya sabe trackear sin
+        palabra clave (cualquier pestaña de udemy.com).
+
+        Usado tanto por el formulario web (tasks/views.py) como por la
+        API (tasks/api.py) -- una sola fuente de verdad para esta regla.
+        """
+        if self.category != self.CATEGORY_STUDY:
+            return None
+        if self.subcategory == self.SUBCATEGORY_UDEMY:
+            return None
+        if not (self.youtube_video_id or self.youtube_playlist_id):
+            return (
+                "Una tarea de Estudio necesita algo enlazado para saber qué estudiar y "
+                "cuándo se ha terminado: un vídeo o una playlist de YouTube (o Udemy, sin "
+                "palabra clave, para un hábito genérico sin curso concreto)."
+            )
+        return None
+
+    def is_last_playlist_video(self, index):
+        """
+        True si `index` (0-based) es el último vídeo conocido de
+        playlist_videos_cache -- o si no hay caché fiable, en cuyo caso
+        se opta por NO decir nunca "es el último" (falsos negativos,
+        nunca falsos positivos: mejor que seguir repitiendo tareas ya
+        acabadas a cerrar una serie que en realidad seguía teniendo
+        vídeos por ver).
+        """
+        total = len(self.playlist_videos_cache or [])
+        if not total:
+            return False
+        return index >= total - 1
+
     def _spawn_next(self):
         if self.repeat == self.REPEAT_NONE or not self.due_date:
             return
@@ -709,11 +806,25 @@ class Task(models.Model):
             youtube_video_id=self.youtube_video_id,
             youtube_playlist_id=self.youtube_playlist_id,
             has_local_video=self.has_local_video,
+            # Se quedaba fuera igual que los de arriba (ver comentario de
+            # este mismo bloque) -- una tarea repetida de Udemy o de
+            # Lectura con PDF perdia la palabra clave justo al generar el
+            # dia siguiente, asi que la extension de Chrome dejaba de
+            # verla como "trackeable" a partir del segundo dia.
+            watch_keyword=self.watch_keyword,
             target_minutes=self.target_minutes,
             target_video_count=self.target_video_count,
             target_steps=self.target_steps,
             target_distance_km=self.target_distance_km,
             max_pace_seconds_per_km=self.max_pace_seconds_per_km,
+            # Igual que watch_keyword arriba -- sin esto, una tarea suelta
+            # repetida con playlist de YouTube perdia la cache y la
+            # posicion cada dia, y volvia a reproducir desde el video 1
+            # en vez de seguir por donde iba (y nunca podia detectar
+            # "es el ultimo video" -- ver Task.is_last_playlist_video).
+            playlist_start_index=self.playlist_start_index,
+            playlist_videos_cache=self.playlist_videos_cache,
+            playlist_synced_at=self.playlist_synced_at,
         )
 
     def _record_occurrence(self, result, auto_expired=False, minutes_watched=None):

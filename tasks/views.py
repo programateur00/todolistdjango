@@ -394,11 +394,22 @@ def task_create(request):
                 avoid_fail_label=request.POST.get("avoid_fail_label", "").strip()[:32],
                 user=get_current_user(),
             )
-            if client_uuid:
-                task.uuid = client_uuid
-            task.save()
-            messages.success(request, "Tarea creada.")
-            return redirect(reverse("tasks:task_list"))
+            if task.subcategory == Task.SUBCATEGORY_UDEMY:
+                # Freestyle Udemy NUNCA lleva palabra clave (ver
+                # _study_link_error) -- si llego alguna en el POST se
+                # ignora, es exclusiva de un Plan.
+                task.watch_keyword = ""
+            link_error = task.study_link_error()
+            if link_error:
+                messages.error(request, link_error)
+            else:
+                if client_uuid:
+                    task.uuid = client_uuid
+                task.save()
+                if task.youtube_playlist_id:
+                    task.sync_playlist_videos()
+                messages.success(request, "Tarea creada.")
+                return redirect(reverse("tasks:task_list"))
 
     initial_title = title if request.method == "POST" else request.GET.get("title", "")
     return render(request, "tasks/task_form.html", {
@@ -418,6 +429,7 @@ def task_create(request):
 def task_edit(request, pk):
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
     if request.method == "POST":
+        old_playlist_id = task.youtube_playlist_id
         task.title = request.POST.get("title", task.title).strip()
         task.notes = request.POST.get("notes", "").strip()
         task.category = _read_category(request, default=task.category)
@@ -450,13 +462,20 @@ def task_edit(request, pk):
         task.avoid_question = request.POST.get("avoid_question", "").strip()[:120]
         task.avoid_success_label = request.POST.get("avoid_success_label", "").strip()[:32]
         task.avoid_fail_label = request.POST.get("avoid_fail_label", "").strip()[:32]
+        if task.subcategory == Task.SUBCATEGORY_UDEMY:
+            task.watch_keyword = ""
+        link_error = task.study_link_error()
         if not task.due_time:
             messages.error(
                 request,
                 "Ponle una hora — la notificación y el aviso de «no hecha» al final del día la necesitan.",
             )
+        elif link_error:
+            messages.error(request, link_error)
         else:
             task.save()
+            if task.youtube_playlist_id and task.youtube_playlist_id != old_playlist_id:
+                task.sync_playlist_videos()
             messages.success(request, "Tarea actualizada.")
             return redirect(reverse("tasks:task_list"))
     return render(request, "tasks/task_form.html", {
@@ -1108,6 +1127,29 @@ def task_video_save(request, pk):
     # exactamente como antes.
     if task.category == Task.CATEGORY_SPORT:
         return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_cooldown", args=[task.pk])})
+
+    # Tarea suelta (sin Plan detrás) de Estudio con un vídeo/playlist de
+    # YouTube fijado: a diferencia de un curso de idioma con Plan (que
+    # avanza su propio temario vía Plan.mark_current_module_watched más
+    # abajo), aquí el contenido puesto ES todo lo que hay que ver -- un
+    # vídeo suelto se acaba al verlo entero, una playlist se acaba al
+    # ver su último vídeo. En cualquiera de los dos casos ya no tiene
+    # sentido seguir pidiendo esta tarea cada día: se cierra la serie
+    # entera, igual que hace Udemy cuando la extensión detecta el curso
+    # al 100% (ver Task.finish_recurring_series).
+    if not plan and task.category == Task.CATEGORY_STUDY:
+        if task.youtube_playlist_id:
+            watched_count = videos_watched if videos_watched is not None else 1
+            next_index = (task.playlist_start_index or 0) + watched_count
+            task.playlist_start_index = next_index
+            if task.is_last_playlist_video(next_index - 1):
+                task.finish_recurring_series()
+                messages.success(request, "Playlist terminada — tarea completada.")
+                return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
+        elif task.youtube_video_id:
+            task.finish_recurring_series()
+            messages.success(request, "Vídeo visto — tarea completada.")
+            return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
 
     task.mark_done(minutes_watched=minutes_watched)
     messages.success(request, "Vídeo visto — tarea completada.")
@@ -2044,6 +2086,22 @@ def plan_form(request, pk=None):
                         item.youtube_video_id = request.POST.get("youtube_video_id", "").strip()[:255]
                         item.youtube_playlist_id = request.POST.get("youtube_playlist_id", "").strip()[:255]
                         item.watch_keyword = request.POST.get("watch_keyword", "").strip()[:120]
+                        # Igual que una tarea suelta de Estudio (ver
+                        # _study_link_error): sin nada de esto puesto, el
+                        # plan sale con una tarea diaria "Estudio simple"
+                        # sin nada que comprobar ni forma de cerrarse solo
+                        # -- ya no se deja crear/guardar así.
+                        if not (item.youtube_video_id or item.youtube_playlist_id or item.watch_keyword):
+                            messages.error(
+                                request,
+                                "Pon algo enlazado: un curso de Udemy (palabra clave), un vídeo "
+                                "o una playlist de YouTube — un plan de Estudio necesita saber "
+                                "qué vas a estudiar.",
+                            )
+                            return redirect(
+                                reverse("tasks:plan_edit", args=[plan.pk]) if plan.pk
+                                else reverse("tasks:plan_create")
+                            )
                         raw_minutes = request.POST.get("target_minutes", "").strip()
                         try:
                             item.target_minutes = max(1, int(raw_minutes)) if raw_minutes else None

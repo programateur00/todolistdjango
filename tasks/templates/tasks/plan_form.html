@@ -185,8 +185,12 @@
     </div>
 
     <div id="study-video-fields">
+        <p class="field__hint">
+            Pon uno de los tres — hace falta saber qué vas a estudiar para que el plan
+            pueda comprobarlo y cerrarse solo al terminarlo.
+        </p>
         <label class="field">
-            <span class="field__label">Curso de Udemy — palabra clave (opcional)</span>
+            <span class="field__label">Curso de Udemy — palabra clave</span>
             <input type="text" name="watch_keyword" value="{{ study_headline.watch_keyword|default:'' }}"
                 placeholder="Un trozo único del título del curso en Udemy, ej. \'Excel\'">
             <span class="field__hint">
@@ -197,12 +201,12 @@
             </span>
         </label>
         <label class="field">
-            <span class="field__label">Vídeo de YouTube (opcional)</span>
+            <span class="field__label">…o vídeo de YouTube</span>
             <input type="text" name="youtube_video_id" value="{{ study_headline.youtube_video_id|default:'' }}"
                 placeholder="Pega la URL o el ID del vídeo">
         </label>
         <label class="field">
-            <span class="field__label">Playlist de YouTube (opcional)</span>
+            <span class="field__label">…o playlist de YouTube</span>
             <input type="text" name="youtube_playlist_id" value="{{ study_headline.youtube_playlist_id|default:'' }}"
                 placeholder="Pega la URL o el ID de la playlist — cualquiera, no hace falta que sea de idiomas">
             <span class="field__hint">

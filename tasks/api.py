@@ -481,6 +481,18 @@ def task_create(request):
         return JsonResponse({"ok": False, "error": error}, status=400)
     if not t.title:
         return JsonResponse({"ok": False, "error": "Falta el título."}, status=400)
+    # Igual que en el formulario web (ver views.task_create): Udemy en
+    # freestyle es un hábito genérico, nunca lleva palabra clave -- eso
+    # es lo que lo distingue de un Udemy de Plan (curso concreto, con
+    # cierre por contenido). Y toda tarea de Estudio necesita algo
+    # enlazado para saber qué estudiar y cuándo se ha terminado; sin
+    # esto la app móvil podría crear tareas "huecas" que el formulario
+    # web ya no permite.
+    if t.subcategory == Task.SUBCATEGORY_UDEMY:
+        t.watch_keyword = ""
+    link_error = t.study_link_error()
+    if link_error:
+        return JsonResponse({"ok": False, "error": link_error}, status=400)
     # Si el cliente ya trae un uuid (offline-first, o porque generó uno
     # de antemano para poder guardar un vídeo local con esa clave antes
     # de crear la tarea), se respeta en vez de generar uno nuevo.
@@ -491,6 +503,8 @@ def task_create(request):
         except ValueError:
             pass
     t.save()
+    if t.youtube_playlist_id:
+        t.sync_playlist_videos()
     return JsonResponse({"ok": True, "task": task_json(t)}, status=201)
 
 

@@ -14,9 +14,13 @@
  * subtipo de tarea distinto:
  *
  *   - Udemy (category="study", subcategory="udemy"): la pestaña es
- *     udemy.com. Además, mientras hay sesión, se comprueba cada minuto
- *     si Udemy reporta el curso al 100% (ver checkCourseCompletion) —
- *     eso cierra la tarea entera, no solo el día.
+ *     udemy.com Y ADEMÁS suena (chrome.tabs.audible) — estar en el
+ *     Q&A, las reseñas o el temario del curso sin el vídeo reproduciéndose
+ *     NO cuenta como estudiar, el audio es la única señal fiable desde
+ *     fuera de la página de que la clase se está viendo de verdad.
+ *     Además, mientras hay sesión, se comprueba cada minuto si Udemy
+ *     reporta el curso al 100% (ver checkCourseCompletion) — eso cierra
+ *     la tarea entera, no solo el día.
  *
  *   - Lectura de un PDF (category="work", subcategory="reading"): la
  *     pestaña es un .pdf (local, file://, o servido por una web) visto
@@ -71,11 +75,14 @@ async function fetchTasksFromServer(cfg) {
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   const pending = Array.isArray(data.pending) ? data.pending : [];
-  return pending.filter(
-    (t) =>
-      (t.subcategory === "udemy" || t.subcategory === "reading") &&
-      (t.watch_keyword || "").trim(),
-  );
+  // Antes se exigia palabra clave puesta siempre. Ahora una tarea
+  // suelta de Udemy (o de Lectura) SIN palabra clave es un habito
+  // GENERICO a proposito -- "pasa tiempo en Udemy" / "pasa tiempo
+  // leyendo", sin curso ni libro concreto que reconocer -- asi que
+  // tambien se deja pasar. matchTask() es quien decide, mas abajo, que
+  // una palabra clave especifica (normalmente de un Plan) gana siempre
+  // sobre el habito generico si las dos encajan a la vez.
+  return pending.filter((t) => t.subcategory === "udemy" || t.subcategory === "reading");
 }
 
 async function refreshTasksCache() {
@@ -114,15 +121,25 @@ async function setCurrentSession(session) {
 
 function matchTask(tasks, tabTitle) {
   const title = (tabTitle || "").toLowerCase();
-  if (!title) return null;
   let best = null;
-  for (const t of tasks) {
-    const kw = (t.watch_keyword || "").trim().toLowerCase();
-    if (kw && title.includes(kw)) {
-      if (!best || kw.length > best.keyword.length) best = { task: t, keyword: kw };
+  if (title) {
+    for (const t of tasks) {
+      const kw = (t.watch_keyword || "").trim().toLowerCase();
+      if (kw && title.includes(kw)) {
+        if (!best || kw.length > best.keyword.length) best = { task: t, keyword: kw };
+      }
     }
   }
-  return best;
+  if (best) return best;
+  // Ninguna palabra clave especifica encaja: si hay una tarea suelta
+  // "generica" (sin palabra clave puesta a proposito -- ver
+  // _study_link_error en el backend), se lleva el tiempo ella en su
+  // lugar -- es el habito de "pasar tiempo en Udemy/leyendo", sin
+  // curso concreto. Una palabra clave especifica (normalmente de un
+  // Plan) SIEMPRE gana sobre esto -- por eso se prueba primero, arriba
+  // -- para que las dos nunca se pisen ni sumen el mismo rato dos veces.
+  const generic = tasks.find((t) => !(t.watch_keyword || "").trim());
+  return generic ? { task: generic, keyword: "" } : null;
 }
 
 function isUdemyUrl(rawUrl) {
@@ -168,15 +185,18 @@ async function getActiveMatch() {
     const pdf = !udemy && isPdfUrl(tab.url);
     if (!udemy && !pdf) return null;
 
-    // "Inactivo" según Chrome (chrome.idle) solo mira ratón/teclado — ver
-    // un vídeo de una clase es EXACTAMENTE el caso en el que no tocas
-    // ninguno de los dos durante minutos y sigues ahí delante. Por eso el
-    // corte de inactividad no aplica a Udemy si la propia pestaña está
-    // sonando: el audio es una señal de "en uso" más fiable que el ratón
-    // para ese caso. Leer un PDF no suena, así que ahí sí se aplica
-    // siempre — es la única señal de "sigue ahí" que hay.
-    const skipIdleCheck = udemy && tab.audible;
-    if (!skipIdleCheck) {
+    if (udemy) {
+      // Estar en una pestaña de udemy.com no es lo mismo que estar
+      // viendo una clase — se puede estar leyendo el Q&A, las reseñas o
+      // el temario del curso sin que el vídeo esté sonando, y eso es
+      // contenido trivial, no estudiar. La única señal fiable desde
+      // fuera de la página de que la clase se está reproduciendo de
+      // verdad es que la pestaña suene, así que aquí NO basta con no
+      // estar inactivo: sin audio, no cuenta, aunque sigas ahí delante.
+      if (!tab.audible) return null;
+    } else {
+      // Un PDF no suena nunca, así que aquí la única señal de "sigues
+      // ahí" que hay es la inactividad de ratón/teclado de Chrome.
       const idleState = await chrome.idle.queryState(IDLE_DETECTION_SECONDS);
       if (idleState !== "active") return null;
     }
@@ -440,7 +460,7 @@ async function reevaluate({ allowEndOnNoMatch = true } = {}) {
 async function heartbeat() {
   await reevaluate();
   const current = await getCurrentSession();
-  if (current && current.task.subcategory === "udemy") {
+  if (current && current.task.subcategory === "udemy" && (current.task.watch_keyword || "").trim()) {
     await checkCourseCompletion(current.task.uuid, current.tabId);
   }
   await flushPendingUploads();

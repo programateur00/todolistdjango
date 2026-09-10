@@ -1616,11 +1616,38 @@ class ApiTests(TestCase):
         return self.client.patch(url, data=json.dumps(payload), content_type="application/json")
 
     def test_create_and_list(self):
-        r = self._post("/api/tasks/create/", {"title": "Desde la app", "category": "study"})
+        # category="general" a propósito: category="study" ahora exige
+        # algo enlazado (ver Task.study_link_error) y no es lo que este
+        # test comprueba -- eso lo cubren los tests de más abajo.
+        r = self._post("/api/tasks/create/", {"title": "Desde la app", "category": "general"})
         self.assertEqual(r.status_code, 201)
         self.assertTrue(r.json()["ok"])
         r = self.client.get("/api/tasks/")
         self.assertEqual(len(r.json()["pending"]), 1)
+
+    def test_create_study_task_requires_something_linked(self):
+        """Igual que en el formulario web: la API tampoco debe dejar crear
+        una tarea de Estudio "hueca" (sin vídeo, sin playlist, sin ser
+        Udemy) -- si no, no hay forma de saber qué estudiar ni de detectar
+        cuándo se ha terminado."""
+        r = self._post("/api/tasks/create/", {"title": "Estudiar algo", "category": "study"})
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertFalse(r.json()["ok"])
+
+    def test_create_study_task_udemy_ignores_watch_keyword(self):
+        r = self._post("/api/tasks/create/", {
+            "title": "Udemy suelto", "category": "study", "subcategory": "udemy",
+            "watch_keyword": "Excel",
+        })
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["task"]["watch_keyword"], "")
+
+    def test_create_study_task_with_youtube_video_is_allowed(self):
+        r = self._post("/api/tasks/create/", {
+            "title": "Ver este vídeo", "category": "study",
+            "youtube_video_id": "dQw4w9WgXcQ",
+        })
+        self.assertEqual(r.status_code, 201, r.content)
 
     def test_dates_are_parsed_not_passed_through(self):
         """Regresión: asignar la fecha como cadena rompía el serializador."""
@@ -1777,20 +1804,27 @@ class UdemyTrackingTests(TestCase):
 
     # ---------------------------------------------------- Fase 3 (formulario web)
 
-    def test_web_create_saves_watch_keyword_and_target_minutes(self):
+    def test_web_create_freestyle_udemy_ignores_watch_keyword(self):
+        """Udemy suelta (freestyle) es un hábito genérico -- nunca lleva
+        palabra clave, eso es justo lo que la distingue de un Udemy de
+        Plan (curso concreto, con cierre por contenido). Aunque el
+        formulario mande una, task_create la descarta."""
         r = self.client.post(reverse("tasks:task_create"), {
-            "title": "Curso de Excel", "category": "study", "subcategory": "udemy",
+            "title": "Udemy en general", "category": "study", "subcategory": "udemy",
             "watch_keyword": "Excel completo", "target_minutes": "45",
             "due_date": "2026-09-10", "due_time": "20:00", "repeat": "daily",
         })
         self.assertEqual(r.status_code, 302, r.content)
-        t = Task.objects.get(title="Curso de Excel")
-        self.assertEqual(t.watch_keyword, "Excel completo")
+        t = Task.objects.get(title="Udemy en general")
+        self.assertEqual(t.watch_keyword, "")
         self.assertEqual(t.target_minutes, 45)
         self.assertEqual(t.category, Task.CATEGORY_STUDY)
         self.assertEqual(t.subcategory, Task.SUBCATEGORY_UDEMY)
 
-    def test_web_edit_updates_watch_keyword(self):
+    def test_web_edit_clears_watch_keyword_for_freestyle_udemy(self):
+        """Igual al crear: si una tarea suelta de Udemy tenía una palabra
+        clave de antes (p.ej. creada directo en el admin), editarla desde
+        el formulario web la limpia -- freestyle nunca la lleva."""
         r = self.client.post(reverse("tasks:task_edit", args=[self.task.pk]), {
             "title": self.task.title, "category": "study", "subcategory": "udemy",
             "watch_keyword": "Linux avanzado", "target_minutes": "30",
@@ -1798,7 +1832,7 @@ class UdemyTrackingTests(TestCase):
         })
         self.assertEqual(r.status_code, 302, r.content)
         self.task.refresh_from_db()
-        self.assertEqual(self.task.watch_keyword, "Linux avanzado")
+        self.assertEqual(self.task.watch_keyword, "")
 
     def test_web_form_renders_with_udemy_task(self):
         """La página de editar no debe romperse con una tarea de Udemy ya guardada."""
