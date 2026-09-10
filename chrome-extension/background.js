@@ -254,18 +254,113 @@ async function flushPendingUploads() {
 // (solo aplica a Udemy — un PDF en el visor nativo no es inspeccionable
 // desde la extensión, así que para "reading" nunca se llama a esto.)
 
-/** Se ejecuta DENTRO de la página de Udemy — no puede usar nada de fuera. */
+// Mínimo de fracciones "x/x" que hacen falta para fiarse del resultado —
+// una sola por casualidad no basta (aunque, al estar acotado al apartado
+// de contenido del curso, ya cuesta mucho más que cuele algo que no sea
+// una sección real).
+const COURSE_PROGRESS_MIN_FRACTIONS = 2;
+
+// Título de "Contenido del curso" tal cual lo pone Udemy según el idioma
+// de la interfaz — para poder acotar la búsqueda SOLO a ese apartado y
+// dejar fuera valoraciones/comentarios ("10/10, lo recomiendo") que
+// también podrían leerse como una fracción si mirásemos toda la página.
+const COURSE_CONTENT_HEADINGS = [
+  "course content",       // inglés
+  "contenido del curso",  // español
+  "contenu du cours",     // francés
+  "kursinhalte",          // alemán
+  "contenuto del corso",  // italiano
+];
+
+/**
+ * Busca el título "Course content" (en cualquiera de los idiomas de
+ * arriba) y devuelve el texto SOLO del bloque que cuelga de él — no toda
+ * la página. El título suele venir en un contenedor pequeño (icono +
+ * texto), así que hay que subir unos pocos niveles hasta dar con el
+ * contenedor que ya incluye la lista de secciones (bastante más texto
+ * que el propio título suelto).
+ *
+ * Si no lo encuentra (Udemy cambió el marcado, título en otro idioma que
+ * no está en la lista...), devuelve null y quien llame usa un respaldo
+ * más conservador en vez de mirar la página entera a lo loco.
+ */
+function getCourseContentSectionText() {
+  const heading = Array.from(
+    document.querySelectorAll('h1,h2,h3,h4,h5,[role="heading"]')
+  ).find((el) => {
+    const t = (el.textContent || "").trim().toLowerCase();
+    return COURSE_CONTENT_HEADINGS.some((h) => t === h || t.startsWith(h));
+  });
+  if (!heading) return null;
+
+  const headingLen = (heading.textContent || "").trim().length;
+  let node = heading;
+  for (let i = 0; i < 6 && node.parentElement; i++) {
+    node = node.parentElement;
+    const len = (node.innerText || "").length;
+    // +200 es un margen arbitrario para asegurarnos de que ya no es solo
+    // el título repetido/envuelto, sino que trae contenido de verdad
+    // (las secciones) debajo.
+    if (len > headingLen + 200) return node.innerText || "";
+  }
+  return node.innerText || null;
+}
+
+/** Extrae fracciones "num/num" de un trozo de texto, descartando lo que
+ * parece nota con decimales ("4.7/5") o fecha ("12/09/2024"). */
+function extractSectionFractions(text) {
+  const fractionRe = /\b(\d{1,3})\s*\/\s*(\d{1,3})\b/g;
+  const fractions = [];
+  let match;
+  while ((match = fractionRe.exec(text)) !== null) {
+    const before = text.slice(Math.max(0, match.index - 2), match.index);
+    const after = text.slice(
+      match.index + match[0].length,
+      match.index + match[0].length + 3
+    );
+    if (/\d\.$/.test(before)) continue;        // "4.7/5" → nota, no lección
+    if (/^\s*\/\s*\d/.test(after)) continue;   // "12/09/2024" → fecha
+    const total = parseInt(match[2], 10);
+    if (total <= 0) continue;                    // "0/0" no dice nada
+    fractions.push([parseInt(match[1], 10), total]);
+  }
+  return fractions;
+}
+
+/** Se ejecuta DENTRO de la página de Udemy — no puede usar nada de fuera.
+ *
+ * OJO: antes esto contaba como "curso completo" cualquier
+ * <progress>/[role="progressbar"] de la página con valor >= 100, pero eso
+ * incluye el propio scrubber del reproductor de vídeo — que llega a 100 al
+ * terminar CUALQUIER lección, no solo la última. Y el texto en español
+ * ("curso"+"100%"+"completado") tampoco vale si Udemy está en otro idioma.
+ *
+ * Detección principal, independiente del idioma: en "Contenido del
+ * curso" cada sección enseña cuántas lecciones tiene vistas como "x/x"
+ * (ej. "10/10") — son solo números, da igual el idioma de la interfaz.
+ * Si TODAS las fracciones de ESE apartado (no de toda la página, para no
+ * colar reseñas) tienen el mismo número a los dos lados, está completo.
+ */
 function detectCourseCompleteInPage() {
   try {
-    const text = document.body ? document.body.innerText || "" : "";
-    if (/\b100\s?%[^.\n]{0,20}(complet|finaliz)/i.test(text)) return true;
-    if (/(complet|finaliz)[a-záéíóúñ]*[^.\n]{0,20}\b100\s?%/i.test(text)) return true;
-    const bars = document.querySelectorAll('[role="progressbar"], progress');
-    for (const el of bars) {
-      const raw = el.getAttribute("aria-valuenow") || el.getAttribute("value");
-      const val = raw !== null ? parseFloat(raw) : NaN;
-      if (!Number.isNaN(val) && Math.round(val) >= 100) return true;
+    const scoped = getCourseContentSectionText();
+    if (scoped) {
+      const fractions = extractSectionFractions(scoped);
+      if (fractions.length >= COURSE_PROGRESS_MIN_FRACTIONS) {
+        return fractions.every(([done, total]) => done === total);
+      }
+      // Encontramos el apartado pero no salen suficientes fracciones
+      // ahí (temario con 1 sola sección, colapsado sin contadores...) —
+      // no concluir "no" a ciegas, seguir con el respaldo de texto.
     }
+
+    // Respaldo si no se pudo acotar el apartado (título no encontrado):
+    // solo el texto en español, más específico que una fracción suelta
+    // y con mucho menos riesgo de colarse desde una reseña.
+    const text = document.body ? document.body.innerText || "" : "";
+    if (/\bcurso\b[^.\n]{0,40}\b100\s?%[^.\n]{0,20}(complet|finaliz)/i.test(text)) return true;
+    if (/(complet|finaliz)[a-záéíóúñ]*[^.\n]{0,20}\b100\s?%[^.\n]{0,40}\bcurso\b/i.test(text)) return true;
+
     return false;
   } catch {
     return false;

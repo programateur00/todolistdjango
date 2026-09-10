@@ -418,7 +418,7 @@
         var esGeneralConTimer = esGeneral && wantsTimerInput.checked;
         focusTargetField.style.display = (v === 'work' || esUdemy || esGeneralConTimer) ? 'block' : 'none';
         var esCarrera = sub === 'running';
-        var modosPorSub = { upper_body: ['camera', 'circuit', 'video'], lower_body: ['camera', 'circuit', 'video'], warmup: ['camera'] };
+        var modosPorSub = { upper_body: ['camera', 'circuit', 'video'], lower_body: ['camera', 'circuit', 'video'], warmup: ['camera', 'circuit'] };
         var modosValidos = modosPorSub[sub] || [];
 
         sportModeField.style.display = modosValidos.length ? 'block' : 'none';

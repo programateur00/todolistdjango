@@ -117,11 +117,11 @@ _EXERCISE_DIFFICULTY = {
     "weighted-pullup": "advanced",
     "weighted-dips": "advanced",
     "archer-pullup": "advanced",
-    # El pino exige equilibrio invertido y estabilidad de hombro que un
-    # principiante de verdad no suele tener todavía, aunque se use apoyo
-    # en la pared — más cerca de kneehold-bar (también "advanced") que de
-    # dead-hang (que quitó su sitio aquí: solo pedía agarre y aguantar).
-    "handstand": "advanced",
+    # El pino exige equilibrio invertido y estabilidad de hombro, pero
+    # menos base de fuerza pura que dominadas/fondos lastrados o el
+    # archer pull-up -- bajado a intermedio (ajustado 2026-09, antes
+    # "advanced").
+    "handstand": "intermediate",
     # Tren inferior / core
     "squat": "beginner",
     "situp": "beginner",
@@ -132,10 +132,11 @@ _EXERCISE_DIFFICULTY = {
     "side-plank": "intermediate",
     "weighted-squat": "intermediate",
     "split-squat": "intermediate",  # unilateral + equilibrio -> más exigente que la sentadilla a dos piernas, mismo nivel que sentadillas con peso
-    "wall-sit": "intermediate",
+    "wall-sit": "beginner",  # ajustado 2026-09, antes "intermediate"
     "double-crunch": "advanced",
     "scissor-kick": "advanced",
-    "kneehold-bar": "advanced",
+    "kneehold-bar": "beginner",  # ajustado 2026-09, antes "advanced" -- cuando
+    # se añada L-sit bar (bastante más exigente) esa sí irá en advanced.
 }
 _LEVEL_TIER_ORDER = ["beginner", "intermediate", "advanced"]
 

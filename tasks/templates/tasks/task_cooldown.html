@@ -9,68 +9,24 @@
     </div>
 </header>
 
-<div id="cooldown-question">
-    <p class="exercise-picker__hint">Ya está todo guardado. ¿Quieres estirar antes de terminar?</p>
-    <div class="task-form__actions">
-        <form method="post" action="{% url 'tasks:task_cooldown' task.pk %}" style="display:contents">
-            {% csrf_token %}
-            <button type="submit" class="ghost-btn">No, terminar ya</button>
-        </form>
-        <button type="button" class="primary-btn" id="cooldown-yes">Sí, quiero estirar</button>
-    </div>
-</div>
-
-<div id="cooldown-video" style="display:none">
-    <p class="exercise-picker__hint">Un último vídeo de vuelta a la calma para cerrar la sesión.</p>
-    <div class="video-embed" id="video-embed">
-        <div id="video-player" class="video-embed__player"></div>
-        <p class="field__hint" id="video-hint">Cargando…</p>
-    </div>
-    <form method="post" action="{% url 'tasks:task_cooldown' task.pk %}">
+<p class="exercise-picker__hint">Ya está todo guardado. ¿Quieres estirar antes de terminar?</p>
+<div class="task-form__actions">
+    <form method="post" action="{% url 'tasks:task_cooldown' task.pk %}" style="display:contents">
         {% csrf_token %}
-        <div class="task-form__actions">
-            <button type="submit" class="ghost-btn">Saltar y terminar ya</button>
-            <button type="submit" class="primary-btn">Terminar sesión</button>
-        </div>
+        <button type="submit" class="ghost-btn">No, terminar ya</button>
     </form>
+    {% if routine_url %}
+    <a href="{{ routine_url }}" class="primary-btn">Sí, quiero estirar</a>
+    {% endif %}
 </div>
 
-<script src="https://www.youtube.com/iframe_api"></script>
-<script>
-(function () {
-    var questionEl = document.getElementById('cooldown-question');
-    var videoEl = document.getElementById('cooldown-video');
-    var hint = document.getElementById('video-hint');
-    var videoId = "{{ video_id }}";
-    var videoLoaded = false;
+{% if routine_url %}
+<p class="field__hint">Se abrirá «{{ routine.name }}» ({{ routine.items.count }} ejercicios).</p>
+{% elif create_routine_url %}
+<p class="field__hint">
+    Todavía no tienes un circuito de estiramiento para «{{ subcategory_label }}» —
+    <a href="{{ create_routine_url }}">crea uno</a>.
+</p>
+{% endif %}
 
-    document.getElementById('cooldown-yes').addEventListener('click', function () {
-        questionEl.style.display = 'none';
-        videoEl.style.display = '';
-        if (!videoLoaded) {
-            videoLoaded = true;
-            loadVideo();
-        }
-    });
-
-    function loadVideo() {
-        window.onYouTubeIframeAPIReady = function () {
-            hint.textContent = 'Míralo entero si quieres, o continúa cuando te apetezca — no hace falta verlo del todo.';
-            new YT.Player('video-player', {
-                videoId: videoId,
-                playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1 },
-                events: {
-                    onStateChange: function (e) {
-                        if (e.data === YT.PlayerState.ENDED) hint.textContent = 'Listo.';
-                    },
-                    onError: function () {
-                        hint.textContent = 'Este vídeo no se pudo cargar — no pasa nada, puedes continuar igual.';
-                    },
-                },
-            });
-        };
-        if (window.YT && window.YT.Player) window.onYouTubeIframeAPIReady();
-    }
-})();
-</script>
 {% endblock %}

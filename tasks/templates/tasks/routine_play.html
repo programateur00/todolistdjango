@@ -9,12 +9,12 @@
         <span class="topbar__eyebrow">{{ routine.name }}</span>
         <h1>{{ task.title }}</h1>
     </div>
-    <a href="{% url 'tasks:task_workout' task.pk %}" class="stats-link">← Cambiar</a>
+    <a href="{{ back_url }}" class="stats-link">← Cambiar</a>
 </header>
 
 <div id="circuit-root"
-     data-save-url="{% url 'tasks:routine_save' task.pk routine.pk %}"
-     data-cancel-url="{% url 'tasks:task_list' %}"
+     data-save-url="{{ save_url }}"
+     data-cancel-url="{{ cancel_url }}"
      data-items='{{ items_json }}'
      class="circuit">
     {% csrf_token %}

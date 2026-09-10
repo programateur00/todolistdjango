@@ -22,14 +22,74 @@ from .utils import get_current_user, read_mobile_release, resolve_plan_target
 from urllib.parse import quote
 
 
-# Vídeos fijos de calentamiento/enfriamiento — RECOMENDADOS (no
-# obligatorios) en toda sesión de Deporte (ver _require_warmup,
-# task_warmup y task_cooldown): se pregunta primero si ya has
-# calentado/quieres estirar, y el vídeo, si se pide, se puede saltar en
-# cualquier momento — no hace falta verlo entero.
-# Cambiar el ID aquí para usar otro vídeo, sin tocar nada de lógica.
-WARMUP_VIDEO_ID = "1YY0xyCgITc"
-COOLDOWN_VIDEO_ID = "r5QG2Lq1oUo"
+# Calentamiento/enfriamiento RECOMENDADO (no obligatorio) en toda sesión
+# de Deporte (ver _require_warmup, task_warmup y task_cooldown): se
+# pregunta primero si ya has calentado/quieres estirar, y si se pide, se
+# ofrece el circuito (Routine) que tengas montado para esa subcategoría
+# -- ver _warmup_routine_for. Antes esto era un vídeo fijo de YouTube
+# igual para todo el mundo; se quitó a petición de Alex a favor de sus
+# propios ejercicios catalogados (calentamiento con cámara + estiramientos
+# cronometrados), específicos por subcategoría (tren superior/inferior).
+
+
+def _task_warmup_subcategory(task):
+    """
+    Subcategoría a efectos de elegir circuito de calentamiento (ver
+    _warmup_routine_for). Una tarea freestyle ya trae `subcategory`
+    puesto (tren superior/inferior/running/warmup). Pero una tarea
+    generada por un Plan de Deporte que NO es running se guarda con
+    `subcategory=""` -- ver Plan.sync_task/_running_target_fields: solo
+    running copia subcategoría a la tarea diaria, el resto la deja en
+    blanco desde siempre (de antes de que este campo existiera). Así
+    que aquí se deriva del `body_area` del ejercicio headline del plan
+    -- el mismo ejercicio que ya decide sport_mode/objetivo del día.
+    """
+    if task.subcategory:
+        return task.subcategory
+    if task.plan:
+        head = task.plan.headline
+        if head and head.exercise:
+            return head.exercise.body_area
+    return ""
+
+
+def _warmup_routine_for(task):
+    """
+    Circuito de calentamiento/estiramiento para la subcategoría de esta
+    tarea (ver Routine.subcategory) -- sustituye al vídeo fijo genérico
+    que había antes. None si el usuario todavía no tiene ninguno montado
+    para esa subcategoría (task_warmup/task_cooldown lo tratan como "sin
+    alternativa", igual que antes cuando el vídeo no cargaba).
+    """
+    subcategory = _task_warmup_subcategory(task)
+    if not subcategory:
+        return None
+    return Routine.objects.filter(
+        user=get_current_user(), subcategory=subcategory, is_warmup_bookend=True,
+        deleted_at__isnull=True,
+    ).first()
+
+
+def _routine_items_data(items):
+    """Serializa RoutineItem -> items_data para circuit.js. Compartido por
+    routine_play, task_warmup_routine y task_cooldown_routine."""
+    data = []
+    for it in items:
+        t = it.resolved_target()
+        data.append({
+            "slug": it.exercise.slug,
+            "name": it.exercise.name,
+            "mode": it.exercise.mode,
+            "counter_key": it.exercise.counter_key,
+            "voice_step": it.exercise.voice_step,
+            "work": t["seconds"],
+            "rest": it.effective_rest_seconds,
+            "target_sets": t["sets"],
+            "target_reps": t["reps"],
+            "target_source": t["source"],
+            "plan_name": t["plan_name"],
+        })
+    return data
 
 
 def _require_warmup(request, task):
@@ -44,10 +104,12 @@ def _require_warmup(request, task):
     """
     if task.category != Task.CATEGORY_SPORT:
         return None
-    if task.subcategory == Task.SUBCATEGORY_RUNNING:
+    if task.subcategory in (Task.SUBCATEGORY_RUNNING, Task.SUBCATEGORY_WARMUP):
         # Running no se cuenta con la cámara ni con un circuito: la
         # sesión ya queda validada por datos reales (distancia/tiempo,
-        # Health Connect...), así que no hace falta el vídeo.
+        # Health Connect...), así que no hace falta calentar antes.
+        # Estiramientos y calentamientos tampoco -- ya ES el calentamiento,
+        # pedir que se caliente antes de calentar no tiene sentido.
         return None
     if WarmupStatus.is_fresh(get_current_user()):
         return None
@@ -715,19 +777,37 @@ def task_workout_save_manual(request, pk):
 def task_warmup(request, pk):
     """
     Calentamiento recomendado antes de entrenar (ver _require_warmup):
-    se pregunta primero si ya has calentado — si dices que sí, o ves el
-    vídeo (opcional, se puede saltar en cualquier momento, ver
-    tasks/task_warmup.html), el POST apunta la hora (WarmupStatus) y se
-    vuelve a donde se iba (?next=), que ya no lo volverá a pedir mientras
-    siga "fresco".
+    se pregunta primero si ya has calentado — si dices que sí, o pasas
+    por el circuito de calentamiento de esa subcategoría (opcional, ver
+    tasks/task_warmup.html y task_warmup_routine), el POST apunta la
+    hora (WarmupStatus) y se vuelve a donde se iba (?next=), que ya no
+    lo volverá a pedir mientras siga "fresco".
     """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
     next_url = request.GET.get("next") or reverse("tasks:task_workout", args=[task.pk])
     if request.method == "POST":
         WarmupStatus.mark_done(get_current_user())
         return redirect(next_url)
+    routine = _warmup_routine_for(task)
+    routine_url = None
+    create_routine_url = None
+    if routine:
+        routine_url = (
+            f"{reverse('tasks:task_warmup_routine', args=[task.pk, routine.pk])}"
+            f"?next={quote(next_url)}"
+        )
+    subcategory_label = ""
+    sub = _task_warmup_subcategory(task)
+    if not routine and sub:
+        create_routine_url = (
+            f"{reverse('tasks:routine_create')}?subcategory={sub}"
+            f"&next={quote(request.get_full_path())}"
+        )
+        subcategory_label = dict(Task.SPORT_SUBCATEGORY_CHOICES).get(sub, sub)
     return render(request, "tasks/task_warmup.html", {
-        "task": task, "next": next_url, "video_id": WARMUP_VIDEO_ID,
+        "task": task, "next": next_url, "routine": routine,
+        "routine_url": routine_url, "create_routine_url": create_routine_url,
+        "subcategory_label": subcategory_label,
     })
 
 
@@ -735,7 +815,7 @@ def task_cooldown(request, pk):
     """
     Enfriamiento/estiramiento recomendado al terminar de entrenar: mismo
     mecanismo que task_warmup pero al revés (se pregunta si quieres
-    estirar; el vídeo, si se pide, es opcional y se puede saltar). Se
+    estirar; el circuito, si se pide, es opcional y se puede saltar). Se
     llega aquí DESPUÉS de guardar ya los números de la sesión
     (task_workout_save, .._save_manual, routine_save, plan_session_save,
     task_video_save) — la tarea se marca hecha de verdad al pasar por
@@ -746,9 +826,94 @@ def task_cooldown(request, pk):
         task.mark_done()
         messages.success(request, "Sesión completada.")
         return redirect(reverse("tasks:task_list"))
+    routine = _warmup_routine_for(task)
+    routine_url = None
+    create_routine_url = None
+    if routine:
+        routine_url = reverse("tasks:task_cooldown_routine", args=[task.pk, routine.pk])
+    subcategory_label = ""
+    sub = _task_warmup_subcategory(task)
+    if not routine and sub:
+        create_routine_url = (
+            f"{reverse('tasks:routine_create')}?subcategory={sub}"
+            f"&next={quote(request.get_full_path())}"
+        )
+        subcategory_label = dict(Task.SPORT_SUBCATEGORY_CHOICES).get(sub, sub)
     return render(request, "tasks/task_cooldown.html", {
-        "task": task, "video_id": COOLDOWN_VIDEO_ID,
+        "task": task, "routine": routine,
+        "routine_url": routine_url, "create_routine_url": create_routine_url,
+        "subcategory_label": subcategory_label,
     })
+
+
+def task_warmup_routine(request, pk, routine_pk):
+    """
+    Reproductor del circuito de calentamiento (sustituye al vídeo fijo
+    de antes) — mismo motor que un circuito normal (routine_play +
+    circuit.js), pero terminar AQUÍ no cuenta como la sesión de la
+    tarea: no se crea ningún WorkoutSession, solo se marca WarmupStatus
+    (ver task_warmup_routine_save) y se vuelve a lo que tocaba hacer.
+    Sin _require_warmup aquí a propósito -- esto YA ES el calentamiento,
+    pedirlo de nuevo sería un bucle.
+    """
+    task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    routine = get_object_or_404(Routine, pk=routine_pk, user=get_current_user())
+    next_url = request.GET.get("next") or reverse("tasks:task_workout", args=[task.pk])
+    items = list(routine.items.select_related("exercise"))
+    if not items:
+        messages.error(request, "Este circuito todavía no tiene ejercicios.")
+        return redirect(next_url)
+    save_url = (
+        f"{reverse('tasks:task_warmup_routine_save', args=[task.pk, routine.pk])}"
+        f"?next={quote(next_url)}"
+    )
+    return render(request, "tasks/routine_play.html", {
+        "task": task, "routine": routine, "items": items,
+        "items_json": json.dumps(_routine_items_data(items)),
+        "save_url": save_url, "cancel_url": next_url, "back_url": next_url,
+    })
+
+
+@require_POST
+def task_warmup_routine_save(request, pk, routine_pk):
+    get_object_or_404(Task, pk=pk, user=get_current_user())
+    WarmupStatus.mark_done(get_current_user())
+    next_url = request.GET.get("next") or reverse("tasks:task_workout", args=[pk])
+    return JsonResponse({"ok": True, "redirect_url": next_url})
+
+
+def task_cooldown_routine(request, pk, routine_pk):
+    """
+    Igual que task_warmup_routine pero para el enfriamiento: terminar el
+    circuito aquí SÍ marca la tarea como hecha (ver
+    task_cooldown_routine_save) -- es la continuación natural de
+    task_cooldown, que ya se llama después de guardar los números de la
+    sesión de verdad.
+    """
+    task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    routine = get_object_or_404(Routine, pk=routine_pk, user=get_current_user())
+    items = list(routine.items.select_related("exercise"))
+    if not items:
+        messages.error(request, "Este circuito todavía no tiene ejercicios.")
+        task.mark_done()
+        messages.success(request, "Sesión completada.")
+        return redirect(reverse("tasks:task_list"))
+    save_url = reverse("tasks:task_cooldown_routine_save", args=[task.pk, routine.pk])
+    return render(request, "tasks/routine_play.html", {
+        "task": task, "routine": routine, "items": items,
+        "items_json": json.dumps(_routine_items_data(items)),
+        "save_url": save_url,
+        "cancel_url": reverse("tasks:task_list"),
+        "back_url": reverse("tasks:task_list"),
+    })
+
+
+@require_POST
+def task_cooldown_routine_save(request, pk, routine_pk):
+    task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    task.mark_done()
+    messages.success(request, "Sesión completada.")
+    return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
 
 
 # ------------------------------------------------------------- lectura / cronometro suelto
@@ -984,18 +1149,31 @@ def _save_routine(request, routine=None):
         back = reverse("tasks:routine_edit", args=[routine.pk]) if routine else reverse("tasks:routine_create")
         return redirect(f"{back}?next={next_url}")
 
+    is_warmup_bookend = bool(request.POST.get("is_warmup_bookend"))
+
     if routine is None:
         routine = Routine.objects.create(
             user=get_current_user(), name=name, subcategory=subcategory,
             default_work_seconds=work, default_rest_seconds=rest,
+            is_warmup_bookend=is_warmup_bookend,
         )
     else:
         routine.name = name
         routine.subcategory = subcategory
         routine.default_work_seconds = work
         routine.default_rest_seconds = rest
+        routine.is_warmup_bookend = is_warmup_bookend
         routine.save()
         routine.items.all().delete()
+
+    # Solo uno marcado por usuario+subcategoría a la vez (ver
+    # _warmup_routine_for) -- si este se marca, se desmarcan los demás
+    # de la misma subcategoría para que no quede ambigüedad de cuál se
+    # ofrece como calentamiento/enfriamiento.
+    if is_warmup_bookend and subcategory:
+        Routine.objects.filter(
+            user=get_current_user(), subcategory=subcategory, is_warmup_bookend=True,
+        ).exclude(pk=routine.pk).update(is_warmup_bookend=False)
 
     # Se admite cualquier ejercicio activo, no solo los cronometrados: un
     # circuito de tren superior (dominadas, fondos) es tan válido como
@@ -1076,24 +1254,12 @@ def routine_play(request, pk, routine_pk):
         messages.error(request, "Este circuito todavía no tiene ejercicios.")
         return redirect(reverse("tasks:task_workout", args=[task.pk]))
 
-    items_data = []
-    for it in items:
-        t = it.resolved_target()
-        items_data.append({
-            "slug": it.exercise.slug,
-            "name": it.exercise.name,
-            "mode": it.exercise.mode,
-            "counter_key": it.exercise.counter_key,
-            "voice_step": it.exercise.voice_step,
-            "work": t["seconds"],
-            "rest": it.effective_rest_seconds,
-            "target_sets": t["sets"],
-            "target_reps": t["reps"],
-            "target_source": t["source"],
-            "plan_name": t["plan_name"],
-        })
     return render(request, "tasks/routine_play.html", {
-        "task": task, "routine": routine, "items": items, "items_json": json.dumps(items_data),
+        "task": task, "routine": routine, "items": items,
+        "items_json": json.dumps(_routine_items_data(items)),
+        "save_url": reverse("tasks:routine_save", args=[task.pk, routine.pk]),
+        "cancel_url": reverse("tasks:task_list"),
+        "back_url": reverse("tasks:task_workout", args=[task.pk]),
     })
 
 

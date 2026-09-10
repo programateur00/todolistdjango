@@ -46,6 +46,16 @@
         </label>
     </div>
 
+    <label class="field field--checkbox">
+        <input type="checkbox" name="is_warmup_bookend" {% if routine.is_warmup_bookend %}checked{% endif %}>
+        <span>Usar como calentamiento/estiramiento de esta subcategoría</span>
+        <span class="field__hint">
+            Se ofrecerá antes y después de entrenar tren superior/inferior, en vez del vídeo
+            genérico. Solo puede haber uno marcado por subcategoría — marcar este desmarca
+            cualquier otro que ya lo estuviera.
+        </span>
+    </label>
+
     <fieldset class="field routine-builder__picker">
         <legend class="field__label">Ejercicios disponibles</legend>
         <ul class="routine-builder__available" id="available-list">

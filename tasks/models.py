@@ -1287,6 +1287,18 @@ class Routine(models.Model):
     )
     default_work_seconds = models.PositiveIntegerField(default=40)
     default_rest_seconds = models.PositiveIntegerField(default=20)
+    # Si True, este es EL circuito que task_warmup/task_cooldown ofrecen
+    # como calentamiento/estiramiento para su subcategoría (ver
+    # views._warmup_routine_for) -- sustituye al vídeo fijo de YouTube
+    # que había antes. Solo tiene sentido uno marcado por
+    # usuario+subcategoría a la vez; _save_routine desmarca los demás de
+    # la misma subcategoría al guardar uno nuevo, para que no haya
+    # ambigüedad sobre cuál se ofrece.
+    is_warmup_bookend = models.BooleanField(
+        default=False,
+        help_text="Usar este circuito como calentamiento/estiramiento antes y después de "
+                   "las sesiones de esta subcategoría, en vez del vídeo genérico.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     updated_at = models.DateTimeField(auto_now=True)
