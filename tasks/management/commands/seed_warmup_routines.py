@@ -34,10 +34,13 @@ ROUTINES = [
         "items": [
             ("neck-circles", 1, 30),
             ("neck-lateral-mobility", 1, 30),
+            ("neck-turn-side", 1, 30),
+            ("neck-half-turn", 1, 30),
             ("arm-circles", 1, 30),
             ("arm-scissors", 1, 30),
             ("arm-cross-stretch", None, None),        # cronometrado: brazo estirado, sujeto con el otro
             ("triceps-overhead-stretch", None, None),  # cronometrado: brazo hacia atrás, sujeto con el otro
+            ("forearm-rotation-elbow-hold", 1, 30),
             ("wrist-rotation-interlaced", 1, 30),
             ("jumping-jack", 1, 30),
             ("push-up", 1, 10),
@@ -55,7 +58,9 @@ ROUTINES = [
             ("leg-rotation", 1, 30),
             ("jumping-jack", 1, 30),
             ("knee-raises", 1, 30),
+            ("heel-kicks", 1, 30),
             ("seated-hamstring-stretch", None, None),  # cronometrado, al final
+            ("standing-quad-stretch", None, None),     # cronometrado, al final del todo
         ],
     },
 ]

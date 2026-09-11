@@ -193,6 +193,7 @@ def routine_json(r):
         "default_work_seconds": r.default_work_seconds,
         "default_rest_seconds": r.default_rest_seconds,
         "total_seconds": r.total_seconds,
+        "is_warmup_bookend": r.is_warmup_bookend,
         "items": [_routine_item_json(i) for i in r.items.select_related("exercise")],
         "updated_at": r.updated_at.isoformat(),
     }
@@ -857,6 +858,30 @@ def warmup(request):
         WarmupStatus.mark_done(_user())
         return JsonResponse({"ok": True})
     return JsonResponse({"ok": True, "fresh": WarmupStatus.is_fresh(_user())})
+
+
+@api("GET")
+def task_warmup_routine(request, uuid):
+    """
+    El circuito (Routine con is_warmup_bookend=True) que le toca a esta
+    tarea para calentamiento/estiramiento, si el usuario tiene uno
+    montado para su subcategoría -- mismo circuito que ofrece la web en
+    task_warmup/task_cooldown (ver _warmup_routine_for en views.py), para
+    que la app pueda sustituir su vídeo fijo por él y hacer los mismos
+    ejercicios que la web en las dos puntas de la sesión.
+
+    routine: null si el usuario no tiene ningún circuito marcado como
+    calentamiento para esa subcategoría todavía (la app entonces no
+    tiene nada que ofrecer, igual que la web en ese caso).
+    """
+    # Import diferido: views.py hace "from . import api" a nivel de
+    # módulo, así que importar views.py aquí arriba (a nivel de módulo)
+    # crearía un ciclo. Dentro de la función no hay problema.
+    from .views import _warmup_routine_for
+
+    t = get_object_or_404(tasks_qs(), uuid=uuid)
+    r = _warmup_routine_for(t)
+    return JsonResponse({"routine": routine_json(r) if r else None})
 
 
 # ------------------------------------------------------ entrenamientos
