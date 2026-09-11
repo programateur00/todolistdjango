@@ -3673,7 +3673,7 @@ class WorkoutSession {
    */
   announceRestBlocked(now) {
     const remaining = Math.max(0, Math.ceil((MIN_REST_MS - (now - this.setClosedAt)) / 1000));
-    const text = `Todavía en descanso obligatorio — quedan ${remaining}s. No se cuenta nada hasta entonces.`;
+    const text = `Todavía en descanso obligatorio — quedan ${remaining} segundos. No se cuenta nada hasta entonces.`;
     this.setStatus(text);
     if (!this.voiceEnabled) return;
     // Una sola vez POR DESCANSO (ver restBlockedVoiceGiven, reseteado
@@ -3917,6 +3917,14 @@ class WorkoutSession {
       this.armCircleLastProgressAt = null;
       this.armCircleRepStartTime = null;
       this.armCircleDidPhaseSwitch = false;
+      // Total contado en cada sentido a lo largo de TODA la sesión de
+      // cámara (no se resetea al cambiar de sentido ni al cerrar una
+      // serie -- solo aquí, una vez, al empezar) -- para exigir el
+      // objetivo por separado en cada sentido (ver countRep más abajo:
+      // pedido explícito "30 hacia delante y 30 hacia atrás", no 30
+      // combinadas entre los dos como estaba antes).
+      this.armCircleForwardTotal = 0;
+      this.armCircleBackwardTotal = 0;
       this.setStatus("Ponte de pie, de frente a la cámara, con los brazos extendidos, para empezar.");
     } else if (this.counterKey === "necklateral") {
       // Tampoco hay nada que calibrar de una barra o de tu altura: el
@@ -4030,6 +4038,13 @@ class WorkoutSession {
       this.legRotationExcursionHipMidX = null;
       this.legRotationExcursionHipMidY = null;
       this.legRotationExcursionHipWidth = null;
+      // Total contado en cada pierna a lo largo de TODA la sesión de
+      // cámara (no se resetea al cerrar una serie -- solo aquí, una vez,
+      // al empezar) -- para exigir el objetivo por separado en cada
+      // pierna (ver countRep más abajo: pedido explícito "30 una pierna y
+      // 30 otra", mismo criterio que círculos de brazos).
+      this.legRotationLeftTotal = 0;
+      this.legRotationRightTotal = 0;
       this.setStatus("Ponte de pie, de frente a la cámara, con las dos piernas apoyadas, para empezar.");
     } else if (this.counterKey === "kneeraises") {
       // Tampoco hay nada que calibrar: los umbrales son proporcionales a
@@ -4462,7 +4477,70 @@ class WorkoutSession {
     // mensaje del objetivo podía pasar sin que te dieras ni cuenta si no
     // estabas mirando esa línea justo en ese instante. El banner se
     // queda puesto todo lo que quieras, hasta que termines o recalibres.
-    if (this.targetSets && this.targetReps && this.currentSetReps >= this.targetReps &&
+    // Círculos de brazos: el objetivo NO es un total combinado ni
+    // "última serie de N", es el mismo número EN CADA SENTIDO por
+    // separado (pedido explícito: "30 hacia delante y 30 hacia atrás").
+    // Se comprueba aparte, ANTES del disparador normal de abajo, y se
+    // excluye a armcircles de ese disparador normal (ver el `this.counterKey
+    // !== "armcircles"` añadido ahí) porque currentSetReps mezcla las reps
+    // de los dos sentidos (armcircles es una sola serie continua) y con
+    // target_sets=1 dispararía el mensaje de "sesión cumplida" en cuanto
+    // sumaran 30 entre los dos sentidos, no 30 de cada uno.
+    if (this.counterKey === "armcircles" && this.targetSets && this.targetReps && !this.targetAnnounced &&
+        this.armCircleForwardTotal >= this.targetReps && this.armCircleBackwardTotal >= this.targetReps) {
+      this.targetAnnounced = true;
+      if (this.voiceEnabled) speakOut("Objetivo de la sesión cumplido. Puedes seguir si quieres o terminar la sesión.", { flush: false });
+      if (this.goalBannerEl) {
+        this.goalBannerEl.hidden = false;
+        this.goalBannerEl.textContent = `🎯 ¡Objetivo cumplido! (${this.targetReps} de cada sentido) Puedes seguir si quieres, o terminar la sesión.`;
+      }
+      this.setStatus(`🎯 ¡Objetivo cumplido (${this.targetReps} de cada sentido)!`);
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        [0, 0.14].forEach((t, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.frequency.value = i === 0 ? 880 : 1175;
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          gain.gain.setValueAtTime(0.18, ctx.currentTime + t);
+          osc.start(ctx.currentTime + t);
+          osc.stop(ctx.currentTime + t + 0.13);
+        });
+      } catch (e) { /* si el navegador bloquea audio, no pasa nada */ }
+      return true;
+    }
+    // Rotación de piernas: mismo criterio que círculos de brazos, pero
+    // por PIERNA (izquierda/derecha) en vez de por sentido -- pedido
+    // explícito: "30 una pierna y 30 otra". Mismo motivo para excluirla
+    // también del disparador normal de abajo (currentSetReps mezcla las
+    // dos piernas, y con target_sets=1 dispararía en cuanto sumaran 30
+    // entre las dos, no 30 de cada una).
+    if (this.counterKey === "legrotation" && this.targetSets && this.targetReps && !this.targetAnnounced &&
+        this.legRotationLeftTotal >= this.targetReps && this.legRotationRightTotal >= this.targetReps) {
+      this.targetAnnounced = true;
+      if (this.voiceEnabled) speakOut("Objetivo de la sesión cumplido. Puedes seguir si quieres o terminar la sesión.", { flush: false });
+      if (this.goalBannerEl) {
+        this.goalBannerEl.hidden = false;
+        this.goalBannerEl.textContent = `🎯 ¡Objetivo cumplido! (${this.targetReps} de cada pierna) Puedes seguir si quieres, o terminar la sesión.`;
+      }
+      this.setStatus(`🎯 ¡Objetivo cumplido (${this.targetReps} de cada pierna)!`);
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        [0, 0.14].forEach((t, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.frequency.value = i === 0 ? 880 : 1175;
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          gain.gain.setValueAtTime(0.18, ctx.currentTime + t);
+          osc.start(ctx.currentTime + t);
+          osc.stop(ctx.currentTime + t + 0.13);
+        });
+      } catch (e) { /* si el navegador bloquea audio, no pasa nada */ }
+      return true;
+    }
+    if (this.counterKey !== "armcircles" && this.counterKey !== "legrotation" && this.targetSets && this.targetReps && this.currentSetReps >= this.targetReps &&
         this.setGoalAnnouncedAtSetIndex !== this.sets.length) {
       this.setGoalAnnouncedAtSetIndex = this.sets.length;
       const isLastSet = !this.targetAnnounced && (this.sets.length + 1 >= this.targetSets);
@@ -6325,11 +6403,16 @@ class WorkoutSession {
           ARMCIRCLES_MIN_REP_SECONDS
         );
         if (counted) {
-          // Sin objetivo de reps por sentido: se deja hacer las que se
-          // quiera en el sentido actual -- el cambio de sentido llega
-          // solo al pararte de verdad (ver ARMCIRCLES_STILL_MS más
-          // arriba), no por llegar a un número concreto.
+          // El cambio de sentido sigue llegando solo al pararte de
+          // verdad (ver ARMCIRCLES_STILL_MS más arriba), no por llegar a
+          // un número concreto -- pero el objetivo (30 de cada sentido,
+          // ver countRep) sí necesita saber cuántas van hechas en CADA
+          // sentido a lo largo de toda la sesión, no solo en la serie
+          // actual (armCirclePhaseReps se resetea en cada cambio de
+          // sentido; esto no).
           this.armCirclePhaseReps += 1;
+          if (this.armCirclePhase === "forward") this.armCircleForwardTotal += 1;
+          else this.armCircleBackwardTotal += 1;
         }
       }
       // Se descuenta una vuelta completa del acumulado, no se resetea a
@@ -7794,6 +7877,8 @@ class WorkoutSession {
         if (this.countRep(seconds, now, label, LEGROTATION_MIN_REP_SECONDS)) {
           this.legRotationLastActivityAt = now;
           this.legRotationLastCountedSide = side;
+          if (side === "left") this.legRotationLeftTotal += 1;
+          else this.legRotationRightTotal += 1;
         }
       } else if (walked && rotationDeg >= LEGROTATION_MIN_ROTATION_DEG) {
         // Habría contado por el giro, pero el cuerpo se ha desplazado de
@@ -10340,9 +10425,19 @@ class WorkoutSession {
         this.restAlerted = false;
         this.updateSetDisplay();
         this.logScissor(`[CALIBRADO] barra_y=${this.barY.toFixed(3)} hombros=${this.shoulderWidth.toFixed(3)}`);
-        this.announceStatus(
-          "¡Listo! Empieza a hacer dominadas de arquero: al subir, lleva un brazo a 90° y estira el otro, alternando de lado en cada repetición."
-        );
+        // Si el descanso obligatorio (MIN_REST_MS) todavía no ha pasado
+        // desde que se cerró la serie anterior, no se anuncia "empieza"
+        // aunque ya estés calibrada/o y colgada/o -- decirlo aquí
+        // contradice al propio descanso obligatorio (countRep ya bloquea
+        // en silencio cualquier intento de contar antes de tiempo, y
+        // announceRestBlocked() lo explica si insistes). El aviso real de
+        // que ya puedes empezar lo da tickRestTimer en cuanto el descanso
+        // termina de verdad (ver pendingHangReminder).
+        if (this.setClosedAt === null || now - this.setClosedAt >= MIN_REST_MS) {
+          this.announceStatus(
+            "¡Listo! Empieza a hacer dominadas de arquero: al subir, lleva un brazo a 90° y estira el otro, alternando de lado en cada repetición."
+          );
+        }
       }
       return;
     }
@@ -11028,7 +11123,17 @@ class WorkoutSession {
         this.restAlerted = false;
         this.updateSetDisplay();
         this.logScissor(`[CALIBRADO] barra_y=${this.barY.toFixed(3)} hombros=${this.shoulderWidth.toFixed(3)}`);
-        this.announceStatus("¡Listo! Empieza a hacer dominadas.");
+        // Si el descanso obligatorio (MIN_REST_MS) todavía no ha pasado
+        // desde que se cerró la serie anterior, no se anuncia "empieza"
+        // aunque ya estés calibrada/o y colgada/o -- decirlo aquí
+        // contradice al propio descanso obligatorio (countRep ya bloquea
+        // en silencio cualquier intento de contar antes de tiempo, y
+        // announceRestBlocked() lo explica si insistes). El aviso real de
+        // que ya puedes empezar lo da tickRestTimer en cuanto el descanso
+        // termina de verdad (ver pendingHangReminder).
+        if (this.setClosedAt === null || now - this.setClosedAt >= MIN_REST_MS) {
+          this.announceStatus("¡Listo! Empieza a hacer dominadas.");
+        }
       }
       return;
     }

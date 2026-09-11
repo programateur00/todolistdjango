@@ -151,6 +151,7 @@ def exercise_json(e):
         "slug": e.slug, "name": e.name, "mode": e.mode,
         "mode_display": e.get_mode_display(),
         "counter_key": e.counter_key, "body_area": e.body_area,
+        "voice_step": e.voice_step,
         "config": e.config, "order": e.order,
     }
 
