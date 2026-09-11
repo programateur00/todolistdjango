@@ -10452,13 +10452,24 @@ class WorkoutSession {
         `[frame descartado] brazos_arriba=${armsUpNow} escala_ok=${scaleOk} cambio_escala=${scaleChange.toFixed(2)}(máx ${SCALE_TOLERANCE}) ` +
         `estado=${this.state} reps_serie=${this.currentSetReps}`
       );
-      this.localBottomY = null;
-      this.localTopY = null;
-      this.liftoffTime = null;
-      this.archerPeakLeftAngle = null;
-      this.archerPeakRightAngle = null;
-      this.archerLiveLeftAngle = null;
-      this.archerLiveRightAngle = null;
+      // Solo se borran las referencias de la repeticion en curso si de
+      // verdad no se ven los brazos arriba (soltaste la barra, saliste
+      // del encuadre) -- si siguen arriba y solo ha fallado el cambio de
+      // escala (motion blur de un tiron rapido), NO se tocan: reportado
+      // en vivo -- si el salto de escala coincidia justo con el instante
+      // de llegar arriba del todo, el siguiente frame valido tomaba esa
+      // posicion ALTA como nuevo "punto de abajo" y esa repeticion se
+      // perdia sin contarse. Aqui se descarta SOLO este frame, no el
+      // progreso de la repeticion.
+      if (!armsUpNow) {
+        this.localBottomY = null;
+        this.localTopY = null;
+        this.liftoffTime = null;
+        this.archerPeakLeftAngle = null;
+        this.archerPeakRightAngle = null;
+        this.archerLiveLeftAngle = null;
+        this.archerLiveRightAngle = null;
+      }
 
       if (armsClearlyReleased) {
         if (this.armsDownSince === null) this.armsDownSince = now;
@@ -11151,9 +11162,20 @@ class WorkoutSession {
         `[frame descartado] brazos_arriba=${armsUpNow} escala_ok=${scaleOk} cambio_escala=${scaleChange.toFixed(2)}(máx ${SCALE_TOLERANCE}) ` +
         `estado=${this.state} reps_serie=${this.currentSetReps}`
       );
-      this.localBottomY = null;
-      this.localTopY = null;
-      this.liftoffTime = null;
+      // Solo se borran las referencias de la repeticion en curso si de
+      // verdad no se ven los brazos arriba (soltaste la barra, saliste
+      // del encuadre) -- si siguen arriba y solo ha fallado el cambio de
+      // escala (motion blur de un tiron rapido), NO se tocan: reportado
+      // en vivo -- si el salto de escala coincidia justo con el instante
+      // de llegar arriba del todo, el siguiente frame valido tomaba esa
+      // posicion ALTA como nuevo "punto de abajo" y esa repeticion se
+      // perdia sin contarse. Aqui se descarta SOLO este frame, no el
+      // progreso de la repeticion.
+      if (!armsUpNow) {
+        this.localBottomY = null;
+        this.localTopY = null;
+        this.liftoffTime = null;
+      }
 
       if (armsClearlyReleased) {
         // Te has soltado de la barra de verdad (bajaste los brazos, no es
