@@ -77,7 +77,7 @@
     <div class="plan-head__now">
         <span class="plan-head__label">Hoy te toca</span>
         <span class="plan-head__target">
-            {% if headline.target.reps %}{{ headline.target.sets }} × {{ headline.target.reps }}{% else %}{{ headline.target.sets }} × {{ headline.target.seconds }}s{% endif %}
+            {% if headline.target.reps %}{{ headline.target.sets }} × {{ headline.target.reps }}{% elif headline.target.seconds %}{{ headline.target.sets }} × {{ headline.target.seconds }}s{% else %}{{ headline.target.sets }} series al fallo{% endif %}
             {% if headline.target.weight_kg %}<em>con {{ headline.target.weight_kg|floatformat:"-1" }} kg</em>{% endif %}
         </span>
     </div>

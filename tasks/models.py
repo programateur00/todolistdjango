@@ -2331,6 +2331,15 @@ class PlanItem(models.Model):
       - doble: sube repeticiones dentro de un rango y, al llegar arriba,
         AÑADE PESO y vuelve abajo del rango.
         Para fuerza: dominadas, fondos, sentadillas.
+      - al fallo: cada serie se hace hasta el fallo (hasta que no
+        puedas más), así que no hay un número de repeticiones que pedir
+        de antemano — sería inventado, y encima lo normal es que la
+        serie 2 rinda menos que la 1 por la fatiga acumulada, así que
+        comparar reps contra reps penalizaría algo que es fisiológico,
+        no un fallo de constancia. Lo único que se prescribe y progresa
+        es el número de SERIES; las repeticiones se siguen guardando
+        (para verlas en el historial, motivación/PR) pero no cuentan
+        para el % de cumplimiento.
 
     La progresión doble es la que evita el disparate. Una progresión
     lineal siempre diverge: subiendo 1 repetición cada 2 sesiones, a los
@@ -2342,12 +2351,14 @@ class PlanItem(models.Model):
     PROG_REPS = "reps"
     PROG_DOUBLE = "double"
     PROG_DISTANCE = "distance"
+    PROG_FAILURE = "failure"
 
     PROGRESSION_CHOICES = [
         (PROG_COMPLETION, "Cumplimiento (objetivo fijo)"),
         (PROG_REPS, "Repeticiones (sube hasta un techo)"),
         (PROG_DOUBLE, "Doble (repeticiones y luego peso)"),
         (PROG_DISTANCE, "Distancia (running: sube km y baja ritmo)"),
+        (PROG_FAILURE, "Al fallo (series sin objetivo de repeticiones)"),
     ]
 
     plan = models.ForeignKey(Plan, on_delete=models.CASCADE, related_name="items")
@@ -2724,6 +2735,25 @@ class PlanItem(models.Model):
                 "distance_km": None, "pace_seconds_per_km": None,
             }
 
+        if self.progression == self.PROG_FAILURE:
+            # No hay reps que pedir (esa es la idea de ir al fallo) — lo
+            # único que sube es el número de series, igual de despacio
+            # que en PROG_REPS (un paso = un escalón de start_sets a
+            # goal_sets), reutilizando _sets_for_progress con una frac
+            # calculada sobre el propio escalón en vez de sobre reps.
+            if self.goal_sets and self.goal_sets > self.start_sets:
+                total_steps = self.goal_sets - self.start_sets
+                frac = min(1.0, step / total_steps) if total_steps else 1.0
+            else:
+                frac = 0.0
+            sets = self._sets_for_progress(frac)
+            done = bool(self.goal_sets and sets >= self.goal_sets)
+            return {
+                "sets": sets, "reps": None, "seconds": None,
+                "weight_kg": self.start_weight_kg, "done": done,
+                "distance_km": None, "pace_seconds_per_km": None,
+            }
+
         # PROG_REPS: sube hasta el techo y ahí se queda.
         if self.is_timed:
             seconds = self.start_seconds + step * self.reps_increment
@@ -2954,6 +2984,14 @@ class WorkoutSession(models.Model):
         elif self.target_sets and self.target_seconds:
             objetivo = self.target_sets * self.target_seconds
             hecho = self.session_duration_seconds
+        elif self.target_sets and not self.target_reps and not self.target_seconds:
+            # Al fallo: no hay reps/segundos que pedir, así que el % se
+            # mide en series completadas, no en lo que salió en cada
+            # una — ver PlanItem.PROG_FAILURE. total_reps se sigue
+            # guardando (historial/PR) pero no entra aquí a propósito:
+            # una última serie floja por fatiga no debe bajar el %.
+            objetivo = self.target_sets
+            hecho = self.total_sets
         elif self.target_distance_km and self.target_pace_seconds_per_km:
             # Aquí no vale un simple "hecho/pedido": hay dos condiciones
             # a la vez (distancia Y ritmo), igual que en la importación
@@ -2993,6 +3031,8 @@ class WorkoutSession(models.Model):
             return f"{self.target_sets} × {self.target_reps}"
         if self.target_sets and self.target_seconds:
             return f"{self.target_sets} × {self.target_seconds}s"
+        if self.target_sets:
+            return f"{self.target_sets} series al fallo"
         return ""
 
     @property

@@ -262,8 +262,8 @@
             <input type="number" name="goal_weight_kg" id="goal-weight" min="0" step="0.5" value="{{ item.goal_weight_kg|default:'' }}">
         </label>
 
-        <h2 class="section-title" data-when="goal">Ritmo</h2>
-        <label class="field" data-when="goal">
+        <h2 class="section-title" data-when="goal-reps">Ritmo</h2>
+        <label class="field" data-when="goal-reps">
             <span class="field__label">¿En cuántas semanas quieres llegar al destino?</span>
             <div class="field-row">
                 <input type="number" name="_weeks_reps" id="weeks-reps" min="1" placeholder="Ej: 12" style="flex:1">
@@ -327,7 +327,10 @@
     var HINTS = {
         completion: 'Objetivo fijo, no sube nunca. Para hábitos o antitareas.',
         reps: 'Sube hasta un techo y ahí se queda. Para abdominales, plancha, resistencia.',
-        double: 'Sube repeticiones y al llegar arriba añade peso y vuelve abajo. Para fuerza.'
+        double: 'Sube repeticiones y al llegar arriba añade peso y vuelve abajo. Para fuerza.',
+        failure: 'Cada serie se hace al fallo (hasta que no puedas más) — sin objetivo de repeticiones, ' +
+            'porque no se puede saber de antemano y la última serie suele rendir menos por la fatiga. ' +
+            'Solo se prescribe y progresa el número de series; las reps se guardan igualmente en el historial.'
     };
 
     function esRunning(){
@@ -371,12 +374,14 @@
         if (running) return;
 
         document.getElementById('prog-hint').textContent = HINTS[p] || '';
+        var esFallo = p === 'failure';
         var visible = {
-            reps: !timed,                    // repeticiones solo si no va a tiempo
-            seconds: timed,
+            reps: !timed && !esFallo,        // repeticiones solo si no va a tiempo y no es al fallo
+            seconds: timed && !esFallo,      // al fallo tampoco pide segundos fijos (aguantar al fallo)
             weight: p === 'double',          // el peso solo en progresion doble
             goal: p !== 'completion',        // cumplimiento no tiene destino
-            increment: p !== 'completion'
+            increment: p !== 'completion' && !esFallo,   // al fallo no sube reps, sube series directamente
+            'goal-reps': p !== 'completion' && !esFallo  // la calculadora de semanas es de reps/segundos, no aplica
         };
         document.querySelectorAll('[data-when]').forEach(function(el){
             var k = el.dataset.when;

@@ -13,7 +13,7 @@ apoyo, así que va como bloque aparte.
     <p class="plan-item__now">
         Hoy:
         <strong>
-            {% if pack.target.reps %}{{ pack.target.sets }} × {{ pack.target.reps }}{% else %}{{ pack.target.sets }} × {{ pack.target.seconds }}s{% endif %}
+            {% if pack.target.reps %}{{ pack.target.sets }} × {{ pack.target.reps }}{% elif pack.target.seconds %}{{ pack.target.sets }} × {{ pack.target.seconds }}s{% else %}{{ pack.target.sets }} series al fallo{% endif %}
             {% if pack.target.weight_kg %}con {{ pack.target.weight_kg|floatformat:"-1" }} kg{% endif %}
         </strong>
         {% if pack.remaining %}<span class="plan-item__left">faltan {{ pack.remaining }} sesiones</span>{% endif %}
@@ -62,7 +62,7 @@ apoyo, así que va como bloque aparte.
                         {% if forloop.counter0 == pack.step %}<span class="plan-here">aquí</span>{% endif %}
                     </td>
                     <td>
-                        {% if row.reps %}{{ row.sets }} × {{ row.reps }}{% else %}{{ row.sets }} × {{ row.seconds }}s{% endif %}
+                        {% if row.reps %}{{ row.sets }} × {{ row.reps }}{% elif row.seconds %}{{ row.sets }} × {{ row.seconds }}s{% else %}{{ row.sets }} series al fallo{% endif %}
                         {% if row.weight_kg %}con {{ row.weight_kg|floatformat:"-1" }} kg{% endif %}
                         {% if row.done %}<span class="plan-item__done">destino</span>{% endif %}
                     </td>
