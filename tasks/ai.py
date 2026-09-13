@@ -444,13 +444,16 @@ def _select_sport_exercises(fitness_level, focus_area, no_bar_equipment, selecte
 # Dominadas/fondos a peso corporal — más duros por repetición que el
 # resto del catálogo pose (sentadillas, flexiones...), empiezan más bajo.
 _LOW_REP_STRENGTH_SLUGS = {"pullup", "wide-pullup", "chinup", "dips"}
-# Variantes con lastre — llevan progresión 'double' (reps dentro de un
-# rango y, al llegar arriba, más peso), el resto de pose usa 'reps'.
-# Tracción/empuje a pulso (dominadas, fondos) y pierna (sentadillas) no
-# aguantan ni suben el mismo peso ni las mismas repeticiones — de ahí
-# `_WEIGHTED_CATEGORY_BY_SLUG`, que dice con qué tabla de
-# `_EXERCISE_CATEGORY_DEFAULTS` calcular cada una (ver más abajo).
-_WEIGHTED_SLUGS = {"weighted-pullup", "weighted-dips", "weighted-squat"}
+# Variantes con lastre — llevan progresión 'reps' con peso objetivo
+# (reps dentro de un rango y, al llegar arriba, más peso — antes esto
+# era una progresión 'double' aparte, ver PlanItem.PROGRESSION_CHOICES),
+# el resto de pose usa 'reps' sin peso. Tracción/empuje a pulso
+# (dominadas, fondos) y pierna (sentadillas) no aguantan ni suben el
+# mismo peso ni las mismas repeticiones — de ahí `_WEIGHTED_CATEGORY_BY_SLUG`,
+# que dice con qué tabla de `_EXERCISE_CATEGORY_DEFAULTS` calcular cada
+# una (ver más abajo). El propio set de slugs vive en Exercise.WEIGHTED_SLUGS
+# (una sola fuente de verdad, la comparten los formularios de objetivo).
+_WEIGHTED_SLUGS = Exercise.WEIGHTED_SLUGS
 _WEIGHTED_CATEGORY_BY_SLUG = {
     "weighted-pullup": "weighted_pull",
     "weighted-dips": "weighted_pull",
@@ -479,12 +482,12 @@ _EXERCISE_CATEGORY_DEFAULTS = {
         "intermediate": {"sets": 3, "start": 30, "rate": 2, "sessions_per_step": 2, "max_goal": 140},
         "advanced":     {"sets": 4, "start": 40, "rate": 3, "sessions_per_step": 2, "max_goal": 210},
     },
-    "weighted_pull": {  # dominadas/fondos con lastre — progresión 'double'
+    "weighted_pull": {  # dominadas/fondos con lastre — 'reps' con peso objetivo
         "beginner":     {"sets": 2, "low": 3, "top": 6,  "weight_goal": 10},
         "intermediate": {"sets": 3, "low": 4, "top": 8,  "weight_goal": 15},
         "advanced":     {"sets": 4, "low": 5, "top": 10, "weight_goal": 20},
     },
-    "weighted_legs": {  # sentadillas con lastre — progresión 'double'. La
+    "weighted_legs": {  # sentadillas con lastre — 'reps' con peso objetivo. La
         # pierna aguanta muchas más repeticiones por serie que un tirón/
         # empuje a pulso (dominadas/fondos), de ahí el rango de reps más
         # alto con el mismo tope de peso (`_DEFAULT_MAX_LOAD_KG`/lo que
@@ -573,7 +576,11 @@ def default_item_fields(exercise, fitness_level, weeks, sessions_per_week):
         d = _EXERCISE_CATEGORY_DEFAULTS[_WEIGHTED_CATEGORY_BY_SLUG[exercise.slug]][level]
         fields.update(
             sessions_per_step=2,
-            progression=PlanItem.PROG_DOUBLE,
+            # 'reps' con peso objetivo puesto (goal_weight_kg) — eso ya
+            # basta para que PlanItem.target_for_step suba peso por
+            # ciclos en vez de repeticiones sin techo (antes hacía falta
+            # una progresión 'double' aparte para esto).
+            progression=PlanItem.PROG_REPS,
             start_sets=d["sets"], goal_sets=d["sets"] + 2,
             start_reps=d["low"], rep_range_low=d["low"], goal_reps=d["top"],
             start_weight_kg=0, goal_weight_kg=d["weight_goal"],
@@ -630,9 +637,8 @@ def apply_pacing(item_fields, *, exercise, sessions_per_week, max_load_kg=None):
     Traduce `weeks_to_goal` a `reps_increment` / `weight_increment_kg` /
     `distance_increment_km` / `pace_decrement_seconds` (lo que de verdad
     entiende PlanItem), con la misma fórmula que la calculadora del
-    formulario. También sanea combinaciones inválidas (progresión
-    'double' en un ejercicio cronometrado, progresión que no sea
-    'distance' en running).
+    formulario. También sanea combinaciones inválidas (progresión que no
+    sea 'distance' en running).
 
     `max_load_kg` es el tope de peso AÑADIDO (chaleco lastrado, cinturón
     con discos...) que el usuario tiene disponible de verdad — sin esto
@@ -660,8 +666,6 @@ def apply_pacing(item_fields, *, exercise, sessions_per_week, max_load_kg=None):
         return item_fields
 
     prog = item_fields.get("progression") or PlanItem.PROG_REPS
-    if is_timed and prog == PlanItem.PROG_DOUBLE:
-        prog = PlanItem.PROG_REPS  # 'double' no tiene sentido en algo cronometrado
     item_fields["progression"] = prog
 
     if prog == PlanItem.PROG_COMPLETION:
@@ -670,14 +674,19 @@ def apply_pacing(item_fields, *, exercise, sessions_per_week, max_load_kg=None):
     _sanitize_sets(item_fields)
     steps = _steps_for_weeks(weeks_to_goal, sessions_per_week, sessions_per_step)
 
-    if prog == PlanItem.PROG_DOUBLE:
-        # El suelo del ciclo de doble progresión tiene que ser de dónde
-        # parte el usuario de verdad, no un valor inventado — si no, el
-        # primer escalón del plan le manda "bajar" a un número que no
-        # tiene nada que ver con lo que puede hacer ya el primer día (el
-        # bug que reportó Alex: pasar de 3x12 a 4x6 sin sentido). Si no
-        # llega `rep_range_low` explícito, se deriva de `start_reps`, que
-        # sí manda siempre.
+    # 'reps' con peso objetivo puesto — antes esto hacía falta pedirlo
+    # con una progresión 'double' aparte; ahora basta con que el
+    # ejercicio traiga `goal_weight_kg` (ver default_item_fields, rama
+    # de _WEIGHTED_SLUGS). No aplica a algo cronometrado (aguantar con
+    # peso no tiene esta mecánica de rango de repeticiones).
+    if prog == PlanItem.PROG_REPS and not is_timed and item_fields.get("goal_weight_kg"):
+        # El suelo del ciclo tiene que ser de dónde parte el usuario de
+        # verdad, no un valor inventado — si no, el primer escalón del
+        # plan le manda "bajar" a un número que no tiene nada que ver
+        # con lo que puede hacer ya el primer día (el bug que reportó
+        # Alex: pasar de 3x12 a 4x6 sin sentido). Si no llega
+        # `rep_range_low` explícito, se deriva de `start_reps`, que sí
+        # manda siempre.
         low = int(item_fields.get("rep_range_low") or item_fields.get("start_reps") or 6)
         top = int(item_fields.get("goal_reps") or (low + 6))
         if top <= low:

@@ -75,7 +75,7 @@
         <select name="exercise" id="exercise-select">
             <option value="">— elegir —</option>
             {% for e in exercises %}
-            <option value="{{ e.slug }}" data-mode="{{ e.mode }}"
+            <option value="{{ e.slug }}" data-mode="{{ e.mode }}" data-weighted="{% if e.slug in weighted_slugs %}1{% else %}0{% endif %}"
                 {% if item.exercise.slug == e.slug %}selected{% endif %}>{{ e.name }}</option>
             {% endfor %}
         </select>
@@ -233,7 +233,7 @@
                 <input type="number" name="start_seconds" id="start-seconds" min="1" value="{{ item.start_seconds|default:40 }}">
             </label>
         </div>
-        <label class="field" data-when="weight">
+        <label class="field" data-when="start-weight">
             <span class="field__label">Peso inicial (kg)</span>
             <input type="number" name="start_weight_kg" id="start-weight" min="0" step="0.5" value="{{ item.start_weight_kg|default:0 }}">
         </label>
@@ -257,9 +257,10 @@
                 <input type="number" name="goal_seconds" id="goal-seconds" min="1" value="{{ item.goal_seconds|default:'' }}">
             </label>
         </div>
-        <label class="field" data-when="weight">
+        <label class="field" data-when="weight-grows">
             <span class="field__label">Peso objetivo (kg)</span>
             <input type="number" name="goal_weight_kg" id="goal-weight" min="0" step="0.5" value="{{ item.goal_weight_kg|default:'' }}">
+            <span class="field__hint" id="goal-weight-hint"></span>
         </label>
 
         <h2 class="section-title" data-when="goal-reps">Ritmo</h2>
@@ -285,8 +286,8 @@
             </label>
         </div>
 
-        <div class="field-row" data-when="weight">
-            <label class="field">
+        <div class="field-row" data-when="weight-grows">
+            <label class="field" data-when="rep-range">
                 <span class="field__label">Vuelve a</span>
                 <input type="number" name="rep_range_low" id="rep-range-low" min="1" value="{{ item.rep_range_low|default:6 }}">
                 <span class="field__hint">Repeticiones a las que se baja al añadir peso.</span>
@@ -294,6 +295,7 @@
             <label class="field">
                 <span class="field__label">Añade (kg)</span>
                 <input type="number" name="weight_increment_kg" id="weight-increment" min="0.5" step="0.5" value="{{ item.weight_increment_kg|default:2.5 }}">
+                <span class="field__hint">Cuánto se añade al llegar arriba (repeticiones en reps, series en al fallo).</span>
             </label>
         </div>
 
@@ -326,11 +328,13 @@
     // a la vez es lo que hace ilegible el formulario del admin.
     var HINTS = {
         completion: 'Objetivo fijo, no sube nunca. Para hábitos o antitareas.',
-        reps: 'Sube hasta un techo y ahí se queda. Para abdominales, plancha, resistencia.',
-        double: 'Sube repeticiones y al llegar arriba añade peso y vuelve abajo. Para fuerza.',
+        reps: 'Sube hasta un techo y ahí se queda. Para abdominales, plancha, resistencia — ' +
+            'y también para fuerza con peso (dominadas/fondos/sentadillas con lastre): si el ejercicio ' +
+            'lleva peso, puedes dejarlo fijo o subirlo poco a poco — se explica abajo.',
         failure: 'Cada serie se hace al fallo (hasta que no puedas más) — sin objetivo de repeticiones, ' +
             'porque no se puede saber de antemano y la última serie suele rendir menos por la fatiga. ' +
-            'Solo se prescribe y progresa el número de series; las reps se guardan igualmente en el historial.'
+            'Solo se prescribe y progresa el número de series; las reps se guardan igualmente en el historial. ' +
+            'Si el ejercicio lleva peso añadido, puedes dejarlo fijo o subirlo poco a poco — se explica abajo.'
     };
 
     function esRunning(){
@@ -347,6 +351,15 @@
         var sel = document.getElementById('exercise-select');
         var opt = sel.options[sel.selectedIndex];
         return opt && opt.dataset.mode === 'timed';
+    }
+    // El ejercicio elegido lleva peso añadido (lastre, chaleco...) — ver
+    // Exercise.WEIGHTED_SLUGS en models.py. Es lo que decide si se
+    // enseñan los campos de peso, en vez de enseñarlos para todo el
+    // catálogo (que es sobre todo peso corporal).
+    function esPeso(){
+        var sel = document.getElementById('exercise-select');
+        var opt = sel.options[sel.selectedIndex];
+        return !!(opt && opt.dataset.weighted === '1');
     }
 
     function actualizar(){
@@ -375,10 +388,13 @@
 
         document.getElementById('prog-hint').textContent = HINTS[p] || '';
         var esFallo = p === 'failure';
+        var pesoEx = esPeso();   // el ejercicio elegido lleva peso añadido
         var visible = {
             reps: !timed && !esFallo,        // repeticiones solo si no va a tiempo y no es al fallo
             seconds: timed && !esFallo,      // al fallo tampoco pide segundos fijos (aguantar al fallo)
-            weight: p === 'double',          // el peso solo en progresion doble
+            'start-weight': pesoEx,          // peso inicial: si el ejercicio lo usa, en cualquier progresión
+            'weight-grows': pesoEx && p !== 'completion' && !timed,  // peso objetivo + incremento: solo si además progresa
+            'rep-range': pesoEx && p === 'reps',   // "vuelve a" solo tiene sentido subiendo reps con peso
             goal: p !== 'completion',        // cumplimiento no tiene destino
             increment: p !== 'completion' && !esFallo,   // al fallo no sube reps, sube series directamente
             'goal-reps': p !== 'completion' && !esFallo  // la calculadora de semanas es de reps/segundos, no aplica
@@ -387,6 +403,16 @@
             var k = el.dataset.when;
             el.style.display = visible[k] === false ? 'none' : '';
         });
+        // Mismo criterio en reps y en al fallo: sin peso objetivo, el
+        // peso no sube solo — se queda fijo en el inicial para siempre
+        // (mismo peso siempre). Se explica aquí porque es la duda más
+        // habitual al mezclar peso con progresión.
+        var goalWeightHint = document.getElementById('goal-weight-hint');
+        if (goalWeightHint) {
+            goalWeightHint.textContent = esFallo
+                ? 'Opcional — sin esto el peso se queda fijo en el inicial para siempre y solo suben las series (mismo peso siempre).'
+                : 'Opcional — sin esto el peso se queda fijo en el inicial para siempre y solo suben las repeticiones (mismo peso siempre).';
+        }
     }
 
     document.querySelectorAll('[data-prog]').forEach(function(r){
@@ -432,17 +458,18 @@
     if (!weeks) { alert('Pon primero en cuántas semanas quieres llegar.'); return; }
     var sesionesPorEscalon = num('sessions-per-step-reps') || 1;
 
-    if (prog() === 'double') {
+    // Reps con peso objetivo puesto (lo que antes era la progresión
+    // "doble" aparte): el eje que se calcula aquí es el peso, no las
+    // repeticiones (esas suben y bajan dentro del rango sin más). Sin
+    // peso objetivo puesto (ejercicio sin peso, o con peso pero fijo),
+    // cae al cálculo normal de repeticiones de más abajo.
+    if (esPeso() && prog() === 'reps' && (num('goal-weight') - num('start-weight')) > 0) {
         var low = num('rep-range-low') || 6;
         var top = num('goal-reps') || (low + 6);
         var span = Math.max(1, top - low + 1);
         var ciclos = Math.max(1, Math.round(escalones(weeks, sesionesPorEscalon) / span));
         var dPeso = num('goal-weight') - num('start-weight');
-        if (dPeso > 0) {
-            document.getElementById('weight-increment').value = (dPeso / ciclos).toFixed(1);
-        } else {
-            alert('Pon primero el peso de destino, más arriba en "Destino" — sin eso no hay nada que calcular.');
-        }
+        document.getElementById('weight-increment').value = (dPeso / ciclos).toFixed(1);
         return;
     }
 

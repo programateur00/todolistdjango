@@ -19,6 +19,9 @@ apoyo, así que va como bloque aparte.
         {% if pack.remaining %}<span class="plan-item__left">faltan {{ pack.remaining }} sesiones</span>{% endif %}
         {% if pack.target.done %}<span class="plan-item__done">✓ destino alcanzado</span>{% endif %}
     </p>
+    {% if pack.own_progress is not None %}
+    <p class="field__hint">Este objetivo aporta {{ pack.own_progress }}% al progreso del plan.</p>
+    {% endif %}
 
     {% if pack.sessions_to_next_step and not pack.target.done %}
     <p class="plan-item__step-hint">
@@ -73,6 +76,18 @@ apoyo, así que va como bloque aparte.
     </details>
 
     <div class="plan-item__actions">
+        {% if is_support %}
+        <form action="{% url 'tasks:plan_item_move' plan.pk pack.item.pk %}" method="post" class="inline-delete">
+            {% csrf_token %}
+            <input type="hidden" name="direction" value="up">
+            <button type="submit" class="ghost-btn" title="Subir un puesto" {% if is_first %}disabled{% endif %}>▲</button>
+        </form>
+        <form action="{% url 'tasks:plan_item_move' plan.pk pack.item.pk %}" method="post" class="inline-delete">
+            {% csrf_token %}
+            <input type="hidden" name="direction" value="down">
+            <button type="submit" class="ghost-btn" title="Bajar un puesto" {% if is_last %}disabled{% endif %}>▼</button>
+        </form>
+        {% endif %}
         <a class="ghost-btn" href="{% url 'tasks:plan_item_edit' plan.pk pack.item.pk %}">Editar</a>
         <form action="{% url 'tasks:plan_item_delete' plan.pk pack.item.pk %}" method="post" class="inline-delete">
             {% csrf_token %}

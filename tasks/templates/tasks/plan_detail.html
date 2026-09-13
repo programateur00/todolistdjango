@@ -107,7 +107,7 @@
 <h2 class="section-title">El camino</h2>
 <p class="field__hint">Ejercicios que te llevan hasta ahí. Progresan, pero no deciden el plan.</p>
 {% for pack in supports %}
-    {% include "tasks/_plan_item.html" with pack=pack plan=plan %}
+    {% include "tasks/_plan_item.html" with pack=pack plan=plan is_support=True is_first=forloop.first is_last=forloop.last %}
 {% endfor %}
 {% endif %}
 
@@ -120,6 +120,7 @@
 <div class="task-form__actions">
     {% if not is_language and not is_study_general %}
     <a class="primary-btn" href="{% url 'tasks:plan_item_create' plan.pk %}">+ Añadir objetivo</a>
+    <a class="ghost-btn" href="{% url 'tasks:plan_item_bulk_create' plan.pk %}">+ Añadir varios</a>
     {% endif %}
     <a class="ghost-btn" href="{% url 'tasks:plan_edit' plan.pk %}">Editar plan</a>
     {% if not plan.closed_at %}

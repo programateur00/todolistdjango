@@ -1331,6 +1331,16 @@ class Exercise(models.Model):
         (MODE_DISTANCE, "Distancia (cardio)"),
     ]
 
+    # Variantes del catálogo que llevan peso añadido (lastre, chaleco...)
+    # — son muy pocas frente al resto del catálogo (peso corporal), así
+    # que en vez de un campo en la base de datos (con su migración) para
+    # algo que casi nunca se usa, es una lista fija aquí. Sirve para que
+    # los formularios de objetivo (plan_item_form, plan_item_bulk_form)
+    # solo enseñen los campos de peso cuando el ejercicio elegido de
+    # verdad lo usa, en vez de para todo el catálogo. Si se añade un
+    # ejercicio con peso nuevo al catálogo, su slug va aquí.
+    WEIGHTED_SLUGS = {"weighted-pullup", "weighted-dips", "weighted-squat"}
+
     name = models.CharField(max_length=64)
     slug = models.SlugField(max_length=64, unique=True)
     mode = models.CharField(max_length=16, choices=MODE_CHOICES, default=MODE_MANUAL)
@@ -2237,63 +2247,39 @@ class Plan(models.Model):
 
     def progress_pct(self):
         """
-        Cuánto llevas del plan, medido sobre la medida principal.
+        Cuánto llevas del plan — la MEDIA del progreso de TODOS los
+        objetivos, no solo de la medida principal.
 
-        Se calcula sobre escalones conseguidos frente a escalones totales
-        hasta el destino, no sobre semanas transcurridas: el plan avanza
-        con lo que haces, no con lo que pasa el calendario.
+        ANTES: esto solo miraba `headline`, así que si tenías un plan
+        con 8 ejercicios (típico tras "Añadir varios") y uno solo estaba
+        marcado como medida principal, el % del plan entero dependía de
+        ESE, y los otros 7 podían llevar cada uno su propio progreso por
+        dentro (su propia barra en el "camino") sin que contara para
+        nada a nivel de plan — reportado por Alex como "una tontería":
+        si añades varios ejercicios a la vez, los varios deberían
+        decidir el plan, no solo el que se marcó como principal.
+        `is_headline` sigue existiendo (decide cuál sale destacado
+        arriba del todo y con qué orden — ver Meta.ordering — pero ya
+        no decide el % en solitario).
 
-        Salvo en cumplimiento (Estudio/General): ahí no hay techo
-        numérico al que subir — es un hábito, no una meta con destino —
-        así que el progreso se mide en cuántas veces de las que tocaba
-        la cumpliste desde que empezó el plan.
+        Cada objetivo aporta su propio `own_progress_pct()` (ver ahí el
+        detalle de cumplimiento vs. escalones) y aquí se promedian todos
+        los que se pueden medir — un objetivo sin destino definido
+        (`own_progress_pct()` devuelve None) se queda fuera de la media
+        en vez de contar como 0, igual que antes un plan sin destino no
+        enseñaba ninguna barra en vez de una clavada en 0%.
 
         Estudio · Idiomas no tiene PlanItem (su medida es CourseModule,
         no un ejercicio con escalones) — se delega en `course_progress`,
         que ya calcula vídeos vistos/totales con el mismo criterio
-        (Occurrence cumplida, no semanas pasadas). Antes de esto
-        `progress_pct` devolvía None para estos planes al no tener
-        `headline`, así que `is_completed`/`auto_close_expired` nunca
-        los daba por completados aunque se hubiera visto el curso
-        entero — quedaba corregido aparte, no es un cambio de conducta
-        nuevo para el usuario, es arreglar algo que estaba roto de base.
-
-        BUG REAL (reportado por Alex, 2026-09-07): esto medía "escalones
-        conseguidos / escalones totales" (`current_step()`, un entero).
-        Con ejercicios que suben cada varias sesiones (`sessions_per_step`
-        > 1 — ej. dominadas, sessions_per_step=4), cualquier sesión que no
-        complete el escalón entero no mueve NADA la cuenta: 3 sesiones al
-        100% con sessions_per_step=4 dan current_step()=0 igual que 0
-        sesiones, así que la barra se queda clavada en 0% durante varias
-        sesiones seguidas y solo salta a trompicones cuando se completa
-        un escalón entero — desde fuera es indistinguible de "no hace
-        ningún seguimiento", que es justo lo que reportó. El objetivo de
-        HOY (`current_target`/`current_step`) tiene que seguir siendo un
-        escalón entero (no tiene sentido pedir "4,75 dominadas"), pero la
-        BARRA es solo una medida de cuánto llevas, así que aquí se cuenta
-        en SESIONES cumplidas frente a sesiones totales hasta la meta, no
-        en escalones — así cada sesión de sobra mueve la barra, aunque
-        el número de reps de hoy todavía no haya subido.
+        (Occurrence cumplida, no semanas pasadas).
         """
         if self.plan_type == self.PLAN_TYPE_STUDY and self.study_subtype == self.STUDY_SUBTYPE_LANGUAGE:
             return self.course_progress()["pct"]
-        head = self.headline
-        if not head:
+        values = [p for p in (item.own_progress_pct() for item in self.items.all()) if p is not None]
+        if not values:
             return None
-        if head.progression == PlanItem.PROG_COMPLETION:
-            total = head._occurrences().count()
-            if not total:
-                return 0
-            successes = sum(1 for o in head._occurrences() if o.result == Occurrence.RESULT_DONE)
-            return min(100, round(100 * successes / total))
-        remaining = head.sessions_to_goal()
-        if remaining is None:
-            return None
-        successes, _ = head.successes_and_streak()
-        total_sessions = head.current_step() * head.sessions_per_step + remaining
-        if total_sessions <= 0:
-            return 100
-        return min(100, round(100 * successes / total_sessions))
+        return round(sum(values) / len(values))
 
     def weekly_completion(self):
         """
@@ -2326,11 +2312,19 @@ class PlanItem(models.Model):
 
       - cumplimiento: objetivo fijo. Se mide cuántas veces lo cumpliste.
         Para estudiar, antitareas, hábitos.
-      - repeticiones: sube hasta un techo y ahí se queda.
-        Para abdominales, plancha, resistencia.
-      - doble: sube repeticiones dentro de un rango y, al llegar arriba,
-        AÑADE PESO y vuelve abajo del rango.
-        Para fuerza: dominadas, fondos, sentadillas.
+      - repeticiones: sube hasta un techo y ahí se queda. Para
+        abdominales, plancha, resistencia — y también para fuerza con
+        peso (dominadas/fondos/sentadillas con lastre): si el ejercicio
+        lleva peso y se pone un "peso objetivo", entonces sube dentro de
+        un rango de repeticiones y, al llegar arriba, AÑADE PESO y
+        vuelve abajo del rango — así hasta llegar al peso objetivo. Sin
+        peso objetivo puesto, el peso (si lo hay) se queda fijo y solo
+        suben las repeticiones, como cualquier otro ejercicio.
+        (Esto antes era una progresión "doble" aparte — PROG_DOUBLE
+        sigue existiendo solo para reconocer objetivos ya guardados con
+        ese valor; ya no se puede elegir en el formulario porque muy
+        pocos ejercicios del catálogo llevan peso, y era una opción más
+        a explicar para casi nadie.)
       - al fallo: cada serie se hace hasta el fallo (hasta que no
         puedas más), así que no hay un número de repeticiones que pedir
         de antemano — sería inventado, y encima lo normal es que la
@@ -2339,24 +2333,25 @@ class PlanItem(models.Model):
         no un fallo de constancia. Lo único que se prescribe y progresa
         es el número de SERIES; las repeticiones se siguen guardando
         (para verlas en el historial, motivación/PR) pero no cuentan
-        para el % de cumplimiento.
+        para el % de cumplimiento. El peso funciona igual que en
+        repeticiones: fijo sin peso objetivo, o sube por ciclos de
+        series con uno puesto.
 
-    La progresión doble es la que evita el disparate. Una progresión
-    lineal siempre diverge: subiendo 1 repetición cada 2 sesiones, a los
-    seis meses el plan pediría 3x47 dominadas. Con la doble, las
-    repeticiones vuelven siempre al suelo del rango y lo que sube es la
-    carga — que es como se progresa de verdad.
+    Sin la vuelta al suelo del rango al añadir peso, una progresión
+    lineal de solo repeticiones divergiría sin sentido: subiendo 1
+    repetición cada 2 sesiones, a los seis meses el plan pediría 3x47
+    dominadas. Por eso, con peso objetivo puesto, lo que sube de verdad
+    es la carga y las repeticiones vuelven siempre al suelo del rango.
     """
     PROG_COMPLETION = "completion"
     PROG_REPS = "reps"
-    PROG_DOUBLE = "double"
+    PROG_DOUBLE = "double"  # legado: ya no elegible, ver comentario arriba
     PROG_DISTANCE = "distance"
     PROG_FAILURE = "failure"
 
     PROGRESSION_CHOICES = [
         (PROG_COMPLETION, "Cumplimiento (objetivo fijo)"),
-        (PROG_REPS, "Repeticiones (sube hasta un techo)"),
-        (PROG_DOUBLE, "Doble (repeticiones y luego peso)"),
+        (PROG_REPS, "Repeticiones (sube hasta un techo; con peso objetivo, sube peso por ciclos)"),
         (PROG_DISTANCE, "Distancia (running: sube km y baja ritmo)"),
         (PROG_FAILURE, "Al fallo (series sin objetivo de repeticiones)"),
     ]
@@ -2471,10 +2466,13 @@ class PlanItem(models.Model):
     )
     reps_increment = models.PositiveIntegerField(default=1)
     weight_increment_kg = models.FloatField(
-        default=2.5, help_text="Solo en progresión doble: cuánto peso se añade al completar el rango.",
+        default=2.5,
+        help_text="Solo si hay peso objetivo puesto (reps o al fallo, en un ejercicio con peso): "
+                  "cuánto se añade al completar el rango/ciclo.",
     )
     rep_range_low = models.PositiveIntegerField(
-        default=6, help_text="Solo en progresión doble: a cuántas repeticiones se vuelve al subir peso.",
+        default=6,
+        help_text="Solo en repeticiones con peso objetivo puesto: a cuántas repeticiones se vuelve al subir peso.",
     )
 
     # El toque de entrenador
@@ -2494,7 +2492,17 @@ class PlanItem(models.Model):
     order = models.PositiveIntegerField(default=0)
 
     class Meta:
-        ordering = ["-is_headline", "order"]
+        # "pk" al final no es cosmético: con casi todos los PlanItem
+        # empatados a order=0 (nadie los ha reordenado con las flechas),
+        # sin un desempate explícito el orden entre ellos no estaría
+        # garantizado por Django/SQL — hoy "funciona" porque así es como
+        # SQLite devuelve las filas empatadas en la práctica, pero eso es
+        # un detalle de implementación, no una garantía. Con "pk" se
+        # asegura el orden de creación de verdad mientras nadie reordene
+        # a mano — y una vez que sí lo hacen, "order" ya no tiene
+        # empates entre ellos (plan_item_move los renumera 0,1,2...) así
+        # que "pk" deja de intervenir.
+        ordering = ["-is_headline", "order", "pk"]
 
     def save(self, *args, **kwargs):
         # Mismo trato que Task: si pegas la URL entera, se limpia sola a
@@ -2707,54 +2715,57 @@ class PlanItem(models.Model):
                 "distance_km": round(distance, 2), "pace_seconds_per_km": pace, "done": done,
             }
 
-        if self.progression == self.PROG_DOUBLE:
-            top = self.goal_reps or (self.rep_range_low + 6)
-            low = min(self.rep_range_low, top)
-            span = max(1, top - low + 1)
-            cycles, within = divmod(step, span)
-            reps = low + within
-            weight = self.start_weight_kg + cycles * self.weight_increment_kg
-            if self.goal_weight_kg is not None and weight >= self.goal_weight_kg:
-                # Llegado el peso objetivo, se deja de añadir carga y solo
-                # quedan las repeticiones que falten para cerrar el plan.
-                weight = self.goal_weight_kg
-                reps = min(low + within, top)
-            done = (
-                self.goal_weight_kg is not None
-                and weight >= self.goal_weight_kg
-                and reps >= top
-            )
-            # El peso es el eje que de verdad mide cuánto llevas en
-            # progresión doble (las reps solo suben y bajan dentro del
-            # rango una y otra vez). Sin meta de peso no hay con qué
-            # medir el progreso, así que las series se quedan fijas.
-            frac = self._progress_fraction(weight, self.start_weight_kg, self.goal_weight_kg)
-            return {
-                "sets": self._sets_for_progress(frac), "reps": reps,
-                "seconds": None, "weight_kg": round(weight, 1), "done": done,
-                "distance_km": None, "pace_seconds_per_km": None,
-            }
-
         if self.progression == self.PROG_FAILURE:
             # No hay reps que pedir (esa es la idea de ir al fallo) — lo
-            # único que sube es el número de series, igual de despacio
-            # que en PROG_REPS (un paso = un escalón de start_sets a
-            # goal_sets), reutilizando _sets_for_progress con una frac
-            # calculada sobre el propio escalón en vez de sobre reps.
-            if self.goal_sets and self.goal_sets > self.start_sets:
-                total_steps = self.goal_sets - self.start_sets
-                frac = min(1.0, step / total_steps) if total_steps else 1.0
+            # que sube es el número de series, igual de despacio que en
+            # PROG_REPS (un paso = un escalón de start_sets a goal_sets).
+            #
+            # El peso es aparte y sigue la misma regla que cualquier otro
+            # destino del plan: sin "peso objetivo" puesto, no hay con qué
+            # medir cuánto subir, así que se queda fijo en el inicial para
+            # siempre (esto es lo que quiere quien no pone incremento de
+            # peso — dominadas/fondos siempre con el mismo lastre, o sin
+            # peso ninguno). Con un peso objetivo puesto, sí se progresa:
+            # se completa un ciclo entero de series (start_sets→goal_sets)
+            # al peso actual y, al llegar arriba, se añade el peso y las
+            # series vuelven a empezar desde start_sets — así hasta llegar
+            # al peso objetivo.
+            if self.goal_weight_kg is not None and self.weight_increment_kg:
+                total_steps = (
+                    self.goal_sets - self.start_sets
+                    if (self.goal_sets and self.goal_sets > self.start_sets) else 0
+                )
+                span = total_steps + 1
+                cycles, within = divmod(step, span)
+                frac = min(1.0, within / total_steps) if total_steps else 1.0
+                sets = self._sets_for_progress(frac)
+                weight = min(
+                    self.start_weight_kg + cycles * self.weight_increment_kg,
+                    self.goal_weight_kg,
+                )
+                sets_ok = self.goal_sets is None or sets >= self.goal_sets
+                done = bool(weight >= self.goal_weight_kg and sets_ok)
             else:
-                frac = 0.0
-            sets = self._sets_for_progress(frac)
-            done = bool(self.goal_sets and sets >= self.goal_sets)
+                if self.goal_sets and self.goal_sets > self.start_sets:
+                    total_steps = self.goal_sets - self.start_sets
+                    frac = min(1.0, step / total_steps) if total_steps else 1.0
+                else:
+                    frac = 0.0
+                sets = self._sets_for_progress(frac)
+                weight = self.start_weight_kg
+                done = bool(self.goal_sets and sets >= self.goal_sets)
             return {
                 "sets": sets, "reps": None, "seconds": None,
-                "weight_kg": self.start_weight_kg, "done": done,
+                "weight_kg": round(weight, 1), "done": done,
                 "distance_km": None, "pace_seconds_per_km": None,
             }
 
-        # PROG_REPS: sube hasta el techo y ahí se queda.
+        # PROG_REPS (y el antiguo PROG_DOUBLE, que ya no se puede elegir en
+        # el formulario pero sigue funcionando igual en objetivos guardados
+        # con ese valor): sube hasta el techo y ahí se queda. No aplica a
+        # algo cronometrado — aguantar con peso no tiene esta mecánica de
+        # rango de repeticiones, así que ahí el peso (si lo hay) va
+        # siempre fijo.
         if self.is_timed:
             seconds = self.start_seconds + step * self.reps_increment
             ceiling = self.goal_seconds
@@ -2768,8 +2779,36 @@ class PlanItem(models.Model):
                 "distance_km": None, "pace_seconds_per_km": None,
             }
 
-        reps = self.start_reps + step * self.reps_increment
+        # El peso es opcional, con la misma idea que en "al fallo": sin
+        # "peso objetivo" puesto, no hay con qué medir cuánto subir, y se
+        # queda fijo en el inicial — solo suben las repeticiones, como
+        # cualquier ejercicio sin peso. Con uno puesto (esto es lo que
+        # antes hacía falta elegir "Doble" aparte para conseguir), se sube
+        # dentro de un rango de repeticiones y, al completarlo, se añade
+        # peso y las repeticiones vuelven al suelo del rango — así hasta
+        # llegar al peso objetivo.
         ceiling = self.goal_reps
+        if self.goal_weight_kg is not None and self.weight_increment_kg:
+            top = ceiling or (self.rep_range_low + 6)
+            low = min(self.rep_range_low, top)
+            span = max(1, top - low + 1)
+            cycles, within = divmod(step, span)
+            reps = low + within
+            weight = self.start_weight_kg + cycles * self.weight_increment_kg
+            if weight >= self.goal_weight_kg:
+                # Llegado el peso objetivo, se deja de añadir carga y solo
+                # quedan las repeticiones que falten para cerrar el plan.
+                weight = self.goal_weight_kg
+                reps = min(low + within, top)
+            done = bool(weight >= self.goal_weight_kg and reps >= top)
+            frac = self._progress_fraction(weight, self.start_weight_kg, self.goal_weight_kg)
+            return {
+                "sets": self._sets_for_progress(frac), "reps": reps,
+                "seconds": None, "weight_kg": round(weight, 1), "done": done,
+                "distance_km": None, "pace_seconds_per_km": None,
+            }
+
+        reps = self.start_reps + step * self.reps_increment
         if ceiling:
             reps = min(reps, ceiling)
         frac = self._progress_fraction(reps, self.start_reps, ceiling)
@@ -2859,6 +2898,55 @@ class PlanItem(models.Model):
             if self.target_for_step(i)["done"]:
                 return max(0, (i - self.current_step()) * self.sessions_per_step)
         return None
+
+    def own_progress_pct(self):
+        """
+        Cuánto lleva ESTE objetivo por su cuenta, del 0 al 100 (o None si
+        no se puede medir — ver más abajo).
+
+        Es la misma cuenta que antes solo se hacía para la medida
+        principal del plan (Plan.progress_pct() llamaba a esto contra
+        `headline` y ya está — el resto de objetivos, aunque llevaran su
+        propio progreso por dentro, no contaban para nada a nivel de
+        plan). Al añadir varios objetivos de golpe (alta rápida) eso
+        empezó a notarse como una tontería: tener 8 ejercicios al fallo
+        avanzando cada uno lo suyo y que el % del plan dependa solo de
+        cuál se marcó como principal. Ahora Plan.progress_pct() promedia
+        esto sobre TODOS los objetivos, no solo sobre uno.
+
+        None cuando el objetivo no tiene destino definido (progresión
+        sin `goal_*`, ej. "sube hasta un techo" sin techo puesto) — no
+        hay con qué medir cuánto camino queda, así que no se puede
+        convertir en un %. Plan.progress_pct() ignora los None al
+        promediar en vez de tratarlos como 0.
+        """
+        if self.progression == self.PROG_COMPLETION:
+            # Cumplimiento no tiene escalones que subir — se mide en
+            # cuántas veces de las que tocaba se cumplió, usando el
+            # mismo criterio que ya usa successes_and_streak() (que sí
+            # sabe distinguir objetivo de TAREA, con Occurrence, de
+            # objetivo de EJERCICIO, con WorkoutSession — usar
+            # directamente _occurrences() aquí, como hacía el código
+            # viejo, daba siempre 0 para un ejercicio de Deporte en
+            # cumplimiento, porque _occurrences() solo mira series_id y
+            # los ejercicios no tienen).
+            total = (
+                self._occurrences().count() if self.series_id
+                else self._sessions().count()
+            )
+            if not total:
+                return 0
+            successes, _ = self.successes_and_streak()
+            return min(100, round(100 * successes / total))
+
+        remaining = self.sessions_to_goal()
+        if remaining is None:
+            return None
+        successes, _ = self.successes_and_streak()
+        total_sessions = self.current_step() * self.sessions_per_step + remaining
+        if total_sessions <= 0:
+            return 100
+        return min(100, round(100 * successes / total_sessions))
 
 
 class WorkoutSession(models.Model):

@@ -1,0 +1,431 @@
+{% extends "tasks/base.html" %}
+{% block title %}Añadir varios objetivos{% endblock %}
+{% block content %}
+
+<style>
+/* El <details> nativo oculta sus hijos solo, PERO cualquier regla de
+   .repeat-options (display:flex, ver styles.css) tiene más especificidad
+   que la regla nativa del navegador y gana — por eso hace falta forzarlo
+   a mano aquí. Es el mismo problema, y el mismo arreglo, que ya tiene
+   .done-details/.task-list en styles.css. */
+.bulk-group { border:1px solid var(--line); border-radius:10px; padding:8px 12px; margin-bottom:10px; }
+.bulk-group > summary { cursor:pointer; font-weight:600; font-size:13px; }
+.bulk-group > summary::-webkit-details-marker { display:none; }
+.bulk-group > summary::marker { content:""; }
+.bulk-group > summary::before { content:"▸ "; font-size:12px; }
+.bulk-group[open] > summary::before { content:"▾ "; }
+.bulk-group:not([open]) > div { display:none; }
+.bulk-group__count { font-weight:400; color:var(--bone-faded); font-size:12px; }
+</style>
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">{{ plan.name }}</span>
+        <h1>Añadir varios objetivos</h1>
+    </div>
+    <a href="{% url 'tasks:plan_detail' plan.pk %}" class="stats-link">← Volver</a>
+</header>
+
+<p class="field__hint">
+    Marca los ejercicios que quieras añadir de golpe. La configuración de abajo se ajusta
+    sola según lo que marques (si no marcas running, no ves ni distancia ni ritmo; si solo
+    marcas running, no ves series ni repeticiones) y se aplica IGUAL a todos los marcados de
+    su tipo — luego puedes editar cualquiera por separado si necesita otros números.
+</p>
+
+<form class="task-form" method="post" id="bulk-item-form">
+    {% if error %}
+    <p class="field__hint" style="color:var(--ember); background:var(--ember-soft); padding:12px 16px; border-radius:10px; border:1px solid var(--ember);">
+        ⚠ {{ error }}
+    </p>
+    {% endif %}
+    {% csrf_token %}
+
+    <h2 class="section-title">Ejercicios</h2>
+    <p class="field__hint">Pulsa el nombre de cada grupo para abrirlo o cerrarlo.</p>
+    {% for value, label, exs in groups %}
+    <details class="bulk-group" open>
+        <summary>{{ label }} <span class="bulk-group__count" data-group-count="{{ value }}"></span></summary>
+        <div style="margin:8px 0;">
+            <button type="button" data-select-group="{{ value }}" data-action="all" class="ghost-btn" style="font-size:12px; padding:3px 8px;">Marcar todos</button>
+            <button type="button" data-select-group="{{ value }}" data-action="none" class="ghost-btn" style="font-size:12px; padding:3px 8px;">Ninguno</button>
+        </div>
+        <div class="repeat-options" data-group="{{ value }}">
+            {% for e in exs %}
+            <label class="repeat-option" data-mode-option="{{ e.mode }}">
+                <input type="checkbox" name="exercises" value="{{ e.slug }}" data-mode="{{ e.mode }}" data-weighted="{% if e.slug in weighted_slugs %}1{% else %}0{% endif %}">
+                <span>{{ e.name }}</span>
+            </label>
+            {% endfor %}
+        </div>
+    </details>
+    {% endfor %}
+
+    <div id="strength-section" hidden>
+    <h2 class="section-title">Cómo se completan (ejercicios normales)</h2>
+    <fieldset class="field" id="sport-mode-field">
+        <legend class="field__label">¿Cómo se hacen?</legend>
+        <div class="repeat-options">
+            {% for value, label in sport_modes %}
+            <label class="repeat-option">
+                <input type="radio" name="sport_mode" value="{{ value }}" {% if forloop.first %}checked{% endif %}>
+                <span>{{ label }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        <span class="field__hint">No aplica a los de running, que siempre son manuales.</span>
+    </fieldset>
+
+    <fieldset class="field" id="progression-field">
+        <legend class="field__label">Cómo progresan (ejercicios normales)</legend>
+        <div class="repeat-options">
+            {% for value, label in progressions %}
+            <label class="repeat-option">
+                <input type="radio" name="progression" value="{{ value }}" data-prog {% if value == "reps" %}checked{% endif %}>
+                <span>{{ label }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        <span class="field__hint" id="prog-hint"></span>
+    </fieldset>
+
+    <div id="strength-fields">
+        <h2 class="section-title">Punto de partida</h2>
+        <div class="field-row">
+            <label class="field">
+                <span class="field__label">Series</span>
+                <input type="number" name="start_sets" min="1" value="3">
+            </label>
+            <label class="field" data-when="reps">
+                <span class="field__label">Repeticiones</span>
+                <input type="number" name="start_reps" id="start-reps" min="1" value="8">
+                <span class="field__hint">Para los que cuentan repeticiones.</span>
+            </label>
+            <label class="field" data-when="seconds">
+                <span class="field__label">Segundos</span>
+                <input type="number" name="start_seconds" id="start-seconds" min="1" value="40">
+                <span class="field__hint">Para los que se aguantan (ej. plancha).</span>
+            </label>
+        </div>
+        <label class="field" data-when="start-weight">
+            <span class="field__label">Peso inicial (kg)</span>
+            <input type="number" name="start_weight_kg" id="start-weight" min="0" step="0.5" value="0">
+        </label>
+
+        <h2 class="section-title" data-when="goal">Destino</h2>
+        <span class="field__hint" data-when="goal">
+            Hasta dónde quieres llegar. Sin destino el plan no sabría cuándo termina
+            y subiría para siempre.
+        </span>
+        <div class="field-row" data-when="goal">
+            <label class="field">
+                <span class="field__label">Series</span>
+                <input type="number" name="goal_sets" min="1" value="">
+            </label>
+            <label class="field" data-when="reps">
+                <span class="field__label">Repeticiones</span>
+                <input type="number" name="goal_reps" id="goal-reps" min="1" value="">
+            </label>
+            <label class="field" data-when="seconds">
+                <span class="field__label">Segundos</span>
+                <input type="number" name="goal_seconds" id="goal-seconds" min="1" value="">
+            </label>
+        </div>
+        <label class="field" data-when="weight-grows">
+            <span class="field__label">Peso objetivo (kg)</span>
+            <input type="number" name="goal_weight_kg" id="goal-weight" min="0" step="0.5" value="">
+            <span class="field__hint" id="goal-weight-hint"></span>
+        </label>
+
+        <h2 class="section-title" data-when="goal-reps">Ritmo</h2>
+        <label class="field" data-when="goal-reps">
+            <span class="field__label">¿En cuántas semanas quieres llegar al destino?</span>
+            <div class="field-row">
+                <input type="number" id="weeks-reps" min="1" placeholder="Ej: 12" style="flex:1">
+                <button type="button" class="ghost-btn" id="calc-reps-btn">Calcular</button>
+            </div>
+            <span class="field__hint">
+                Con tus {{ sessions_per_week }} día{{ sessions_per_week|pluralize }} a la semana, calcula cuánto
+                subir cada escalón (o, en peso, cada cuántos ciclos añadir carga).
+            </span>
+        </label>
+        <div class="field-row" data-when="goal">
+            <label class="field">
+                <span class="field__label">Sesiones por escalón</span>
+                <input type="number" name="sessions_per_step" id="sessions-per-step-reps" min="1" value="2">
+            </label>
+            <label class="field" data-when="increment">
+                <span class="field__label">Sube de</span>
+                <input type="number" name="reps_increment" id="reps-increment" min="0.1" step="0.1" value="1">
+            </label>
+        </div>
+
+        <div class="field-row" data-when="weight-grows">
+            <label class="field" data-when="rep-range">
+                <span class="field__label">Vuelve a</span>
+                <input type="number" name="rep_range_low" id="rep-range-low" min="1" value="6">
+                <span class="field__hint">Repeticiones a las que se baja al añadir peso.</span>
+            </label>
+            <label class="field">
+                <span class="field__label">Añade (kg)</span>
+                <input type="number" name="weight_increment_kg" id="weight-increment" min="0.5" step="0.5" value="2.5">
+                <span class="field__hint">Cuánto se añade al llegar arriba (repeticiones en reps, series en al fallo).</span>
+            </label>
+        </div>
+
+        <label class="field" data-when="goal">
+            <span class="field__label">Bajar escalón tras</span>
+            <input type="number" name="deload_after_failures" min="0" value="3">
+            <span class="field__hint">
+                Sesiones seguidas sin llegar al objetivo antes de bajar un escalón. 0 lo desactiva.
+            </span>
+        </label>
+    </div>
+    </div><!-- /strength-section -->
+
+    <div id="distance-section" hidden>
+    <h2 class="section-title">Running</h2>
+    <p class="field__hint">Se aplica solo a los ejercicios de running marcados arriba, con su propia progresión por distancia y ritmo.</p>
+    <div id="distance-fields">
+        <h2 class="section-title">Punto de partida</h2>
+        <div class="field-row">
+            <label class="field">
+                <span class="field__label">Distancia (km)</span>
+                <input type="number" name="start_distance_km" id="start-distance" min="0.1" step="0.1" value="1.0">
+            </label>
+            <label class="field">
+                <span class="field__label">A qué ritmo</span>
+                <select name="start_pace_seconds_per_km" id="start-pace">
+                    {% for seconds, label in pace_presets %}
+                    <option value="{{ seconds }}" {% if seconds == 420 %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+        </div>
+
+        <h2 class="section-title">Destino</h2>
+        <span class="field__hint">Hasta dónde quieres llegar (obligatorio para que se cree el objetivo de running).</span>
+        <div class="field-row">
+            <label class="field">
+                <span class="field__label">Distancia (km)</span>
+                <input type="number" name="goal_distance_km" id="goal-distance" min="0.1" step="0.1" value="">
+            </label>
+            <label class="field">
+                <span class="field__label">A qué ritmo</span>
+                <select name="goal_pace_seconds_per_km" id="goal-pace">
+                    <option value="">Cualquier ritmo vale</option>
+                    {% for seconds, label in pace_presets %}
+                    <option value="{{ seconds }}">{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+        </div>
+
+        <h2 class="section-title">Ritmo de progresión</h2>
+        <label class="field">
+            <span class="field__label">¿En cuántas semanas quieres llegar al destino?</span>
+            <div class="field-row">
+                <input type="number" id="weeks-distance" min="1" placeholder="Ej: 9" style="flex:1">
+                <button type="button" class="ghost-btn" id="calc-distance-btn">Calcular</button>
+            </div>
+            <span class="field__hint">
+                Con tus {{ sessions_per_week }} día{{ sessions_per_week|pluralize }} a la semana, calcula solo
+                cuánto subir en cada escalón.
+            </span>
+        </label>
+        <div class="field-row">
+            <label class="field">
+                <span class="field__label">Sesiones por escalón</span>
+                <input type="number" name="sessions_per_step" id="sessions-per-step-distance" min="1" value="2">
+            </label>
+            <label class="field">
+                <span class="field__label">Sube (km) cada escalón</span>
+                <input type="number" name="distance_increment_km" id="distance-increment" min="0.1" step="0.1" value="0.5">
+            </label>
+        </div>
+        <label class="field">
+            <span class="field__label">Acelera (segundos por km) cada escalón</span>
+            <input type="number" name="pace_decrement_seconds" id="pace-decrement" min="0" value="10">
+        </label>
+    </div>
+    </div><!-- /distance-section -->
+
+    <div class="task-form__actions">
+        <button type="submit" class="primary-btn">Crear objetivos</button>
+    </div>
+</form>
+
+<script>
+(function(){
+    // Nota: aquí "sessions_per_step" del bloque de running comparte
+    // input name con el del bloque de series/reps (ambos se llaman
+    // sessions_per_step en PlanItem) — pero son DOS campos de formulario
+    // con id distinto (uno por bloque) porque cada objetivo creado solo
+    // usa el valor de SU bloque (running usa run_shared, el resto usa
+    // shared) — ver plan_item_bulk_form en views.py. Con dos inputs con
+    // el mismo "name", el backend cogería el primero para ambos casos si
+    // no se leyeran por separado — pero aquí se leen con request.POST
+    // .get() una sola vez, así que en realidad los dos comparten el
+    // mismo valor de "sessions_per_step" en el envío. Para que cada
+    // bloque pueda tener su propio ritmo, el de running usa su propio
+    // name distinto.
+    document.getElementById('sessions-per-step-distance').name = 'sessions_per_step_distance';
+
+    document.querySelectorAll('[data-select-group]').forEach(function(btn){
+        btn.addEventListener('click', function(){
+            var group = btn.dataset.selectGroup;
+            var marcar = btn.dataset.action === 'all';
+            document.querySelectorAll('[data-group="' + group + '"] input[type="checkbox"]').forEach(function(cb){
+                cb.checked = marcar;
+            });
+            actualizar();
+        });
+    });
+
+    var HINTS = {
+        completion: 'Objetivo fijo, no sube nunca. Para hábitos o antitareas.',
+        reps: 'Sube hasta un techo y ahí se queda. Para abdominales, plancha, resistencia — ' +
+            'y también para fuerza con peso (dominadas/fondos/sentadillas con lastre): si el ejercicio ' +
+            'lleva peso, puedes dejarlo fijo o subirlo poco a poco — se explica abajo.',
+        failure: 'Cada serie se hace al fallo (hasta que no puedas más) — sin objetivo de repeticiones. ' +
+            'Solo se prescribe y progresa el número de series; las reps se guardan igual en el historial. ' +
+            'Si los ejercicios llevan peso añadido, puedes dejarlo fijo o subirlo poco a poco — se explica abajo.'
+    };
+
+    function prog(){
+        var el = document.querySelector('[data-prog]:checked');
+        return el ? el.value : 'reps';
+    }
+
+    // Qué modos de ejercicio hay marcados ahora mismo (pose/manual = cuentan
+    // reps, timed = se aguantan, distance = running). Con NADA marcado,
+    // no hay nada que configurar todavía — los dos bloques (normales y
+    // running) se quedan ocultos hasta que marques algo.
+    function modosMarcados(){
+        var modos = {};
+        document.querySelectorAll('input[name="exercises"]:checked').forEach(function(cb){
+            modos[cb.dataset.mode] = true;
+        });
+        return modos;
+    }
+
+    // Alguno de los ejercicios marcados (que no sea running) lleva peso
+    // añadido — ver Exercise.WEIGHTED_SLUGS en models.py. Es lo que
+    // decide si se enseñan los campos de peso compartidos.
+    function esPeso(){
+        var any = false;
+        document.querySelectorAll('input[name="exercises"]:checked').forEach(function(cb){
+            if (cb.dataset.mode !== 'distance' && cb.dataset.weighted === '1') any = true;
+        });
+        return any;
+    }
+
+    function actualizarContadores(){
+        document.querySelectorAll('[data-group]').forEach(function(grupo){
+            var total = grupo.querySelectorAll('input[type="checkbox"]').length;
+            var marcados = grupo.querySelectorAll('input[type="checkbox"]:checked').length;
+            var contador = document.querySelector('[data-group-count="' + grupo.dataset.group + '"]');
+            if (contador) contador.textContent = marcados ? '(' + marcados + ' de ' + total + ')' : '';
+        });
+    }
+
+    function actualizar(){
+        actualizarContadores();
+
+        var modos = modosMarcados();
+        var hayReps = !!modos.pose || !!modos.manual;
+        var hayTimed = !!modos.timed;
+        var hayDistance = !!modos.distance;
+        var hayNormales = hayReps || hayTimed;
+
+        document.getElementById('strength-section').hidden = !hayNormales;
+        document.getElementById('distance-section').hidden = !hayDistance;
+
+        var p = prog();
+        var esFallo = p === 'failure';
+        var pesoEx = esPeso();
+        document.getElementById('prog-hint').textContent = HINTS[p] || '';
+        var visible = {
+            reps: hayReps && !esFallo,
+            seconds: hayTimed && !esFallo,
+            'start-weight': pesoEx,
+            'weight-grows': pesoEx && p !== 'completion' && !hayTimed,
+            'rep-range': pesoEx && p === 'reps',
+            goal: p !== 'completion',
+            increment: p !== 'completion' && !esFallo,
+            'goal-reps': p !== 'completion' && !esFallo
+        };
+        document.querySelectorAll('[data-when]').forEach(function(el){
+            var k = el.dataset.when;
+            el.style.display = visible[k] === false ? 'none' : '';
+        });
+        var goalWeightHint = document.getElementById('goal-weight-hint');
+        if (goalWeightHint) {
+            goalWeightHint.textContent = esFallo
+                ? 'Opcional — sin esto el peso se queda fijo en el inicial para siempre y solo suben las series (mismo peso siempre).'
+                : 'Sin esto, el peso sube sin parar cada vez que completes el rango de repeticiones.';
+        }
+    }
+
+    document.querySelectorAll('[data-prog]').forEach(function(r){
+        r.addEventListener('change', actualizar);
+    });
+    document.querySelectorAll('input[name="exercises"]').forEach(function(cb){
+        cb.addEventListener('change', actualizar);
+    });
+    actualizar();
+
+    // ---------------------------------------------- calculadora de ritmo
+    function escalones(weeks, porEscalon) {
+        var totalSesiones = weeks * {{ sessions_per_week|default:2 }};
+        return Math.max(1, Math.round(totalSesiones / porEscalon));
+    }
+    function num(id) {
+        var el = document.getElementById(id);
+        return el ? parseFloat(String(el.value).replace(',', '.')) || 0 : 0;
+    }
+
+    document.getElementById('calc-distance-btn').addEventListener('click', function () {
+        var weeks = num('weeks-distance');
+        if (!weeks) { alert('Pon primero en cuántas semanas quieres llegar.'); return; }
+        var pasos = escalones(weeks, num('sessions-per-step-distance') || 1);
+        var dDist = num('goal-distance') - num('start-distance');
+        var dPace = num('start-pace') - num('goal-pace');
+        var cambiado = false;
+        if (dDist > 0) { document.getElementById('distance-increment').value = (dDist / pasos).toFixed(2); cambiado = true; }
+        if (dPace > 0) { document.getElementById('pace-decrement').value = Math.max(1, Math.round(dPace / pasos)); cambiado = true; }
+        if (!cambiado) {
+            alert('Pon primero la distancia y/o el ritmo de destino, más arriba en "Destino".');
+        }
+    });
+
+    document.getElementById('calc-reps-btn').addEventListener('click', function () {
+        var weeks = num('weeks-reps');
+        if (!weeks) { alert('Pon primero en cuántas semanas quieres llegar.'); return; }
+        var sesionesPorEscalon = num('sessions-per-step-reps') || 1;
+
+        if (esPeso() && prog() === 'reps' && (num('goal-weight') - num('start-weight')) > 0) {
+            var low = num('rep-range-low') || 6;
+            var top = num('goal-reps') || (low + 6);
+            var span = Math.max(1, top - low + 1);
+            var ciclos = Math.max(1, Math.round(escalones(weeks, sesionesPorEscalon) / span));
+            var dPeso = num('goal-weight') - num('start-weight');
+            document.getElementById('weight-increment').value = (dPeso / ciclos).toFixed(1);
+            return;
+        }
+
+        var pasos = escalones(weeks, sesionesPorEscalon);
+        var deltaReps = num('goal-reps') - num('start-reps');
+        var deltaSeconds = num('goal-seconds') - num('start-seconds');
+        var delta = Math.max(deltaReps, deltaSeconds);
+
+        if (delta > 0) {
+            document.getElementById('reps-increment').value = Math.max(0.1, parseFloat((delta / pasos).toFixed(1)));
+        } else {
+            alert('Pon primero el destino (repeticiones o segundos), más arriba.');
+        }
+    });
+})();
+</script>
+
+{% endblock %}

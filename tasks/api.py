@@ -1550,11 +1550,11 @@ def _apply_plan_item_fields(item, plan, data):
     item.sessions_per_step = _int("sessions_per_step", 2) or 1
     item.reps_increment = _int("reps_increment", 1) or 1
     item.weight_increment_kg = _float("weight_increment_kg", 2.5) or 2.5
-    # Por defecto, el suelo del ciclo de doble progresión es de dónde
-    # parte el usuario (start_reps) — no un 6 fijo sin relación con nada.
-    # Sin esto, un progresión 'double' sin `rep_range_low` explícito podía
-    # mandar "bajar" en el primer escalón a un número que no tenía nada
-    # que ver con lo que la persona ya podía hacer el primer día.
+    # Por defecto, el suelo del ciclo de reps con peso objetivo es de
+    # dónde parte el usuario (start_reps) — no un 6 fijo sin relación con
+    # nada. Sin esto, unas reps con peso sin `rep_range_low` explícito
+    # podían mandar "bajar" en el primer escalón a un número que no tenía
+    # nada que ver con lo que la persona ya podía hacer el primer día.
     item.rep_range_low = _int("rep_range_low", item.start_reps) or 1
     item.deload_after_failures = _int("deload_after_failures", 3)
     if "is_headline" in data:

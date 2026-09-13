@@ -45,8 +45,10 @@ urlpatterns = [
     path("planes/<int:pk>/cerrar/", views.plan_close, name="plan_close"),
     path("planes/<int:pk>/idioma/reintentar/", views.plan_language_retry, name="plan_language_retry"),
     path("planes/<int:plan_pk>/objetivo/nuevo/", views.plan_item_form, name="plan_item_create"),
+    path("planes/<int:plan_pk>/objetivo/varios/", views.plan_item_bulk_form, name="plan_item_bulk_create"),
     path("planes/<int:plan_pk>/objetivo/<int:pk>/", views.plan_item_form, name="plan_item_edit"),
     path("planes/<int:plan_pk>/objetivo/<int:pk>/eliminar/", views.plan_item_delete, name="plan_item_delete"),
+    path("planes/<int:plan_pk>/objetivo/<int:pk>/mover/", views.plan_item_move, name="plan_item_move"),
     path("planes/idiomas/test/<uuid:quiz_uuid>/", views.quiz_take, name="quiz_take"),
     path("planes/idiomas/test/<uuid:quiz_uuid>/resultado/", views.quiz_result, name="quiz_result"),
 

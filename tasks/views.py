@@ -1560,6 +1560,11 @@ def plan_detail(request, pk):
             "target": item.current_target(),
             "step": item.current_step(),
             "remaining": remaining,
+            # Lo que aporta ESTE objetivo al % del plan (Plan.progress_pct()
+            # ahora promedia esto de todos, no solo de la medida principal)
+            # — se enseña aquí para que se vea de dónde sale el número de
+            # arriba, en vez de que parezca sacado de la nada.
+            "own_progress": item.own_progress_pct(),
             "schedule": item.schedule(rows),
             "history": item.history(12),
             # Cuántas sesiones cumplidas más hacen falta para el
@@ -2493,6 +2498,7 @@ def plan_item_form(request, plan_pk, pk=None):
                 "progressions": PlanItem.PROGRESSION_CHOICES,
                 "pace_presets": Task.PACE_PRESETS,
                 "sessions_per_week": max(1, len(plan.custom_days_list())),
+                "weighted_slugs": Exercise.WEIGHTED_SLUGS,
             })
 
         item.save()
@@ -2515,7 +2521,171 @@ def plan_item_form(request, plan_pk, pk=None):
         # cuántas semanas quiero llegar" en vez de que el usuario tenga
         # que hacer la cuenta él mismo de cuánto subir cada escalón.
         "sessions_per_week": max(1, len(plan.custom_days_list())),
+        "weighted_slugs": Exercise.WEIGHTED_SLUGS,
     })
+
+
+def plan_item_bulk_form(request, plan_pk):
+    """
+    Alta rápida de varios objetivos de Deporte a la vez.
+
+    En vez de repetir "+ Añadir objetivo" ejercicio por ejercicio, se
+    marcan los que se quieran y se les aplica LA MISMA configuración —
+    pensado para un plan con muchos ejercicios seguidos (ej. tren
+    superior con 8 ejercicios al fallo, todos "3 series, sube cada 2
+    sesiones"). Se puede marcar running a la vez que ejercicios
+    normales: cada ejercicio de running se crea con progresión por
+    distancia/ritmo (los campos de esa sección), el resto con la
+    progresión de series/reps elegida arriba — son dos bloques de
+    ajustes compartidos, independientes entre sí, no uno según qué
+    ejercicio esté seleccionado.
+
+    Los objetivos que salen de aquí son PlanItem normales y corrientes:
+    se pueden editar uno a uno después con plan_item_form si alguno
+    necesita otros números.
+    """
+    plan = get_object_or_404(_plans_qs(), pk=plan_pk)
+    if plan.plan_type != Plan.PLAN_TYPE_SPORT:
+        messages.info(request, "El alta rápida solo aplica a planes de Deporte.")
+        return redirect(reverse("tasks:plan_detail", args=[plan.pk]))
+
+    exercises = Exercise.objects.filter(is_active=True)
+    # Agrupados por tren superior/inferior/running (Exercise.body_area),
+    # igual que ya se pesaría un plan de verdad — un "Marcar todos" por
+    # grupo es lo que de verdad ahorra los clics que se quejaba Alex,
+    # más que la lista plana.
+    group_labels = dict(Task.SPORT_SUBCATEGORY_CHOICES)
+    groups = []
+    for value, label in Task.SPORT_SUBCATEGORY_CHOICES:
+        qs = list(exercises.filter(body_area=value))
+        if qs:
+            groups.append((value, label, qs))
+    otros = list(exercises.filter(body_area=""))
+    if otros:
+        groups.append(("", "Otros", otros))
+
+    # 'distance' no es una opción a elegir aquí: se aplica sola a
+    # cualquier ejercicio de running marcado, vía el bloque de
+    # distancia/ritmo de más abajo — no tiene sentido como radio junto a
+    # "reps"/"al fallo"/etc.
+    progressions = [c for c in PlanItem.PROGRESSION_CHOICES if c[0] != PlanItem.PROG_DISTANCE]
+    # Vídeo tampoco tiene sentido en alta rápida: todos los marcados
+    # compartirían el mismo vídeo de YouTube, que no es lo que se pide.
+    sport_modes = [c for c in PlanItem.SPORT_MODE_CHOICES if c[0] != PlanItem.SPORT_MODE_VIDEO]
+
+    base_ctx = {
+        "plan": plan,
+        "groups": groups,
+        "progressions": progressions,
+        "sport_modes": sport_modes,
+        "pace_presets": Task.PACE_PRESETS,
+        "sessions_per_week": max(1, len(plan.custom_days_list())),
+        "weighted_slugs": Exercise.WEIGHTED_SLUGS,
+    }
+
+    if request.method == "POST":
+        def _int(name, default):
+            try:
+                return max(0, int(request.POST.get(name) or default))
+            except (TypeError, ValueError):
+                return default
+
+        def _float(name, default):
+            try:
+                return max(0.0, float(request.POST.get(name) or default))
+            except (TypeError, ValueError):
+                return default
+
+        slugs = request.POST.getlist("exercises")
+        selected = list(exercises.filter(slug__in=slugs))
+        if not selected:
+            return render(request, "tasks/plan_item_bulk_form.html", {
+                **base_ctx, "error": "Marca al menos un ejercicio.",
+            })
+
+        valid_prog = {k for k, _ in progressions}
+        prog = request.POST.get("progression", PlanItem.PROG_REPS)
+        prog = prog if prog in valid_prog else PlanItem.PROG_REPS
+
+        valid_modes = {k for k, _ in sport_modes}
+        raw_mode = request.POST.get("sport_mode", PlanItem.SPORT_MODE_CAMERA)
+        sport_mode = raw_mode if raw_mode in valid_modes else PlanItem.SPORT_MODE_CAMERA
+
+        # Compartido para los ejercicios normales (no running). Los dos
+        # campos de "objetivo" (reps Y segundos) se guardan siempre — el
+        # que no aplique lo ignora is_timed/PROG_FAILURE al leerlo,
+        # mismo criterio que ya usa el formulario de uno en uno.
+        shared = dict(
+            sport_mode=sport_mode,
+            progression=prog,
+            start_sets=_int("start_sets", 3) or 1,
+            start_reps=_int("start_reps", 8),
+            start_seconds=_int("start_seconds", 40),
+            start_weight_kg=_float("start_weight_kg", 0),
+            goal_sets=_int("goal_sets", 0) or None,
+            goal_reps=_int("goal_reps", 0) or None,
+            goal_seconds=_int("goal_seconds", 0) or None,
+            sessions_per_step=_int("sessions_per_step", 2) or 1,
+            reps_increment=_int("reps_increment", 1) or 1,
+            weight_increment_kg=_float("weight_increment_kg", 2.5) or 2.5,
+            rep_range_low=_int("rep_range_low", 6) or 1,
+            deload_after_failures=_int("deload_after_failures", 3),
+        )
+        gw = request.POST.get("goal_weight_kg")
+        shared["goal_weight_kg"] = _float("goal_weight_kg", 0) if gw else None
+
+        # Compartido para los de running (distancia/ritmo) — progresión
+        # forzada a PROG_DISTANCE, igual que hace plan_item_form con
+        # es_running.
+        run_shared = dict(
+            progression=PlanItem.PROG_DISTANCE,
+            start_distance_km=_float("start_distance_km", 1.0) or 1.0,
+            start_pace_seconds_per_km=_int("start_pace_seconds_per_km", 420) or 420,
+            # Campo con name distinto en la plantilla a propósito: hay
+            # dos "sesiones por escalón" en el formulario (uno para
+            # series/reps, otro para running) y cada uno solo debe
+            # afectar a SU bloque — con el mismo name, el segundo pisaría
+            # al primero en request.POST.
+            sessions_per_step=_int("sessions_per_step_distance", 2) or 1,
+            distance_increment_km=_float("distance_increment_km", 0.5) or 0.5,
+            pace_decrement_seconds=_int("pace_decrement_seconds", 10) or 10,
+        )
+        gd = request.POST.get("goal_distance_km")
+        run_shared["goal_distance_km"] = _float("goal_distance_km", 0) if gd else None
+        gp = request.POST.get("goal_pace_seconds_per_km")
+        run_shared["goal_pace_seconds_per_km"] = _int("goal_pace_seconds_per_km", 0) if gp else None
+
+        creados = 0
+        sin_destino = []
+        for ex in selected:
+            item = PlanItem(plan=plan, exercise=ex)
+            fields = run_shared if ex.mode == Exercise.MODE_DISTANCE else shared
+            for k, v in fields.items():
+                setattr(item, k, v)
+            if ex.mode == Exercise.MODE_DISTANCE and not item.goal_distance_km:
+                # Igual que en plan_item_form: sin destino, running no
+                # sabría cuándo ha llegado — se salta en vez de crearlo
+                # roto, y se avisa al final con cuáles se han quedado
+                # fuera (mejor que bloquear TODO el envío por uno malo).
+                sin_destino.append(ex.name)
+                continue
+            item.save()
+            creados += 1
+
+        plan.sync_task()
+        if creados:
+            messages.success(request, f"{creados} objetivo(s) creado(s).")
+        if sin_destino:
+            messages.error(
+                request,
+                "No se han creado (falta distancia de destino, hace falta para running): "
+                + ", ".join(sin_destino),
+            )
+        if not creados and not sin_destino:
+            messages.error(request, "No se ha creado ningún objetivo.")
+        return redirect(reverse("tasks:plan_detail", args=[plan.pk]))
+
+    return render(request, "tasks/plan_item_bulk_form.html", base_ctx)
 
 
 @require_POST
@@ -2523,6 +2693,48 @@ def plan_item_delete(request, plan_pk, pk):
     plan = get_object_or_404(_plans_qs(), pk=plan_pk)
     get_object_or_404(PlanItem, pk=pk, plan=plan).delete()
     messages.success(request, "Objetivo eliminado.")
+    return redirect(reverse("tasks:plan_detail", args=[plan.pk]))
+
+
+@require_POST
+def plan_item_move(request, plan_pk, pk):
+    """
+    Sube o baja un puesto un ejercicio de apoyo en el orden de la
+    sesión — `Plan.session_items()` recorre `plan.items` (ordenados por
+    PlanItem.order) para decidir en qué orden salen hoy los ejercicios
+    en el circuito de cámara. La medida principal no se toca aquí:
+    siempre va primero (Meta.ordering = ["-is_headline", "order"]), así
+    que solo tiene sentido reordenar el resto.
+
+    Casi todos los PlanItem nacen con order=0 (hasta ahora no había
+    ningún sitio para cambiarlo), así que el primer movimiento en un
+    plan renumera TODO el camino en su orden actual (0, 1, 2...) antes
+    de intercambiar — si no, "subir" algo con order=0 no tendría con
+    qué intercambiar.
+    """
+    plan = get_object_or_404(_plans_qs(), pk=plan_pk)
+    item = get_object_or_404(PlanItem, pk=pk, plan=plan)
+    direction = request.POST.get("direction")
+    if direction not in ("up", "down"):
+        return redirect(reverse("tasks:plan_detail", args=[plan.pk]))
+
+    supports = list(plan.support_items)
+    for i, it in enumerate(supports):
+        if it.order != i:
+            it.order = i
+            it.save(update_fields=["order"])
+
+    idx = next((i for i, it in enumerate(supports) if it.pk == item.pk), None)
+    if idx is None:
+        return redirect(reverse("tasks:plan_detail", args=[plan.pk]))
+
+    swap_idx = idx - 1 if direction == "up" else idx + 1
+    if 0 <= swap_idx < len(supports):
+        a, b = supports[idx], supports[swap_idx]
+        a.order, b.order = b.order, a.order
+        a.save(update_fields=["order"])
+        b.save(update_fields=["order"])
+
     return redirect(reverse("tasks:plan_detail", args=[plan.pk]))
 
 
