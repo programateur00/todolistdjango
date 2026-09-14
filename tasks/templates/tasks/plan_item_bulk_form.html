@@ -203,8 +203,18 @@
             </label>
         </div>
 
+        <label class="field field--inline">
+            <input type="checkbox" name="distance_flat" id="distance-flat">
+            <span class="field__label">Sin progresión: correr siempre la misma distancia</span>
+        </label>
+        <span class="field__hint">
+            Se aplica a todos los de running marcados: cada día se les pedirá esta distancia y
+            este ritmo, sin subir ni tener un destino.
+        </span>
+
+        <div id="distance-goal-fields">
         <h2 class="section-title">Destino</h2>
-        <span class="field__hint">Hasta dónde quieres llegar (obligatorio para que se cree el objetivo de running).</span>
+        <span class="field__hint">Hasta dónde quieres llegar (obligatorio salvo que marques "sin progresión").</span>
         <div class="field-row">
             <label class="field">
                 <span class="field__label">Distancia (km)</span>
@@ -247,6 +257,7 @@
             <span class="field__label">Acelera (segundos por km) cada escalón</span>
             <input type="number" name="pace_decrement_seconds" id="pace-decrement" min="0" value="10">
         </label>
+        </div><!-- /distance-goal-fields -->
     </div>
     </div><!-- /distance-section -->
 
@@ -340,6 +351,8 @@
 
         document.getElementById('strength-section').hidden = !hayNormales;
         document.getElementById('distance-section').hidden = !hayDistance;
+        document.getElementById('distance-goal-fields').style.display =
+            document.getElementById('distance-flat').checked ? 'none' : 'block';
 
         var p = prog();
         var esFallo = p === 'failure';
@@ -373,6 +386,7 @@
     document.querySelectorAll('input[name="exercises"]').forEach(function(cb){
         cb.addEventListener('change', actualizar);
     });
+    document.getElementById('distance-flat').addEventListener('change', actualizar);
     actualizar();
 
     // ---------------------------------------------- calculadora de ritmo

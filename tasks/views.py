@@ -2626,12 +2626,25 @@ def plan_item_form(request, plan_pk, pk=None):
         # presets que ya usa una tarea suelta de running).
         item.start_distance_km = _float("start_distance_km", 1.0) or 1.0
         item.start_pace_seconds_per_km = _int("start_pace_seconds_per_km", 420) or 420
-        gd = request.POST.get("goal_distance_km")
-        item.goal_distance_km = _float("goal_distance_km", 0) if gd else None
-        gp = request.POST.get("goal_pace_seconds_per_km")
-        item.goal_pace_seconds_per_km = _int("goal_pace_seconds_per_km", 0) if gp else None
-        item.distance_increment_km = _float("distance_increment_km", 0.5) or 0.5
-        item.pace_decrement_seconds = _int("pace_decrement_seconds", 10) or 10
+        # Sin progresión: correr siempre la misma distancia/ritmo, sin
+        # destino ni escalones — el mismo criterio que ya usa cualquier
+        # otra progresión sin "goal_*" puesto (se queda fija para
+        # siempre, ver PlanItem.target_for_step). Sin este atajo, un 0
+        # en incremento/desaceleración se perdía igualmente porque
+        # "_float(...) or 0.5" trata el 0 como "no puesto".
+        distance_flat = bool(request.POST.get("distance_flat"))
+        if distance_flat:
+            item.goal_distance_km = None
+            item.goal_pace_seconds_per_km = None
+            item.distance_increment_km = 0.0
+            item.pace_decrement_seconds = 0
+        else:
+            gd = request.POST.get("goal_distance_km")
+            item.goal_distance_km = _float("goal_distance_km", 0) if gd else None
+            gp = request.POST.get("goal_pace_seconds_per_km")
+            item.goal_pace_seconds_per_km = _int("goal_pace_seconds_per_km", 0) if gp else None
+            item.distance_increment_km = _float("distance_increment_km", 0.5) or 0.5
+            item.pace_decrement_seconds = _int("pace_decrement_seconds", 10) or 10
 
         item.sessions_per_step = _int("sessions_per_step", 2) or 1
         item.reps_increment = _int("reps_increment", 1) or 1
@@ -2646,7 +2659,7 @@ def plan_item_form(request, plan_pk, pk=None):
         error = None
         if not item.exercise:
             error = "Elige un ejercicio."
-        elif es_running and not item.goal_distance_km:
+        elif es_running and not item.goal_distance_km and not distance_flat:
             error = "Pon una distancia de destino — sin eso el plan no sabría cuándo has llegado."
         elif not es_running and not item.sport_mode:
             error = "Elige cómo la vas a completar: cámara, circuito o vídeo."
@@ -2799,6 +2812,7 @@ def plan_item_bulk_form(request, plan_pk):
         # Compartido para los de running (distancia/ritmo) — progresión
         # forzada a PROG_DISTANCE, igual que hace plan_item_form con
         # es_running.
+        distance_flat = bool(request.POST.get("distance_flat"))
         run_shared = dict(
             progression=PlanItem.PROG_DISTANCE,
             start_distance_km=_float("start_distance_km", 1.0) or 1.0,
@@ -2809,13 +2823,20 @@ def plan_item_bulk_form(request, plan_pk):
             # afectar a SU bloque — con el mismo name, el segundo pisaría
             # al primero en request.POST.
             sessions_per_step=_int("sessions_per_step_distance", 2) or 1,
-            distance_increment_km=_float("distance_increment_km", 0.5) or 0.5,
-            pace_decrement_seconds=_int("pace_decrement_seconds", 10) or 10,
+            # Sin progresión: mismos km/ritmo todos los días, sin
+            # destino ni escalones — ver la nota equivalente en
+            # plan_item_form.
+            distance_increment_km=0.0 if distance_flat else (_float("distance_increment_km", 0.5) or 0.5),
+            pace_decrement_seconds=0 if distance_flat else (_int("pace_decrement_seconds", 10) or 10),
         )
-        gd = request.POST.get("goal_distance_km")
-        run_shared["goal_distance_km"] = _float("goal_distance_km", 0) if gd else None
-        gp = request.POST.get("goal_pace_seconds_per_km")
-        run_shared["goal_pace_seconds_per_km"] = _int("goal_pace_seconds_per_km", 0) if gp else None
+        if distance_flat:
+            run_shared["goal_distance_km"] = None
+            run_shared["goal_pace_seconds_per_km"] = None
+        else:
+            gd = request.POST.get("goal_distance_km")
+            run_shared["goal_distance_km"] = _float("goal_distance_km", 0) if gd else None
+            gp = request.POST.get("goal_pace_seconds_per_km")
+            run_shared["goal_pace_seconds_per_km"] = _int("goal_pace_seconds_per_km", 0) if gp else None
 
         creados = 0
         sin_destino = []
@@ -2824,11 +2845,12 @@ def plan_item_bulk_form(request, plan_pk):
             fields = run_shared if ex.mode == Exercise.MODE_DISTANCE else shared
             for k, v in fields.items():
                 setattr(item, k, v)
-            if ex.mode == Exercise.MODE_DISTANCE and not item.goal_distance_km:
-                # Igual que en plan_item_form: sin destino, running no
-                # sabría cuándo ha llegado — se salta en vez de crearlo
-                # roto, y se avisa al final con cuáles se han quedado
-                # fuera (mejor que bloquear TODO el envío por uno malo).
+            if ex.mode == Exercise.MODE_DISTANCE and not item.goal_distance_km and not distance_flat:
+                # Igual que en plan_item_form: sin destino (y sin marcar
+                # "sin progresión"), running no sabría cuándo ha llegado
+                # — se salta en vez de crearlo roto, y se avisa al final
+                # con cuáles se han quedado fuera (mejor que bloquear
+                # TODO el envío por uno malo).
                 sin_destino.append(ex.name)
                 continue
             item.save()

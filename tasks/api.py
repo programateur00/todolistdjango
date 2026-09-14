@@ -1542,10 +1542,20 @@ def _apply_plan_item_fields(item, plan, data):
 
     item.start_distance_km = _float("start_distance_km", 1.0) or 1.0
     item.start_pace_seconds_per_km = _int("start_pace_seconds_per_km", 420) or 420
-    item.goal_distance_km = _float("goal_distance_km", 0) if data.get("goal_distance_km") else None
-    item.goal_pace_seconds_per_km = _int("goal_pace_seconds_per_km", 0) if data.get("goal_pace_seconds_per_km") else None
-    item.distance_increment_km = _float("distance_increment_km", 0.5) or 0.5
-    item.pace_decrement_seconds = _int("pace_decrement_seconds", 10) or 10
+    # Sin progresión: correr siempre la misma distancia/ritmo, sin
+    # destino ni escalones — mismo criterio que la web (ver
+    # plan_item_form en views.py).
+    distance_flat = bool(data.get("distance_flat"))
+    if distance_flat:
+        item.goal_distance_km = None
+        item.goal_pace_seconds_per_km = None
+        item.distance_increment_km = 0.0
+        item.pace_decrement_seconds = 0
+    else:
+        item.goal_distance_km = _float("goal_distance_km", 0) if data.get("goal_distance_km") else None
+        item.goal_pace_seconds_per_km = _int("goal_pace_seconds_per_km", 0) if data.get("goal_pace_seconds_per_km") else None
+        item.distance_increment_km = _float("distance_increment_km", 0.5) or 0.5
+        item.pace_decrement_seconds = _int("pace_decrement_seconds", 10) or 10
 
     item.sessions_per_step = _int("sessions_per_step", 2) or 1
     item.reps_increment = _int("reps_increment", 1) or 1
@@ -1564,7 +1574,7 @@ def _apply_plan_item_fields(item, plan, data):
     # "vacío" y al pulsar play la app no sabía qué pantalla enseñar.
     if not item.exercise:
         return "Elige un ejercicio."
-    if es_running and not item.goal_distance_km:
+    if es_running and not item.goal_distance_km and not distance_flat:
         return "Pon una distancia de destino — sin eso el plan no sabría cuándo has llegado."
     if not es_running and not item.sport_mode:
         return "Elige cómo la vas a completar: cámara, circuito o vídeo."
