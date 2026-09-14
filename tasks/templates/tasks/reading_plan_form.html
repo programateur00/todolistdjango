@@ -1,0 +1,123 @@
+{% extends "tasks/base.html" %}
+{% block title %}{% if task %}Editar plan de lectura{% else %}Nuevo plan de lectura{% endif %} — Libreta{% endblock %}
+{% block content %}
+
+<a href="{% url 'tasks:task_list' %}" class="back-link">← volver a la libreta</a>
+
+<form class="task-form" method="post"
+      action="{% if task %}{% url 'tasks:reading_plan_edit' task.pk %}{% else %}{% url 'tasks:reading_plan_create' %}{% endif %}">
+    {% csrf_token %}
+    <input type="hidden" name="reading_pdf_key" id="reading-pdf-key-input" value="{{ task.reading_pdf_key|default:'' }}">
+
+    <div class="field">
+        <span class="field__label">PDF del libro</span>
+        <p class="field__hint" id="pdf-pick-hint">
+            {% if task.reading_pdf_key %}
+                Ya tienes un PDF elegido en este navegador.
+            {% else %}
+                Se guarda solo en este navegador (nunca sube al servidor) — elige el mismo PDF cada vez que abras el visor desde este ordenador.
+            {% endif %}
+        </p>
+        <div class="task-form__actions">
+            <button type="button" class="ghost-btn" id="pdf-pick-btn">
+                {% if task.reading_pdf_key %}Cambiar el PDF{% else %}+ Elegir el PDF de tu ordenador{% endif %}
+            </button>
+        </div>
+        <p class="field__hint" id="pdf-pick-status"></p>
+    </div>
+
+    <label class="field">
+        <span class="field__label">Título del plan</span>
+        <input type="text" name="title" id="reading-title-input" value="{{ task.title|default:'' }}"
+               placeholder="Se rellena solo con el nombre del PDF" maxlength="255">
+        <span class="field__hint">El nombre del libro — puedes dejarlo en blanco y se rellena al elegir el PDF, o cambiarlo cuando quieras.</span>
+    </label>
+
+    <div class="field-row">
+        <label class="field">
+            <span class="field__label">Última página real</span>
+            <input type="number" name="reading_last_page" min="1" required
+                   value="{{ task.reading_last_page|default:'' }}" placeholder="Ej. 320">
+            <span class="field__hint">La del final del contenido — sin contar glosario, apéndices o índice.</span>
+        </label>
+        <label class="field">
+            <span class="field__label">Plazo objetivo (semanas)</span>
+            <input type="number" name="reading_target_weeks" min="1" required
+                   value="{{ task.reading_target_weeks|default:'' }}" placeholder="Ej. 6">
+            <span class="field__hint">
+                {% if task %}Cambiar esto recalcula el ritmo, no reinicia lo ya leído.{% else %}El ritmo (páginas/día) se recalcula solo — el plan sigue activo aunque se pase el plazo, hasta terminar el libro de verdad.{% endif %}
+            </span>
+        </label>
+    </div>
+
+    <div class="task-form__actions">
+        <button type="submit" class="primary-btn">{% if task %}Guardar cambios{% else %}Crear plan{% endif %}</button>
+    </div>
+</form>
+
+<script>
+(function () {
+    var supportsLocal = 'showOpenFilePicker' in window;
+    var pickBtn = document.getElementById('pdf-pick-btn');
+    var pickHint = document.getElementById('pdf-pick-hint');
+    var pickStatus = document.getElementById('pdf-pick-status');
+    var keyInput = document.getElementById('reading-pdf-key-input');
+    var titleInput = document.getElementById('reading-title-input');
+
+    if (!supportsLocal) {
+        pickBtn.disabled = true;
+        pickHint.textContent = 'Este navegador no puede elegir archivos locales para el visor — usa Chrome o Edge.';
+        return;
+    }
+
+    function openHandleDb() {
+        return new Promise(function (resolve, reject) {
+            var req = indexedDB.open('libreta-reading-pdfs', 1);
+            req.onupgradeneeded = function () { req.result.createObjectStore('handles'); };
+            req.onsuccess = function () { resolve(req.result); };
+            req.onerror = function () { reject(req.error); };
+        });
+    }
+    function storeHandle(key, handle) {
+        return openHandleDb().then(function (db) {
+            return new Promise(function (resolve, reject) {
+                var tx = db.transaction('handles', 'readwrite');
+                tx.objectStore('handles').put(handle, key);
+                tx.oncomplete = function () { resolve(); };
+                tx.onerror = function () { reject(tx.error); };
+            });
+        });
+    }
+
+    // Limpia el nombre del archivo para sugerir un título: quita la
+    // extensión y cambia guiones/guiones bajos por espacios. No es
+    // perfecto (no sabe de mayúsculas de títulos reales), pero es mejor
+    // punto de partida que dejarlo en blanco, y siempre es editable.
+    function titleFromFilename(name) {
+        return name.replace(/\.pdf$/i, '').replace(/[-_]+/g, ' ').trim();
+    }
+
+    pickBtn.addEventListener('click', function () {
+        window.showOpenFilePicker({
+            types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }],
+            multiple: false,
+        }).then(function (handles) {
+            var handle = handles[0];
+            var key = keyInput.value || ('reading-' + crypto.randomUUID());
+            return storeHandle(key, handle).then(function () {
+                keyInput.value = key;
+                return handle.getFile();
+            });
+        }).then(function (file) {
+            pickStatus.textContent = 'Elegido: ' + file.name;
+            if (!titleInput.value.trim()) titleInput.value = titleFromFilename(file.name);
+        }).catch(function (err) {
+            if (err && err.name !== 'AbortError') {
+                pickStatus.textContent = 'No se pudo usar ese archivo (' + (err.name || err.message || err) + ').';
+            }
+        });
+    });
+})();
+</script>
+
+{% endblock %}

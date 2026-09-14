@@ -1,0 +1,323 @@
+{% extends "tasks/base.html" %}
+{% load static %}
+{% block title %}{{ task.title }} — Libreta{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">plan de lectura</span>
+        <h1>{{ task.title }}</h1>
+    </div>
+    <a href="{% url 'tasks:reading_plan_edit' task.pk %}" class="stats-link">Editar plan</a>
+</header>
+
+<div class="video-embed" id="reading-embed"
+     data-pdf-key="{{ task.reading_pdf_key }}"
+     data-current-page="{{ task.reading_current_page }}"
+     data-last-page="{{ task.reading_last_page|default_if_none:'' }}">
+
+    <div id="reading-status" class="reading-status">
+        {% if status %}
+        <span>Página {{ status.current_page }} de {{ status.last_page }}</span>
+        <span>·</span>
+        <span id="reading-pace">
+            {% if status.is_overdue %}Vas {{ status.days_left|cut:"-" }} días tarde — {{ status.pace_per_day }} pág./día para ponerte al día
+            {% else %}Te faltan {{ status.days_left }} días · ritmo: {{ status.pace_per_day }} pág./día{% endif %}
+        </span>
+        {% else %}
+        <span>Sin ritmo calculado todavía.</span>
+        {% endif %}
+    </div>
+    <div class="stats-bar"><div class="stats-bar__done" id="reading-progress-bar" style="width:{{ status.pct|default:0 }}%"></div></div>
+
+    <div id="reading-viewer" class="reading-viewer">
+        <canvas id="reading-canvas" class="reading-viewer__canvas"></canvas>
+    </div>
+
+    <div class="reading-nav" id="reading-nav" hidden>
+        <button type="button" class="ghost-btn" id="reading-prev">← Anterior</button>
+        <span id="reading-page-label" class="reading-nav__label">—</span>
+        <button type="button" class="ghost-btn" id="reading-next">Siguiente →</button>
+    </div>
+
+    <p class="field__hint" id="reading-hint">Cargando…</p>
+
+    <div class="task-form__actions" id="reading-permission-prompt" hidden>
+        <button type="button" class="primary-btn" id="reading-permission-btn">Dar permiso y abrir el PDF</button>
+        <button type="button" class="ghost-btn" id="reading-reselect-btn" hidden>Volver a elegir el archivo</button>
+    </div>
+
+    <div class="task-form__actions" id="reading-pick-actions" hidden>
+        <button type="button" class="primary-btn" id="reading-pick-btn">+ Elegir el PDF de tu ordenador</button>
+    </div>
+
+    <p class="workout__goal-banner" id="reading-finish-banner" hidden></p>
+
+    <div class="task-form__actions" id="reading-session-actions">
+        <button type="button" class="ghost-btn" id="reading-finish-session-btn">Terminar sesión de hoy</button>
+    </div>
+</div>
+
+<style>
+    .reading-status { display: flex; gap: .5em; flex-wrap: wrap; align-items: baseline; font-size: .95em; opacity: .85; margin-bottom: .5em; }
+    .reading-viewer { display: flex; justify-content: center; background: rgba(0,0,0,.15); border-radius: .5em; padding: .5em; min-height: 40vh; }
+    .reading-viewer__canvas { max-width: 100%; height: auto; box-shadow: 0 2px 12px rgba(0,0,0,.35); }
+    .reading-nav { display: flex; align-items: center; justify-content: center; gap: 1em; margin-top: .75em; }
+    .reading-nav__label { font-variant-numeric: tabular-nums; min-width: 6em; text-align: center; }
+</style>
+
+<script type="module">
+    var embed = document.getElementById('reading-embed');
+    var hint = document.getElementById('reading-hint');
+    var canvas = document.getElementById('reading-canvas');
+    var nav = document.getElementById('reading-nav');
+    var prevBtn = document.getElementById('reading-prev');
+    var nextBtn = document.getElementById('reading-next');
+    var pageLabel = document.getElementById('reading-page-label');
+    var pickActions = document.getElementById('reading-pick-actions');
+    var pickBtn = document.getElementById('reading-pick-btn');
+    var permissionPrompt = document.getElementById('reading-permission-prompt');
+    var permissionBtn = document.getElementById('reading-permission-btn');
+    var reselectBtn = document.getElementById('reading-reselect-btn');
+    var paceLabel = document.getElementById('reading-pace');
+    var progressBar = document.getElementById('reading-progress-bar');
+    var finishBanner = document.getElementById('reading-finish-banner');
+    var sessionActions = document.getElementById('reading-session-actions');
+    var finishSessionBtn = document.getElementById('reading-finish-session-btn');
+
+    var pdfKey = embed.dataset.pdfKey || '';
+    var lastPageReal = embed.dataset.lastPage ? parseInt(embed.dataset.lastPage, 10) : null;
+    var currentPage = parseInt(embed.dataset.currentPage, 10) || 0;
+    var progressUrl = "{% url 'tasks:task_reading_progress' task.pk %}";
+    var saveUrl = "{% url 'tasks:task_reading_save' task.pk %}";
+    var listUrl = "{% url 'tasks:task_list' %}";
+    var csrfToken = "{{ csrf_token }}";
+
+    var supportsLocal = 'showOpenFilePicker' in window;
+    var pdfDoc = null;
+    var pageNum = Math.max(1, currentPage);
+    var numPages = 0;
+    var rendering = false;
+    var pendingPage = null;
+    var reportTimer = null;
+    var finished = false;
+
+    if (!supportsLocal) {
+        hint.textContent = 'Este navegador no puede abrir archivos locales para el visor — usa Chrome o Edge en el ordenador donde tengas el PDF.';
+    }
+
+    // ------------------------------------------------- IndexedDB (handle)
+    // Mismo patrón que task_video.html con el vídeo local, pero con su
+    // propio almacén y clave (reading_pdf_key, no task.uuid — ver
+    // Task._spawn_next: el pdf_key se arrastra igual cada día, así el
+    // mismo archivo sigue encontrándose durante todo el plan).
+    function openHandleDb() {
+        return new Promise(function (resolve, reject) {
+            var req = indexedDB.open('libreta-reading-pdfs', 1);
+            req.onupgradeneeded = function () { req.result.createObjectStore('handles'); };
+            req.onsuccess = function () { resolve(req.result); };
+            req.onerror = function () { reject(req.error); };
+        });
+    }
+    function getStoredHandle(key) {
+        if (!key) return Promise.resolve(null);
+        return openHandleDb().then(function (db) {
+            return new Promise(function (resolve) {
+                var tx = db.transaction('handles', 'readonly');
+                var req = tx.objectStore('handles').get(key);
+                req.onsuccess = function () { resolve(req.result || null); };
+                req.onerror = function () { resolve(null); };
+            });
+        });
+    }
+    function storeHandle(key, handle) {
+        return openHandleDb().then(function (db) {
+            return new Promise(function (resolve, reject) {
+                var tx = db.transaction('handles', 'readwrite');
+                tx.objectStore('handles').put(handle, key);
+                tx.oncomplete = function () { resolve(); };
+                tx.onerror = function () { reject(tx.error); };
+            });
+        });
+    }
+
+    // ------------------------------------------------------------ pdf.js
+    function loadPdfJs() {
+        return import("{% static 'vendor/pdfjs/pdf.min.mjs' %}").then(function (pdfjsLib) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = "{% static 'vendor/pdfjs/pdf.worker.min.mjs' %}";
+            return pdfjsLib;
+        });
+    }
+
+    function openFile(file) {
+        hint.textContent = 'Abriendo…';
+        return file.arrayBuffer().then(function (buf) {
+            return loadPdfJs().then(function (pdfjsLib) {
+                return pdfjsLib.getDocument({ data: buf }).promise;
+            });
+        }).then(function (doc) {
+            pdfDoc = doc;
+            // numPages es el total de páginas del ARCHIVO (puede incluir
+            // portada/índice/apéndices) — el objetivo real del plan es
+            // lastPageReal, que puede ser menor; se navega el archivo
+            // entero, y record_reading_page es quien decide cuándo se
+            // considera terminado el libro (ver reading_last_page).
+            numPages = doc.numPages;
+            pageNum = Math.min(Math.max(1, pageNum), numPages);
+            nav.hidden = false;
+            pickActions.hidden = true;
+            permissionPrompt.hidden = true;
+            hint.textContent = '';
+            renderPage(pageNum);
+        }).catch(function (err) {
+            console.error('openFile:', err);
+            hint.textContent = 'No se pudo abrir ese PDF (' + (err && (err.name || err.message) || err) + ').';
+        });
+    }
+
+    function renderPage(n) {
+        if (!pdfDoc) return;
+        if (rendering) { pendingPage = n; return; }
+        rendering = true;
+        pdfDoc.getPage(n).then(function (page) {
+            var containerWidth = document.getElementById('reading-viewer').clientWidth - 16;
+            var baseViewport = page.getViewport({ scale: 1 });
+            var scale = Math.max(0.5, Math.min(2.5, containerWidth / baseViewport.width));
+            var viewport = page.getViewport({ scale: scale });
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            var ctx = canvas.getContext('2d');
+            return page.render({ canvasContext: ctx, viewport: viewport }).promise;
+        }).then(function () {
+            rendering = false;
+            pageLabel.textContent = n + ' / ' + numPages + (lastPageReal && n === lastPageReal ? ' (fin del contenido)' : '');
+            prevBtn.disabled = n <= 1;
+            nextBtn.disabled = n >= numPages;
+            reportPage(n);
+            if (pendingPage !== null) {
+                var next = pendingPage;
+                pendingPage = null;
+                renderPage(next);
+            }
+        }).catch(function (err) {
+            rendering = false;
+            console.error('renderPage:', err);
+        });
+    }
+
+    function reportPage(n) {
+        // Debounce corto: pasar varias páginas rápido (o mantener pulsado)
+        // no dispara una petición por cada una, solo la última.
+        clearTimeout(reportTimer);
+        reportTimer = setTimeout(function () {
+            fetch(progressUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                body: JSON.stringify({ page: n }),
+            }).then(function (r) { return r.json(); }).then(function (data) {
+                if (!data.ok) return;
+                if (data.status) {
+                    progressBar.style.width = data.status.pct + '%';
+                    paceLabel.textContent = data.status.is_overdue
+                        ? ('Vas ' + Math.abs(data.status.days_left) + ' días tarde — ' + data.status.pace_per_day + ' pág./día para ponerte al día')
+                        : ('Te faltan ' + data.status.days_left + ' días · ritmo: ' + data.status.pace_per_day + ' pág./día');
+                }
+                if (data.finished) {
+                    finished = true;
+                    nav.hidden = true;
+                    sessionActions.hidden = true;
+                    finishBanner.hidden = false;
+                    finishBanner.textContent = '¡Libro terminado! Se ha guardado el plan.';
+                    setTimeout(function () { window.location.href = data.redirect_url || listUrl; }, 1800);
+                }
+            }).catch(function () { /* red intermitente: se reintenta en el próximo cambio de página */ });
+        }, 400);
+    }
+
+    prevBtn.addEventListener('click', function () { if (pageNum > 1) renderPage(--pageNum); });
+    nextBtn.addEventListener('click', function () { if (pageNum < numPages) renderPage(++pageNum); });
+    document.addEventListener('keydown', function (e) {
+        if (finished || !pdfDoc) return;
+        if (e.key === 'ArrowRight') nextBtn.click();
+        if (e.key === 'ArrowLeft') prevBtn.click();
+    });
+
+    finishSessionBtn.addEventListener('click', function () {
+        finishSessionBtn.disabled = true;
+        finishSessionBtn.textContent = 'Guardando…';
+        fetch(saveUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            body: JSON.stringify({}),
+        }).then(function (r) { return r.json(); }).then(function (data) {
+            window.location.href = data.redirect_url || listUrl;
+        }).catch(function () {
+            finishSessionBtn.disabled = false;
+            finishSessionBtn.textContent = 'Terminar sesión de hoy';
+            hint.textContent = 'No se pudo guardar la sesión — inténtalo otra vez.';
+        });
+    });
+
+    function pickFile() {
+        window.showOpenFilePicker({
+            types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }],
+            multiple: false,
+        }).then(function (handles) {
+            var handle = handles[0];
+            var key = pdfKey || ('reading-' + crypto.randomUUID());
+            return storeHandle(key, handle).then(function () { return handle.getFile(); });
+        }).then(openFile).catch(function (err) {
+            if (err && err.name !== 'AbortError') {
+                hint.textContent = 'No se pudo usar ese archivo (' + (err.name || err.message || err) + ').';
+            }
+        });
+    }
+    pickBtn.addEventListener('click', pickFile);
+
+    function askPermissionThenOpen(handle) {
+        hint.textContent = 'Hace falta tu permiso para abrir el PDF.';
+        permissionPrompt.hidden = false;
+        reselectBtn.hidden = true;
+        permissionBtn.hidden = false;
+        permissionBtn.onclick = function () {
+            permissionBtn.disabled = true;
+            permissionBtn.textContent = 'Abriendo…';
+            handle.requestPermission({ mode: 'read' }).then(function (perm) {
+                permissionBtn.disabled = false;
+                permissionBtn.textContent = 'Dar permiso y abrir el PDF';
+                if (perm !== 'granted') {
+                    hint.textContent = 'No se concedió el permiso — puedes volver a elegir el archivo.';
+                    permissionBtn.hidden = true;
+                    reselectBtn.hidden = false;
+                    return;
+                }
+                permissionPrompt.hidden = true;
+                handle.getFile().then(openFile).catch(function (err) {
+                    hint.textContent = 'No se pudo abrir el archivo (' + (err.name || err.message || err) + ') — puede que se haya movido o borrado.';
+                    reselectBtn.hidden = false;
+                });
+            }).catch(function () {
+                reselectBtn.hidden = false;
+                permissionBtn.hidden = true;
+            });
+        };
+        reselectBtn.onclick = function () { permissionPrompt.hidden = true; pickFile(); };
+    }
+
+    function boot() {
+        if (!supportsLocal) { return; }
+        getStoredHandle(pdfKey).then(function (handle) {
+            if (!handle) {
+                hint.textContent = 'No hay ningún PDF guardado en este navegador todavía.';
+                pickActions.hidden = false;
+                return;
+            }
+            handle.getFile().then(openFile).catch(function () {
+                askPermissionThenOpen(handle);
+            });
+        });
+    }
+    boot();
+</script>
+
+{% endblock %}

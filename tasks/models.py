@@ -132,6 +132,23 @@ class Task(models.Model):
         (SUBCATEGORY_READING, "Lectura"),
     ]
 
+    # Cómo se sigue una tarea de Lectura (CATEGORY_WORK / SUBCATEGORY_READING):
+    # - freestyle (de toda la vida): cronómetro manual (target_minutes) o la
+    #   extensión de Chrome vigilando watch_keyword en el PDF que tengas en
+    #   primer plano (ver workout_kind). No sabe en qué página vas.
+    # - plan: visor de PDF propio (pdf.js) embebido a pantalla completa, con
+    #   seguimiento de página real — ver reading_last_page/reading_target_weeks
+    #   /reading_current_page y Task.record_reading_page/reading_plan_status.
+    #   Ambos modos comparten subcategory='reading'; este campo es el que los
+    #   distingue, igual que Plan.study_subtype distingue Idiomas de Estudio
+    #   normal.
+    READING_MODE_FREESTYLE = "freestyle"
+    READING_MODE_PLAN = "plan"
+    READING_MODE_CHOICES = [
+        (READING_MODE_FREESTYLE, "Freestyle (cronómetro / extensión)"),
+        (READING_MODE_PLAN, "Plan de lectura (visor propio con página)"),
+    ]
+
     # Subcategorías de "Estudio": de momento solo "Idiomas" — un curso con
     # vídeos organizados por nivel (ver Plan.STUDY_SUBTYPE_LANGUAGE y
     # CourseModule), en vez del hábito diario simple de siempre. En
@@ -294,6 +311,64 @@ class Task(models.Model):
                    "de YouTube. Solo para category='sport'/'work' — Estudio no lo usa.",
     )
 
+    # ------------------------------------------------ Plan de lectura (PDF)
+    # Solo con category=CATEGORY_WORK, subcategory=SUBCATEGORY_READING y
+    # reading_mode=READING_MODE_PLAN — ver workout_kind, reading_plan_status
+    # y record_reading_page. El PDF en sí NO vive aquí, igual que
+    # has_local_video: cada navegador lo guarda por su cuenta (File System
+    # Access API + IndexedDB, ver tasks/reading_plan_form.html y
+    # tasks/task_reading.html) — reading_pdf_key es solo la clave para
+    # encontrar ese archivo guardado.
+    reading_mode = models.CharField(
+        max_length=10, choices=READING_MODE_CHOICES, blank=True, default=READING_MODE_FREESTYLE,
+        help_text="Solo Lectura: 'freestyle' (cronómetro/extensión, de toda la vida) o "
+                   "'plan' (visor de PDF propio con seguimiento de página).",
+    )
+    reading_pdf_key = models.CharField(
+        max_length=40, blank=True,
+        help_text="Solo reading_mode='plan': clave para encontrar el archivo del PDF "
+                   "guardado en IndexedDB en ESTE navegador — se genera al elegir el "
+                   "archivo (ver reading_plan_form.html) y no cambia aunque se reelija "
+                   "el PDF, para que el visor lo siga encontrando.",
+    )
+    reading_last_page = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Solo reading_mode='plan': última página real del contenido (excluye "
+                   "glosario/apéndices) — cuándo se considera terminado el libro de "
+                   "verdad, y con qué se compara reading_current_page.",
+    )
+    reading_target_weeks = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Solo reading_mode='plan': en cuántas semanas se quiere terminar el "
+                   "libro. Con reading_last_page y reading_current_page decide el ritmo "
+                   "(páginas/día) que enseña el visor — ver reading_plan_status. El plan "
+                   "NO se cierra solo al pasar este plazo, sigue hasta la página real.",
+    )
+    reading_current_page = models.PositiveIntegerField(
+        default=0,
+        help_text="Solo reading_mode='plan': última página reportada por el visor de PDF "
+                   "(ver record_reading_page) — mismo patrón que playlist_start_index, "
+                   "pero de página en vez de vídeo. Se arrastra de un día al siguiente "
+                   "vía _spawn_next, nunca se reinicia sola.",
+    )
+    reading_started_on = models.DateField(
+        null=True, blank=True,
+        help_text="Solo reading_mode='plan': fecha en que se creó el plan — con "
+                   "reading_target_weeks fija el plazo, y con la fecha real de "
+                   "finalización decide reading_final_pct si se termina tarde.",
+    )
+    reading_completed_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Se pone al llegar de verdad a reading_last_page — señal de que el "
+                   "plan se cerró (repeat pasa a REPEAT_NONE), distinta de is_done.",
+    )
+    reading_final_pct = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="% guardado al terminar el plan: 100 si se llegó a tiempo o antes, "
+                   "menos si se tardó de más — ver record_reading_page para la fórmula "
+                   "exacta (plazo previsto ÷ tiempo real).",
+    )
+
     # Objetivos que permiten que la tarea se marque sola al importar de
     # Health Connect. Sin ninguno puesto, cualquier actividad importada
     # la da por hecha; con ellos, solo cuenta si de verdad se cumplió.
@@ -443,6 +518,12 @@ class Task(models.Model):
             # General se queda como lista de tareas de toda la vida.
             return "focus" if self.wants_timer else None
         if self.category == self.CATEGORY_WORK:
+            if self.subcategory == self.SUBCATEGORY_READING and self.reading_mode == self.READING_MODE_PLAN:
+                # Plan de lectura: visor de PDF propio, con su propia
+                # pantalla (ver task_reading) — se completa sola al llegar
+                # a reading_last_page, y mientras tanto se puede "Terminar
+                # sesión de hoy" desde ahí mismo (ver task_reading_save).
+                return "reading"
             if self.subcategory == self.SUBCATEGORY_READING and (self.watch_keyword or "").strip():
                 # Lectura con palabra clave puesta: la vigila la extensión
                 # de Chrome (PDF en primer plano) exactamente igual que un
@@ -775,6 +856,86 @@ class Task(models.Model):
             return False
         return index >= total - 1
 
+    @property
+    def reading_plan_status(self):
+        """
+        Estado del Plan de lectura para pintarlo en el visor: páginas que
+        faltan, días que quedan hasta el plazo objetivo, y el ritmo
+        (páginas/día) recalculado con eso — se recalcula en caliente cada
+        vez, nunca se guarda (si no, habría que corregirlo cada día aunque
+        nadie tocara el plan).
+
+        None si esto no es un plan de lectura con los tres datos que hacen
+        falta para calcular algo (reading_last_page, reading_target_weeks,
+        reading_started_on) — p.ej. un plan recién creado antes de
+        guardarse del todo.
+        """
+        if self.reading_mode != self.READING_MODE_PLAN:
+            return None
+        if not (self.reading_last_page and self.reading_target_weeks and self.reading_started_on):
+            return None
+        pages_left = max(0, self.reading_last_page - self.reading_current_page)
+        deadline = self.reading_started_on + timedelta(weeks=self.reading_target_weeks)
+        today = timezone.localtime(timezone.now()).date()
+        days_left = (deadline - today).days
+        # Con el plazo ya cumplido (days_left <= 0) el ritmo se calcula
+        # igual sobre 1 día -- no tiene sentido dividir por 0 ni por un
+        # número negativo, y así el visor puede seguir enseñando "cuánto
+        # te falta leer hoy para ponerte al día" en vez de un error.
+        pace = pages_left / max(days_left, 1)
+        return {
+            "pages_left": pages_left,
+            "days_left": days_left,
+            "is_overdue": days_left < 0,
+            "pace_per_day": round(pace, 1),
+            "deadline": deadline,
+            "current_page": self.reading_current_page,
+            "last_page": self.reading_last_page,
+            "pct": min(100, round(100 * self.reading_current_page / self.reading_last_page)),
+        }
+
+    def record_reading_page(self, page):
+        """
+        Guarda la página actual de un Plan de lectura -- la llama el
+        visor (tasks/task_reading.html) en cada cambio de página, mismo
+        patrón que playlist_start_index/PlaylistProgress con los vídeos.
+
+        Nunca retrocede (una página anterior reportada por error, o una
+        recarga de una pestaña vieja, no debe "deshacer" el avance real).
+        Al llegar de verdad a reading_last_page, cierra el plan entero:
+        para la serie (repeat=REPEAT_NONE, como finish_recurring_series,
+        pero sin tocar course_completed_at -- ese campo es de Udemy) y
+        calcula reading_final_pct con "plazo previsto ÷ tiempo real":
+        100% si se llegó a tiempo o antes, menos si se tardó de más (ver
+        Task.reading_plan_status para el ritmo mientras tanto, que es
+        solo informativo y no afecta a esta cuenta).
+
+        Devuelve True si esta llamada ha terminado el libro.
+        """
+        if self.reading_mode != self.READING_MODE_PLAN:
+            return False
+        page = max(0, int(page))
+        today = timezone.localtime(timezone.now()).date()
+        if not self.reading_started_on:
+            self.reading_started_on = today
+        self.reading_current_page = max(self.reading_current_page, page)
+        finished = bool(self.reading_last_page) and self.reading_current_page >= self.reading_last_page
+        update_fields = ["reading_started_on", "reading_current_page"]
+        if finished and not self.reading_completed_at:
+            dias_reales = max(1, (today - self.reading_started_on).days)
+            semanas_reales = dias_reales / 7
+            pct = 100
+            if self.reading_target_weeks:
+                pct = min(100, round(100 * self.reading_target_weeks / semanas_reales))
+            self.reading_completed_at = timezone.now()
+            self.reading_final_pct = pct
+            self.repeat = self.REPEAT_NONE
+            update_fields += ["reading_completed_at", "reading_final_pct", "repeat"]
+        self.save(update_fields=update_fields)
+        if finished:
+            self.mark_done()
+        return finished
+
     def _spawn_next(self):
         if self.repeat == self.REPEAT_NONE or not self.due_date:
             return
@@ -825,6 +986,17 @@ class Task(models.Model):
             playlist_start_index=self.playlist_start_index,
             playlist_videos_cache=self.playlist_videos_cache,
             playlist_synced_at=self.playlist_synced_at,
+            # Plan de lectura: igual razón que watch_keyword/playlist_*
+            # arriba -- sin esto, una tarea de Lectura con plan perdía el
+            # PDF, la página por la que ibas y el plazo en cuanto se
+            # generaba el día siguiente, y volvía a verse como recién
+            # creada cada mañana.
+            reading_mode=self.reading_mode,
+            reading_pdf_key=self.reading_pdf_key,
+            reading_last_page=self.reading_last_page,
+            reading_target_weeks=self.reading_target_weeks,
+            reading_current_page=self.reading_current_page,
+            reading_started_on=self.reading_started_on,
         )
 
     def _record_occurrence(self, result, auto_expired=False, minutes_watched=None):

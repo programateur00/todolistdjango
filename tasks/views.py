@@ -428,6 +428,12 @@ def task_create(request):
 
 def task_edit(request, pk):
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    if task.reading_mode == Task.READING_MODE_PLAN:
+        # Un Plan de lectura se edita en su propio formulario (título,
+        # última página, plazo, PDF) -- este mega-formulario no sabe nada
+        # de esos campos, y dejar que alguien lo abra aquí por una URL
+        # vieja lo dejaría atascado sin forma de tocar nada del plan.
+        return redirect(reverse("tasks:reading_plan_edit", args=[task.pk]))
     if request.method == "POST":
         old_playlist_id = task.youtube_playlist_id
         task.title = request.POST.get("title", task.title).strip()
@@ -997,6 +1003,162 @@ def task_focus_save(request, pk):
     resumen = f"Sesión guardada: {minutes} min"
     resumen += "." if ts.target_met else f" — {ts.achievement_pct}% del objetivo. La tarea sigue pendiente."
     messages.success(request, resumen)
+    return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
+
+
+# ------------------------------------------------------- plan de lectura
+
+def reading_plan_form(request, pk=None):
+    """
+    Crea o edita un Plan de lectura: una tarea de Lectura (category='work',
+    subcategory='reading') con reading_mode='plan'. El PDF se elige AQUÍ
+    mismo (a diferencia del vídeo local, que se elige ya en el visor) para
+    poder autorrellenar el título con el nombre del archivo -- ver el JS
+    de la plantilla. Como el archivo vive solo en este navegador (File
+    System Access API + IndexedDB, nunca sube al servidor), lo único que
+    llega en el POST es reading_pdf_key, la clave con la que el visor
+    (task_reading) lo va a encontrar.
+
+    Se guarda como una tarea normal que se repite cada día (repeat=daily):
+    el plan no tiene su propio ciclo de "sesiones por semana" como un Plan
+    de Estudio -- es una tarea de Lectura de toda la vida, solo que con
+    visor propio y objetivo de página en vez de minutos. Por eso vive
+    aparte de tasks/task_form.html en vez de meterse ahí: ese formulario
+    no tiene forma de pedir el PDF con autorrelleno del título sin liar
+    todo lo demás que ya hace.
+    """
+    task = None
+    if pk is not None:
+        task = get_object_or_404(
+            Task, pk=pk, user=get_current_user(),
+            category=Task.CATEGORY_WORK, subcategory=Task.SUBCATEGORY_READING,
+            reading_mode=Task.READING_MODE_PLAN,
+        )
+
+    if request.method == "POST":
+        title = request.POST.get("title", "").strip()[:255] or "Plan de lectura"
+        pdf_key = request.POST.get("reading_pdf_key", "").strip()[:40]
+        try:
+            last_page = int(request.POST.get("reading_last_page") or 0)
+        except ValueError:
+            last_page = 0
+        try:
+            target_weeks = int(request.POST.get("reading_target_weeks") or 0)
+        except ValueError:
+            target_weeks = 0
+
+        if last_page < 1 or target_weeks < 1:
+            messages.error(request, "Pon la última página real del libro y en cuántas semanas quieres terminarlo.")
+            return render(request, "tasks/reading_plan_form.html", {"task": task})
+
+        today = timezone.localtime(timezone.now()).date()
+        if task is None:
+            task = Task.objects.create(
+                user=get_current_user(), title=title,
+                category=Task.CATEGORY_WORK, subcategory=Task.SUBCATEGORY_READING,
+                reading_mode=Task.READING_MODE_PLAN,
+                reading_pdf_key=pdf_key, reading_last_page=last_page, reading_target_weeks=target_weeks,
+                reading_started_on=today,
+                repeat=Task.REPEAT_DAILY, due_date=today, series_start_date=today,
+            )
+        else:
+            task.title = title
+            # El plazo puede tocarse desde aquí sin más -- lo único que NO
+            # se toca al editar es reading_started_on ni reading_current_page:
+            # cambiar de idea sobre el plazo no debe reiniciar el avance ya
+            # hecho ni fingir que el plan empezó hoy.
+            task.reading_last_page = last_page
+            task.reading_target_weeks = target_weeks
+            if pdf_key:
+                task.reading_pdf_key = pdf_key
+            task.save(update_fields=["title", "reading_last_page", "reading_target_weeks", "reading_pdf_key"])
+        messages.success(request, "Plan de lectura guardado.")
+        return redirect(reverse("tasks:task_reading", args=[task.pk]))
+
+    return render(request, "tasks/reading_plan_form.html", {"task": task})
+
+
+def task_reading(request, pk):
+    """
+    Visor de PDF a pantalla completa de un Plan de lectura -- pdf.js
+    propio, mismo espíritu que task_video.html con el IFrame de YouTube.
+    El PDF en sí se abre desde el archivo guardado en IndexedDB (ver
+    reading_plan_form.html, que es donde se elige) usando task.reading_pdf_key
+    como clave; si no hay ninguno guardado en ESTE navegador (aparato
+    nuevo, o se limpió el sitio), el propio visor ofrece elegirlo de
+    nuevo, igual que "olvidar vídeo local" en task_video.html.
+    """
+    task = get_object_or_404(
+        Task, pk=pk, user=get_current_user(),
+        category=Task.CATEGORY_WORK, subcategory=Task.SUBCATEGORY_READING,
+        reading_mode=Task.READING_MODE_PLAN,
+    )
+    return render(request, "tasks/task_reading.html", {
+        "task": task,
+        "status": task.reading_plan_status,
+    })
+
+
+@require_POST
+def task_reading_progress(request, pk):
+    """
+    Reporta la página por la que va el visor -- se llama en cada cambio
+    de página (con un pequeño debounce en el JS), mismo patrón que
+    playlist_start_index con los vídeos. Ligero a propósito: solo guarda
+    la página y, si con eso se llega a la última página real, cierra el
+    plan entero -- ver Task.record_reading_page. No marca "hecho el día
+    de hoy" (eso es task_reading_save, aparte) salvo que esto sea
+    justamente lo que termina el libro.
+    """
+    task = get_object_or_404(
+        Task, pk=pk, user=get_current_user(),
+        category=Task.CATEGORY_WORK, subcategory=Task.SUBCATEGORY_READING,
+        reading_mode=Task.READING_MODE_PLAN,
+    )
+    try:
+        data = json.loads(request.body or b"{}")
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({"ok": False, "error": "JSON inválido"}, status=400)
+    try:
+        page = int(data.get("page"))
+    except (TypeError, ValueError):
+        return JsonResponse({"ok": False, "error": "Falta 'page'"}, status=400)
+
+    finished = task.record_reading_page(page)
+    response = {"ok": True, "finished": finished, "status": task.reading_plan_status}
+    if finished:
+        response["redirect_url"] = reverse("tasks:task_list")
+        messages.success(
+            request,
+            f"«{task.title}» terminado — {task.reading_final_pct}% del plazo original."
+            if task.reading_target_weeks else f"«{task.title}» terminado.",
+        )
+    return JsonResponse(response)
+
+
+@require_POST
+def task_reading_save(request, pk):
+    """
+    "Terminar sesión de hoy" del visor: mismo criterio que task_focus_save,
+    marca hecha la instancia de HOY y genera la de mañana (mark_done ->
+    _spawn_next), sin cerrar el plan -- para eso hace falta llegar de
+    verdad a la última página (ver task_reading_progress). Independiente
+    del progreso de página en sí, que ya se reporta aparte según se va
+    leyendo: aquí solo se resuelve el día, como cualquier otra tarea de
+    Enfoque.
+    """
+    task = get_object_or_404(
+        Task, pk=pk, user=get_current_user(),
+        category=Task.CATEGORY_WORK, subcategory=Task.SUBCATEGORY_READING,
+        reading_mode=Task.READING_MODE_PLAN,
+    )
+    if task.reading_completed_at:
+        # El libro ya se terminó (task_reading_progress ya cerró el plan
+        # y marcó hecho) -- nada que guardar aquí, evita un mark_done()
+        # de más sobre una serie que ya está en REPEAT_NONE.
+        return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
+    task.mark_done()
+    messages.success(request, "Sesión de lectura guardada.")
     return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
 
 

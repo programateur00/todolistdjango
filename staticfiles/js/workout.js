@@ -392,9 +392,28 @@ const DIP_FACE_CAMERA_STABLE_MS = 500; // cuánto tiempo seguido con los dos hom
 // rectos arme el contador por error, así que no hace falta exigir el
 // codo doblado para eso.
 const PUSHUP_UP_ANGLE_DEG = 160;   // brazo casi recto -> arriba (posición de partida / cuenta la repetición al volver aquí)
-const PUSHUP_DOWN_ANGLE_DEG = 90;  // codo doblado en ángulo recto o más -> abajo (mitad de la repetición)
+const PUSHUP_DOWN_ANGLE_DEG = 90;  // codo doblado en ángulo recto o más -> abajo (criterio real de "flexión completa")
 const PUSHUP_MIN_VISIBILITY = 0.4;
 const PUSHUP_LINE_MIN_DEG = 150;   // hombro-cadera-tobillo casi recto (cuerpo estirado, no encogido)
+// Reportado 2026-09-14: haciendo flexiones rápido, el esqueleto no sigue el
+// ritmo y se pierden repeticiones. En un móvil lento (o con el modelo MediaPipe
+// "full") el frame exacto en el que el codo pasa por PUSHUP_DOWN_ANGLE_DEG o
+// PUSHUP_UP_ANGLE_DEG puede "saltarse" entre dos capturas consecutivas
+// (undersampling), así que la transición de estado nunca se dispara aunque la
+// persona sí haya bajado/subido del todo. Se ensancha SOLO la zona de CONTEO
+// (no el gate de armado inicial, que se queda estricto en PUSHUP_UP_ANGLE_DEG
+// sostenido, sin este margen) el margen de abajo, así que un frame "cercano"
+// ya vale como haber llegado, sin tener que tocar el ángulo exacto. Valor de
+// partida sin calibrar en cámara real — pendiente de ajustar con el registro
+// de depuración (📋) si se siguen perdiendo repeticiones, o si con esto
+// empieza a contar de más (bajarlo).
+const PUSHUP_FAST_REP_TOLERANCE_DEG = 10;
+const PUSHUP_COUNT_DOWN_ANGLE_DEG = PUSHUP_DOWN_ANGLE_DEG + PUSHUP_FAST_REP_TOLERANCE_DEG; // 100° — dispara "abajo" con un poco más de margen
+const PUSHUP_COUNT_UP_ANGLE_DEG = PUSHUP_UP_ANGLE_DEG - PUSHUP_FAST_REP_TOLERANCE_DEG;     // 150° — dispara "arriba"/cuenta la rep con un poco más de margen
+// Mismo motivo que JUMPINGJACK_MIN_REP_SECONDS/KNEERAISE_MIN_REP_SECONDS:
+// flexiones no tenía umbral propio y usaba el genérico MIN_REP_SECONDS (0.3s),
+// que puede descartar como "ruido" una flexión rápida real.
+const PUSHUP_MIN_REP_SECONDS = 0.15;
 // Cierre de serie por romper la postura (te levantas): usa el mismo
 // tilt que el gate de armado pero con MENOS sensibilidad a propósito —
 // ver el fallo real que arregla en el docstring de processPushup: con
@@ -5350,21 +5369,24 @@ class WorkoutSession {
         );
       }
     } else if (this.state === "top") {
-      if (elbowAngle <= PUSHUP_DOWN_ANGLE_DEG) {
-        // Empieza a bajar: arranca la flexión.
+      if (elbowAngle <= PUSHUP_COUNT_DOWN_ANGLE_DEG) {
+        // Empieza a bajar: arranca la flexión. Umbral de CONTEO (con
+        // margen, ver PUSHUP_FAST_REP_TOLERANCE_DEG), no el estricto de
+        // PUSHUP_DOWN_ANGLE_DEG usado para el gate de armado.
         this.state = "bottom";
         this.repStartTime = now;
       }
-    } else if (elbowAngle >= PUSHUP_UP_ANGLE_DEG) {
-      // El brazo ha vuelto a estar recto: repetición completa.
-      this.countRep((now - this.repStartTime) / 1000, now, "Flexión");
+    } else if (elbowAngle >= PUSHUP_COUNT_UP_ANGLE_DEG) {
+      // El brazo ha vuelto a estar recto (con el mismo margen de conteo):
+      // repetición completa.
+      this.countRep((now - this.repStartTime) / 1000, now, "Flexión", PUSHUP_MIN_REP_SECONDS);
       this.state = "top";
     }
 
     if (this.debugEl) {
       this.debugEl.textContent =
         `ángulo codo (${useLeft ? "izq" : "der"}): ${elbowAngle.toFixed(0)}° | inclinación: ${tilt.toFixed(0)}° | estado: ${this.state ?? "esperando"} ` +
-        `(abajo ≤${PUSHUP_DOWN_ANGLE_DEG}°, arriba ≥${PUSHUP_UP_ANGLE_DEG}°)`;
+        `(abajo ≤${PUSHUP_COUNT_DOWN_ANGLE_DEG}°, arriba ≥${PUSHUP_COUNT_UP_ANGLE_DEG}°)`;
     }
   }
 
@@ -5515,21 +5537,24 @@ class WorkoutSession {
         );
       }
     } else if (this.state === "top") {
-      if (elbowAngle <= PUSHUP_DOWN_ANGLE_DEG) {
-        // Empieza a bajar: arranca la flexión.
+      if (elbowAngle <= PUSHUP_COUNT_DOWN_ANGLE_DEG) {
+        // Empieza a bajar: arranca la flexión. Umbral de CONTEO (con
+        // margen, ver PUSHUP_FAST_REP_TOLERANCE_DEG), no el estricto de
+        // PUSHUP_DOWN_ANGLE_DEG usado para el gate de armado.
         this.state = "bottom";
         this.repStartTime = now;
       }
-    } else if (elbowAngle >= PUSHUP_UP_ANGLE_DEG) {
-      // El brazo ha vuelto a estar recto: repetición completa.
-      this.countRep((now - this.repStartTime) / 1000, now, "Flexión inclinada");
+    } else if (elbowAngle >= PUSHUP_COUNT_UP_ANGLE_DEG) {
+      // El brazo ha vuelto a estar recto (con el mismo margen de conteo):
+      // repetición completa.
+      this.countRep((now - this.repStartTime) / 1000, now, "Flexión inclinada", PUSHUP_MIN_REP_SECONDS);
       this.state = "top";
     }
 
     if (this.debugEl) {
       this.debugEl.textContent =
         `ángulo codo (${useLeft ? "izq" : "der"}): ${elbowAngle.toFixed(0)}° | pies sobre manos: ${(footRise * 100).toFixed(0)}% tronco (mínimo ${(INCLINE_PUSHUP_MIN_FOOT_RISE_FACTOR * 100).toFixed(0)}%) | estado: ${this.state ?? "esperando"} ` +
-        `(abajo ≤${PUSHUP_DOWN_ANGLE_DEG}°, arriba ≥${PUSHUP_UP_ANGLE_DEG}°)`;
+        `(abajo ≤${PUSHUP_COUNT_DOWN_ANGLE_DEG}°, arriba ≥${PUSHUP_COUNT_UP_ANGLE_DEG}°)`;
     }
   }
 
