@@ -7,6 +7,11 @@ ejercicios de cámara (calentamiento propiamente dicho) con movilidad
 articular, con un único set ligero cada uno -- no es un bloque de
 fuerza, es la parte de antes/después de la sesión de verdad.
 
+Los ejercicios bilaterales/direccionales (un lado y luego el otro, o un
+sentido y luego el otro -- círculos de brazos, estiramientos de brazo
+cruzado, etc.) van a DOS series completas, una por lado/sentido -- no
+una sola serie repartida entre los dos. Ver la nota junto a ROUTINES.
+
 Idempotente: si ya existe un Routine con ese nombre para este usuario,
 se actualiza (borra y vuelve a crear sus RoutineItem) en vez de
 duplicarlo -- para poder reajustar la lista de ejercicios re-lanzando
@@ -25,6 +30,26 @@ from tasks.utils import get_current_user
 # aparte del calentamiento propiamente dicho) que llevan su propio
 # número. Los ejercicios de movilidad (cuello/muñeca/cadera/pierna)
 # van a 30 reps -- ajustado a petición de Alex (antes 8).
+#
+# BILATERALES/DIRECCIONALES -- a petición de Alex: cualquier ejercicio
+# que se hace "un lado y luego el otro" o "un sentido y luego el otro"
+# (círculos de brazos: horario y luego antihorario; giros de cuello;
+# zancada dividida: pierna izq. y luego dcha.; estiramientos sujetando
+# un brazo/pierna: uno y luego el otro...) lleva DOS series completas
+# de 30, no una sola de 30 repartida entre los dos lados/sentidos:
+#   - Ejercicios de cámara (pose): target_sets=2 en vez de 1 -- el
+#     propio circuito exige acabar la 2ª serie de 30 reps antes de
+#     pasar al siguiente ejercicio (cambias de lado/sentido entre
+#     serie y serie, eso lo decides tú, no lo fuerza el contador).
+#   - Ejercicios cronometrados (timed: brazo cruzado, tríceps por
+#     detrás, isquios sentado, cuádriceps de pie): no existen "series"
+#     para un timed (RoutineItem no las usa en ese modo), así que el
+#     mismo slug aparece DOS VECES seguidas en la lista -- dos cuentas
+#     atrás de 30s independientes, una por lado.
+# Los simétricos (jumping jacks, flexiones, tijera de brazos, rotación
+# de muñeca entrelazada, cadera adelante-atrás, rodillas altas, talón
+# al glúteo, medio giro de cuello) se quedan con una sola serie: ya
+# trabajan los dos lados a la vez o no tienen lado/sentido que alternar.
 ROUTINES = [
     {
         "name": "Calentamiento y estiramiento — tren superior",
@@ -32,16 +57,18 @@ ROUTINES = [
         # Orden de arriba a abajo del cuerpo: cuello, brazos, muñecas,
         # jumping jacks, flexiones (a petición de Alex).
         "items": [
-            ("neck-circles", 1, 30),
-            ("neck-lateral-mobility", 1, 30),
-            ("neck-turn-side", 1, 30),
-            ("neck-half-turn", 1, 30),
-            ("arm-circles", 1, 30),
-            ("arm-scissors", 1, 30),
-            ("arm-cross-stretch", None, None),        # cronometrado: brazo estirado, sujeto con el otro
-            ("triceps-overhead-stretch", None, None),  # cronometrado: brazo hacia atrás, sujeto con el otro
-            ("forearm-rotation-elbow-hold", 1, 30),
-            ("wrist-rotation-interlaced", 1, 30),
+            ("neck-circles", 2, 30),           # bilateral: sentido horario y antihorario
+            ("neck-lateral-mobility", 2, 30),  # bilateral: inclinación izq. y dcha.
+            ("neck-turn-side", 2, 30),         # bilateral: giro izq. y dcha.
+            ("neck-half-turn", 1, 30),         # simétrico (barrido adelante-atrás)
+            ("arm-circles", 2, 30),            # bilateral: sentido horario y antihorario
+            ("arm-scissors", 1, 30),           # simétrico (los dos brazos a la vez)
+            ("arm-cross-stretch", None, None),        # cronometrado, bilateral -- serie 1: un brazo
+            ("arm-cross-stretch", None, None),        # cronometrado, bilateral -- serie 2: el otro brazo
+            ("triceps-overhead-stretch", None, None),  # cronometrado, bilateral -- serie 1: un brazo
+            ("triceps-overhead-stretch", None, None),  # cronometrado, bilateral -- serie 2: el otro brazo
+            ("forearm-rotation-elbow-hold", 2, 30),    # bilateral: sentido horario y antihorario
+            ("wrist-rotation-interlaced", 1, 30),      # simétrico (las dos muñecas entrelazadas)
             ("jumping-jack", 1, 30),
             ("push-up", 1, 10),
         ],
@@ -52,15 +79,17 @@ ROUTINES = [
         # Mismo criterio que tren superior: de arriba a abajo del cuerpo,
         # con jumping jacks y rodillas altas como los dos últimos.
         "items": [
-            ("hip-forward-back", 1, 30),
-            ("hip-lateral-mobility", 1, 30),
-            ("split-squat-warmup", 1, 30),
-            ("leg-rotation", 1, 30),
+            ("hip-forward-back", 1, 30),          # simétrico (adelante-atrás con las dos caderas)
+            ("hip-lateral-mobility", 2, 30),      # bilateral: cadera izq. y dcha.
+            ("split-squat-warmup", 2, 30),        # bilateral: pierna izq. delante y dcha. delante
+            ("leg-rotation", 2, 30),              # bilateral: sentido horario y antihorario
             ("jumping-jack", 1, 30),
             ("knee-raises", 1, 30),
             ("heel-kicks", 1, 30),
-            ("seated-hamstring-stretch", None, None),  # cronometrado, al final
-            ("standing-quad-stretch", None, None),     # cronometrado, al final del todo
+            ("seated-hamstring-stretch", None, None),  # cronometrado, bilateral -- serie 1: una pierna
+            ("seated-hamstring-stretch", None, None),  # cronometrado, bilateral -- serie 2: la otra pierna
+            ("standing-quad-stretch", None, None),     # cronometrado, bilateral -- serie 1: una pierna
+            ("standing-quad-stretch", None, None),     # cronometrado, bilateral -- serie 2: la otra pierna
         ],
     },
 ]
