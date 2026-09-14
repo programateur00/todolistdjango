@@ -3,6 +3,7 @@ Un objetivo del plan: lo que toca hoy, el camino que queda y lo que ya
 hiciste. Se usa igual para la medida principal y para los ejercicios de
 apoyo, así que va como bloque aparte.
 {% endcomment %}
+{% load plan_format %}
 
 <article class="plan-item">
     <header class="plan-item__head">
@@ -13,7 +14,8 @@ apoyo, así que va como bloque aparte.
     <p class="plan-item__now">
         Hoy:
         <strong>
-            {% if pack.target.reps %}{{ pack.target.sets }} × {{ pack.target.reps }}{% elif pack.target.seconds %}{{ pack.target.sets }} × {{ pack.target.seconds }}s{% else %}{{ pack.target.sets }} series al fallo{% endif %}
+            {% if pack.target.distance_km %}{{ pack.target.distance_km|floatformat:"-2" }} km{% if pack.target.pace_seconds_per_km %} a {{ pack.target.pace_seconds_per_km|pace_label }}{% endif %}
+            {% elif pack.target.reps %}{{ pack.target.sets }} × {{ pack.target.reps }}{% elif pack.target.seconds %}{{ pack.target.sets }} × {{ pack.target.seconds }}s{% else %}{{ pack.target.sets }} series al fallo{% endif %}
             {% if pack.target.weight_kg %}con {{ pack.target.weight_kg|floatformat:"-1" }} kg{% endif %}
         </strong>
         {% if pack.remaining %}<span class="plan-item__left">faltan {{ pack.remaining }} sesiones</span>{% endif %}
@@ -52,6 +54,7 @@ apoyo, así que va como bloque aparte.
     </details>
     {% endif %}
 
+    {% if not pack.item.is_flat %}
     <details class="plan-details">
         <summary>El camino completo ({{ pack.schedule|length }} escalones)</summary>
         <table class="plan-table">
@@ -65,7 +68,8 @@ apoyo, así que va como bloque aparte.
                         {% if forloop.counter0 == pack.step %}<span class="plan-here">aquí</span>{% endif %}
                     </td>
                     <td>
-                        {% if row.reps %}{{ row.sets }} × {{ row.reps }}{% elif row.seconds %}{{ row.sets }} × {{ row.seconds }}s{% else %}{{ row.sets }} series al fallo{% endif %}
+                        {% if row.distance_km %}{{ row.distance_km|floatformat:"-2" }} km{% if row.pace_seconds_per_km %} a {{ row.pace_seconds_per_km|pace_label }}{% endif %}
+                        {% elif row.reps %}{{ row.sets }} × {{ row.reps }}{% elif row.seconds %}{{ row.sets }} × {{ row.seconds }}s{% else %}{{ row.sets }} series al fallo{% endif %}
                         {% if row.weight_kg %}con {{ row.weight_kg|floatformat:"-1" }} kg{% endif %}
                         {% if row.done %}<span class="plan-item__done">destino</span>{% endif %}
                     </td>
@@ -74,6 +78,7 @@ apoyo, así que va como bloque aparte.
             </tbody>
         </table>
     </details>
+    {% endif %}
 
     <div class="plan-item__actions">
         {% if is_support %}

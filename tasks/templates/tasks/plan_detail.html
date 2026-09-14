@@ -1,4 +1,5 @@
 {% extends "tasks/base.html" %}
+{% load plan_format %}
 {% block title %}{{ plan.name }}{% endblock %}
 {% block content %}
 
@@ -77,7 +78,8 @@
     <div class="plan-head__now">
         <span class="plan-head__label">Hoy te toca</span>
         <span class="plan-head__target">
-            {% if headline.target.reps %}{{ headline.target.sets }} × {{ headline.target.reps }}{% elif headline.target.seconds %}{{ headline.target.sets }} × {{ headline.target.seconds }}s{% else %}{{ headline.target.sets }} series al fallo{% endif %}
+            {% if headline.target.distance_km %}{{ headline.target.distance_km|floatformat:"-2" }} km{% if headline.target.pace_seconds_per_km %} a {{ headline.target.pace_seconds_per_km|pace_label }}{% endif %}
+            {% elif headline.target.reps %}{{ headline.target.sets }} × {{ headline.target.reps }}{% elif headline.target.seconds %}{{ headline.target.sets }} × {{ headline.target.seconds }}s{% else %}{{ headline.target.sets }} series al fallo{% endif %}
             {% if headline.target.weight_kg %}<em>con {{ headline.target.weight_kg|floatformat:"-1" }} kg</em>{% endif %}
         </span>
     </div>

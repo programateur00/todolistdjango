@@ -2824,11 +2824,31 @@ class PlanItem(models.Model):
         nada": antes solo se veía el objetivo de hoy sin cambiar, sin
         decir que ya llevabas 3 de las 4 que hacían falta.
         """
-        if self.progression == self.PROG_COMPLETION:
+        if self.progression == self.PROG_COMPLETION or self.is_flat:
             return None
         successes, _ = self.successes_and_streak()
         per_step = max(1, self.sessions_per_step)
         return per_step - (successes % per_step)
+
+    @property
+    def is_flat(self):
+        """
+        True si el objetivo no cambia nunca de escalón a escalón — el
+        caso de running "sin progresión" (incremento y desaceleración a
+        cero, sin destino), pero también cualquier otra progresión sin
+        techo/destino puesto que por eso se queda fija en el punto de
+        partida para siempre (ver target_for_step).
+
+        Sirve para no enseñar pistas de "sube al siguiente escalón" ni
+        una tabla de 60 filas idénticas cuando en realidad no hay ningún
+        escalón que subir: antes de esto, cualquier progresión sin
+        destino (`sessions_to_goal() is None`) caía en el mismo tope fijo
+        de 60 filas como red de seguridad — pensado para progresiones que
+        SÍ siguen cambiando sin límite (reps sin techo), no para una que
+        ya no cambia nunca (p. ej. un plan de running de 10 km todos los
+        días).
+        """
+        return self.target_for_step(0) == self.target_for_step(1)
 
     # -------------------------------------------------------- objetivo
 

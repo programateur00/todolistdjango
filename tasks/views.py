@@ -1714,9 +1714,16 @@ def plan_detail(request, pk):
         # a todo. El tope es solo una red de seguridad.
         remaining = item.sessions_to_goal()
         _sessions_to_next_step = item.sessions_to_next_step()
-        rows = 60
         if remaining is not None:
             rows = min(120, item.current_step() + remaining // max(1, item.sessions_per_step) + 2)
+        elif item.is_flat:
+            # Sin destino Y el objetivo no cambia (running "sin
+            # progresión", o cualquier otra progresión sin meta puesta):
+            # con una fila basta, el tope de 60 de más abajo es para
+            # progresiones que SÍ siguen cambiando sin límite.
+            rows = 1
+        else:
+            rows = 60
         return {
             "item": item,
             "target": item.current_target(),

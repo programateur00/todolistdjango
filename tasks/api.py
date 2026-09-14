@@ -1274,7 +1274,11 @@ def plan_json(p, detail=False):
     }
     if detail:
         data["items"] = [_item(i) for i in p.items.select_related("exercise")]
-        data["schedule"] = head.schedule(60) if head else []
+        # Mismo criterio que la web (ver plan_detail en views.py): sin
+        # destino y con el objetivo fijo (running "sin progresión", o
+        # cualquier progresión sin meta puesta), una fila basta — 60
+        # filas idénticas no aportaban nada, solo confundían.
+        data["schedule"] = ([] if not head else head.schedule(1) if head.is_flat else head.schedule(60))
         data["history"] = head.history(12) if head else []
         if p.plan_type == Plan.PLAN_TYPE_STUDY and p.study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE:
             progress = p.course_progress()
