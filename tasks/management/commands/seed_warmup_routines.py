@@ -78,14 +78,14 @@ class Command(BaseCommand):
                 defaults={
                     "subcategory": plan["subcategory"],
                     "default_work_seconds": 30,
-                    "default_rest_seconds": 10,
+                    "default_rest_seconds": 0,
                     "is_warmup_bookend": True,
                 },
             )
             if not created:
                 routine.subcategory = plan["subcategory"]
                 routine.default_work_seconds = 30
-                routine.default_rest_seconds = 10
+                routine.default_rest_seconds = 0
                 routine.is_warmup_bookend = True
                 routine.save()
                 routine.items.all().delete()
