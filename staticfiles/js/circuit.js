@@ -120,19 +120,25 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   // -------------------------------------------------------- cronómetro
 
   function runTimer(item) {
+    // "Al fallo" (item.work vacío/null -- Plan.session_items(),
+    // PROG_FAILURE): no hay segundos objetivo que contar hacia atrás --
+    // se cuenta libremente hacia ADELANTE desde 0 hasta que el usuario
+    // decida que ha llegado al fallo, igual que en session-runner.js
+    // (móvil) / plan-session.js.
+    const isFailure = !item.work;
     playerHost.innerHTML = `
       <div class="circuit">
         <p class="circuit__progress">${esc(progressLabel())}</p>
         <div class="circuit__icon">${iconFor(item.slug)}</div>
         <h2 class="circuit__exercise-name">${esc(item.name)}</h2>
-        <p class="circuit__phase circuit__phase--work">Trabajo</p>
-        <div class="circuit__timer" id="run-timer">${fmt(item.work)}</div>
+        <p class="circuit__phase circuit__phase--work">${isFailure ? "Al fallo" : "Trabajo"}</p>
+        <div class="circuit__timer" id="run-timer">${fmt(item.work || 0)}</div>
         <p class="circuit__next">${hasNext() ? `Siguiente: ${esc(sequence[index + 1].name)}` : "¡Último ejercicio!"}</p>
         <div class="circuit__controls">
           <button type="button" class="workout__btn workout__btn--ghost" id="run-pause">Pausar</button>
-          <button type="button" class="workout__btn workout__btn--ghost" id="run-skip">Saltar ▸</button>
-          <button type="button" class="workout__btn workout__btn--ghost" id="run-quit">Terminar antes</button>
+          <button type="button" class="workout__btn workout__btn--primary" id="run-skip">${hasNext() ? "Siguiente ▸" : "Terminar"}</button>
         </div>
+        <button type="button" class="workout__btn workout__btn--subtle" id="run-quit">Terminar sesión antes</button>
       </div>`;
 
     let remaining = item.work;
@@ -144,8 +150,16 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     clearInterval(timerId);
     timerId = setInterval(() => {
       if (paused) return;
-      remaining -= 1;
       elapsed += 1;
+      if (isFailure) {
+        timerEl.textContent = fmt(elapsed);
+        if (isVoiceEnabled() && elapsed % 5 === 0 && elapsed !== lastSpokenNumber) {
+          lastSpokenNumber = elapsed;
+          speakOut(numeroEnPalabras(elapsed));
+        }
+        return;
+      }
+      remaining -= 1;
       if (remaining <= 0) {
         clearInterval(timerId);
         record({ exercise: item.slug, seconds: item.work });
@@ -214,24 +228,37 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         ? checkStandingQuadStretch
         : checkPlankPosture;
 
+    // "Al fallo" (item.work vacío/null -- PROG_FAILURE): sin objetivo de
+    // tiempo, ni cuenta atrás ni aviso de "objetivo cumplido" tienen
+    // sentido -- se cuenta libremente desde el principio y el botón
+    // principal para avanzar está disponible desde ya (como en runCamera),
+    // no escondido detrás de un objetivo que aquí no existe.
+    const isFailure = !item.work;
+
     playerHost.innerHTML = `
       <div class="circuit">
         <p class="circuit__progress">${esc(progressLabel())}</p>
         <h2 class="circuit__exercise-name">${esc(item.name)}</h2>
-        <p class="circuit__phase circuit__phase--work">Trabajo</p>
+        <p class="circuit__phase circuit__phase--work">${isFailure ? "Al fallo" : "Trabajo"}</p>
         <div class="workout__camera">
           <video id="posture-video" playsinline muted class="workout__video"></video>
           <canvas id="posture-canvas" class="workout__canvas"></canvas>
         </div>
         <p id="posture-status" class="workout__status">Preparando la cámara…</p>
         <p id="run-goal-banner" class="workout__goal-banner" hidden></p>
-        <div class="circuit__timer" id="run-timer">${fmt(item.work)}</div>
+        <div class="circuit__timer" id="run-timer">${fmt(0)}</div>
         <p class="circuit__next">${hasNext() ? `Siguiente: ${esc(sequence[index + 1].name)}` : "¡Último ejercicio!"}</p>
         <div class="circuit__controls">
-          <button type="button" class="workout__btn workout__btn--ghost" id="run-skip">Saltar ▸</button>
-          <button type="button" class="workout__btn workout__btn--ghost" id="run-quit">Terminar antes</button>
+          <button type="button" class="workout__btn ${isFailure ? "workout__btn--primary" : "workout__btn--ghost"}" id="run-skip">${
+            isFailure ? (hasNext() ? "Siguiente ▸" : "Terminar") : "Saltar ▸"
+          }</button>
         </div>
-        <p class="workout__note">La cuenta atrás se pausa sola mientras la postura no sea correcta. Si sigues después del objetivo, sigue sumando por encima del 100%.</p>
+        <button type="button" class="workout__btn workout__btn--subtle" id="run-quit">Terminar sesión antes</button>
+        <p class="workout__note">${
+          isFailure
+            ? "Aguanta hasta que ya no puedas y pulsa Siguiente/Terminar."
+            : "La cuenta atrás se pausa sola mientras la postura no sea correcta. Si sigues después del objetivo, sigue sumando por encima del 100%."
+        }</p>
       </div>`;
 
     // OJO: a diferencia de antes, llegar a item.work YA NO cierra el
@@ -331,6 +358,15 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       if (!postureOk) return; // pausado mientras la postura no sea válida
       elapsed += 1;
 
+      if (isFailure) {
+        timerEl.textContent = fmt(elapsed);
+        if (isVoiceEnabled() && elapsed % 5 === 0 && elapsed !== lastSpokenNumber) {
+          lastSpokenNumber = elapsed;
+          speakOut(numeroEnPalabras(elapsed));
+        }
+        return;
+      }
+
       if (!goalReached && elapsed < item.work) {
         // Cuenta atrás normal hacia el objetivo — igual que antes, pero
         // ahora además dicha en voz alta cada segundo (como cada
@@ -363,6 +399,8 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         // cumplido el objetivo (no se está saltando nada) — mismo texto
         // que usa workout.js para el botón equivalente en reps.
         skipBtn.textContent = hasNext() ? "Siguiente ▸" : "Terminar";
+        skipBtn.classList.remove("workout__btn--ghost");
+        skipBtn.classList.add("workout__btn--primary");
         timerEl.textContent = "+0";
         return;
       }
@@ -384,7 +422,11 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   // -------------------------------------------------------------- cámara
 
   async function runCamera(item) {
-    const objetivo = item.target_reps ? `${item.target_sets} × ${item.target_reps}` : `${item.target_sets} × ${item.work}s`;
+    // "Al fallo" (PROG_FAILURE): sin target_reps, no hay número que pedir
+    // -- ver el mismo caso en runTimer/runTimerWithPosture.
+    const objetivo = item.target_reps
+      ? `${item.target_sets} × ${item.target_reps}`
+      : `${item.target_sets} series al fallo`;
     const fuente =
       item.target_source === "plan"
         ? `<span class="run-plan">plan «${esc(item.plan_name || "")}»</span>`

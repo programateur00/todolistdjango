@@ -114,6 +114,15 @@ CORS_URLS_REGEX = r"^/api/.*$"
 BASIC_AUTH_USER = os.environ.get("BASIC_AUTH_USER", "")
 BASIC_AUTH_PASSWORD = os.environ.get("BASIC_AUTH_PASSWORD", "")
 
+# --------------------------------------------------------------
+# TOKEN DEL REGISTRO DE DEPURACIÓN (botón 📋, ver DebugLog en models.py)
+# Aparte del candado de arriba a propósito -- así se puede leer el
+# registro (tasks/api.py: debug_log_create/debug_log_latest) sin dar la
+# contraseña real de la app. Sin esta variable definida, esos dos
+# endpoints rechazan cualquier petición (ver _debug_log_token_ok).
+# --------------------------------------------------------------
+DEBUG_LOG_TOKEN = os.environ.get("DEBUG_LOG_TOKEN", "")
+
 
 # --------------------------------------------------------------
 # Cookies seguras en producción.

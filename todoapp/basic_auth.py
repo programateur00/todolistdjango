@@ -26,6 +26,14 @@ class BasicAuthMiddleware:
         if not settings.BASIC_AUTH_USER or not settings.BASIC_AUTH_PASSWORD:
             return self.get_response(request)
 
+        # El registro de depuración (botón 📋) lleva su propio token corto
+        # en la URL/petición (settings.DEBUG_LOG_TOKEN, ver
+        # tasks/api.py: debug_log_create/debug_log_latest) precisamente
+        # para poder leerlo sin la contraseña real de la app -- así que
+        # aquí NO se le exige además el candado general.
+        if request.path.startswith("/api/debug-log/"):
+            return self.get_response(request)
+
         auth_header = request.META.get("HTTP_AUTHORIZATION")
         if auth_header:
             try:

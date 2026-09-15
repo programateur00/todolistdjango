@@ -23,6 +23,14 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 // logScissor) de verdad ayuda a diagnosticar.
 const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v1+wristrotation-v2+standingquadstretch-v1+hipforwardback-v3";
 
+// Token del registro de depuración remoto (ver settings.DEBUG_LOG_TOKEN
+// en el backend) -- exportScissorLog() lo manda junto al registro para
+// que el endpoint sepa que es una petición legítima. No es la
+// contraseña de la app (esto NO va detrás de BasicAuthMiddleware, ver
+// todoapp/basic_auth.py) -- si algún día se rota, cambia también aquí,
+// en mobile-app/www/js/workout.js y en el DEBUG_LOG_TOKEN del servidor (.env).
+const DEBUG_LOG_TOKEN = "R4Xg0yUJWyZKObyTH4lhOlVkzJbpKvny";
+
 // Umbral de movimiento (proporcional al ancho de hombros) para
 // considerar que hay un cambio de estado real y no ruido de la cámara.
 const MOVE_FACTOR = 0.12;
@@ -44,6 +52,13 @@ const HANG_MARGIN_FACTOR = 0.08; // cuanto tienen que estar las munecas por enci
 const RELEASE_MARGIN_FACTOR = 0.15;
 const SCALE_TOLERANCE = 0.3; // cuanto puede variar el ancho de hombros (te acercas/alejas) antes de desconfiar del frame
 const MIN_REP_SECONDS = 0.3; // por debajo de esto, se descarta como ruido
+const PERF_LOG_EVERY_N_FRAMES = 90; // cada cuantos frames se vuelca al registro [perf] (ver loop()) un resumen de ms/frame real de detectForVideo -- ~3s a 30fps, ~1.5s a 60fps
+// Prueba hecha 2026-09-15 en el Redmi A5 de Alex: "GPU" prom=114.8ms/9fps
+// vs "CPU" prom=215.0ms/5fps (casi el doble de lento) — confirma que la
+// GPU SÍ acelera de verdad en este dispositivo. ~9-11fps con GPU es el
+// techo real del hardware para el modelo full, no un fallback oculto a
+// CPU esperando a activarse. Dejar en "GPU" (mejor opción confirmada).
+const POSE_DELEGATE = "GPU";
 // La voz solo anuncia multiplos de N (N, 2N, 3N...) -- decirlas TODAS no
 // daba tiempo a seguir el ritmo real de la serie en los ejercicios muy
 // rapidos. Antes N=5 era fijo para todos los ejercicios; ahora es por
@@ -409,11 +424,46 @@ const PUSHUP_LINE_MIN_DEG = 150;   // hombro-cadera-tobillo casi recto (cuerpo e
 // empieza a contar de más (bajarlo).
 const PUSHUP_FAST_REP_TOLERANCE_DEG = 10;
 const PUSHUP_COUNT_DOWN_ANGLE_DEG = PUSHUP_DOWN_ANGLE_DEG + PUSHUP_FAST_REP_TOLERANCE_DEG; // 100° — dispara "abajo" con un poco más de margen
-const PUSHUP_COUNT_UP_ANGLE_DEG = PUSHUP_UP_ANGLE_DEG - PUSHUP_FAST_REP_TOLERANCE_DEG;     // 150° — dispara "arriba"/cuenta la rep con un poco más de margen
+// Registro real (2026-09-15, Redmi A5, flexiones rápidas de verdad, log
+// completo vía Compartir): con el umbral simétrico de 150° para "arriba",
+// una tanda de ~3 flexiones físicas rápidas y seguidas quedó comprimida en
+// UNA sola rep contada de 3.0s — el codo oscilaba entre ~66° y ~149° sin
+// llegar nunca a 150°, así que el estado se quedaba en "bottom" todo el
+// rato y no volvía a armarse entre repetición y repetición. No es
+// undersampling (el ángulo sí se ve, solo que no llega al umbral) — es que
+// al encadenar flexiones rápidas no se bloquea el codo del todo entre una
+// y la siguiente, algo normal haciendo series rápidas de verdad.
+// Solución: separar el umbral de "vuelta arriba para poder contar la
+// siguiente" (rearm) del umbral de profundidad. La profundidad (abajo,
+// PUSHUP_COUNT_DOWN_ANGLE_DEG=100°) NO se toca — ahí es donde se decide si
+// la flexión fue completa de verdad. Para el rearm basta con alejarse lo
+// bastante del fondo como para distinguir una repetición real de ruido de
+// la cámara, sin exigir el bloqueo de codo completo: con los datos de
+// arriba, 130° habría separado esa tanda en ~3 repeticiones distintas en
+// vez de 1 (quedan margen de 30° tanto respecto al umbral de bajada como
+// respecto a los picos reales registrados, 142-149°).
+const PUSHUP_REARM_TOLERANCE_DEG = 30;
+const PUSHUP_COUNT_UP_ANGLE_DEG = PUSHUP_UP_ANGLE_DEG - PUSHUP_REARM_TOLERANCE_DEG;         // 130° — solo rearma el conteo, no mide profundidad
 // Mismo motivo que JUMPINGJACK_MIN_REP_SECONDS/KNEERAISE_MIN_REP_SECONDS:
 // flexiones no tenía umbral propio y usaba el genérico MIN_REP_SECONDS (0.3s),
 // que puede descartar como "ruido" una flexión rápida real.
 const PUSHUP_MIN_REP_SECONDS = 0.15;
+// Registro real (2026-09-15, mismo test que PUSHUP_REARM_TOLERANCE_DEG):
+// el armado tardó 11+ de los 16s totales porque el intento de "postura
+// confirmada" se reiniciaba una y otra vez — el codo, estando REALMENTE
+// quieto en plancha, oscilaba entre lecturas de ~149-159° y de repente
+// ~161-166°, y como armsStraight exigía elbowAngle >= PUSHUP_UP_ANGLE_DEG
+// (160°) EN CADA FRAME, un solo frame a 157-158° (2-3° por debajo)
+// reiniciaba groundStableSince a null y tiraba los ON_GROUND_STABLE_MS ya
+// acumulados — pasó 3 veces seguidas antes de que un tramo de suerte se
+// mantuviera 600ms sin bajar de 160. Esto es ruido normal de estimación
+// de landmarks estando parado, no falta de postura real. El umbral de
+// PROFUNDIDAD/calidad de la flexión en sí (PUSHUP_DOWN_ANGLE_DEG=90,
+// PUSHUP_UP_ANGLE_DEG=160 como referencia de "recto de verdad") no se
+// toca — esto solo afecta a si cuenta como "brazos estirados" para EMPEZAR
+// a armar el contador, no a si una repetición cuenta como completa.
+const PUSHUP_ARM_GATE_TOLERANCE_DEG = 15;
+const PUSHUP_ARM_GATE_ANGLE_DEG = PUSHUP_UP_ANGLE_DEG - PUSHUP_ARM_GATE_TOLERANCE_DEG; // 145°
 // Cierre de serie por romper la postura (te levantas): usa el mismo
 // tilt que el gate de armado pero con MENOS sensibilidad a propósito —
 // ver el fallo real que arregla en el docstring de processPushup: con
@@ -3234,6 +3284,20 @@ class WorkoutSession {
     this.scissorTrackB = null;        // tijeretas: lo mismo para la pierna rastreada "2"
     this.scissorSwitchCount = 0;      // tijeretas: cambios de pierna confirmados desde que se armó — una repetición es un vaivén COMPLETO, así que solo se cuenta cada dos cambios
     this.scissorLog = [];             // tijeretas: registro de depuración en memoria (ver logScissor/exportScissorLog)
+    // Instrumentación de rendimiento (2026-09-15): reportado que tras un
+    // cambio que NO toca loop()/drawOverlay()/el modelo, el punto de la
+    // nariz se ve con menos fps. Se mide el tiempo real de cada
+    // detectForVideo() (ver loop()) y se vuelca un resumen cada
+    // PERF_LOG_EVERY_N_FRAMES frames al mismo registro que exporta el
+    // botón 📋, para tener un número real (ms/frame) en vez de
+    // depender de la sensación al usarlo. "GPU" en baseOptions.delegate
+    // es solo lo que se PIDE al crear el PoseLandmarker — la librería
+    // puede caer a CPU sin avisar si el dispositivo/WebView no soporta
+    // bien la aceleración; un ms/frame alto es la señal indirecta de que
+    // eso ha pasado (o de que el móvil está limitado por otro motivo:
+    // térmico, ahorro de batería, otra app en segundo plano).
+    this.perfFrameTimes = [];
+    this.perfLoggedOnce = false;
     // DECIMOCUARTO BUG REAL (2026-09-04): este tope se puso en 900
     // pensando en "de sobra para unos 30s a 30fps" — es decir, 1 línea
     // por frame. Pero processDip (y el resto de ejercicios) escriben DOS
@@ -3542,26 +3606,104 @@ class WorkoutSession {
     // todo). Si no coincide con la última entregada, el registro entero es
     // de una copia vieja del código — no hace falta adivinarlo.
     const text = `=== workout.js build: ${WORKOUT_JS_BUILD} ===\n` + this.scissorLog.join("\n");
+    const filename = `${this.counterKey}-debug.txt`;
+    const n = this.scissorLog.length;
+
+    // 0. Directo al servidor (DebugLog, ver tasks/api.py): antes había
+    // que compartirlo/copiarlo y reenviarlo a mano al chat -- un paso de
+    // más que se pidió quitar. Best-effort: si falla no bloquea nada de
+    // lo de abajo, que sigue funcionando exactamente igual que antes.
+    // Sin X-CSRFToken a propósito -- debug_log_create es @csrf_exempt
+    // (no usa cookies de sesión para autenticarse, lleva su propio
+    // token, ver DEBUG_LOG_TOKEN arriba).
+    //
+    // Se pide una explicación en texto libre antes de mandarlo ("me han
+    // fallado X dominadas") -- así queda guardada junto al registro sin
+    // tener que adivinar qué pasó solo a partir de los números. Cancelar
+    // el cuadro (Cancelar/Esc) no bloquea el envío, solo se manda sin nota.
+    const note = (window.prompt("¿Qué ha pasado? (opcional -- se manda junto al registro)", "") || "").trim();
+    let remoteSent = false;
+    try {
+      const resp = await fetch("/api/debug-log/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: DEBUG_LOG_TOKEN, platform: "web",
+          counter_key: this.counterKey, build: WORKOUT_JS_BUILD, note, content: text,
+        }),
+      });
+      remoteSent = resp.ok;
+    } catch (e) {
+      console.warn("No se pudo mandar el registro al servidor:", e);
+    }
+
+    // 1. Web Share API con archivo adjunto (2026-09-15): confirmado que
+    // un <a download> normal NO llega a Descargas dentro del WebView de
+    // Capacitor de la app móvil (probado por Alex, no aparecía nada). El
+    // panel nativo de "Compartir" sí está pensado para sacar un archivo
+    // de una WebView — desde ahí se puede elegir "Guardar en Archivos" o
+    // mandarlo directo a la app de chat que sea. Se intenta primero
+    // porque es la vía que de verdad funciona en el móvil; en escritorio
+    // normalmente no está disponible y se pasa a las reservas de abajo.
+    try {
+      const file = new File([text], filename, { type: "text/plain" });
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: filename });
+        this.debugExportStatusEl.textContent =
+          `${remoteSent ? "Enviado ✓ y c" : "C"}ompartido (${n} líneas, build ${WORKOUT_JS_BUILD}) — elige "Guardar en Archivos" o mándalo ` +
+          "directo desde el panel de compartir.";
+        return;
+      }
+    } catch (e) {
+      if (e?.name === "AbortError") {
+        // El usuario cerró el panel de compartir sin elegir nada -- no es un fallo real, no hay nada más que hacer.
+        this.debugExportStatusEl.textContent = "Panel de compartir cerrado sin enviar nada.";
+        return;
+      }
+      console.warn("navigator.share con archivo falló, se prueba portapapeles/descarga:", e);
+    }
+
+    // 2. Portapapeles (reserva si el share no está disponible -- pegar
+    // un registro muy largo donde se vaya a mandar puede cortarse, por
+    // eso se intenta compartir primero).
+    let copied = false;
     try {
       await navigator.clipboard.writeText(text);
-      this.debugExportStatusEl.textContent = `Copiado al portapapeles (${this.scissorLog.length} líneas, build ${WORKOUT_JS_BUILD}) — ya puedes pegarlo donde lo quieras mandar.`;
+      copied = true;
     } catch (e) {
-      console.warn("No se pudo copiar el registro al portapapeles, se descarga como archivo:", e);
-      try {
-        const blob = new Blob([text], { type: "text/plain" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${this.counterKey}-debug.txt`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-        this.debugExportStatusEl.textContent = `Descargado como archivo (${this.scissorLog.length} líneas, build ${WORKOUT_JS_BUILD}).`;
-      } catch (e2) {
-        console.error("Tampoco se pudo descargar el registro:", e2);
-        this.debugExportStatusEl.textContent = "No se ha podido copiar ni descargar — mira la consola del navegador (F12).";
-      }
+      console.warn("No se pudo copiar el registro al portapapeles:", e);
+    }
+
+    // 3. Descarga como archivo (último recurso -- fiable en navegador de
+    // escritorio).
+    let downloaded = false;
+    try {
+      const blob = new Blob([text], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      downloaded = true;
+    } catch (e2) {
+      console.error("No se pudo descargar el registro como archivo:", e2);
+    }
+
+    const prefix = remoteSent ? "Enviado ✓ y c" : "C";
+    if (copied && downloaded) {
+      this.debugExportStatusEl.textContent =
+        `${prefix}opiado al portapapeles y descargado como archivo (${n} líneas, build ${WORKOUT_JS_BUILD}).`;
+    } else if (copied) {
+      this.debugExportStatusEl.textContent = `${prefix}opiado al portapapeles (${n} líneas, build ${WORKOUT_JS_BUILD}) — ya puedes pegarlo donde lo quieras mandar.`;
+    } else if (downloaded) {
+      this.debugExportStatusEl.textContent = `${remoteSent ? "Enviado ✓ y d" : "D"}escargado como archivo (${n} líneas, build ${WORKOUT_JS_BUILD}).`;
+    } else if (remoteSent) {
+      this.debugExportStatusEl.textContent = `Enviado ✓ (${n} líneas, build ${WORKOUT_JS_BUILD}) — no se ha podido además copiar/descargar, pero esto sí ha llegado.`;
+    } else {
+      this.debugExportStatusEl.textContent = "No se ha podido copiar, descargar ni enviar — mira la consola del navegador (F12).";
     }
   }
 
@@ -3748,10 +3890,15 @@ class WorkoutSession {
       const { FilesetResolver, PoseLandmarker } = await import(MEDIAPIPE_BUNDLE_URL);
       const vision = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_BASE_URL);
       this.poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-        baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
+        baseOptions: { modelAssetPath: MODEL_URL, delegate: POSE_DELEGATE },
         runningMode: "VIDEO",
         numPoses: 1,
       });
+      this.logScissor(
+        `[perf] PoseLandmarker creado pidiendo delegate=${POSE_DELEGATE} (con "GPU" la librería no ` +
+        "confirma si de verdad lo consigue usar o cae a CPU en silencio — comparar el resumen [perf] " +
+        "de más abajo entre una prueba con cada valor es la forma indirecta de saberlo)."
+      );
     } catch (err) {
       this.announceStatus("No se pudo cargar el modelo de seguimiento. Comprueba tu conexión y recarga.");
       console.error(err);
@@ -4240,7 +4387,23 @@ class WorkoutSession {
   loop() {
     if (!this.running) return;
     const now = performance.now();
+    const detectStart = performance.now();
     const result = this.poseLandmarker.detectForVideo(this.video, now);
+    this.perfFrameTimes.push(performance.now() - detectStart);
+    if (this.perfFrameTimes.length >= PERF_LOG_EVERY_N_FRAMES) {
+      const times = this.perfFrameTimes;
+      const avg = times.reduce((a, b) => a + b, 0) / times.length;
+      const max = Math.max(...times);
+      const min = Math.min(...times);
+      const impliedFps = avg > 0 ? 1000 / avg : 0;
+      this.logScissor(
+        `[perf] detectForVideo: prom=${avg.toFixed(1)}ms (min ${min.toFixed(1)} / max ${max.toFixed(1)}) ` +
+        `sobre ${times.length} frames ≈ ${impliedFps.toFixed(0)} fps de seguimiento real` +
+        (this.perfLoggedOnce ? "" : " (primera lectura tras armar/empezar a moverte)")
+      );
+      this.perfLoggedOnce = true;
+      this.perfFrameTimes = [];
+    }
     this.drawOverlay(result);
     this.processResult(result, now);
     requestAnimationFrame(() => this.loop());
@@ -5340,7 +5503,9 @@ class WorkoutSession {
       // te colocas. Es la misma posición de plancha con la que se
       // arranca una serie de flexiones real.
       const bodyStraight = lineAngle >= PUSHUP_LINE_MIN_DEG;
-      const armsStraight = elbowAngle >= PUSHUP_UP_ANGLE_DEG;
+      // PUSHUP_ARM_GATE_ANGLE_DEG (145°), no PUSHUP_UP_ANGLE_DEG (160°) —
+      // ver el porqué justo encima de PUSHUP_ARM_GATE_TOLERANCE_DEG.
+      const armsStraight = elbowAngle >= PUSHUP_ARM_GATE_ANGLE_DEG;
 
       if (onGround && bodyStraight && armsStraight) {
         if (this.groundStableSince === null) this.groundStableSince = now;
@@ -5507,7 +5672,9 @@ class WorkoutSession {
       // (brazos estirados, manos a la altura del pecho, codos pegados al
       // cuerpo, cuerpo estirado) Y con los pies claramente en alto —
       // sostenida un rato, no un solo frame.
-      const armsStraight = elbowAngle >= PUSHUP_UP_ANGLE_DEG;
+      // PUSHUP_ARM_GATE_ANGLE_DEG (145°), no PUSHUP_UP_ANGLE_DEG (160°) —
+      // mismo motivo que en processPushup (ver PUSHUP_ARM_GATE_TOLERANCE_DEG).
+      const armsStraight = elbowAngle >= PUSHUP_ARM_GATE_ANGLE_DEG;
 
       if (inPosition && armsStraight) {
         if (this.groundStableSince === null) this.groundStableSince = now;
@@ -8961,6 +9128,37 @@ class WorkoutSession {
       if (this.repsEl) this.repsEl.textContent = "0";
       this.setClosedAt = performance.now();
       this.restBlockedVoiceGiven = false;
+      // "Al fallo" (this.targetReps null -- PROG_FAILURE, ver el objetivo
+      // del constructor): countRep() ya avisa de "objetivo cumplido"
+      // cuando hay targetReps, pero eso no puede pasar aquí porque no hay
+      // ningún número de reps que comprobar en marcha -- el único
+      // objetivo real es el número de SERIES, y solo se sabe si se ha
+      // cumplido cuando una serie se cierra de verdad (aquí), no antes.
+      // Mismo aviso/sonido que el de countRep(), una sola vez por sesión
+      // (this.targetAnnounced) y ANTES de announceSetComplete para que
+      // se oiga primero "objetivo cumplido" y después "serie terminada".
+      if (this.targetSets && !this.targetReps && !this.targetAnnounced &&
+          this.sets.length >= this.targetSets) {
+        this.targetAnnounced = true;
+        if (this.voiceEnabled) speakOut("Objetivo de la sesión cumplido. Has llegado a las series que tocaban. Puedes seguir si quieres, o pasar al siguiente ejercicio.", { flush: false });
+        if (this.goalBannerEl) {
+          this.goalBannerEl.hidden = false;
+          this.goalBannerEl.textContent = "🎯 ¡Objetivo de la sesión cumplido! Has llegado a las series que tocaban. Puedes seguir si quieres, o pasar al siguiente ejercicio.";
+        }
+        try {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          [0, 0.14].forEach((t, i) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.frequency.value = i === 0 ? 880 : 1175;
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            gain.gain.setValueAtTime(0.18, ctx.currentTime + t);
+            osc.start(ctx.currentTime + t);
+            osc.stop(ctx.currentTime + t + 0.13);
+          });
+        } catch (e) { /* si el navegador bloquea audio, no pasa nada */ }
+      }
       // El aviso de descanso obligatorio SÍ tiene que oírse — por eso va
       // antes de silenciar la voz (restVoiceQuiet), no después.
       this.announceSetComplete(`Serie de ${closedReps}`, waitingMessage);
@@ -9299,6 +9497,34 @@ class WorkoutSession {
         waitingMessage = "Vuelve a standby (de pie, brazos sueltos) y prueba con la otra pierna.";
       } else {
         waitingMessage = this.postureWaitingMessage();
+      }
+      // "Al fallo" (this.targetSeconds null -- PROG_FAILURE): aquí no hay
+      // segundos objetivo por tramo, así que notePostureOk() nunca avisa
+      // de "objetivo cumplido" (ver ese método) -- lo único prescrito es
+      // el número de SERIES, y solo se sabe si se ha cumplido al cerrar
+      // una serie de verdad, aquí. Mismo mecanismo que closeActiveSet()
+      // para el caso equivalente en reps.
+      if (this.targetSets && !this.targetSeconds && !this.targetAnnounced &&
+          this.sets.length >= this.targetSets) {
+        this.targetAnnounced = true;
+        if (this.voiceEnabled) speakOut("Objetivo de la sesión cumplido. Has llegado a las series que tocaban. Puedes seguir si quieres, o pasar al siguiente ejercicio.", { flush: false });
+        if (this.goalBannerEl) {
+          this.goalBannerEl.hidden = false;
+          this.goalBannerEl.textContent = "🎯 ¡Objetivo de la sesión cumplido! Has llegado a las series que tocaban. Puedes seguir si quieres, o pasar al siguiente ejercicio.";
+        }
+        try {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          [0, 0.14].forEach((t, i) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.frequency.value = i === 0 ? 880 : 1175;
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            gain.gain.setValueAtTime(0.18, ctx.currentTime + t);
+            osc.start(ctx.currentTime + t);
+            osc.stop(ctx.currentTime + t + 0.13);
+          });
+        } catch (e) { /* si el navegador bloquea audio, no pasa nada */ }
       }
       this.announceSetComplete(`Serie de ${formatHoldSeconds(held)}`, waitingMessage);
       this.restVoiceQuiet = true;

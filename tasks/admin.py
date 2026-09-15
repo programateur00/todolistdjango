@@ -1,8 +1,8 @@
 from django.contrib import admin
 
 from .models import (
-    CourseModule, CoursePlaylist, CourseQuiz, Exercise, Occurrence, Plan, PlanItem, Routine,
-    RoutineItem, SavedVideo, Task, WorkoutSession,
+    CourseModule, CoursePlaylist, CourseQuiz, DebugLog, Exercise, Occurrence, Plan, PlanItem,
+    Routine, RoutineItem, SavedVideo, Task, WorkoutSession,
 )
 
 
@@ -143,3 +143,16 @@ class CourseQuizAdmin(admin.ModelAdmin):
     search_fields = ("plan__name", "plan__language_name")
     readonly_fields = ("topics", "questions", "answers")
     list_per_page = 50
+
+
+@admin.register(DebugLog)
+class DebugLogAdmin(admin.ModelAdmin):
+    # Solo lectura: esto lo escribe el botón 📋 vía api.debug_log_create,
+    # no se crea/edita a mano desde el admin.
+    list_display = ("counter_key", "platform", "build", "note", "created_at")
+    list_filter = ("platform", "counter_key")
+    readonly_fields = ("created_at", "platform", "counter_key", "build", "note", "content")
+    list_per_page = 30
+
+    def has_add_permission(self, request):
+        return False

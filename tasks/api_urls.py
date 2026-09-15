@@ -53,4 +53,10 @@ urlpatterns = [
     path("stats/delete/", api.stats_delete_all, name="stats_delete_all"),
     path("stats/<uuid:series_id>/", api.stats_detail, name="stats_detail"),
     path("stats/<uuid:series_id>/delete/", api.stats_delete_series, name="stats_delete_series"),
+
+    # Registro de depuración del botón 📋 (ver DebugLog en models.py) --
+    # protegido por su propio token (settings.DEBUG_LOG_TOKEN), no por
+    # BasicAuthMiddleware -- ver la excepción de ruta en todoapp/basic_auth.py.
+    path("debug-log/", api.debug_log_create, name="debug_log_create"),
+    path("debug-log/latest/", api.debug_log_latest, name="debug_log_latest"),
 ]

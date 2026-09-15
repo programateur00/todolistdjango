@@ -21,6 +21,7 @@ import unicodedata
 import uuid
 from functools import wraps
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Q, Sum
 from django.http import Http404, JsonResponse
@@ -33,8 +34,8 @@ from django.views.decorators.http import require_http_methods
 
 from . import ai
 from .models import (
-    CourseModule, CoursePlaylist, CourseQuiz, Exercise, Occurrence, Plan, PlanItem, Routine,
-    RoutineItem, SavedVideo, Task, TimerSession, WarmupStatus, WorkoutSession,
+    CourseModule, CoursePlaylist, CourseQuiz, DebugLog, Exercise, Occurrence, Plan, PlanItem,
+    Routine, RoutineItem, SavedVideo, Task, TimerSession, WarmupStatus, WorkoutSession,
 )
 from .utils import get_current_user, read_mobile_release, resolve_plan_target as _plan_context
 from .youtube_search import YouTubeSearchError, get_videos_details, list_playlist_items
@@ -2394,4 +2395,84 @@ def plan_session_save(request, uuid, plan_uuid):
             for w in created
         ],
         "task": task_json(task),
+    })
+
+
+# --------------------------------------------------------- registro de depuración
+#
+# El botón 📋 (exportScissorLog en workout.js) mandaba el registro por
+# "compartir"/portapapeles y había que reenviarlo a mano al chat -- un
+# paso de más que se pidió quitar. Estos dos endpoints dejan que el botón
+# lo mande directo aquí, para leerlo sin que el usuario tenga que copiar
+# nada.
+#
+# NO usan @api()/_user(): a propósito no van detrás del candado de la app
+# entera (BasicAuthMiddleware, ver todoapp/basic_auth.py) -- llevan su
+# propio token corto (settings.DEBUG_LOG_TOKEN) para poder leerlos sin
+# compartir la contraseña real de la app. Ver la excepción de ruta en
+# basic_auth.py (busca "debug-log").
+
+def _debug_log_token_ok(request):
+    token = request.GET.get("token") or (body(request).get("token") if request.method == "POST" else None)
+    expected = getattr(settings, "DEBUG_LOG_TOKEN", "") or ""
+    return bool(expected) and token == expected
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def debug_log_create(request):
+    if not _debug_log_token_ok(request):
+        return JsonResponse({"ok": False, "error": "Token inválido"}, status=403)
+    try:
+        data = body(request)
+    except json.JSONDecodeError:
+        return JsonResponse({"ok": False, "error": "JSON inválido"}, status=400)
+
+    content = str(data.get("content", ""))[:200_000]  # margen de sobra sobre scissorLogMax*2 líneas
+    if not content.strip():
+        return JsonResponse({"ok": False, "error": "Registro vacío"}, status=400)
+
+    platform = data.get("platform") if data.get("platform") in dict(DebugLog.PLATFORM_CHOICES) else DebugLog.PLATFORM_MOBILE
+    DebugLog.objects.create(
+        platform=platform,
+        counter_key=str(data.get("counter_key", ""))[:60],
+        build=str(data.get("build", ""))[:60],
+        note=str(data.get("note", ""))[:2_000],
+        content=content,
+    )
+    # Poda las más viejas -- esto es un cajón de depuración, no historial
+    # que haya que conservar indefinidamente (ver DebugLog.MAX_ENTRIES).
+    stale_ids = list(
+        DebugLog.objects.order_by("-created_at").values_list("id", flat=True)[DebugLog.MAX_ENTRIES:]
+    )
+    if stale_ids:
+        DebugLog.objects.filter(id__in=stale_ids).delete()
+
+    return JsonResponse({"ok": True})
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def debug_log_latest(request):
+    if not _debug_log_token_ok(request):
+        return JsonResponse({"ok": False, "error": "Token inválido"}, status=403)
+    try:
+        n = max(1, min(10, int(request.GET.get("n", 1))))
+    except (TypeError, ValueError):
+        n = 1
+    logs = DebugLog.objects.order_by("-created_at")[:n]
+    return JsonResponse({
+        "ok": True,
+        "logs": [
+            {
+                "id": log.id,
+                "created_at": log.created_at.isoformat(),
+                "platform": log.platform,
+                "counter_key": log.counter_key,
+                "build": log.build,
+                "note": log.note,
+                "content": log.content,
+            }
+            for log in logs
+        ],
     })

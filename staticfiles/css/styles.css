@@ -613,6 +613,15 @@ button { font-family:var(--font-b); cursor:pointer; }
 .workout__btn--primary { background:var(--ember); color:var(--ash); border-color:var(--ember); font-weight:700; }
 .workout__btn--primary:disabled { opacity:.6; }
 .workout__btn--ghost { background:var(--paper); color:var(--bone); }
+/* Botón de "terminar sesión antes" en los ejercicios con cronómetro
+   (runTimer/runTimerWithPosture, circuit.js/plan-session.js): antes tenía
+   el mismo peso visual que el botón de avanzar al siguiente ejercicio, y
+   se confundía con él -- de ahí que quede aparte, más discreto, en su
+   propia línea (ver circuit__controls, ya no lo incluye). */
+.workout__btn--subtle { flex:0 0 auto; display:block; margin:6px auto 0; padding:8px 10px;
+  border:none; background:none; color:var(--bone-faded); font-weight:500; font-size:13px;
+  text-decoration:underline; text-underline-offset:2px; }
+.workout__btn--subtle:hover:not(:disabled) { transform:none; box-shadow:none; color:var(--bone); }
 .workout__note { font-size:12px; color:var(--bone-faded); text-align:center; margin:0; }
 .workout__note--warn { color:var(--danger); }
 

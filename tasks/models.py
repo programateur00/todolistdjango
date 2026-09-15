@@ -2387,7 +2387,19 @@ class Plan(models.Model):
                 "target_sets": t["sets"],
                 "target_reps": t["reps"],
                 "target_weight_kg": t["weight_kg"],
-                "work": t["seconds"] or 40,
+                # Antes: "t['seconds'] or 40" -- un 40 inventado para
+                # CUALQUIER ejercicio sin segundos objetivo, incluidos los
+                # "al fallo" (PROG_FAILURE: t["seconds"] siempre None, ver
+                # target_for_step) donde NO hay objetivo de tiempo que
+                # cumplir por diseño. Eso hacía que un ejercicio al fallo
+                # cronometrado (plancha, dead hang...) mostrara "3 × 40s"
+                # en vez de "al fallo", y que el reproductor tratara los
+                # 40s inventados como una cuenta atrás real en vez de
+                # dejar contar libremente hasta que el usuario decida que
+                # ha llegado al fallo (ver runTimer/runTimerWithPosture en
+                # session-runner.js/circuit.js/plan-session.js, que ahora
+                # tratan work=None como modo "al fallo" explícito).
+                "work": t["seconds"],
                 "rest": 30,
                 "target_source": "plan",
                 "plan_name": self.name,
@@ -3914,3 +3926,38 @@ class Occurrence(models.Model):
             "total": total,
             "pct": round(100 * done / total) if total else None,
         }
+
+
+class DebugLog(models.Model):
+    """
+    Registro de depuración del contador de cámara (botón 📋, ver
+    exportScissorLog en workout.js), mandado directo desde la app/web al
+    servidor en vez de depender de compartir/copiar y reenviar a mano.
+
+    No lleva `user`: es una herramienta de desarrollo de un solo uso
+    (diagnosticar un contador que falla ahora mismo), no un dato de la
+    app -- no hace falta filtrar por usuario para lo que sirve (ver
+    api.debug_log_create/debug_log_latest, protegidos por un token propio
+    en vez del candado de la app entera, ver todoapp/basic_auth.py).
+
+    Sin límite de líneas propio aparte del que ya impone scissorLogMax en
+    workout.js -- si esto crece demasiado con el tiempo, debug_log_create
+    poda las entradas más viejas (ver MAX_ENTRIES).
+    """
+    PLATFORM_WEB = "web"
+    PLATFORM_MOBILE = "mobile"
+    PLATFORM_CHOICES = [(PLATFORM_WEB, "Web"), (PLATFORM_MOBILE, "Móvil")]
+
+    MAX_ENTRIES = 30  # cuántas se conservan -- ver debug_log_create en api.py
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    platform = models.CharField(max_length=10, choices=PLATFORM_CHOICES)
+    counter_key = models.CharField(max_length=60, blank=True)
+    build = models.CharField(max_length=60, blank=True)
+    content = models.TextField()
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.counter_key or '?'} ({self.platform}) — {self.created_at:%Y-%m-%d %H:%M}"

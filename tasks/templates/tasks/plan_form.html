@@ -349,10 +349,13 @@
     var studyVideoInput = studyVideoFields.querySelector('input[name="youtube_video_id"]');
     var studyPlaylistInput = studyVideoFields.querySelector('input[name="youtube_playlist_id"]');
     var planTypeRadios = document.querySelectorAll(".plan-type-radio");
-    // Semanas: sale para Deporte y Estudio · Hábito simple (ahí sí es un
-    // plazo real), pero no para Estudio · Idiomas -- el curso termina al
-    // acabar el temario, no por calendario (ver Plan.auto_close_expired),
-    // así que pedir un número de semanas ahí solo confunde.
+    // Semanas: sale para Deporte y Estudio · Hábito simple con vídeo suelto
+    // o temporizador (ahí sí es un plazo real), pero no para Estudio ·
+    // Idiomas ni para Estudio · Hábito simple con curso de Udemy -- en
+    // ambos el plan termina al acabar el temario/curso, no por calendario
+    // (ver Plan.auto_close_expired: Idiomas cierra con course_progress(),
+    // Udemy cierra con course_completed_at), así que pedir un número de
+    // semanas ahí solo confunde.
     var weeksField = document.getElementById("weeks-field");
     var weeksInput = document.getElementById("weeks-input");
     var nextStepHintSport = document.getElementById("next-step-hint-sport");
@@ -419,8 +422,12 @@
         // fuente a la vez si isStudyGeneral -- esto vuelve a dejar
         // deshabilitados los dos que no tocan según el toggle.
         if (isStudyGeneral) refreshStudySource();
-        weeksField.style.display = isLanguage ? "none" : "block";
-        weeksInput.disabled = isLanguage;
+        // Curso de Udemy: se completa solo (course_completed_at), igual
+        // que Idiomas -- "semanas" no aplica ahí tampoco.
+        var isUdemyCourse = isStudyGeneral && selectedValue(studySourceRadios) === "udemy";
+        var hideWeeks = isLanguage || isUdemyCourse;
+        weeksField.style.display = hideWeeks ? "none" : "block";
+        weeksInput.disabled = hideWeeks;
     }
 
     for (var i = 0; i < planTypeRadios.length; i++) {
@@ -430,7 +437,12 @@
         studySubtypeRadios[i].addEventListener("change", refresh);
     }
     for (var i = 0; i < studySourceRadios.length; i++) {
-        studySourceRadios[i].addEventListener("change", refreshStudySource);
+        // Antes solo llamaba a refreshStudySource -- eso enseñaba/ocultaba
+        // los tres campos de fuente, pero no reevaluaba "semanas" al
+        // cambiar entre Udemy/vídeo/playlist, así que elegir Udemy seguía
+        // pidiendo semanas hasta cambiar de materia y volver. refresh() ya
+        // llama a refreshStudySource() por dentro cuando isStudyGeneral.
+        studySourceRadios[i].addEventListener("change", refresh);
     }
     refresh();
 
