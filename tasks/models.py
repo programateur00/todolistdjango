@@ -3954,6 +3954,10 @@ class DebugLog(models.Model):
     platform = models.CharField(max_length=10, choices=PLATFORM_CHOICES)
     counter_key = models.CharField(max_length=60, blank=True)
     build = models.CharField(max_length=60, blank=True)
+    # Explicación en texto libre que se pide al pulsar 📋 ("me han fallado
+    # X dominadas") -- opcional, para saber qué pasó sin tener que
+    # adivinarlo solo a partir del registro (ver exportScissorLog).
+    note = models.TextField(blank=True)
     content = models.TextField()
 
     class Meta:
