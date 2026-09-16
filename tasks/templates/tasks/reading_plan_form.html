@@ -69,6 +69,20 @@
     </div>
 </form>
 
+{% if task %}
+{# Fuera del <form> de arriba a propósito -- un <form> dentro de otro no es #}
+{# válido en HTML. Mismo patrón que "Eliminar plan" en plan_detail.html, pero #}
+{# aquí no hay Plan detrás que soft-borrar (ver el comentario del radio de #}
+{# Lectura en plan_form.html) -- esto es la Task de siempre, task_delete. #}
+<div class="task-form__actions">
+    <form action="{% url 'tasks:task_delete' task.pk %}" method="post" class="inline-delete"
+          onsubmit="return confirm('¿Eliminar «{{ task.title|escapejs }}»? Se pierde el progreso guardado y no se puede deshacer.');">
+        {% csrf_token %}
+        <button type="submit" class="ghost-btn ghost-btn--danger">Eliminar plan de lectura</button>
+    </form>
+</div>
+{% endif %}
+
 <script>
 (function () {
     var supportsLocal = 'showOpenFilePicker' in window;
