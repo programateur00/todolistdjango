@@ -83,17 +83,13 @@
             {% elif headline.target.reps %}{{ headline.target.sets }} × {{ headline.target.reps }}{% elif headline.target.seconds %}{{ headline.target.sets }} × {{ headline.target.seconds }}s{% else %}{{ headline.target.sets }} series al fallo{% endif %}
             {% if headline.target.weight_kg %}<em>con {{ headline.target.weight_kg|floatformat:"-1" }} kg</em>{% endif %}
             {% else %}
-            {# Objetivo de TAREA (Estudio/General, sin ejercicio): sets/reps
-               no significan nada aquí -- ver PlanItem.display_target_text. #}
             {{ headline.item.display_target_text }}
             {% endif %}
         </span>
     </div>
 
     {% if headline.item.watch_keyword %}
-    {# Curso de Udemy: cuánto queda del TEMARIO según la propia Udemy (lo
-       detecta la extensión de Chrome) -- distinto de la barra de "días
-       cumplidos" de más abajo, que mide constancia, no avance real. #}
+    {# Barra de progreso del curso #}
     {% with udemy_pct=headline.item.current_course_progress_pct %}
     {% if udemy_pct is not None %}
     <div class="plan-bar" role="img" aria-label="Progreso del curso: {{ udemy_pct }}%">

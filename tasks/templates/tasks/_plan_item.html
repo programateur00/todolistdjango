@@ -19,8 +19,6 @@ apoyo, así que va como bloque aparte.
             {% elif pack.target.reps %}{{ pack.target.sets }} × {{ pack.target.reps }}{% elif pack.target.seconds %}{{ pack.target.sets }} × {{ pack.target.seconds }}s{% else %}{{ pack.target.sets }} series al fallo{% endif %}
             {% if pack.target.weight_kg %}con {{ pack.target.weight_kg|floatformat:"-1" }} kg{% endif %}
             {% else %}
-            {# Objetivo de TAREA (Estudio/General, sin ejercicio) -- ver
-               PlanItem.display_target_text; sets/reps no aplican aquí. #}
             {{ pack.item.display_target_text }}
             {% endif %}
         </strong>
