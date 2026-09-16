@@ -297,11 +297,18 @@
             <p class="field__hint" id="pdf-pick-status"></p>
             <input type="hidden" name="reading_pdf_key" id="reading-pdf-key-input" value="">
         </div>
-        <label class="field">
-            <span class="field__label">Última página real</span>
-            <input type="number" name="reading_last_page" id="reading-last-page-input" min="1" required placeholder="Ej. 320">
-            <span class="field__hint">La del final del contenido — sin contar glosario, apéndices o índice.</span>
-        </label>
+        <div class="field-row">
+            <label class="field">
+                <span class="field__label">Empieza en la página (opcional)</span>
+                <input type="number" name="reading_first_page" id="reading-first-page-input" min="1" placeholder="1">
+                <span class="field__hint">Portada, índice, prólogo... antes de esto no cuenta para el ritmo ni para dónde abre el visor la primera vez. En blanco = empieza en la 1.</span>
+            </label>
+            <label class="field">
+                <span class="field__label">Última página real</span>
+                <input type="number" name="reading_last_page" id="reading-last-page-input" min="1" required placeholder="Ej. 320">
+                <span class="field__hint">La del final del contenido — sin contar glosario, apéndices o índice.</span>
+            </label>
+        </div>
         <label class="field">
             <span class="field__label">Plazo objetivo (semanas)</span>
             <input type="number" name="reading_target_weeks" id="reading-target-weeks-input" min="1" required placeholder="Ej. 6">
@@ -397,6 +404,7 @@
     var defaultFormAction = form.action;
     var readingPlanCreateUrl = "{% url 'tasks:reading_plan_create' %}";
     var readingFields = document.getElementById("reading-fields");
+    var readingFirstPageInput = document.getElementById("reading-first-page-input");
     var readingLastPageInput = document.getElementById("reading-last-page-input");
     var readingTargetWeeksInput = document.getElementById("reading-target-weeks-input");
     var readingPdfKeyInput = document.getElementById("reading-pdf-key-input");
@@ -481,6 +489,7 @@
         // para que no viaje nada de eso a esa vista, que no lo espera.
         form.action = isReading ? readingPlanCreateUrl : defaultFormAction;
         readingFields.style.display = isReading ? "block" : "none";
+        readingFirstPageInput.disabled = !isReading;
         readingLastPageInput.disabled = !isReading;
         readingTargetWeeksInput.disabled = !isReading;
         // OJO: .field es display:flex por CSS (gap:6px entre label e

@@ -35,20 +35,26 @@
 
     <div class="field-row">
         <label class="field">
+            <span class="field__label">Empieza en la página (opcional)</span>
+            <input type="number" name="reading_first_page" min="1"
+                   value="{{ task.reading_first_page|default:'' }}" placeholder="1">
+            <span class="field__hint">Portada, índice, prólogo... antes de esto no cuenta para el ritmo ni para dónde abre el visor la primera vez. En blanco = empieza en la 1.</span>
+        </label>
+        <label class="field">
             <span class="field__label">Última página real</span>
             <input type="number" name="reading_last_page" min="1" required
                    value="{{ task.reading_last_page|default:'' }}" placeholder="Ej. 320">
             <span class="field__hint">La del final del contenido — sin contar glosario, apéndices o índice.</span>
         </label>
-        <label class="field">
-            <span class="field__label">Plazo objetivo (semanas)</span>
-            <input type="number" name="reading_target_weeks" min="1" required
-                   value="{{ task.reading_target_weeks|default:'' }}" placeholder="Ej. 6">
-            <span class="field__hint">
-                {% if task %}Cambiar esto recalcula el ritmo, no reinicia lo ya leído.{% else %}El ritmo (páginas/día) se recalcula solo — el plan sigue activo aunque se pase el plazo, hasta terminar el libro de verdad.{% endif %}
-            </span>
-        </label>
     </div>
+    <label class="field">
+        <span class="field__label">Plazo objetivo (semanas)</span>
+        <input type="number" name="reading_target_weeks" min="1" required
+               value="{{ task.reading_target_weeks|default:'' }}" placeholder="Ej. 6">
+        <span class="field__hint">
+            {% if task %}Cambiar esto recalcula el ritmo, no reinicia lo ya leído.{% else %}El ritmo (páginas/día) se recalcula solo — el plan sigue activo aunque se pase el plazo, hasta terminar el libro de verdad.{% endif %}
+        </span>
+    </label>
 
     <fieldset class="field">
         <legend class="field__label">Qué días lees</legend>

@@ -14,6 +14,7 @@
 <div class="video-embed" id="reading-embed"
      data-pdf-key="{{ task.reading_pdf_key }}"
      data-current-page="{{ task.reading_current_page }}"
+     data-first-page="{{ task.reading_first_page|default_if_none:'1' }}"
      data-last-page="{{ task.reading_last_page|default_if_none:'' }}">
 
     <div id="reading-status" class="reading-status">
@@ -109,6 +110,7 @@
 
     var pdfKey = embed.dataset.pdfKey || '';
     var lastPageReal = embed.dataset.lastPage ? parseInt(embed.dataset.lastPage, 10) : null;
+    var firstPageReal = parseInt(embed.dataset.firstPage, 10) || 1;
     var startPage = parseInt(embed.dataset.currentPage, 10) || 0;
     var progressUrl = "{% url 'tasks:task_reading_progress' task.pk %}";
     var saveUrl = "{% url 'tasks:task_reading_save' task.pk %}";
@@ -119,7 +121,6 @@
     var pdfDoc = null;
     var numPages = 0;
     var reportTimer = null;
-    var catchUpTimer = null;
     var finished = false;
 
     if (!supportsLocal) {
@@ -444,7 +445,11 @@
         }).then(function (firstPage) {
             var vp = firstPage.getViewport({ scale: 1 });
             baseViewportSize = { width: vp.width, height: vp.height };
-            currentPage = Math.min(Math.max(1, startPage || 1), numPages);
+            // Sin progreso guardado todavía (startPage=0, libro recién
+            // creado), abre directamente en la página donde empieza el
+            // contenido real -- no en la portada/índice, que nadie
+            // necesita "leer" de verdad (ver reading_first_page).
+            currentPage = Math.min(Math.max(1, startPage || firstPageReal), numPages);
             toolbar.hidden = false;
             pickActions.hidden = true;
             permissionPrompt.hidden = true;
@@ -452,18 +457,6 @@
             buildPages();
             pageLabel.textContent = currentPage + ' / ' + numPages + (lastPageReal && currentPage === lastPageReal ? ' (fin del contenido)' : '');
             updateFinishAvailability();
-            // "Ping" cada pocos segundos con la página en la que estás
-            // ahora mismo -- el servidor topa cuánto puede avanzar de
-            // golpe según el tiempo real transcurrido (ver
-            // Task.record_reading_page), así que si scrolleas rápido más
-            // allá de lo que ese tope deja pasar de momento, esto es lo
-            // que hace que el progreso guardado te vaya alcanzando solo
-            // según pasan los minutos, sin que haga falta tocar nada más.
-            clearInterval(catchUpTimer);
-            catchUpTimer = setInterval(function () {
-                if (finished || !pdfDoc) return;
-                reportPage(currentPage);
-            }, 10000);
             // Salta directo a la página por la que ibas -- sin animación,
             // que un scroll "smooth" de cientos de páginas de golpe se ve
             // rarísimo.
@@ -490,7 +483,6 @@
         }
         if (data.finished) {
             finished = true;
-            clearInterval(catchUpTimer);
             toolbar.hidden = true;
             sessionActions.hidden = true;
             finishBanner.hidden = false;

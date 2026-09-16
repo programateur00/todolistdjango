@@ -1048,6 +1048,13 @@ def reading_plan_form(request, pk=None):
             target_weeks = int(request.POST.get("reading_target_weeks") or 0)
         except ValueError:
             target_weeks = 0
+        # Opcional -- en blanco (o cualquier cosa rara) es "empieza en la
+        # 1", el de toda la vida antes de que existiera este campo.
+        try:
+            first_page = int(request.POST.get("reading_first_page") or 1)
+        except ValueError:
+            first_page = 1
+        first_page = max(1, first_page)
         # Sin ningún día marcado (o si el navegador no manda nada), se cae
         # en lunes/miércoles/viernes -- mismo valor por defecto que un Plan
         # de Deporte/Estudio/General (ver plan_form), nunca "ningún día"
@@ -1060,6 +1067,12 @@ def reading_plan_form(request, pk=None):
                 "task": task, "weekdays": Task.WEEKDAYS,
                 "selected_days": custom_days.split(","),
             })
+        if first_page > last_page:
+            messages.error(request, "La página donde empieza el libro no puede ser mayor que la última página real.")
+            return render(request, "tasks/reading_plan_form.html", {
+                "task": task, "weekdays": Task.WEEKDAYS,
+                "selected_days": custom_days.split(","),
+            })
 
         today = timezone.localtime(timezone.now()).date()
         if task is None:
@@ -1067,7 +1080,8 @@ def reading_plan_form(request, pk=None):
                 user=get_current_user(), title=title,
                 category=Task.CATEGORY_WORK, subcategory=Task.SUBCATEGORY_READING,
                 reading_mode=Task.READING_MODE_PLAN,
-                reading_pdf_key=pdf_key, reading_last_page=last_page, reading_target_weeks=target_weeks,
+                reading_pdf_key=pdf_key, reading_first_page=first_page,
+                reading_last_page=last_page, reading_target_weeks=target_weeks,
                 reading_started_on=today,
                 repeat=Task.REPEAT_CUSTOM, custom_days=custom_days, due_date=today, series_start_date=today,
             )
@@ -1077,6 +1091,7 @@ def reading_plan_form(request, pk=None):
             # se toca al editar es reading_started_on ni reading_current_page:
             # cambiar de idea sobre el plazo no debe reiniciar el avance ya
             # hecho ni fingir que el plan empezó hoy.
+            task.reading_first_page = first_page
             task.reading_last_page = last_page
             task.reading_target_weeks = target_weeks
             task.repeat = Task.REPEAT_CUSTOM
@@ -1084,8 +1099,8 @@ def reading_plan_form(request, pk=None):
             if pdf_key:
                 task.reading_pdf_key = pdf_key
             task.save(update_fields=[
-                "title", "reading_last_page", "reading_target_weeks", "reading_pdf_key",
-                "repeat", "custom_days",
+                "title", "reading_first_page", "reading_last_page", "reading_target_weeks",
+                "reading_pdf_key", "repeat", "custom_days",
             ])
         messages.success(request, "Plan de lectura guardado.")
         return redirect(reverse("tasks:task_reading", args=[task.pk]))

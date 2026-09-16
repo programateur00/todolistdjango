@@ -362,6 +362,15 @@ class Task(models.Model):
                    "archivo (ver reading_plan_form.html) y no cambia aunque se reelija "
                    "el PDF, para que el visor lo siga encontrando.",
     )
+    reading_first_page = models.PositiveIntegerField(
+        default=1,
+        help_text="Solo reading_mode='plan': página real donde empieza el contenido, "
+                   "después de portada/índice/prólogo... Con esto el ritmo y el % leído "
+                   "(ver reading_plan_status) se calculan sobre las páginas de contenido "
+                   "de verdad, no desde la 1 -- y el visor abre aquí la primera vez que "
+                   "se abre el libro, en vez de en la portada. 1 por defecto (el libro "
+                   "empieza al principio del archivo, como si no se hubiera puesto nada).",
+    )
     reading_last_page = models.PositiveIntegerField(
         null=True, blank=True,
         help_text="Solo reading_mode='plan': última página real del contenido (excluye "
@@ -914,7 +923,15 @@ class Task(models.Model):
             return None
         if not (self.reading_last_page and self.reading_target_weeks and self.reading_started_on):
             return None
-        pages_left = max(0, self.reading_last_page - self.reading_current_page)
+        # El ritmo y el % se calculan sobre las páginas de CONTENIDO
+        # (reading_first_page..reading_last_page), no desde la página 1 del
+        # archivo -- si no, un libro que empieza de verdad en la página 12
+        # (portada/índice/prólogo antes) infla el total y hace parecer que
+        # falta más ritmo del que hace falta de verdad.
+        first_page = self.reading_first_page or 1
+        total_pages = max(1, self.reading_last_page - first_page + 1)
+        pages_read = max(0, min(self.reading_current_page, self.reading_last_page) - first_page + 1)
+        pages_left = max(0, total_pages - pages_read)
         deadline = self.reading_started_on + timedelta(weeks=self.reading_target_weeks)
         today = timezone.localtime(timezone.now()).date()
         days_left = (deadline - today).days
@@ -931,7 +948,8 @@ class Task(models.Model):
             "deadline": deadline,
             "current_page": self.reading_current_page,
             "last_page": self.reading_last_page,
-            "pct": min(100, round(100 * self.reading_current_page / self.reading_last_page)),
+            "first_page": first_page,
+            "pct": min(100, round(100 * pages_read / total_pages)),
         }
 
     def record_reading_page(self, page):
@@ -1078,6 +1096,7 @@ class Task(models.Model):
             # creada cada mañana.
             reading_mode=self.reading_mode,
             reading_pdf_key=self.reading_pdf_key,
+            reading_first_page=self.reading_first_page,
             reading_last_page=self.reading_last_page,
             reading_target_weeks=self.reading_target_weeks,
             reading_current_page=self.reading_current_page,
