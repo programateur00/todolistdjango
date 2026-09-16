@@ -10,6 +10,14 @@
     <a href="{% url 'tasks:task_list' %}" class="stats-link">← Tareas</a>
 </header>
 
+{# Arriba del todo, antes de la lista -- si no, con unos pocos planes ya #}
+{# creados hay que bajar hasta el final de la página para encontrar el #}
+{# botón de crear uno nuevo. #}
+<div class="task-form__actions">
+    <a class="primary-btn" href="{% url 'tasks:plan_ai_create' %}">⚡ Generar automáticamente</a>
+    <a class="ghost-btn" href="{% url 'tasks:plan_create' %}">+ Nuevo plan a mano</a>
+</div>
+
 <div class="task-form__actions">
     <a class="ghost-btn" href="{% url 'tasks:weekly_review' %}">Revisión semanal →</a>
     <a class="ghost-btn" href="{% url 'tasks:challenges_list' %}">🏆 Retos</a>
@@ -71,11 +79,6 @@
     «ponerme en forma», con una medida concreta que diga si vas llegando.
 </p>
 {% endif %}
-
-<div class="task-form__actions">
-    <a class="primary-btn" href="{% url 'tasks:plan_ai_create' %}">⚡ Generar automáticamente</a>
-    <a class="ghost-btn" href="{% url 'tasks:plan_create' %}">+ Nuevo plan a mano</a>
-</div>
 
 {% if closed_plans or closed_reading_plans %}
 <details class="done-details">
