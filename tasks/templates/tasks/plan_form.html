@@ -595,6 +595,12 @@
             return name.replace(/\.pdf$/i, '').replace(/[-_]+/g, ' ').trim();
         }
 
+        // Igual que en reading_plan_form.html: solo se autorrellena si el
+        // título está vacío o es justo el último valor autorrellenado --
+        // cambiar de PDF sin haber tocado el título lo actualiza, pero un
+        // título ya escrito a mano no se pisa.
+        var lastAutoTitle = '';
+
         pickBtn.addEventListener('click', function () {
             window.showOpenFilePicker({
                 types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }],
@@ -608,7 +614,10 @@
                 });
             }).then(function (file) {
                 pickStatus.textContent = 'Elegido: ' + file.name;
-                if (!nameInput.value.trim()) nameInput.value = titleFromFilename(file.name);
+                if (!nameInput.value.trim() || nameInput.value === lastAutoTitle) {
+                    lastAutoTitle = titleFromFilename(file.name);
+                    nameInput.value = lastAutoTitle;
+                }
             }).catch(function (err) {
                 if (err && err.name !== 'AbortError') {
                     pickStatus.textContent = 'No se pudo usar ese archivo (' + (err.name || err.message || err) + ').';
