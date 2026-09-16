@@ -220,6 +220,17 @@
         p.rendering = false;
     }
 
+    // scrollIntoView() mueve TODOS los contenedores con scroll por los
+    // que pasa el elemento, no solo #reading-scroll -- si el visor no
+    // está pegado del todo arriba de la página (barra de progreso,
+    // cabecera...), también movía la página entera hacia abajo un poco.
+    // Esto solo toca el scroll interno del visor.
+    function scrollPageToTop(div) {
+        var containerRect = scrollEl.getBoundingClientRect();
+        var targetRect = div.getBoundingClientRect();
+        scrollEl.scrollTop += (targetRect.top - containerRect.top);
+    }
+
     function applyLayout() {
         var scale = scaleForRender();
         pages.forEach(function (p) {
@@ -291,7 +302,7 @@
         // del documento -- se vuelve a la página en la que ibas.
         requestAnimationFrame(function () {
             var target = pages[anchor - 1];
-            if (target) target.div.scrollIntoView({ block: 'start' });
+            if (target) scrollPageToTop(target.div);
         });
     }
     zoomInBtn.addEventListener('click', function () { setZoom(zoomFactor * 1.15); });
@@ -315,18 +326,55 @@
         if (baseViewportSize) applyLayout();
     });
 
-    // Como en el visor nativo: flechas/PageUp/PageDown/espacio bajan o
-    // suben una pantalla entera, en vez de saltar de página en página.
+    // Espacio/PageUp/PageDown bajan o suben una pantalla entera (como en
+    // el visor nativo). Las flechitas arriba/abajo son más finas a
+    // propósito: una pulsación suelta = un empujón pequeño (1-2 líneas);
+    // mantenida pulsada = desplazamiento continuo y suave (por fotograma,
+    // no un salto grande repetido), hasta soltarla.
+    var ARROW_NUDGE_PX = 48;
+    var ARROW_HOLD_PX_PER_FRAME = 6;
+    var arrowScrollDirection = 0;
+    var arrowScrollRAF = null;
+
+    function stepArrowScroll() {
+        if (!arrowScrollDirection) { arrowScrollRAF = null; return; }
+        scrollEl.scrollTop += arrowScrollDirection * ARROW_HOLD_PX_PER_FRAME;
+        arrowScrollRAF = requestAnimationFrame(stepArrowScroll);
+    }
+
     document.addEventListener('keydown', function (e) {
         if (finished || !pdfDoc) return;
-        if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ' ') {
+        if (e.key === 'PageDown' || e.key === ' ') {
             e.preventDefault();
             scrollEl.scrollBy({ top: scrollEl.clientHeight * 0.9, behavior: 'smooth' });
-        } else if (e.key === 'ArrowUp' || e.key === 'PageUp') {
+        } else if (e.key === 'PageUp') {
             e.preventDefault();
             scrollEl.scrollBy({ top: -scrollEl.clientHeight * 0.9, behavior: 'smooth' });
+        } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            var dir = e.key === 'ArrowDown' ? 1 : -1;
+            if (e.repeat) {
+                // El sistema repite el keydown a trompicones (con una
+                // pausa inicial y luego a su propio ritmo) -- en cuanto
+                // se detecta que se mantiene pulsada, se pasa a un
+                // desplazamiento propio por fotograma, más suave y
+                // constante, hasta que se suelte la tecla.
+                if (arrowScrollDirection !== dir) {
+                    arrowScrollDirection = dir;
+                    if (!arrowScrollRAF) arrowScrollRAF = requestAnimationFrame(stepArrowScroll);
+                }
+            } else {
+                scrollEl.scrollTop += dir * ARROW_NUDGE_PX;
+            }
         }
     });
+    document.addEventListener('keyup', function (e) {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') arrowScrollDirection = 0;
+    });
+    // Si se suelta la tecla fuera de foco (cambio de pestaña/ventana con
+    // la flecha mantenida) el keyup nunca llega -- esto evita que se
+    // quede desplazando solo para siempre.
+    window.addEventListener('blur', function () { arrowScrollDirection = 0; });
 
     function openFile(file) {
         hint.textContent = 'Abriendo…';
@@ -358,7 +406,7 @@
             // rarísimo.
             requestAnimationFrame(function () {
                 var target = pages[currentPage - 1];
-                if (target) target.div.scrollIntoView({ block: 'start' });
+                if (target) scrollPageToTop(target.div);
             });
         }).catch(function (err) {
             console.error('openFile:', err);
