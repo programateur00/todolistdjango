@@ -10,70 +10,103 @@
     <a href="{% url 'tasks:task_list' %}" class="stats-link">← Tareas</a>
 </header>
 
-{# Arriba del todo, antes de la lista -- si no, con unos pocos planes ya #}
-{# creados hay que bajar hasta el final de la página para encontrar el #}
-{# botón de crear uno nuevo. #}
-<div class="task-form__actions">
+{# Una sola fila: crear plan a la izquierda como acción principal, y las #}
+{# utilidades (revisión semanal, retos) como enlaces sueltos a la derecha #}
+{# -- antes eran dos .task-form__actions apiladas a todo lo ancho, con lo #}
+{# que "crear plan" pesaba visualmente lo mismo que "ver retos". #}
+<div class="plan-toolbar">
     <a class="primary-btn" href="{% url 'tasks:plan_ai_create' %}">⚡ Generar automáticamente</a>
     <a class="ghost-btn" href="{% url 'tasks:plan_create' %}">+ Nuevo plan a mano</a>
+    <div class="plan-toolbar__secondary">
+        <a class="plan-toolbar__link" href="{% url 'tasks:weekly_review' %}">Revisión semanal →</a>
+        <a class="plan-toolbar__link" href="{% url 'tasks:challenges_list' %}">🏆 Retos</a>
+    </div>
 </div>
 
-<div class="task-form__actions">
-    <a class="ghost-btn" href="{% url 'tasks:weekly_review' %}">Revisión semanal →</a>
-    <a class="ghost-btn" href="{% url 'tasks:challenges_list' %}">🏆 Retos</a>
-</div>
+{% if plans %}
+<section class="task-section">
+    <h2 class="task-section__title">Progresión <span class="task-section__count">{{ plans|length }}</span></h2>
+    <ul class="plan-list">
+        {% for p in plans %}
+        <li class="plan-card {% if not p.plan.is_active %}plan-card--off{% endif %}">
+            <a href="{% url 'tasks:plan_detail' p.plan.pk %}">
+                <div class="plan-card__row">
+                    <span class="plan-card__icon">🎯</span>
+                    <span class="plan-card__body">
+                        <p class="plan-card__name">{{ p.plan.name }}</p>
+                        <p class="plan-card__pills">
+                            <span class="plan-card__pill">Semana {{ p.plan.week_number }} de {{ p.plan.weeks }}</span>
+                            {% if not p.plan.is_active %}<span class="plan-card__pill plan-card__pill--paused">pausado</span>{% endif %}
+                        </p>
+                        {% if p.headline %}
+                        <p class="plan-card__head">
+                            {{ p.headline.display_name }}:
+                            <strong>
+                                {% if p.target.reps %}{{ p.target.sets }} × {{ p.target.reps }}{% else %}{{ p.target.sets }} × {{ p.target.seconds }}s{% endif %}
+                                {% if p.target.weight_kg %}con {{ p.target.weight_kg|floatformat:"-1" }} kg{% endif %}
+                            </strong>
+                            {% if p.remaining %}<span class="plan-item__left">faltan {{ p.remaining }}</span>{% endif %}
+                        </p>
+                        {% endif %}
+                        {% if p.progress is not None %}
+                        <div class="plan-card__progress">
+                            <div class="plan-bar"><div class="plan-bar__fill" style="width: {{ p.progress }}%"></div></div>
+                            <span class="plan-card__pct">{{ p.progress }}%</span>
+                        </div>
+                        {% endif %}
+                    </span>
+                </div>
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}
 
-{% if plans or reading_plans %}
-<ul class="plan-list">
-    {% for p in plans %}
-    <li class="plan-card {% if not p.plan.is_active %}plan-card--off{% endif %}">
-        <a href="{% url 'tasks:plan_detail' p.plan.pk %}">
-            <p class="plan-card__name">{{ p.plan.name }}</p>
-            <p class="plan-card__meta">
-                Semana {{ p.plan.week_number }} de {{ p.plan.weeks }}
-                {% if not p.plan.is_active %}· pausado{% endif %}
-            </p>
-            {% if p.headline %}
-            <p class="plan-card__head">
-                {{ p.headline.display_name }}:
-                <strong>
-                    {% if p.target.reps %}{{ p.target.sets }} × {{ p.target.reps }}{% else %}{{ p.target.sets }} × {{ p.target.seconds }}s{% endif %}
-                    {% if p.target.weight_kg %}con {{ p.target.weight_kg|floatformat:"-1" }} kg{% endif %}
-                </strong>
-                {% if p.remaining %}<span class="plan-item__left">faltan {{ p.remaining }}</span>{% endif %}
-            </p>
-            {% endif %}
-            {% if p.progress is not None %}
-            <div class="plan-bar"><div class="plan-bar__fill" style="width: {{ p.progress }}%"></div></div>
-            {% endif %}
-        </a>
-    </li>
-    {% endfor %}
-    {% comment %}
-    Lectura no es un Plan de verdad (vive aparte en Task.reading_mode=
-    'plan' -- ver plan_list view) y por eso no tiene semana/objetivo con
-    series como los de arriba, pero para quien lo creó es un plan igual
-    que los demás -- se enseña en la misma lista, con lo suyo (ritmo, %
-    leído) en vez de forzarlo en la tarjeta de Plan normal.
-    {% endcomment %}
-    {% for p in reading_plans %}
-    <li class="plan-card">
-        <a href="{% url 'tasks:task_reading' p.task.pk %}">
-            <p class="plan-card__name">📖 {{ p.task.title }}</p>
-            {% if p.status %}
-            <p class="plan-card__meta">
-                {% if p.status.is_overdue %}Vas {{ p.status.days_left|cut:"-" }} días tarde{% else %}Te faltan {{ p.status.days_left }} días{% endif %}
-                · {{ p.status.pace_per_day }} pág./día
-            </p>
-            <div class="plan-bar"><div class="plan-bar__fill" style="width: {{ p.status.pct }}%"></div></div>
-            {% else %}
-            <p class="plan-card__meta">Sin ritmo calculado todavía.</p>
-            {% endif %}
-        </a>
-    </li>
-    {% endfor %}
-</ul>
-{% else %}
+{% comment %}
+Lectura no es un Plan de verdad (vive aparte en Task.reading_mode=
+'plan' -- ver plan_list view) y por eso no tiene semana/objetivo con
+series como los de arriba, pero para quien lo creó es un plan igual
+que los demás -- se enseña en su propia sección, con lo suyo (ritmo, %
+leído) en vez de forzarlo en la tarjeta de Plan normal.
+{% endcomment %}
+{% if reading_plans %}
+<section class="task-section">
+    <h2 class="task-section__title">Lectura <span class="task-section__count">{{ reading_plans|length }}</span></h2>
+    <ul class="plan-list">
+        {% for p in reading_plans %}
+        <li class="plan-card">
+            <a href="{% url 'tasks:task_reading' p.task.pk %}">
+                <div class="plan-card__row">
+                    <span class="plan-card__icon plan-card__icon--reading">📖</span>
+                    <span class="plan-card__body">
+                        <p class="plan-card__name">{{ p.task.title }}</p>
+                        {% if p.status %}
+                        <p class="plan-card__pills">
+                            {% if p.status.is_overdue %}
+                            <span class="plan-card__pill plan-card__pill--late">{{ p.status.days_left|cut:"-" }} días tarde</span>
+                            {% else %}
+                            <span class="plan-card__pill">Te faltan {{ p.status.days_left }} días</span>
+                            {% endif %}
+                            <span class="plan-card__pill">{{ p.status.pace_per_day }} pág./día</span>
+                        </p>
+                        <div class="plan-card__progress">
+                            <div class="plan-bar"><div class="plan-bar__fill" style="width: {{ p.status.pct }}%"></div></div>
+                            <span class="plan-card__pct">{{ p.status.pct }}%</span>
+                        </div>
+                        {% else %}
+                        <p class="plan-card__pills"><span class="plan-card__pill">Sin ritmo calculado todavía</span></p>
+                        {% endif %}
+                    </span>
+                </div>
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}
+
+{% if not plans and not reading_plans %}
 <p class="empty-state">
     Todavía no tienes planes. Un plan es un objetivo con progresión:
     «ponerme en forma», con una medida concreta que diga si vas llegando.
@@ -87,29 +120,42 @@
         {% for p in closed_plans %}
         <li class="plan-card plan-card--off">
             <a href="{% url 'tasks:plan_close' p.plan.pk %}">
-                <p class="plan-card__name">
-                    {{ p.plan.name }}
-                    <span class="count-pill {% if p.plan.is_completed %}count-pill--done{% else %}count-pill--not-done{% endif %}">
-                        {% if p.plan.is_completed %}completado{% else %}incompleto{% endif %}
+                <div class="plan-card__row">
+                    <span class="plan-card__icon">🎯</span>
+                    <span class="plan-card__body">
+                        <p class="plan-card__name">
+                            {{ p.plan.name }}
+                            <span class="count-pill {% if p.plan.is_completed %}count-pill--done{% else %}count-pill--not-done{% endif %}">
+                                {% if p.plan.is_completed %}completado{% else %}incompleto{% endif %}
+                            </span>
+                        </p>
+                        <p class="plan-card__pills"><span class="plan-card__pill">Cerrado el {{ p.plan.closed_at|date:"d M Y" }}</span></p>
+                        {% if p.progress is not None %}
+                        <div class="plan-card__progress">
+                            <div class="plan-bar"><div class="plan-bar__fill" style="width: {{ p.progress }}%"></div></div>
+                            <span class="plan-card__pct">{{ p.progress }}%</span>
+                        </div>
+                        {% endif %}
                     </span>
-                </p>
-                <p class="plan-card__meta">Cerrado el {{ p.plan.closed_at|date:"d M Y" }}</p>
-                {% if p.progress is not None %}
-                <div class="plan-bar"><div class="plan-bar__fill" style="width: {{ p.progress }}%"></div></div>
-                {% endif %}
+                </div>
             </a>
         </li>
         {% endfor %}
         {% for p in closed_reading_plans %}
         <li class="plan-card plan-card--off">
             <a href="{% url 'tasks:task_reading' p.task.pk %}">
-                <p class="plan-card__name">
-                    📖 {{ p.task.title }}
-                    <span class="count-pill {% if p.task.reading_final_pct >= 100 %}count-pill--done{% else %}count-pill--not-done{% endif %}">
-                        {{ p.task.reading_final_pct|default:100 }}%
+                <div class="plan-card__row">
+                    <span class="plan-card__icon plan-card__icon--reading">📖</span>
+                    <span class="plan-card__body">
+                        <p class="plan-card__name">
+                            {{ p.task.title }}
+                            <span class="count-pill {% if p.task.reading_final_pct >= 100 %}count-pill--done{% else %}count-pill--not-done{% endif %}">
+                                {{ p.task.reading_final_pct|default:100 }}%
+                            </span>
+                        </p>
+                        <p class="plan-card__pills"><span class="plan-card__pill">Terminado el {{ p.task.reading_completed_at|date:"d M Y" }}</span></p>
                     </span>
-                </p>
-                <p class="plan-card__meta">Terminado el {{ p.task.reading_completed_at|date:"d M Y" }}</p>
+                </div>
             </a>
         </li>
         {% endfor %}

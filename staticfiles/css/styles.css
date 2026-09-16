@@ -491,6 +491,8 @@ button { font-family:var(--font-b); cursor:pointer; }
   .task-form { padding:18px; }
   .field-row { grid-template-columns:1fr; }
   .streak-row { flex-direction:column; }
+  .plan-toolbar__secondary { margin-left:0; width:100%; justify-content:flex-start; }
+  .plan-card__icon { width:36px; height:36px; font-size:16px; }
 }
 
 /* ── Categories ─────────────────────────────────────────────────────── */
@@ -807,6 +809,41 @@ button { font-family:var(--font-b); cursor:pointer; }
 .plan-card__meta { font-size:11px; color:var(--bone-faded); text-transform:uppercase;
   letter-spacing:.05em; margin:0 0 8px; }
 .plan-card__head { font-size:13px; margin:0 0 8px; }
+
+/* ── Barra de acciones de Planes (plan_list.html) ──────────────────────
+   Antes eran dos .task-form__actions apiladas a todo lo ancho (crear
+   plan, y debajo revisión semanal / retos) -- con eso la acción
+   principal pesaba visualmente lo mismo que las secundarias. Aquí los
+   botones de crear van a la izquierda y las utilidades quedan como
+   enlaces sueltos empujados a la derecha (margin-left:auto), en la
+   misma fila cuando cabe y debajo cuando no. */
+.plan-toolbar { display:flex; align-items:center; gap:10px 16px; flex-wrap:wrap; margin-bottom:24px; }
+.plan-toolbar__secondary { display:flex; align-items:center; gap:14px; margin-left:auto; flex-wrap:wrap; }
+.plan-toolbar__link { font-size:13px; font-weight:500; color:var(--bone-faded); text-decoration:none;
+  display:inline-flex; align-items:center; gap:4px; transition:color .15s ease; }
+.plan-toolbar__link:hover { color:var(--ember); }
+
+/* ── Tarjeta de plan con icono (plan_list.html) ────────────────────────
+   Sigue siendo la misma .plan-card de siempre -- weekly_review.html la
+   usa tal cual, sin ninguna de las clases de aquí abajo, así que nada
+   de esto le afecta. Aquí, dentro del <a>, el contenido se organiza en
+   icono + cuerpo (en vez de un bloque de texto plano) para que se lea
+   de un vistazo qué tipo de plan es cada tarjeta y cómo va, sin tener
+   que entrar. */
+.plan-card__row  { display:flex; align-items:flex-start; gap:14px; }
+.plan-card__icon { flex:none; width:42px; height:42px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center; font-size:18px;
+  background:var(--ember-soft); border:1.6px solid var(--line); }
+.plan-card__icon--reading { background:var(--gold-soft); }
+.plan-card__body { flex:1; min-width:0; }
+.plan-card__pills { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:0 0 8px; }
+.plan-card__pill { font-size:11px; padding:2px 8px; border-radius:999px; font-weight:500;
+  background:var(--ash-soft); color:var(--bone-faded); white-space:nowrap; }
+.plan-card__pill--late   { background:var(--danger-soft); color:var(--danger); font-weight:600; }
+.plan-card__pill--paused { font-style:italic; }
+.plan-card__progress { display:flex; align-items:center; gap:8px; }
+.plan-card__progress .plan-bar { flex:1; margin:0; }
+.plan-card__pct { flex:none; font-family:var(--font-mono); font-size:11px; color:var(--bone-faded); min-width:32px; text-align:right; }
 
 /* La medida principal: lo que define si el plan se ha conseguido. */
 .plan-head { background:var(--ash-soft); border-radius:var(--radius);
