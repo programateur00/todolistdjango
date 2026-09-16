@@ -1037,7 +1037,7 @@ def reading_plan_form(request, pk=None):
 
     if request.method == "POST":
         title = request.POST.get("title", "").strip()[:255] or "Plan de lectura"
-        pdf_key = request.POST.get("reading_pdf_key", "").strip()[:40]
+        pdf_key = request.POST.get("reading_pdf_key", "").strip()[:64]
         try:
             last_page = int(request.POST.get("reading_last_page") or 0)
         except ValueError:

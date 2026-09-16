@@ -338,7 +338,13 @@ class Task(models.Model):
                    "'plan' (visor de PDF propio con seguimiento de página).",
     )
     reading_pdf_key = models.CharField(
-        max_length=40, blank=True,
+        # "reading-" + crypto.randomUUID() (36 caracteres) = 44 -- 40 se
+        # quedaba corto y la vista lo truncaba en silencio ([:40] en
+        # reading_plan_form), guardando una clave distinta de la que de
+        # verdad quedó en IndexedDB del navegador (siempre la completa,
+        # sin truncar) — el visor nunca la encontraba ("No hay ningún
+        # PDF guardado..."). 64 deja margen de sobra.
+        max_length=64, blank=True,
         help_text="Solo reading_mode='plan': clave para encontrar el archivo del PDF "
                    "guardado en IndexedDB en ESTE navegador — se genera al elegir el "
                    "archivo (ver reading_plan_form.html) y no cambia aunque se reelija "
