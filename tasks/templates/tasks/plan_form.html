@@ -12,16 +12,16 @@
 
 <form class="task-form" method="post">
     {% csrf_token %}
-    <label class="field">
-        <span class="field__label">Nombre del objetivo</span>
-        <input type="text" name="name" maxlength="80" required
+    <label class="field" id="name-field">
+        <span class="field__label" id="name-field-label">Nombre del objetivo</span>
+        <input type="text" name="name" id="name-input" maxlength="80" required
                value="{{ plan.name|default:'' }}" placeholder="Ponerme en forma">
-        <span class="field__hint">
+        <span class="field__hint" id="name-field-hint">
             El objetivo de verdad, aunque sea difuso. La medida concreta se añade después.
         </span>
     </label>
 
-    <label class="field">
+    <label class="field" id="notes-field">
         <span class="field__label">Notas</span>
         <textarea name="notes" rows="2">{{ plan.notes|default:'' }}</textarea>
     </label>
@@ -36,6 +36,17 @@
                     {% if plan %}disabled{% endif %}>
                 <span>{{ label }}</span>
             </label>
+            {% if value == 'study' %}
+            {# "Lectura" no es un Plan de verdad (ver reading-fields más abajo) --
+               vive aparte en Task.reading_mode='plan', a propósito (ver notas del
+               proyecto). Este radio solo cambia qué campos se enseñan y a qué URL
+               se manda el formulario -- nunca viaja como plan_type real. #}
+            <label class="repeat-option">
+                <input type="radio" name="plan_type" value="reading" class="plan-type-radio" id="plan-type-reading"
+                    {% if plan %}disabled{% endif %}>
+                <span>Lectura</span>
+            </label>
+            {% endif %}
             {% endfor %}
         </div>
         {% if plan %}
@@ -47,6 +58,7 @@
             <ul class="field__hint">
                 <li><em>Deporte</em> → objetivos con progresión (ejercicios, running).</li>
                 <li><em>Estudio</em> → un vídeo, playlist o temporizador que se completa cada día.</li>
+                <li><em>Lectura</em> → un libro en PDF con visor propio y ritmo de páginas hasta el plazo.</li>
                 <li><em>General</em> → un hábito cualquiera, sin más.</li>
             </ul>
         </details>
@@ -273,12 +285,35 @@
         <span class="field__hint">Con playlist, uno de los dos — vídeos al día manda sobre minutos.</span>
     </div>
 
+    <div id="reading-fields">
+        <div class="field">
+            <span class="field__label">PDF del libro</span>
+            <p class="field__hint" id="pdf-pick-hint">Se guarda solo en este navegador (nunca sube al servidor) — elige el mismo PDF cada vez que abras el visor desde este ordenador.</p>
+            <div class="task-form__actions">
+                <button type="button" class="ghost-btn" id="pdf-pick-btn">+ Elegir el PDF de tu ordenador</button>
+            </div>
+            <p class="field__hint" id="pdf-pick-status"></p>
+            <input type="hidden" name="reading_pdf_key" id="reading-pdf-key-input" value="">
+        </div>
+        <label class="field">
+            <span class="field__label">Última página real</span>
+            <input type="number" name="reading_last_page" id="reading-last-page-input" min="1" required placeholder="Ej. 320">
+            <span class="field__hint">La del final del contenido — sin contar glosario, apéndices o índice.</span>
+        </label>
+        <label class="field">
+            <span class="field__label">Plazo objetivo (semanas)</span>
+            <input type="number" name="reading_target_weeks" id="reading-target-weeks-input" min="1" required placeholder="Ej. 6">
+            <span class="field__hint">El ritmo (páginas/día) se recalcula solo — el plan sigue activo aunque se pase el plazo, hasta terminar el libro de verdad.</span>
+        </label>
+    </div>
+
     <p class="field__hint" id="next-step-hint-sport" hidden>El ejercicio se añade en el siguiente paso.</p>
     <p class="field__hint" id="next-step-hint-general" hidden>Nada más que añadir — es solo un hábito diario.</p>
     <p class="field__hint" id="next-step-hint-language" hidden>El temario del catálogo se confirma en el siguiente paso.</p>
+    <p class="field__hint" id="next-step-hint-reading" hidden>Se abre el visor del PDF en cuanto lo crees.</p>
 
-    <div class="field-row">
-        <label class="field">
+    <div class="field-row" id="started-weeks-row">
+        <label class="field" id="started-on-field">
             <span class="field__label">Empieza el</span>
             <input type="date" name="started_on" value="{{ plan.started_on|date:'Y-m-d' }}">
         </label>
@@ -289,7 +324,7 @@
         </label>
     </div>
 
-    <fieldset class="field">
+    <fieldset class="field" id="training-days-field">
         <legend class="field__label">Qué días entrenas</legend>
         <div class="repeat-options">
             {% for value, label in weekdays %}
@@ -300,28 +335,28 @@
             </label>
             {% endfor %}
         </div>
-        <input type="hidden" name="repeat" value="custom">
+        <input type="hidden" name="repeat" value="custom" id="repeat-hidden-input">
         <span class="field__hint">
             El plan crea su propia tarea con estos días. Te saldrá en la lista
             y solo tienes que darle al play.
         </span>
     </fieldset>
 
-    <label class="field">
+    <label class="field" id="due-time-field">
         <span class="field__label">Hora</span>
-        <input type="time" name="due_time" value="{{ plan.due_time|time:'H:i'|default:'' }}" required>
+        <input type="time" name="due_time" id="due-time-input" value="{{ plan.due_time|time:'H:i'|default:'' }}" required>
         <span class="field__hint">A esta hora avisa la app y, si sigue sin hacerse, se marca sola como no hecha.</span>
     </label>
 
-    <label class="field field--inline">
-        <input type="checkbox" name="is_active" {% if plan.is_active or not plan %}checked{% endif %}>
+    <label class="field field--inline" id="is-active-field">
+        <input type="checkbox" name="is_active" id="is-active-input" {% if plan.is_active or not plan %}checked{% endif %}>
         <span class="field__label">Plan activo</span>
     </label>
-    <span class="field__hint">Activo: sus objetivos mandan al entrenar. Pausado: entrenas a tu aire.</span>
+    <span class="field__hint" id="is-active-hint">Activo: sus objetivos mandan al entrenar. Pausado: entrenas a tu aire.</span>
 
-    <label class="field">
+    <label class="field" id="reward-field">
         <span class="field__label">Recompensa al cerrar el ciclo (opcional)</span>
-        <input type="text" name="reward" maxlength="200" placeholder="Ej: unas zapatillas nuevas"
+        <input type="text" name="reward" id="reward-input" maxlength="200" placeholder="Ej: unas zapatillas nuevas"
                value="{{ plan.reward|default:'' }}">
         <span class="field__hint">Se enseña en la pantalla de cierre, al terminar el plan. Déjalo en blanco si no quieres ninguna.</span>
     </label>
@@ -349,6 +384,39 @@
     var studyVideoInput = studyVideoFields.querySelector('input[name="youtube_video_id"]');
     var studyPlaylistInput = studyVideoFields.querySelector('input[name="youtube_playlist_id"]');
     var planTypeRadios = document.querySelectorAll(".plan-type-radio");
+    // -------------------------------------------------- Lectura (reading)
+    // "Lectura" no es un Plan (ver el comentario junto al radio en el
+    // HTML) — es un Task con reading_mode='plan', creado por una vista
+    // totalmente distinta (reading_plan_create). Elegir este radio no
+    // cambia plan_type de verdad: cambia a qué URL se manda el
+    // formulario y qué campos viajan, reutilizando los mismos inputs
+    // donde tiene sentido (name-input pasa a mandarse como "title").
+    var form = document.querySelector("form.task-form");
+    var defaultFormAction = form.action;
+    var readingPlanCreateUrl = "{% url 'tasks:reading_plan_create' %}";
+    var readingFields = document.getElementById("reading-fields");
+    var readingLastPageInput = document.getElementById("reading-last-page-input");
+    var readingTargetWeeksInput = document.getElementById("reading-target-weeks-input");
+    var readingPdfKeyInput = document.getElementById("reading-pdf-key-input");
+    var nextStepHintReading = document.getElementById("next-step-hint-reading");
+    var nameInput = document.getElementById("name-input");
+    var nameFieldLabel = document.getElementById("name-field-label");
+    var nameFieldHint = document.getElementById("name-field-hint");
+    var notesField = document.getElementById("notes-field");
+    var startedOnField = document.getElementById("started-on-field");
+    var startedOnInput = startedOnField.querySelector('input[name="started_on"]');
+    var trainingDaysField = document.getElementById("training-days-field");
+    var trainingDaysInputs = trainingDaysField.querySelectorAll("input");
+    var dueTimeField = document.getElementById("due-time-field");
+    var dueTimeInput = document.getElementById("due-time-input");
+    var isActiveField = document.getElementById("is-active-field");
+    var isActiveHint = document.getElementById("is-active-hint");
+    var isActiveInput = document.getElementById("is-active-input");
+    var rewardField = document.getElementById("reward-field");
+    var rewardInput = document.getElementById("reward-input");
+    var NAME_FIELD_DEFAULT_LABEL = nameFieldLabel.textContent;
+    var NAME_FIELD_DEFAULT_HINT = nameFieldHint.textContent;
+    var NAME_FIELD_DEFAULT_PLACEHOLDER = nameInput.placeholder;
     // Semanas: sale para Deporte y Estudio · Hábito simple con vídeo suelto
     // o temporizador (ahí sí es un plazo real), pero no para Estudio ·
     // Idiomas ni para Estudio · Hábito simple con curso de Udemy -- en
@@ -393,11 +461,45 @@
         var isStudy = planTypeValue === "study";
         var isLanguage = isStudy && selectedValue(studySubtypeRadios) === "language";
         var isStudyGeneral = isStudy && !isLanguage;
+        var isReading = planTypeValue === "reading";
         // Antes salían los tres avisos a la vez, sin importar el tipo
         // elegido -- solo el que toca según lo de arriba.
         nextStepHintSport.hidden = planTypeValue !== "sport";
         nextStepHintGeneral.hidden = planTypeValue !== "general";
         nextStepHintLanguage.hidden = !isLanguage;
+        nextStepHintReading.hidden = !isReading;
+
+        // Lectura: manda a otra URL (reading_plan_create), con sus
+        // propios campos -- todo lo que es específico de un Plan de
+        // verdad (Deporte/Estudio/General) se oculta Y se deshabilita
+        // para que no viaje nada de eso a esa vista, que no lo espera.
+        form.action = isReading ? readingPlanCreateUrl : defaultFormAction;
+        readingFields.style.display = isReading ? "block" : "none";
+        readingLastPageInput.disabled = !isReading;
+        readingTargetWeeksInput.disabled = !isReading;
+        notesField.style.display = isReading ? "none" : "block";
+        startedOnField.style.display = isReading ? "none" : "block";
+        startedOnInput.disabled = isReading;
+        trainingDaysField.style.display = isReading ? "none" : "block";
+        for (var t = 0; t < trainingDaysInputs.length; t++) trainingDaysInputs[t].disabled = isReading;
+        dueTimeField.style.display = isReading ? "none" : "block";
+        dueTimeInput.disabled = isReading;
+        dueTimeInput.required = !isReading;
+        isActiveField.style.display = isReading ? "none" : "block";
+        isActiveHint.style.display = isReading ? "none" : "block";
+        isActiveInput.disabled = isReading;
+        rewardField.style.display = isReading ? "none" : "block";
+        rewardInput.disabled = isReading;
+        // "Nombre del objetivo" se reutiliza como título del libro --
+        // mismo input, pero viaja como "title" (lo que espera
+        // reading_plan_create) en vez de "name".
+        nameInput.name = isReading ? "title" : "name";
+        nameFieldLabel.textContent = isReading ? "Título del plan" : NAME_FIELD_DEFAULT_LABEL;
+        nameInput.placeholder = isReading ? "Se rellena solo con el nombre del PDF" : NAME_FIELD_DEFAULT_PLACEHOLDER;
+        nameFieldHint.textContent = isReading
+            ? "El nombre del libro — puedes dejarlo en blanco y se rellena al elegir el PDF, o cambiarlo cuando quieras."
+            : NAME_FIELD_DEFAULT_HINT;
+        nameInput.required = !isReading;
 
         // display, no el atributo `hidden` — con las clases .field del
         // resto de la app, `hidden` se queda sin efecto (una regla de
@@ -425,7 +527,7 @@
         // Curso de Udemy: se completa solo (course_completed_at), igual
         // que Idiomas -- "semanas" no aplica ahí tampoco.
         var isUdemyCourse = isStudyGeneral && selectedValue(studySourceRadios) === "udemy";
-        var hideWeeks = isLanguage || isUdemyCourse;
+        var hideWeeks = isLanguage || isUdemyCourse || isReading;
         weeksField.style.display = hideWeeks ? "none" : "block";
         weeksInput.disabled = hideWeeks;
     }
@@ -445,6 +547,68 @@
         studySourceRadios[i].addEventListener("change", refresh);
     }
     refresh();
+
+    // --------------------------------------------------- PDF de Lectura
+    // Mismo mecanismo que reading_plan_form.html: el archivo se elige
+    // con File System Access API y se guarda en IndexedDB en ESTE
+    // navegador (nunca sube al servidor) -- lo único que viaja en el
+    // POST es reading_pdf_key, la clave con la que el visor lo
+    // encuentra después.
+    (function initReadingPdfPicker() {
+        var supportsLocal = 'showOpenFilePicker' in window;
+        var pickBtn = document.getElementById('pdf-pick-btn');
+        var pickHint = document.getElementById('pdf-pick-hint');
+        var pickStatus = document.getElementById('pdf-pick-status');
+
+        if (!supportsLocal) {
+            pickBtn.disabled = true;
+            pickHint.textContent = 'Este navegador no puede elegir archivos locales para el visor — usa Chrome o Edge.';
+            return;
+        }
+
+        function openHandleDb() {
+            return new Promise(function (resolve, reject) {
+                var req = indexedDB.open('libreta-reading-pdfs', 1);
+                req.onupgradeneeded = function () { req.result.createObjectStore('handles'); };
+                req.onsuccess = function () { resolve(req.result); };
+                req.onerror = function () { reject(req.error); };
+            });
+        }
+        function storeHandle(key, handle) {
+            return openHandleDb().then(function (db) {
+                return new Promise(function (resolve, reject) {
+                    var tx = db.transaction('handles', 'readwrite');
+                    tx.objectStore('handles').put(handle, key);
+                    tx.oncomplete = function () { resolve(); };
+                    tx.onerror = function () { reject(tx.error); };
+                });
+            });
+        }
+        function titleFromFilename(name) {
+            return name.replace(/\.pdf$/i, '').replace(/[-_]+/g, ' ').trim();
+        }
+
+        pickBtn.addEventListener('click', function () {
+            window.showOpenFilePicker({
+                types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }],
+                multiple: false,
+            }).then(function (handles) {
+                var handle = handles[0];
+                var key = readingPdfKeyInput.value || ('reading-' + crypto.randomUUID());
+                return storeHandle(key, handle).then(function () {
+                    readingPdfKeyInput.value = key;
+                    return handle.getFile();
+                });
+            }).then(function (file) {
+                pickStatus.textContent = 'Elegido: ' + file.name;
+                if (!nameInput.value.trim()) nameInput.value = titleFromFilename(file.name);
+            }).catch(function (err) {
+                if (err && err.name !== 'AbortError') {
+                    pickStatus.textContent = 'No se pudo usar ese archivo (' + (err.name || err.message || err) + ').';
+                }
+            });
+        });
+    })();
 
     // --------------------------------------------- minutos/día (idiomas)
     // Escoger "120" a mano en un input de número queda raro — en vez de
