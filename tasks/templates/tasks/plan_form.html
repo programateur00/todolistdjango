@@ -37,10 +37,12 @@
                 <span>{{ label }}</span>
             </label>
             {% if value == 'study' %}
-            {# "Lectura" no es un Plan de verdad (ver reading-fields más abajo) --
-               vive aparte en Task.reading_mode='plan', a propósito (ver notas del
-               proyecto). Este radio solo cambia qué campos se enseñan y a qué URL
-               se manda el formulario -- nunca viaja como plan_type real. #}
+            {% comment %}
+            "Lectura" no es un Plan de verdad (ver reading-fields más abajo) --
+            vive aparte en Task.reading_mode='plan', a propósito (ver notas del
+            proyecto). Este radio solo cambia qué campos se enseñan y a qué URL
+            se manda el formulario -- nunca viaja como plan_type real.
+            {% endcomment %}
             <label class="repeat-option">
                 <input type="radio" name="plan_type" value="reading" class="plan-type-radio" id="plan-type-reading"
                     {% if plan %}disabled{% endif %}>
