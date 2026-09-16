@@ -10,17 +10,13 @@
     <a href="{% url 'tasks:task_list' %}" class="stats-link">← Tareas</a>
 </header>
 
-{# Una sola fila: crear plan a la izquierda como acción principal, y las #}
-{# utilidades (revisión semanal, retos) como enlaces sueltos a la derecha #}
-{# -- antes eran dos .task-form__actions apiladas a todo lo ancho, con lo #}
-{# que "crear plan" pesaba visualmente lo mismo que "ver retos". #}
+{# Los tres botones en una sola fila, con el mismo peso -- la revisión #}
+{# semanal ya tiene su propia pestaña en el nav de arriba ("Revisión"), #}
+{# así que no hace falta repetirla aquí también. #}
 <div class="plan-toolbar">
     <a class="primary-btn" href="{% url 'tasks:plan_ai_create' %}">⚡ Generar automáticamente</a>
     <a class="ghost-btn" href="{% url 'tasks:plan_create' %}">+ Nuevo plan a mano</a>
-    <div class="plan-toolbar__secondary">
-        <a class="plan-toolbar__link" href="{% url 'tasks:weekly_review' %}">Revisión semanal →</a>
-        <a class="plan-toolbar__link" href="{% url 'tasks:challenges_list' %}">🏆 Retos</a>
-    </div>
+    <a class="ghost-btn" href="{% url 'tasks:challenges_list' %}">🏆 Retos</a>
 </div>
 
 {% if plans %}
