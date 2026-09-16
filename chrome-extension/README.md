@@ -19,14 +19,17 @@ tipos de pestaña trackeable, cada uno emparejado con un tipo de tarea:
   cierre automático. Si las dos existen a la vez, la palabra clave
   específica siempre gana sobre el hábito genérico, para que nunca se
   pisen ni sumen el mismo rato dos veces.
-- **Lectura de un PDF** — tarea de categoría Enfoque, subtipo
+- **Lectura de un PDF (modo Freestyle)** — tarea de categoría
   "Lectura". Si el título de la pestaña activa es un `.pdf` (local o
   de una web) y coincide con la palabra clave de la tarea, cuenta
   tiempo igual que Udemy. Aquí no hay detección de "página final" —
   el visor de PDF nativo de Chrome no es inspeccionable desde una
   extensión — así que la tarea se completa sola cuando llegas al
   objetivo en minutos del día (si la tarea tiene uno puesto), igual
-  que ya hace cualquier tarea de Enfoque con temporizador.
+  que ya hace cualquier tarea de Lectura con temporizador. Esto es
+  distinto del "Plan de lectura" (visor propio pdf.js con página
+  exacta, desde la pestaña Planes) — el Freestyle no sabe en qué
+  página vas, solo cuenta tiempo.
 
 No está pensada para publicarse en la Chrome Web Store — es de uso
 personal, se carga "sin empaquetar".
@@ -73,9 +76,10 @@ falta el subtipo.
    dar a mano, no hay forma de activarlo desde el código. Si se te
    olvida, el propio icono de la extensión te avisa con un botón que
    te lleva directo a esa pantalla.
-2. Crea una tarea de categoría "Enfoque" → subtipo "Lectura", con una
-   palabra clave que aparezca en el nombre del archivo o el título de
-   la pestaña (ej. "clean-code" para `clean-code.pdf`).
+2. Crea una tarea de categoría "Lectura" (modo Freestyle, no Plan de
+   lectura), con una palabra clave que aparezca en el nombre del
+   archivo o el título de la pestaña (ej. "clean-code" para
+   `clean-code.pdf`).
 3. Abre el PDF en una pestaña de Chrome (arrastra el archivo a una
    ventana de Chrome, o pégalo en la barra de direcciones) y déjalo en
    primer plano mientras lees. También funciona con un PDF alojado en

@@ -52,6 +52,7 @@
 <div class="task-form__actions">
     <a class="primary-btn" href="{% url 'tasks:plan_ai_create' %}">⚡ Generar automáticamente</a>
     <a class="ghost-btn" href="{% url 'tasks:plan_create' %}">+ Nuevo plan a mano</a>
+    <a class="ghost-btn" href="{% url 'tasks:reading_plan_create' %}">📖 Plan de lectura</a>
 </div>
 
 {% if closed_plans %}

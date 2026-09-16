@@ -40,7 +40,7 @@
  */
 
 const TASKS_CACHE_TTL_MS = 2 * 60 * 1000;     // 2 min
-const IDLE_DETECTION_SECONDS = 60;             // 1 min sin tocar ratón/teclado = inactivo
+const IDLE_DETECTION_SECONDS = 300;            // 5 min sin tocar ratón/teclado = inactivo
 const MIN_SESSION_MINUTES_TO_SEND = 1;         // sesiones de <1 min no se mandan, no aportan nada
 const HEARTBEAT_ALARM = "libreta-udemy-heartbeat";
 const RETRY_ALARM = "libreta-udemy-retry-uploads";
