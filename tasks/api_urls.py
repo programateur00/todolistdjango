@@ -31,6 +31,7 @@ urlpatterns = [
     path("tasks/<uuid:uuid>/running-import/", api.running_import, name="running_import"),
     path("tasks/<uuid:uuid>/circuit/<uuid:routine_uuid>/", api.routine_result, name="routine_result"),
     path("tasks/<uuid:uuid>/focus/", api.focus_save, name="focus_save"),
+    path("tasks/<uuid:uuid>/course-progress/", api.course_progress_save, name="course_progress_save"),
     path("tasks/<uuid:uuid>/video/", api.video_save, name="video_save"),
     path("videos/", api.saved_video_list, name="saved_video_list"),
     path("videos/<uuid:uuid>/", api.saved_video_delete, name="saved_video_delete"),

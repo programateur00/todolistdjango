@@ -235,6 +235,19 @@ class Task(models.Model):
     # saber cuándo cerrar (y enseñar la recompensa de) un plan que iba
     # detrás de este curso.
     course_completed_at = models.DateTimeField(null=True, blank=True)
+    # Cuánto lleva completado el curso SEGÚN Udemy (0-100), no cuántos
+    # días de estudio has cumplido (eso ya lo mide Plan/PlanItem con las
+    # Occurrence de siempre). Lo rellena la extensión de Chrome leyendo
+    # las fracciones "x/x" de "Contenido del curso" (ver
+    # detectCourseProgressInPage en background.js) cada vez que hace la
+    # comprobación de "¿ya está al 100%?" — así de paso se puede enseñar
+    # una barra de "cuánto te queda del curso" en la pantalla del plan
+    # (ver PlanItem.current_course_progress_pct) en vez de nada hasta
+    # que se termina del todo. None mientras no se ha detectado ninguna
+    # fracción todavía (curso recién creado, o Udemy cambió su
+    # maquetación y la extensión no la reconoce) — no se asume 0, que
+    # sería mentir sobre "no has visto nada".
+    course_progress_pct = models.PositiveIntegerField(null=True, blank=True)
     youtube_video_id = models.CharField(
         max_length=255, blank=True,
         help_text="ID o URL de un vídeo de YouTube (ej. 'dQw4w9WgXcQ' o el enlace completo — "
@@ -973,6 +986,12 @@ class Task(models.Model):
             # dia siguiente, asi que la extension de Chrome dejaba de
             # verla como "trackeable" a partir del segundo dia.
             watch_keyword=self.watch_keyword,
+            # Mismo motivo que watch_keyword: sin propagarlo aquí, la
+            # barra de "cuánto llevas del curso" se reiniciaría a "sin
+            # datos" cada mañana en cuanto se generase la tarea del día
+            # siguiente, aunque Udemy siga reportando el mismo curso a
+            # medias -- ver Task.record_course_progress.
+            course_progress_pct=self.course_progress_pct,
             target_minutes=self.target_minutes,
             target_video_count=self.target_video_count,
             target_steps=self.target_steps,
@@ -1119,6 +1138,26 @@ class Task(models.Model):
             self.save(update_fields=["repeat", "course_completed_at"])
         if not self.is_done:
             self.mark_done()
+
+    def record_course_progress(self, pct):
+        """
+        Guarda el % de curso de Udemy detectado por la extensión de
+        Chrome (ver checkCourseCompletion/detectCourseProgressInPage en
+        background.js), para poder enseñar una barra de "cuánto te
+        queda del curso" en la pantalla del plan.
+
+        Independiente de finish_recurring_series()/course_completed_at:
+        ese sigue siendo el único que cierra la tarea/serie, y sigue
+        usando su propia detección (todas las fracciones cuadran) — más
+        estricta a propósito. Esto es solo para enseñar un número
+        mientras tanto, así que un 99% aquí no cierra nada por su cuenta.
+        """
+        try:
+            pct = max(0, min(100, round(float(pct))))
+        except (TypeError, ValueError):
+            return
+        self.course_progress_pct = pct
+        self.save(update_fields=["course_progress_pct"])
 
     def mark_not_done(self):
         """
@@ -2765,6 +2804,48 @@ class PlanItem(models.Model):
     @property
     def is_timed(self):
         return bool(self.exercise and self.exercise.mode == Exercise.MODE_TIMED)
+
+    def current_course_progress_pct(self):
+        """
+        Solo para un objetivo de "Curso de Udemy" (watch_keyword puesto,
+        sin ejercicio): el % de curso completado que reportó Udemy la
+        última vez que la extensión de Chrome lo comprobó (ver
+        Task.course_progress_pct/record_course_progress). None si esto
+        no es un objetivo de Udemy, o si es uno pero todavía no ha
+        llegado ningún dato (curso recién creado, o Udemy cambió su
+        maquetación y la extensión no la reconoce) — nunca se inventa
+        un 0 de partida.
+        """
+        if not self.watch_keyword or not self.series_id:
+            return None
+        task = Task.objects.filter(series_id=self.series_id).order_by("-due_date").first()
+        return task.course_progress_pct if task else None
+
+    def display_target_text(self):
+        """
+        Qué decir en "Hoy te toca" para un objetivo de TAREA (sin
+        ejercicio: Estudio · Hábito simple o General) -- current_target()
+        siempre devuelve start_sets/start_reps para PROG_COMPLETION
+        porque el modelo necesita algún valor por defecto, pero
+        mostrarlos tal cual en la pantalla no significa nada ("3 × 8" de
+        una tarea de estudiar francés) — ni siquiera es un bug solo de
+        Udemy, cualquier objetivo de cumplimiento sin ejercicio lo
+        arrastraba. Las plantillas llaman a esto en vez de leer
+        pack.target.sets/reps cuando self.exercise es None.
+        """
+        if self.watch_keyword:
+            pct = self.current_course_progress_pct()
+            return f"{pct}% del curso completado" if pct is not None else "sigue el curso de Udemy"
+        if self.youtube_playlist_id:
+            progress = self.plan._study_playlist_progress(self)
+            if progress["total"]:
+                return f"vídeo {progress['index'] + 1} de {progress['total']}"
+            return "sigue la playlist"
+        if self.youtube_video_id:
+            return "ver el vídeo de hoy"
+        if self.target_minutes:
+            return f"estudiar {self.target_minutes} min"
+        return "cumplir hoy"
 
     # ------------------------------------------------------- historial
 

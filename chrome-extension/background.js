@@ -18,9 +18,11 @@
  *     Q&A, las reseñas o el temario del curso sin el vídeo reproduciéndose
  *     NO cuenta como estudiar, el audio es la única señal fiable desde
  *     fuera de la página de que la clase se está viendo de verdad.
- *     Además, mientras hay sesión, se comprueba cada minuto si Udemy
- *     reporta el curso al 100% (ver checkCourseCompletion) — eso cierra
- *     la tarea entera, no solo el día.
+ *     Además, mientras hay sesión, se comprueba cada minuto cuánto
+ *     lleva el curso (ver checkCourseCompletion) — el % se manda siempre
+ *     que se puede calcular, para la barra de la pantalla del plan, y si
+ *     Udemy lo reporta al 100% eso además cierra la tarea entera, no
+ *     solo el día.
  *
  *   - Lectura de un PDF (category="work", subcategory="reading"): la
  *     pestaña es un .pdf (local, file://, o servido por una web) visto
@@ -360,14 +362,27 @@ function extractSectionFractions(text) {
  * (ej. "10/10") — son solo números, da igual el idioma de la interfaz.
  * Si TODAS las fracciones de ESE apartado (no de toda la página, para no
  * colar reseñas) tienen el mismo número a los dos lados, está completo.
+ *
+ * De paso (esto es lo nuevo) se suma nº de lecciones vistas / totales de
+ * TODAS las fracciones del apartado para sacar un % de avance del curso
+ * entero — no solo el "sí/no" de completado — así la pantalla del plan
+ * puede enseñar una barra de "cuánto llevas" en vez de nada hasta que se
+ * termina del todo. Devuelve {complete, pct}: `pct` sale null cuando no
+ * hay suficientes fracciones fiables (mismo umbral que la detección de
+ * completado) o cuando se cae al respaldo de texto, que no da números.
  */
-function detectCourseCompleteInPage() {
+function detectCourseProgressInPage() {
   try {
     const scoped = getCourseContentSectionText();
     if (scoped) {
       const fractions = extractSectionFractions(scoped);
       if (fractions.length >= COURSE_PROGRESS_MIN_FRACTIONS) {
-        return fractions.every(([done, total]) => done === total);
+        const done = fractions.reduce((sum, [d]) => sum + d, 0);
+        const total = fractions.reduce((sum, [, t]) => sum + t, 0);
+        return {
+          complete: fractions.every(([d, t]) => d === t),
+          pct: total > 0 ? Math.round((done / total) * 100) : null,
+        };
       }
       // Encontramos el apartado pero no salen suficientes fracciones
       // ahí (temario con 1 sola sección, colapsado sin contadores...) —
@@ -376,32 +391,54 @@ function detectCourseCompleteInPage() {
 
     // Respaldo si no se pudo acotar el apartado (título no encontrado):
     // solo el texto en español, más específico que una fracción suelta
-    // y con mucho menos riesgo de colarse desde una reseña.
+    // y con mucho menos riesgo de colarse desde una reseña. Sin
+    // fracciones no hay con qué sacar un %, así que aquí siempre null.
     const text = document.body ? document.body.innerText || "" : "";
-    if (/\bcurso\b[^.\n]{0,40}\b100\s?%[^.\n]{0,20}(complet|finaliz)/i.test(text)) return true;
-    if (/(complet|finaliz)[a-záéíóúñ]*[^.\n]{0,20}\b100\s?%[^.\n]{0,40}\bcurso\b/i.test(text)) return true;
+    let complete = false;
+    if (/\bcurso\b[^.\n]{0,40}\b100\s?%[^.\n]{0,20}(complet|finaliz)/i.test(text)) complete = true;
+    if (/(complet|finaliz)[a-záéíóúñ]*[^.\n]{0,20}\b100\s?%[^.\n]{0,40}\bcurso\b/i.test(text)) complete = true;
 
-    return false;
+    return { complete, pct: null };
   } catch {
-    return false;
+    return { complete: false, pct: null };
   }
 }
 
 async function checkCourseCompletion(taskUuid, tabId) {
+  let progress;
   try {
     const [{ result } = {}] = await chrome.scripting.executeScript({
       target: { tabId },
-      func: detectCourseCompleteInPage,
+      func: detectCourseProgressInPage,
     });
-    if (!result) return;
+    progress = result;
   } catch (err) {
     // La pestaña pudo cerrarse, cambiar de origen, etc. — no es un error
     // real, simplemente no se pudo comprobar esta vez.
     return;
   }
+  if (!progress) return;
 
   const cfg = await getConfig();
   if (!isConfigured(cfg)) return;
+
+  // El % se manda aparte de "completado" -- son dos señales
+  // independientes (ver Task.record_course_progress vs
+  // finish_recurring_series), así que uno puede fallar sin bloquear al
+  // otro.
+  if (progress.pct !== null && progress.pct !== undefined) {
+    try {
+      await fetch(apiUrl(cfg, `/tasks/${taskUuid}/course-progress/`), {
+        method: "POST",
+        headers: { Authorization: authHeader(cfg), "Content-Type": "application/json" },
+        body: JSON.stringify({ pct: progress.pct }),
+      });
+    } catch (err) {
+      console.warn("[Libreta] no se pudo mandar el % del curso (se reintentará en el próximo heartbeat):", err);
+    }
+  }
+
+  if (!progress.complete) return;
   try {
     await fetch(apiUrl(cfg, `/tasks/${taskUuid}/mark/course-complete/`), {
       method: "POST",

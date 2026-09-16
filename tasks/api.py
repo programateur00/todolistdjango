@@ -596,6 +596,31 @@ def task_mark(request, uuid, action):
     return JsonResponse({"ok": True, "task": task_json(t)})
 
 
+@api("POST")
+def course_progress_save(request, uuid):
+    """
+    La extensión de Chrome de Udemy manda aquí, junto con la comprobación
+    de "¿el curso está al 100%?" (ver checkCourseCompletion en
+    background.js), cuánto lleva completado SEGÚN LAS FRACCIONES "x/x" de
+    "Contenido del curso" -- para poder enseñar una barra de "cuánto te
+    queda del curso" en la pantalla del plan (ver
+    Task.record_course_progress / PlanItem.current_course_progress_pct)
+    en vez de nada hasta que se termina del todo.
+
+    Separado a propósito de la acción "course-complete" de task_mark: esa
+    sigue siendo la única que cierra la tarea/serie, con su propio
+    criterio (más estricto: TODAS las fracciones cuadran). Aquí solo se
+    guarda un número para enseñar, así que un cuerpo sin "pct" válido no
+    es un error -- simplemente no hay nada que actualizar todavía.
+    """
+    t = get_object_or_404(tasks_qs(), uuid=uuid)
+    data = body(request)
+    pct = data.get("pct")
+    if isinstance(pct, (int, float)) and not isinstance(pct, bool):
+        t.record_course_progress(pct)
+    return JsonResponse({"ok": True, "task": task_json(t)})
+
+
 # --------------------------------------------------------- circuitos
 
 @api("GET", "POST")

@@ -14,9 +14,15 @@ apoyo, así que va como bloque aparte.
     <p class="plan-item__now">
         Hoy:
         <strong>
+            {% if pack.item.exercise %}
             {% if pack.target.distance_km %}{{ pack.target.distance_km|floatformat:"-2" }} km{% if pack.target.pace_seconds_per_km %} a {{ pack.target.pace_seconds_per_km|pace_label }}{% endif %}
             {% elif pack.target.reps %}{{ pack.target.sets }} × {{ pack.target.reps }}{% elif pack.target.seconds %}{{ pack.target.sets }} × {{ pack.target.seconds }}s{% else %}{{ pack.target.sets }} series al fallo{% endif %}
             {% if pack.target.weight_kg %}con {{ pack.target.weight_kg|floatformat:"-1" }} kg{% endif %}
+            {% else %}
+            {# Objetivo de TAREA (Estudio/General, sin ejercicio) -- ver
+               PlanItem.display_target_text; sets/reps no aplican aquí. #}
+            {{ pack.item.display_target_text }}
+            {% endif %}
         </strong>
         {% if pack.remaining %}<span class="plan-item__left">faltan {{ pack.remaining }} sesiones</span>{% endif %}
         {% if pack.target.done %}<span class="plan-item__done">✓ destino alcanzado</span>{% endif %}
