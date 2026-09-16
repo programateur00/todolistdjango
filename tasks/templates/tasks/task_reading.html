@@ -31,13 +31,15 @@
     <div class="stats-bar"><div class="stats-bar__done" id="reading-progress-bar" style="width:{{ status.pct|default:0 }}%"></div></div>
 
     <div id="reading-viewer" class="reading-viewer">
-        <canvas id="reading-canvas" class="reading-viewer__canvas"></canvas>
-    </div>
-
-    <div class="reading-nav" id="reading-nav" hidden>
-        <button type="button" class="ghost-btn" id="reading-prev">← Anterior</button>
-        <span id="reading-page-label" class="reading-nav__label">—</span>
-        <button type="button" class="ghost-btn" id="reading-next">Siguiente →</button>
+        <div class="reading-toolbar" id="reading-toolbar" hidden>
+            <button type="button" class="ghost-btn reading-toolbar__btn" id="reading-zoom-out" title="Alejar">−</button>
+            <span id="reading-zoom-label" class="reading-toolbar__zoom">100%</span>
+            <button type="button" class="ghost-btn reading-toolbar__btn" id="reading-zoom-in" title="Acercar">+</button>
+            <span id="reading-page-label" class="reading-toolbar__page">—</span>
+            <span class="reading-toolbar__spacer"></span>
+            <button type="button" class="ghost-btn reading-toolbar__btn" id="reading-fullscreen-btn" title="Pantalla completa">⛶ Pantalla completa</button>
+        </div>
+        <div class="reading-scroll" id="reading-scroll"></div>
     </div>
 
     <p class="field__hint" id="reading-hint">Cargando…</p>
@@ -60,20 +62,38 @@
 
 <style>
     .reading-status { display: flex; gap: .5em; flex-wrap: wrap; align-items: baseline; font-size: .95em; opacity: .85; margin-bottom: .5em; }
-    .reading-viewer { display: flex; justify-content: center; background: rgba(0,0,0,.15); border-radius: .5em; padding: .5em; min-height: 40vh; }
-    .reading-viewer__canvas { max-width: 100%; height: auto; box-shadow: 0 2px 12px rgba(0,0,0,.35); }
-    .reading-nav { display: flex; align-items: center; justify-content: center; gap: 1em; margin-top: .75em; }
-    .reading-nav__label { font-variant-numeric: tabular-nums; min-width: 6em; text-align: center; }
+
+    /* Visor a lo Chrome: scroll continuo por todas las páginas, con una
+       barra de herramientas fija arriba (zoom, página actual, pantalla
+       completa) en vez de una sola página con "Anterior"/"Siguiente". */
+    .reading-viewer { display: flex; flex-direction: column; background: rgba(0,0,0,.2); border-radius: .5em; overflow: hidden; }
+    .reading-toolbar { display: flex; align-items: center; gap: .5em; padding: .5em .75em; background: rgba(0,0,0,.3); }
+    .reading-toolbar__btn { padding: 4px 10px; }
+    .reading-toolbar__zoom { min-width: 3.5em; text-align: center; font-variant-numeric: tabular-nums; font-size: .85em; opacity: .85; }
+    .reading-toolbar__page { font-variant-numeric: tabular-nums; font-size: .85em; opacity: .85; }
+    .reading-toolbar__spacer { flex: 1; }
+    .reading-scroll {
+        flex: 1; overflow-y: auto; overflow-x: auto;
+        padding: 1em 0; display: flex; flex-direction: column; align-items: center; gap: .75em;
+        min-height: 50vh; max-height: 78vh; scroll-behavior: auto;
+    }
+    .reading-page { flex-shrink: 0; background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,.35); }
+    .reading-page canvas { display: block; width: 100%; height: 100%; }
+    #reading-viewer:fullscreen { border-radius: 0; }
+    #reading-viewer:fullscreen .reading-scroll { max-height: none; height: calc(100vh - 45px); }
 </style>
 
 <script type="module">
     var embed = document.getElementById('reading-embed');
     var hint = document.getElementById('reading-hint');
-    var canvas = document.getElementById('reading-canvas');
-    var nav = document.getElementById('reading-nav');
-    var prevBtn = document.getElementById('reading-prev');
-    var nextBtn = document.getElementById('reading-next');
+    var viewerEl = document.getElementById('reading-viewer');
+    var toolbar = document.getElementById('reading-toolbar');
+    var scrollEl = document.getElementById('reading-scroll');
+    var zoomOutBtn = document.getElementById('reading-zoom-out');
+    var zoomInBtn = document.getElementById('reading-zoom-in');
+    var zoomLabel = document.getElementById('reading-zoom-label');
     var pageLabel = document.getElementById('reading-page-label');
+    var fullscreenBtn = document.getElementById('reading-fullscreen-btn');
     var pickActions = document.getElementById('reading-pick-actions');
     var pickBtn = document.getElementById('reading-pick-btn');
     var permissionPrompt = document.getElementById('reading-permission-prompt');
@@ -87,7 +107,7 @@
 
     var pdfKey = embed.dataset.pdfKey || '';
     var lastPageReal = embed.dataset.lastPage ? parseInt(embed.dataset.lastPage, 10) : null;
-    var currentPage = parseInt(embed.dataset.currentPage, 10) || 0;
+    var startPage = parseInt(embed.dataset.currentPage, 10) || 0;
     var progressUrl = "{% url 'tasks:task_reading_progress' task.pk %}";
     var saveUrl = "{% url 'tasks:task_reading_save' task.pk %}";
     var listUrl = "{% url 'tasks:task_list' %}";
@@ -95,10 +115,7 @@
 
     var supportsLocal = 'showOpenFilePicker' in window;
     var pdfDoc = null;
-    var pageNum = Math.max(1, currentPage);
     var numPages = 0;
-    var rendering = false;
-    var pendingPage = null;
     var reportTimer = null;
     var finished = false;
 
@@ -149,6 +166,168 @@
         });
     }
 
+    // --------------------------------------------- scroll continuo (Chrome-like)
+    // Un <canvas> por página metidas en un único scroll vertical, en vez
+    // de una página suelta con "Anterior"/"Siguiente" -- así se puede
+    // scrollear y hacer zoom como en el visor nativo de Chrome. Para no
+    // reventar memoria con libros de cientos de páginas, cada canvas se
+    // dibuja solo cuando su página está cerca del viewport
+    // (IntersectionObserver) y se vacía otra vez al alejarse mucho -- el
+    // div contenedor mantiene siempre su alto ya calculado, así el
+    // scroll no da saltos al dibujar/vaciar.
+    //
+    // Se asume que todas las páginas miden lo mismo (se toma el tamaño
+    // de la página 1 como referencia) -- cierto en la inmensa mayoría de
+    // PDFs de un solo libro; si alguna página suelta midiera distinto,
+    // el único efecto sería un hueco/solape leve en esa página al
+    // dibujarse, nada roto.
+    var baseViewportSize = null; // { width, height } de la página 1 a escala 1
+    var zoomFactor = 1;          // 1 = "ajustar al ancho" (se enseña como "100%")
+    var pages = [];              // { div, canvas, num, rendered, rendering }
+    var currentPage = 1;
+    var io = null;
+
+    function scaleForRender() {
+        var containerWidth = scrollEl.clientWidth - 24;
+        var fitScale = baseViewportSize ? containerWidth / baseViewportSize.width : 1;
+        return Math.max(0.15, fitScale * zoomFactor);
+    }
+
+    function renderPageCanvas(p) {
+        if (p.rendering || p.rendered) return;
+        p.rendering = true;
+        var scale = scaleForRender();
+        pdfDoc.getPage(p.num).then(function (page) {
+            var viewport = page.getViewport({ scale: scale });
+            p.canvas.width = viewport.width;
+            p.canvas.height = viewport.height;
+            var ctx = p.canvas.getContext('2d');
+            return page.render({ canvasContext: ctx, viewport: viewport }).promise;
+        }).then(function () {
+            p.rendering = false;
+            p.rendered = true;
+        }).catch(function (err) {
+            p.rendering = false;
+            console.error('renderPage:', p.num, err);
+        });
+    }
+
+    function freePageCanvas(p) {
+        if (!p.rendered && !p.rendering) return;
+        p.canvas.width = 0;
+        p.canvas.height = 0;
+        p.rendered = false;
+        p.rendering = false;
+    }
+
+    function applyLayout() {
+        var scale = scaleForRender();
+        pages.forEach(function (p) {
+            p.div.style.width = Math.round(baseViewportSize.width * scale) + 'px';
+            p.div.style.height = Math.round(baseViewportSize.height * scale) + 'px';
+            freePageCanvas(p); // se redibuja sola en cuanto vuelva a estar cerca
+        });
+        zoomLabel.textContent = Math.round(zoomFactor * 100) + '%';
+        // Vuelve a dibujar ya mismo lo que esté (o esté a punto de estar)
+        // a la vista, sin esperar a que el observer reaccione al resize.
+        var scrollRect = scrollEl.getBoundingClientRect();
+        var margin = scrollRect.height;
+        pages.forEach(function (p) {
+            var rect = p.div.getBoundingClientRect();
+            if (rect.bottom > scrollRect.top - margin && rect.top < scrollRect.bottom + margin) {
+                renderPageCanvas(p);
+            }
+        });
+    }
+
+    function setCurrentPage(n) {
+        if (n === currentPage) return;
+        currentPage = n;
+        pageLabel.textContent = n + ' / ' + numPages + (lastPageReal && n === lastPageReal ? ' (fin del contenido)' : '');
+        reportPage(n);
+    }
+
+    function observePages() {
+        if (io) io.disconnect();
+        io = new IntersectionObserver(function (entries) {
+            var best = null;
+            entries.forEach(function (entry) {
+                var p = pages[parseInt(entry.target.dataset.pageNum, 10) - 1];
+                if (entry.isIntersecting) {
+                    renderPageCanvas(p);
+                    if (!best || entry.intersectionRatio > best.ratio) best = { num: p.num, ratio: entry.intersectionRatio };
+                } else if (Math.abs(p.num - currentPage) > 6) {
+                    // Lejos de verdad -- si no, un scroll pequeño de ida
+                    // y vuelta estaría vaciando y redibujando sin parar.
+                    freePageCanvas(p);
+                }
+            });
+            if (best) setCurrentPage(best.num);
+        }, { root: scrollEl, rootMargin: '100% 0px', threshold: [0, 0.25, 0.5, 0.75, 1] });
+        pages.forEach(function (p) { io.observe(p.div); });
+    }
+
+    function buildPages() {
+        scrollEl.innerHTML = '';
+        pages = [];
+        for (var n = 1; n <= numPages; n++) {
+            var div = document.createElement('div');
+            div.className = 'reading-page';
+            div.dataset.pageNum = String(n);
+            var canvas = document.createElement('canvas');
+            div.appendChild(canvas);
+            scrollEl.appendChild(div);
+            pages.push({ div: div, canvas: canvas, num: n, rendered: false, rendering: false });
+        }
+        applyLayout();
+        observePages();
+    }
+
+    function setZoom(newZoom) {
+        zoomFactor = Math.max(0.4, Math.min(3, newZoom));
+        var anchor = currentPage;
+        applyLayout();
+        // Sin esto, cambiar el zoom te deja mirando un punto cualquiera
+        // del documento -- se vuelve a la página en la que ibas.
+        requestAnimationFrame(function () {
+            var target = pages[anchor - 1];
+            if (target) target.div.scrollIntoView({ block: 'start' });
+        });
+    }
+    zoomInBtn.addEventListener('click', function () { setZoom(zoomFactor * 1.15); });
+    zoomOutBtn.addEventListener('click', function () { setZoom(zoomFactor / 1.15); });
+
+    fullscreenBtn.addEventListener('click', function () {
+        if (document.fullscreenElement) {
+            document.exitFullscreen();
+        } else if (viewerEl.requestFullscreen) {
+            viewerEl.requestFullscreen();
+        }
+    });
+    document.addEventListener('fullscreenchange', function () {
+        var isFull = document.fullscreenElement === viewerEl;
+        fullscreenBtn.textContent = isFull ? '⛶ Salir de pantalla completa' : '⛶ Pantalla completa';
+        // El ancho disponible cambia al entrar/salir -- hay que recalcular
+        // el "ajustar al ancho" para el nuevo tamaño del contenedor.
+        requestAnimationFrame(function () { if (baseViewportSize) applyLayout(); });
+    });
+    window.addEventListener('resize', function () {
+        if (baseViewportSize) applyLayout();
+    });
+
+    // Como en el visor nativo: flechas/PageUp/PageDown/espacio bajan o
+    // suben una pantalla entera, en vez de saltar de página en página.
+    document.addEventListener('keydown', function (e) {
+        if (finished || !pdfDoc) return;
+        if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ' ') {
+            e.preventDefault();
+            scrollEl.scrollBy({ top: scrollEl.clientHeight * 0.9, behavior: 'smooth' });
+        } else if (e.key === 'ArrowUp' || e.key === 'PageUp') {
+            e.preventDefault();
+            scrollEl.scrollBy({ top: -scrollEl.clientHeight * 0.9, behavior: 'smooth' });
+        }
+    });
+
     function openFile(file) {
         hint.textContent = 'Abriendo…';
         return file.arrayBuffer().then(function (buf) {
@@ -163,51 +342,33 @@
             // entero, y record_reading_page es quien decide cuándo se
             // considera terminado el libro (ver reading_last_page).
             numPages = doc.numPages;
-            pageNum = Math.min(Math.max(1, pageNum), numPages);
-            nav.hidden = false;
+            return doc.getPage(1);
+        }).then(function (firstPage) {
+            var vp = firstPage.getViewport({ scale: 1 });
+            baseViewportSize = { width: vp.width, height: vp.height };
+            currentPage = Math.min(Math.max(1, startPage || 1), numPages);
+            toolbar.hidden = false;
             pickActions.hidden = true;
             permissionPrompt.hidden = true;
             hint.textContent = '';
-            renderPage(pageNum);
+            buildPages();
+            pageLabel.textContent = currentPage + ' / ' + numPages + (lastPageReal && currentPage === lastPageReal ? ' (fin del contenido)' : '');
+            // Salta directo a la página por la que ibas -- sin animación,
+            // que un scroll "smooth" de cientos de páginas de golpe se ve
+            // rarísimo.
+            requestAnimationFrame(function () {
+                var target = pages[currentPage - 1];
+                if (target) target.div.scrollIntoView({ block: 'start' });
+            });
         }).catch(function (err) {
             console.error('openFile:', err);
             hint.textContent = 'No se pudo abrir ese PDF (' + (err && (err.name || err.message) || err) + ').';
         });
     }
 
-    function renderPage(n) {
-        if (!pdfDoc) return;
-        if (rendering) { pendingPage = n; return; }
-        rendering = true;
-        pdfDoc.getPage(n).then(function (page) {
-            var containerWidth = document.getElementById('reading-viewer').clientWidth - 16;
-            var baseViewport = page.getViewport({ scale: 1 });
-            var scale = Math.max(0.5, Math.min(2.5, containerWidth / baseViewport.width));
-            var viewport = page.getViewport({ scale: scale });
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
-            var ctx = canvas.getContext('2d');
-            return page.render({ canvasContext: ctx, viewport: viewport }).promise;
-        }).then(function () {
-            rendering = false;
-            pageLabel.textContent = n + ' / ' + numPages + (lastPageReal && n === lastPageReal ? ' (fin del contenido)' : '');
-            prevBtn.disabled = n <= 1;
-            nextBtn.disabled = n >= numPages;
-            reportPage(n);
-            if (pendingPage !== null) {
-                var next = pendingPage;
-                pendingPage = null;
-                renderPage(next);
-            }
-        }).catch(function (err) {
-            rendering = false;
-            console.error('renderPage:', err);
-        });
-    }
-
     function reportPage(n) {
-        // Debounce corto: pasar varias páginas rápido (o mantener pulsado)
-        // no dispara una petición por cada una, solo la última.
+        // Debounce corto: scrollear rápido por varias páginas no dispara
+        // una petición por cada una, solo la última tras un momento quieto.
         clearTimeout(reportTimer);
         reportTimer = setTimeout(function () {
             fetch(progressUrl, {
@@ -224,7 +385,7 @@
                 }
                 if (data.finished) {
                     finished = true;
-                    nav.hidden = true;
+                    toolbar.hidden = true;
                     sessionActions.hidden = true;
                     finishBanner.hidden = false;
                     finishBanner.textContent = '¡Libro terminado! Se ha guardado el plan.';
@@ -233,14 +394,6 @@
             }).catch(function () { /* red intermitente: se reintenta en el próximo cambio de página */ });
         }, 400);
     }
-
-    prevBtn.addEventListener('click', function () { if (pageNum > 1) renderPage(--pageNum); });
-    nextBtn.addEventListener('click', function () { if (pageNum < numPages) renderPage(++pageNum); });
-    document.addEventListener('keydown', function (e) {
-        if (finished || !pdfDoc) return;
-        if (e.key === 'ArrowRight') nextBtn.click();
-        if (e.key === 'ArrowLeft') prevBtn.click();
-    });
 
     finishSessionBtn.addEventListener('click', function () {
         finishSessionBtn.disabled = true;
