@@ -50,6 +50,20 @@
         </label>
     </div>
 
+    <fieldset class="field">
+        <legend class="field__label">Qué días lees</legend>
+        <div class="repeat-options">
+            {% for value, label in weekdays %}
+            <label class="repeat-option">
+                <input type="checkbox" name="custom_days" value="{{ value }}"
+                    {% if value in selected_days %}checked{% endif %}>
+                <span>{{ label }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        <span class="field__hint">La tarea de lectura te saldrá en la lista esos días.</span>
+    </fieldset>
+
     <div class="task-form__actions">
         <button type="submit" class="primary-btn">{% if task %}Guardar cambios{% else %}Crear plan{% endif %}</button>
     </div>

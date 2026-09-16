@@ -1019,13 +1019,15 @@ def reading_plan_form(request, pk=None):
     llega en el POST es reading_pdf_key, la clave con la que el visor
     (task_reading) lo va a encontrar.
 
-    Se guarda como una tarea normal que se repite cada día (repeat=daily):
-    el plan no tiene su propio ciclo de "sesiones por semana" como un Plan
-    de Estudio -- es una tarea de Lectura de toda la vida, solo que con
-    visor propio y objetivo de página en vez de minutos. Por eso vive
-    aparte de tasks/task_form.html en vez de meterse ahí: ese formulario
-    no tiene forma de pedir el PDF con autorrelleno del título sin liar
-    todo lo demás que ya hace.
+    Se guarda como una tarea normal que se repite en los días que se
+    elijan (repeat=custom, custom_days -- mismo mecanismo que un Plan de
+    Deporte/Estudio/General, ver plan_form view): el plan no tiene su
+    propio ciclo de "sesiones por semana" como un Plan de Estudio -- es
+    una tarea de Lectura de toda la vida, solo que con visor propio y
+    objetivo de página en vez de minutos. Por eso vive aparte de
+    tasks/task_form.html en vez de meterse ahí: ese formulario no tiene
+    forma de pedir el PDF con autorrelleno del título sin liar todo lo
+    demás que ya hace.
     """
     task = None
     if pk is not None:
@@ -1046,10 +1048,18 @@ def reading_plan_form(request, pk=None):
             target_weeks = int(request.POST.get("reading_target_weeks") or 0)
         except ValueError:
             target_weeks = 0
+        # Sin ningún día marcado (o si el navegador no manda nada), se cae
+        # en lunes/miércoles/viernes -- mismo valor por defecto que un Plan
+        # de Deporte/Estudio/General (ver plan_form), nunca "ningún día"
+        # (una tarea que no vuelve a salir nunca no sirve de nada).
+        custom_days = ",".join(request.POST.getlist("custom_days")) or "0,2,4"
 
         if last_page < 1 or target_weeks < 1:
             messages.error(request, "Pon la última página real del libro y en cuántas semanas quieres terminarlo.")
-            return render(request, "tasks/reading_plan_form.html", {"task": task})
+            return render(request, "tasks/reading_plan_form.html", {
+                "task": task, "weekdays": Task.WEEKDAYS,
+                "selected_days": custom_days.split(","),
+            })
 
         today = timezone.localtime(timezone.now()).date()
         if task is None:
@@ -1059,7 +1069,7 @@ def reading_plan_form(request, pk=None):
                 reading_mode=Task.READING_MODE_PLAN,
                 reading_pdf_key=pdf_key, reading_last_page=last_page, reading_target_weeks=target_weeks,
                 reading_started_on=today,
-                repeat=Task.REPEAT_DAILY, due_date=today, series_start_date=today,
+                repeat=Task.REPEAT_CUSTOM, custom_days=custom_days, due_date=today, series_start_date=today,
             )
         else:
             task.title = title
@@ -1069,13 +1079,21 @@ def reading_plan_form(request, pk=None):
             # hecho ni fingir que el plan empezó hoy.
             task.reading_last_page = last_page
             task.reading_target_weeks = target_weeks
+            task.repeat = Task.REPEAT_CUSTOM
+            task.custom_days = custom_days
             if pdf_key:
                 task.reading_pdf_key = pdf_key
-            task.save(update_fields=["title", "reading_last_page", "reading_target_weeks", "reading_pdf_key"])
+            task.save(update_fields=[
+                "title", "reading_last_page", "reading_target_weeks", "reading_pdf_key",
+                "repeat", "custom_days",
+            ])
         messages.success(request, "Plan de lectura guardado.")
         return redirect(reverse("tasks:task_reading", args=[task.pk]))
 
-    return render(request, "tasks/reading_plan_form.html", {"task": task})
+    return render(request, "tasks/reading_plan_form.html", {
+        "task": task, "weekdays": Task.WEEKDAYS,
+        "selected_days": task.custom_days_list() if task else ["0", "2", "4"],
+    })
 
 
 def task_reading(request, pk):
@@ -1645,7 +1663,30 @@ def plan_list(request):
         {"plan": p, "progress": p.final_progress_pct}
         for p in _plans_qs().filter(closed_at__isnull=False).order_by("-closed_at")
     ]
-    return render(request, "tasks/plan_list.html", {"plans": plans, "closed_plans": closed_plans})
+    # Lectura no es un Plan de verdad (vive aparte en Task.reading_mode=
+    # 'plan', ver el comentario junto a ese campo en models.py) -- pero
+    # para quien lo crea, es un plan igual que los demás, y no aparecía
+    # aquí para nada. Se enseña en su propia sección, con lo suyo (ritmo,
+    # % leído), en vez de forzarlo en las tarjetas de Plan de verdad, que
+    # esperan campos que un plan de lectura no tiene (semanas, objetivo
+    # con series/repeticiones...).
+    reading_qs = Task.objects.filter(
+        user=get_current_user(), category=Task.CATEGORY_WORK, subcategory=Task.SUBCATEGORY_READING,
+        reading_mode=Task.READING_MODE_PLAN, deleted_at__isnull=True,
+    )
+    reading_plans = [
+        {"task": t, "status": t.reading_plan_status}
+        for t in reading_qs.filter(reading_completed_at__isnull=True).order_by("title")
+    ]
+    closed_reading_plans = [
+        {"task": t, "status": t.reading_plan_status}
+        for t in reading_qs.filter(reading_completed_at__isnull=False).order_by("-reading_completed_at")
+    ]
+    return render(request, "tasks/plan_list.html", {
+        "plans": plans, "closed_plans": closed_plans,
+        "reading_plans": reading_plans, "closed_reading_plans": closed_reading_plans,
+        "closed_plans_count": len(closed_plans) + len(closed_reading_plans),
+    })
 
 
 def challenges_list(request):

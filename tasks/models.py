@@ -148,6 +148,18 @@ class Task(models.Model):
         (READING_MODE_FREESTYLE, "Freestyle (cronómetro / extensión)"),
         (READING_MODE_PLAN, "Plan de lectura (visor propio con página)"),
     ]
+    # Tope de velocidad para record_reading_page: como mínimo tienen que
+    # pasar estos segundos reales por página, de media, entre el primer
+    # aviso de una racha y el último -- no es ya solo "impedir un scroll
+    # instantáneo", es que la página guardada tenga que ver con un rato
+    # de verdad sentado leyendo. P.ej. con 45s/página, 33 páginas piden al
+    # menos 24-25 minutos reales antes de darse por leídas -- ese margen
+    # es aposta generoso (nadie necesita ir más despacio de eso para leer
+    # de verdad), pero si de normal lees más rápido que esto, verás el
+    # progreso quedarse un poco por detrás de por dónde vas de verdad
+    # hasta que pase el tiempo mínimo -- se pone al día solo, sin perder
+    # nada (ver el intervalo de "catch-up" en task_reading.html).
+    READING_SECONDS_PER_PAGE = 45
 
     # Subcategorías de "Estudio": de momento solo "Idiomas" — un curso con
     # vídeos organizados por nivel (ver Plan.STUDY_SUBTYPE_LANGUAGE y
@@ -369,6 +381,15 @@ class Task(models.Model):
                    "(ver record_reading_page) — mismo patrón que playlist_start_index, "
                    "pero de página en vez de vídeo. Se arrastra de un día al siguiente "
                    "vía _spawn_next, nunca se reinicia sola.",
+    )
+    reading_progress_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Solo reading_mode='plan': cuándo se guardó por última vez "
+                   "reading_current_page — referencia para topar cuánto puede "
+                   "avanzar de golpe en un solo aviso del visor (ver "
+                   "record_reading_page). Sin esto, arrastrar la barra de scroll "
+                   "o pasar rapidísimo por encima de todas las páginas hasta el "
+                   "final del archivo se guardaba igual que haberlo leído entero.",
     )
     reading_started_on = models.DateField(
         null=True, blank=True,
@@ -921,6 +942,23 @@ class Task(models.Model):
 
         Nunca retrocede (una página anterior reportada por error, o una
         recarga de una pestaña vieja, no debe "deshacer" el avance real).
+
+        Dos topes para que esto siga significando "hasta aquí he leído de
+        verdad" y no "hasta aquí he scrolleado":
+        - Nunca pasa de reading_last_page (la última página REAL del
+          contenido), aunque se reporte una página mayor -- si el PDF
+          trae epílogo/apéndices/anexos detrás, o si se arrastra el
+          scroll hasta el final físico del archivo, se guarda como si
+          te hubieras parado justo en el final del contenido, no en la
+          página del archivo donde aterrizó el scroll.
+        - No puede avanzar más de un ritmo de READING_SECONDS_PER_PAGE
+          segundos reales por página, contando desde el aviso anterior
+          (reading_progress_at) -- no es ya un tope "de emergencia" para
+          un scroll instantáneo, es que el número de páginas guardado
+          tenga que corresponder con un rato de verdad transcurrido. El
+          primer aviso de todos (reading_progress_at todavía vacío) no
+          tiene con qué compararse, así que nunca se topa.
+
         Al llegar de verdad a reading_last_page, cierra el plan entero:
         para la serie (repeat=REPEAT_NONE, como finish_recurring_series,
         pero sin tocar course_completed_at -- ese campo es de Udemy) y
@@ -934,12 +972,34 @@ class Task(models.Model):
         if self.reading_mode != self.READING_MODE_PLAN:
             return False
         page = max(0, int(page))
-        today = timezone.localtime(timezone.now()).date()
+        now = timezone.now()
+        if self.reading_progress_at:
+            elapsed = max(0, (now - self.reading_progress_at).total_seconds())
+            # entero hacia abajo a propósito -- con menos de
+            # READING_SECONDS_PER_PAGE transcurridos esto da 0, así que
+            # ese aviso no avanza nada (en vez de un "mínimo 1 página" que
+            # dejaría colarse una página de más en cada aviso, por poco
+            # que haya pasado -- con el "ping" periódico del visor cada
+            # pocos segundos eso habría deshecho el tope entero).
+            max_advance = int(elapsed // self.READING_SECONDS_PER_PAGE)
+            page = min(page, self.reading_current_page + max_advance)
+        if self.reading_last_page:
+            page = min(page, self.reading_last_page)
+        today = timezone.localtime(now).date()
         if not self.reading_started_on:
             self.reading_started_on = today
+        # El reloj de reading_progress_at solo se reinicia cuando de
+        # verdad se acepta una página nueva (o en el primerísimo aviso,
+        # sin el que comparar) -- si se reiniciara en CADA aviso (incluido
+        # uno que no avanza nada, como el "ping" periódico de arriba), el
+        # tiempo transcurrido nunca llegaría a acumularse lo bastante
+        # como para soltar la siguiente página, y esto se quedaría
+        # atascado para siempre en cuanto tocara el tope.
+        if page > self.reading_current_page or not self.reading_progress_at:
+            self.reading_progress_at = now
         self.reading_current_page = max(self.reading_current_page, page)
         finished = bool(self.reading_last_page) and self.reading_current_page >= self.reading_last_page
-        update_fields = ["reading_started_on", "reading_current_page"]
+        update_fields = ["reading_started_on", "reading_current_page", "reading_progress_at"]
         if finished and not self.reading_completed_at:
             dias_reales = max(1, (today - self.reading_started_on).days)
             semanas_reales = dias_reales / 7
@@ -1021,6 +1081,7 @@ class Task(models.Model):
             reading_last_page=self.reading_last_page,
             reading_target_weeks=self.reading_target_weeks,
             reading_current_page=self.reading_current_page,
+            reading_progress_at=self.reading_progress_at,
             reading_started_on=self.reading_started_on,
         )
 

@@ -327,7 +327,7 @@
     </div>
 
     <fieldset class="field" id="training-days-field">
-        <legend class="field__label">Qué días entrenas</legend>
+        <legend class="field__label" id="training-days-legend">Qué días entrenas</legend>
         <div class="repeat-options">
             {% for value, label in weekdays %}
             <label class="repeat-option">
@@ -338,7 +338,7 @@
             {% endfor %}
         </div>
         <input type="hidden" name="repeat" value="custom" id="repeat-hidden-input">
-        <span class="field__hint">
+        <span class="field__hint" id="training-days-hint">
             El plan crea su propia tarea con estos días. Te saldrá en la lista
             y solo tienes que darle al play.
         </span>
@@ -409,6 +409,10 @@
     var startedOnInput = startedOnField.querySelector('input[name="started_on"]');
     var trainingDaysField = document.getElementById("training-days-field");
     var trainingDaysInputs = trainingDaysField.querySelectorAll("input");
+    var trainingDaysLegend = document.getElementById("training-days-legend");
+    var trainingDaysHint = document.getElementById("training-days-hint");
+    var TRAINING_DAYS_DEFAULT_LABEL = trainingDaysLegend.textContent;
+    var TRAINING_DAYS_DEFAULT_HINT = trainingDaysHint.textContent;
     var dueTimeField = document.getElementById("due-time-field");
     var dueTimeInput = document.getElementById("due-time-input");
     var isActiveField = document.getElementById("is-active-field");
@@ -487,8 +491,17 @@
         notesField.style.display = isReading ? "none" : "flex";
         startedOnField.style.display = isReading ? "none" : "flex";
         startedOnInput.disabled = isReading;
-        trainingDaysField.style.display = isReading ? "none" : "flex";
-        for (var t = 0; t < trainingDaysInputs.length; t++) trainingDaysInputs[t].disabled = isReading;
+        // Qué días: a diferencia del resto de campos de Plan, esto SÍ
+        // aplica también a Lectura (el usuario lo pidió explícitamente —
+        // antes de esto, un plan de lectura salía siempre como tarea
+        // diaria sin poder elegir qué días, a diferencia de Deporte/
+        // Estudio/General). reading_plan_create lee los mismos
+        // custom_days del POST (ver views.py) — nunca se oculta ni se
+        // deshabilita para ningún tipo de plan.
+        trainingDaysLegend.textContent = isReading ? "Qué días lees" : TRAINING_DAYS_DEFAULT_LABEL;
+        trainingDaysHint.textContent = isReading
+            ? "La tarea de lectura te saldrá en la lista esos días."
+            : TRAINING_DAYS_DEFAULT_HINT;
         dueTimeField.style.display = isReading ? "none" : "flex";
         dueTimeInput.disabled = isReading;
         dueTimeInput.required = !isReading;

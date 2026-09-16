@@ -56,6 +56,7 @@
     <p class="workout__goal-banner" id="reading-finish-banner" hidden></p>
 
     <div class="task-form__actions" id="reading-session-actions">
+        <button type="button" class="primary-btn" id="reading-mark-finished-btn" hidden>He terminado el libro</button>
         <button type="button" class="ghost-btn" id="reading-finish-session-btn">Terminar sesión de hoy</button>
     </div>
 </div>
@@ -104,6 +105,7 @@
     var finishBanner = document.getElementById('reading-finish-banner');
     var sessionActions = document.getElementById('reading-session-actions');
     var finishSessionBtn = document.getElementById('reading-finish-session-btn');
+    var markFinishedBtn = document.getElementById('reading-mark-finished-btn');
 
     var pdfKey = embed.dataset.pdfKey || '';
     var lastPageReal = embed.dataset.lastPage ? parseInt(embed.dataset.lastPage, 10) : null;
@@ -117,6 +119,7 @@
     var pdfDoc = null;
     var numPages = 0;
     var reportTimer = null;
+    var catchUpTimer = null;
     var finished = false;
 
     if (!supportsLocal) {
@@ -251,11 +254,58 @@
         });
     }
 
+    // Recalcula tamaños de página (zoom, entrar/salir de pantalla
+    // completa, redimensionar la ventana) SIN perder el sitio ni
+    // reportar página de más. Antes, cambiar el ancho del contenedor
+    // (p.ej. al entrar/salir de pantalla completa) cambiaba cuánto mide
+    // cada página en píxeles pero dejaba el scrollTop tal cual, así que
+    // ese mismo scrollTop pasaba a apuntar a una página completamente
+    // distinta (a veces 25-50 páginas más abajo) -- y como el observer
+    // seguía activo durante el redimensionado, llegó a reportar esa
+    // página falsa como "leída de verdad" (record_reading_page se queda
+    // con el máximo alcanzado, así que ese progreso falso no se
+    // deshacía solo). Ahora se desconecta el observer mientras se
+    // redimensiona, se vuelve a colocar el scroll en la página en la
+    // que estabas de verdad, y solo entonces se reconecta.
+    function relayout() {
+        if (!baseViewportSize) return;
+        var anchor = currentPage;
+        if (io) { io.disconnect(); io = null; }
+        applyLayout();
+        requestAnimationFrame(function () {
+            var target = pages[anchor - 1];
+            if (target) scrollPageToTop(target.div);
+            requestAnimationFrame(observePages);
+        });
+    }
+
+    function jumpToPage(n) {
+        n = Math.max(1, Math.min(numPages, n));
+        var target = pages[n - 1];
+        if (target) scrollPageToTop(target.div);
+    }
+
     function setCurrentPage(n) {
         if (n === currentPage) return;
         currentPage = n;
         pageLabel.textContent = n + ' / ' + numPages + (lastPageReal && n === lastPageReal ? ' (fin del contenido)' : '');
         reportPage(n);
+        updateFinishAvailability();
+    }
+
+    // Botón de respaldo: el progreso normalmente se cierra solo al llegar
+    // scrolleando a reading_last_page (ver reportPage/record_reading_page
+    // más abajo), pero eso depende de que el IntersectionObserver llegue a
+    // marcar esa página en concreto como "la más visible" -- con una
+    // última página de contenido corta, o justo al final del archivo sin
+    // nada debajo con lo que comparar, eso puede no llegar a pasar nunca
+    // aunque el usuario SÍ haya leído hasta ahí. En cuanto se ha llegado
+    // (o pasado) la última página real al menos una vez, este botón queda
+    // a la vista como forma explícita y segura de cerrar el plan sin
+    // depender de esa detección pasiva.
+    function updateFinishAvailability() {
+        if (finished) return;
+        markFinishedBtn.hidden = !(lastPageReal && currentPage >= lastPageReal);
     }
 
     function observePages() {
@@ -296,14 +346,7 @@
 
     function setZoom(newZoom) {
         zoomFactor = Math.max(0.4, Math.min(3, newZoom));
-        var anchor = currentPage;
-        applyLayout();
-        // Sin esto, cambiar el zoom te deja mirando un punto cualquiera
-        // del documento -- se vuelve a la página en la que ibas.
-        requestAnimationFrame(function () {
-            var target = pages[anchor - 1];
-            if (target) scrollPageToTop(target.div);
-        });
+        relayout();
     }
     zoomInBtn.addEventListener('click', function () { setZoom(zoomFactor * 1.15); });
     zoomOutBtn.addEventListener('click', function () { setZoom(zoomFactor / 1.15); });
@@ -318,21 +361,22 @@
     document.addEventListener('fullscreenchange', function () {
         var isFull = document.fullscreenElement === viewerEl;
         fullscreenBtn.textContent = isFull ? '⛶ Salir de pantalla completa' : '⛶ Pantalla completa';
-        // El ancho disponible cambia al entrar/salir -- hay que recalcular
-        // el "ajustar al ancho" para el nuevo tamaño del contenedor.
-        requestAnimationFrame(function () { if (baseViewportSize) applyLayout(); });
+        // El ancho disponible cambia al entrar/salir -- relayout()
+        // recalcula el "ajustar al ancho" y devuelve el scroll a la
+        // página en la que ibas de verdad (ver el comentario de arriba).
+        relayout();
     });
-    window.addEventListener('resize', function () {
-        if (baseViewportSize) applyLayout();
-    });
+    window.addEventListener('resize', relayout);
 
     // Espacio/PageUp/PageDown bajan o suben una pantalla entera (como en
-    // el visor nativo). Las flechitas arriba/abajo son más finas a
-    // propósito: una pulsación suelta = un empujón pequeño (1-2 líneas);
-    // mantenida pulsada = desplazamiento continuo y suave (por fotograma,
-    // no un salto grande repetido), hasta soltarla.
+    // el visor nativo). Arriba/abajo son más finas a propósito: una
+    // pulsación suelta = un empujón pequeño (1-2 líneas); mantenida
+    // pulsada = desplazamiento continuo y suave (por fotograma, no un
+    // salto grande repetido), hasta soltarla. Izquierda/derecha saltan
+    // directas a la página anterior/siguiente (alineada arriba del
+    // todo), como los botones "Anterior"/"Siguiente" de antes.
     var ARROW_NUDGE_PX = 48;
-    var ARROW_HOLD_PX_PER_FRAME = 6;
+    var ARROW_HOLD_PX_PER_FRAME = 12;
     var arrowScrollDirection = 0;
     var arrowScrollRAF = null;
 
@@ -366,6 +410,12 @@
             } else {
                 scrollEl.scrollTop += dir * ARROW_NUDGE_PX;
             }
+        } else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            jumpToPage(currentPage + 1);
+        } else if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            jumpToPage(currentPage - 1);
         }
     });
     document.addEventListener('keyup', function (e) {
@@ -401,6 +451,19 @@
             hint.textContent = '';
             buildPages();
             pageLabel.textContent = currentPage + ' / ' + numPages + (lastPageReal && currentPage === lastPageReal ? ' (fin del contenido)' : '');
+            updateFinishAvailability();
+            // "Ping" cada pocos segundos con la página en la que estás
+            // ahora mismo -- el servidor topa cuánto puede avanzar de
+            // golpe según el tiempo real transcurrido (ver
+            // Task.record_reading_page), así que si scrolleas rápido más
+            // allá de lo que ese tope deja pasar de momento, esto es lo
+            // que hace que el progreso guardado te vaya alcanzando solo
+            // según pasan los minutos, sin que haga falta tocar nada más.
+            clearInterval(catchUpTimer);
+            catchUpTimer = setInterval(function () {
+                if (finished || !pdfDoc) return;
+                reportPage(currentPage);
+            }, 10000);
             // Salta directo a la página por la que ibas -- sin animación,
             // que un scroll "smooth" de cientos de páginas de golpe se ve
             // rarísimo.
@@ -414,6 +477,29 @@
         });
     }
 
+    // Común a reportPage (automático, con debounce) y al botón "He
+    // terminado el libro" (manual, inmediato) -- misma respuesta del
+    // servidor, misma forma de pintarla.
+    function applyProgressResponse(data) {
+        if (!data.ok) return false;
+        if (data.status) {
+            progressBar.style.width = data.status.pct + '%';
+            paceLabel.textContent = data.status.is_overdue
+                ? ('Vas ' + Math.abs(data.status.days_left) + ' días tarde — ' + data.status.pace_per_day + ' pág./día para ponerte al día')
+                : ('Te faltan ' + data.status.days_left + ' días · ritmo: ' + data.status.pace_per_day + ' pág./día');
+        }
+        if (data.finished) {
+            finished = true;
+            clearInterval(catchUpTimer);
+            toolbar.hidden = true;
+            sessionActions.hidden = true;
+            finishBanner.hidden = false;
+            finishBanner.textContent = '¡Libro terminado! Se ha guardado el plan.';
+            setTimeout(function () { window.location.href = data.redirect_url || listUrl; }, 1800);
+        }
+        return data.finished;
+    }
+
     function reportPage(n) {
         // Debounce corto: scrollear rápido por varias páginas no dispara
         // una petición por cada una, solo la última tras un momento quieto.
@@ -423,25 +509,33 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
                 body: JSON.stringify({ page: n }),
-            }).then(function (r) { return r.json(); }).then(function (data) {
-                if (!data.ok) return;
-                if (data.status) {
-                    progressBar.style.width = data.status.pct + '%';
-                    paceLabel.textContent = data.status.is_overdue
-                        ? ('Vas ' + Math.abs(data.status.days_left) + ' días tarde — ' + data.status.pace_per_day + ' pág./día para ponerte al día')
-                        : ('Te faltan ' + data.status.days_left + ' días · ritmo: ' + data.status.pace_per_day + ' pág./día');
-                }
-                if (data.finished) {
-                    finished = true;
-                    toolbar.hidden = true;
-                    sessionActions.hidden = true;
-                    finishBanner.hidden = false;
-                    finishBanner.textContent = '¡Libro terminado! Se ha guardado el plan.';
-                    setTimeout(function () { window.location.href = data.redirect_url || listUrl; }, 1800);
-                }
-            }).catch(function () { /* red intermitente: se reintenta en el próximo cambio de página */ });
+            }).then(function (r) { return r.json(); }).then(applyProgressResponse)
+              .catch(function () { /* red intermitente: se reintenta en el próximo cambio de página */ });
         }, 400);
     }
+
+    markFinishedBtn.addEventListener('click', function () {
+        markFinishedBtn.disabled = true;
+        markFinishedBtn.textContent = 'Marcando…';
+        clearTimeout(reportTimer); // que no llegue después un reportPage con una página menor y pise el estado "finished"
+        fetch(progressUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            body: JSON.stringify({ page: lastPageReal }),
+        }).then(function (r) { return r.json(); }).then(function (data) {
+            if (!applyProgressResponse(data)) {
+                // No debería pasar (se enseña el botón solo tras llegar a
+                // lastPageReal, y esa página siempre cierra el plan) --
+                // por si acaso, deja reintentar en vez de quedarse colgado.
+                markFinishedBtn.disabled = false;
+                markFinishedBtn.textContent = 'He terminado el libro';
+            }
+        }).catch(function () {
+            markFinishedBtn.disabled = false;
+            markFinishedBtn.textContent = 'He terminado el libro';
+            hint.textContent = 'No se pudo guardar — inténtalo otra vez.';
+        });
+    });
 
     finishSessionBtn.addEventListener('click', function () {
         finishSessionBtn.disabled = true;
