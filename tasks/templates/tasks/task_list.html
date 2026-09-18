@@ -170,9 +170,17 @@
                 {% if task.workout_kind == "reading" %}
                 {% with status=task.reading_plan_status %}
                 {% if status %}
-                <div class="task-progress" title="Progreso del plan de lectura">
+                <div class="task-progress" title="Progreso del plan de lectura (libro completo)">
                     <div class="task-progress__bar"><div class="task-progress__done" style="width:{{ status.pct }}%"></div></div>
                     <span class="task-progress__label">pág. {{ status.current_page }}/{{ status.last_page }} · {{ status.pct }}%</span>
+                </div>
+                {% endif %}
+                {% endwith %}
+                {% with today=task.reading_today_status %}
+                {% if today %}
+                <div class="task-progress" title="Progreso de hoy hacia el objetivo del día">
+                    <div class="task-progress__bar"><div class="task-progress__done{% if today.pct > 100 %} task-progress__done--over{% endif %}" style="width:{{ today.bar_pct|default:0 }}%"></div></div>
+                    <span class="task-progress__label">hoy: {{ today.pages_today }}/{{ today.goal }} pág. · {{ today.pct }}%</span>
                 </div>
                 {% endif %}
                 {% endwith %}

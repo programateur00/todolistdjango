@@ -1,4 +1,5 @@
 import datetime as _dt
+import math
 import re
 import uuid
 from datetime import timedelta
@@ -400,6 +401,23 @@ class Task(models.Model):
                    "o pasar rapidísimo por encima de todas las páginas hasta el "
                    "final del archivo se guardaba igual que haberlo leído entero.",
     )
+    reading_day_start_page = models.PositiveIntegerField(
+        default=0,
+        help_text="Solo reading_mode='plan': reading_current_page en el momento en que "
+                   "se generó ESTA instancia diaria (ver _spawn_next) -- punto de partida "
+                   "para medir cuánto se ha leído hoy en concreto (ver reading_today_status), "
+                   "ya que reading_current_page es acumulado de todo el libro y no se reinicia.",
+    )
+    reading_day_goal = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Solo reading_mode='plan': páginas que tocaba leer HOY para ir al ritmo, "
+                   "fijadas una sola vez al generarse esta instancia diaria (ver "
+                   "_reading_day_goal_for) y nunca recalculadas mientras se lee -- así "
+                   "reading_today_status puede pasar de 100% si se lee de más, en vez de "
+                   "recortarse como reading_plan_status. None si todavía no se ha calculado "
+                   "(instancias de antes de que existiera este campo -- ver "
+                   "ensure_reading_day_goal).",
+    )
     reading_started_on = models.DateField(
         null=True, blank=True,
         help_text="Solo reading_mode='plan': fecha en que se creó el plan — con "
@@ -641,24 +659,25 @@ class Task(models.Model):
         )
         if self.target_distance_km:
             max_pace = self.max_pace_seconds_per_km
-            km_hoy = 0.0
-            for ws in sesiones_hoy:
-                if not ws.distance_km:
-                    continue
-                # Sin duración no se puede saber el ritmo -- y "no se
-                # sabe" no es lo mismo que "no lo cumplió". Antes se
-                # descartaba igual que un ritmo demasiado lento, así que
-                # una distancia sin sesión propia (el resumen del día
-                # que manda health-sync.js cuando el Detector de
-                # Actividad no crea sesión para una caminata corta)
-                # desaparecía entera si la tarea pedía un ritmo mínimo.
-                if (
-                    max_pace is not None
-                    and ws.pace_seconds_per_km is not None
-                    and ws.pace_seconds_per_km > max_pace
-                ):
-                    continue
-                km_hoy += ws.distance_km
+            km_hoy = sum(ws.distance_km for ws in sesiones_hoy if ws.distance_km)
+            # El ritmo se comprueba en MEDIA sobre el día entero, no
+            # sesión por sesión: el Detector de Actividad tarda un rato
+            # en "engancharse" a la velocidad real al empezar a andar
+            # (una caminata a ritmo constante puede arrancar marcando
+            # 16 min/km y bajar a 12 min/km en el propio primer tramo),
+            # así que exigir el ritmo en cada sesión suelta descartaba
+            # caminatas hechas bien enteras por culpa de ese arranque.
+            # Las sesiones sin duración (el resumen del día que manda
+            # health-sync.js cuando no hay sesión propia) no se pueden
+            # cronometrar, así que no entran en el cálculo del ritmo,
+            # pero sí suman a la distancia una vez el ritmo ya cuadra.
+            if max_pace is not None and km_hoy:
+                segundos_hoy = sum(
+                    ws.session_duration_seconds for ws in sesiones_hoy
+                    if ws.distance_km and ws.session_duration_seconds
+                )
+                if segundos_hoy and (segundos_hoy / km_hoy) > max_pace:
+                    km_hoy = 0.0
             pct = min(100, round(100 * km_hoy / self.target_distance_km))
             return {
                 "pct": pct,
@@ -914,6 +933,40 @@ class Task(models.Model):
             return False
         return index >= total - 1
 
+    def _reading_pace(self, as_of_date):
+        """
+        Piezas compartidas por reading_plan_status y el objetivo diario
+        (_reading_day_goal_for): páginas de contenido que quedan y días
+        que quedan hasta el plazo, medidas desde `as_of_date` -- para que
+        el objetivo de un día concreto se calcule con la fecha de ESE día
+        (ver _spawn_next) y no siempre con "hoy".
+
+        None si no es un plan de lectura con los tres datos que hacen
+        falta (reading_last_page, reading_target_weeks, reading_started_on).
+        """
+        if self.reading_mode != self.READING_MODE_PLAN:
+            return None
+        if not (self.reading_last_page and self.reading_target_weeks and self.reading_started_on):
+            return None
+        # Sobre las páginas de CONTENIDO (reading_first_page..reading_last_page),
+        # no desde la página 1 del archivo -- si no, un libro que empieza de
+        # verdad en la página 12 (portada/índice/prólogo antes) infla el
+        # total y hace parecer que falta más ritmo del que hace falta.
+        first_page = self.reading_first_page or 1
+        total_pages = max(1, self.reading_last_page - first_page + 1)
+        pages_read = max(0, min(self.reading_current_page, self.reading_last_page) - first_page + 1)
+        pages_left = max(0, total_pages - pages_read)
+        deadline = self.reading_started_on + timedelta(weeks=self.reading_target_weeks)
+        days_left = (deadline - as_of_date).days
+        return {
+            "first_page": first_page,
+            "total_pages": total_pages,
+            "pages_read": pages_read,
+            "pages_left": pages_left,
+            "deadline": deadline,
+            "days_left": days_left,
+        }
+
     @property
     def reading_plan_status(self):
         """
@@ -921,45 +974,120 @@ class Task(models.Model):
         faltan, días que quedan hasta el plazo objetivo, y el ritmo
         (páginas/día) recalculado con eso — se recalcula en caliente cada
         vez, nunca se guarda (si no, habría que corregirlo cada día aunque
-        nadie tocara el plan).
+        nadie tocara el plan). Distinto de reading_today_status: esto es
+        el ritmo GENERAL para todo el libro, siempre recortado al 100%;
+        reading_today_status es solo el objetivo de HOY, fijado una vez,
+        que sí puede pasar de 100% si se lee de más.
 
         None si esto no es un plan de lectura con los tres datos que hacen
         falta para calcular algo (reading_last_page, reading_target_weeks,
         reading_started_on) — p.ej. un plan recién creado antes de
         guardarse del todo.
         """
-        if self.reading_mode != self.READING_MODE_PLAN:
-            return None
-        if not (self.reading_last_page and self.reading_target_weeks and self.reading_started_on):
-            return None
-        # El ritmo y el % se calculan sobre las páginas de CONTENIDO
-        # (reading_first_page..reading_last_page), no desde la página 1 del
-        # archivo -- si no, un libro que empieza de verdad en la página 12
-        # (portada/índice/prólogo antes) infla el total y hace parecer que
-        # falta más ritmo del que hace falta de verdad.
-        first_page = self.reading_first_page or 1
-        total_pages = max(1, self.reading_last_page - first_page + 1)
-        pages_read = max(0, min(self.reading_current_page, self.reading_last_page) - first_page + 1)
-        pages_left = max(0, total_pages - pages_read)
-        deadline = self.reading_started_on + timedelta(weeks=self.reading_target_weeks)
         today = timezone.localtime(timezone.now()).date()
-        days_left = (deadline - today).days
+        pace = self._reading_pace(today)
+        if pace is None:
+            return None
         # Con el plazo ya cumplido (days_left <= 0) el ritmo se calcula
         # igual sobre 1 día -- no tiene sentido dividir por 0 ni por un
         # número negativo, y así el visor puede seguir enseñando "cuánto
         # te falta leer hoy para ponerte al día" en vez de un error.
-        pace = pages_left / max(days_left, 1)
+        pace_per_day = pace["pages_left"] / max(pace["days_left"], 1)
         return {
-            "pages_left": pages_left,
-            "days_left": days_left,
-            "is_overdue": days_left < 0,
-            "pace_per_day": round(pace, 1),
-            "deadline": deadline,
+            "pages_left": pace["pages_left"],
+            "days_left": pace["days_left"],
+            "is_overdue": pace["days_left"] < 0,
+            "pace_per_day": round(pace_per_day, 1),
+            "deadline": pace["deadline"],
             "current_page": self.reading_current_page,
             "last_page": self.reading_last_page,
-            "first_page": first_page,
-            "pct": min(100, round(100 * pages_read / total_pages)),
+            "first_page": pace["first_page"],
+            "pct": min(100, round(100 * pace["pages_read"] / pace["total_pages"])),
         }
+
+    def _reading_day_goal_for(self, as_of_date):
+        """
+        Cuántas páginas tocaba leer en el día `as_of_date` para ir al
+        ritmo -- se llama UNA vez, al generarse esa instancia diaria (ver
+        _spawn_next y ensure_reading_day_goal), y el resultado se guarda
+        en reading_day_goal en vez de recalcularse mientras se lee: así
+        "hoy" tiene un objetivo fijo que sí se puede superar.
+
+        None si no hay datos suficientes (ver _reading_pace); 0 si ya no
+        queda ninguna página por leer (nada que pedir para hoy).
+        """
+        pace = self._reading_pace(as_of_date)
+        if pace is None:
+            return None
+        if pace["pages_left"] <= 0:
+            return 0
+        return max(1, math.ceil(pace["pages_left"] / max(pace["days_left"], 1)))
+
+    @property
+    def reading_today_status(self):
+        """
+        Progreso de HOY frente al objetivo fijado al generarse esta
+        instancia diaria (reading_day_goal) -- a diferencia de
+        reading_plan_status, que se recalcula en caliente y siempre se
+        recorta al 100%, este objetivo se queda fijo durante todo el día,
+        así que el % puede pasar de 100 sin ningún tope si se lee de más
+        (decisión con Alex: mejor dejar ver que vas por delante que
+        recortar la barra como si el objetivo de hoy ya no sirviera).
+
+        None si esto no es un plan de lectura, o si esta instancia todavía
+        no tiene un objetivo de hoy calculado (ver ensure_reading_day_goal).
+        """
+        if self.reading_mode != self.READING_MODE_PLAN:
+            return None
+        if self.reading_day_goal is None:
+            return None
+        pages_today = max(0, self.reading_current_page - self.reading_day_start_page)
+        goal = self.reading_day_goal
+        if goal:
+            pct = round(100 * pages_today / goal)
+        else:
+            # Objetivo 0 (no quedaba nada por leer cuando se generó el
+            # día) -- cualquier página leída ya es "de más".
+            pct = 100 if pages_today else 0
+        return {
+            "pages_today": pages_today,
+            "goal": goal,
+            "pct": pct,  # sin tope -- puede pasar de 100 si se lee de más
+            "bar_pct": min(100, pct),  # para el ancho de la barra -- que no se salga del hueco
+        }
+
+    def ensure_reading_day_goal(self):
+        """
+        Rellena reading_day_start_page/reading_day_goal si esta instancia
+        se creó antes de que existieran estos campos (planes ya abiertos
+        al desplegar esta función) -- toma el estado actual como "inicio
+        del día" a partir de ahora, la primera vez que se abre el visor.
+        No hace nada si ya hay un objetivo calculado (el camino normal,
+        ver _spawn_next, ya lo deja puesto) ni si faltan datos del plan.
+        """
+        if self.reading_mode != self.READING_MODE_PLAN or self.reading_day_goal is not None:
+            return
+        today = timezone.localtime(timezone.now()).date()
+        goal = self._reading_day_goal_for(today)
+        if goal is None:
+            return
+        self.reading_day_start_page = self.reading_current_page
+        self.reading_day_goal = goal
+        self.save(update_fields=["reading_day_start_page", "reading_day_goal"])
+
+    def recompute_reading_day_goal(self):
+        """
+        Recalcula el objetivo de HOY sin tocar reading_day_start_page --
+        para cuando se edita el plazo/última página desde
+        reading_plan_form a media semana: lo leído hoy sigue siendo lo
+        leído hoy, pero el objetivo debe reflejar el ritmo nuevo. Quien
+        llama a esto es quien guarda (añadir "reading_day_goal" al
+        update_fields del save()).
+        """
+        if self.reading_mode != self.READING_MODE_PLAN:
+            return
+        today = timezone.localtime(timezone.now()).date()
+        self.reading_day_goal = self._reading_day_goal_for(today)
 
     def record_reading_page(self, page):
         """
@@ -1111,6 +1239,13 @@ class Task(models.Model):
             reading_current_page=self.reading_current_page,
             reading_progress_at=self.reading_progress_at,
             reading_started_on=self.reading_started_on,
+            # Objetivo de HOY (de la instancia que se está creando, no de
+            # esta) fijado de una vez -- ver _reading_day_goal_for/
+            # reading_today_status. reading_day_start_page es el punto de
+            # partida: la página en la que se quedó HOY se convierte en
+            # el "inicio del día" de mañana.
+            reading_day_start_page=self.reading_current_page,
+            reading_day_goal=self._reading_day_goal_for(next_date),
         )
 
     def _record_occurrence(self, result, auto_expired=False, minutes_watched=None):

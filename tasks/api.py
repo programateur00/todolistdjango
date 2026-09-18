@@ -1145,19 +1145,22 @@ def running_import(request, uuid):
         if min_steps is not None:
             total_steps = de_hoy.aggregate(pasos=Sum("steps"))["pasos"] or 0
         if min_distance is not None:
-            # Mismo criterio que Task.auto_progress (pace_seconds_per_km,
-            # no avg_rep_seconds -- se recalcula de distance_km /
-            # session_duration_seconds en vez de fiarse del valor
-            # guardado al importar): sin ritmo conocido no se descarta,
-            # solo cuando el ritmo SÍ se conoce y no llega al mínimo.
-            total_distance = 0.0
-            for sesion in de_hoy:
-                if not sesion.distance_km:
-                    continue
-                pace_sesion = sesion.pace_seconds_per_km
-                if max_pace is not None and pace_sesion is not None and pace_sesion > max_pace:
-                    continue
-                total_distance += sesion.distance_km
+            # Mismo criterio que Task.auto_progress: el ritmo se mira en
+            # MEDIA sobre el día entero (distancia total / tiempo total
+            # de las sesiones cronometradas), no sesión por sesión -- el
+            # Detector de Actividad tarda un rato en "engancharse" a la
+            # velocidad real al empezar a andar, así que una caminata
+            # hecha a ritmo constante puede tener su primer tramo con un
+            # ritmo aparente mucho más lento sin que eso signifique que
+            # el día entero se hizo despacio.
+            total_distance = sum(s.distance_km for s in de_hoy if s.distance_km)
+            if max_pace is not None and total_distance:
+                segundos_con_duracion = sum(
+                    s.session_duration_seconds for s in de_hoy
+                    if s.distance_km and s.session_duration_seconds
+                )
+                if segundos_con_duracion and (segundos_con_duracion / total_distance) > max_pace:
+                    total_distance = 0.0
 
     if min_steps is not None and total_steps >= min_steps:
         qualifying += 1

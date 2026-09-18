@@ -31,6 +31,13 @@
     </div>
     <div class="stats-bar"><div class="stats-bar__done" id="reading-progress-bar" style="width:{{ status.pct|default:0 }}%"></div></div>
 
+    {% if today_status %}
+    <div id="reading-today-status" class="reading-status">
+        <span id="reading-today-label">Hoy: {{ today_status.pages_today }}/{{ today_status.goal }} pág. · {{ today_status.pct }}%</span>
+    </div>
+    <div class="stats-bar"><div class="stats-bar__done{% if today_status.pct > 100 %} stats-bar__done--over{% endif %}" id="reading-today-bar" style="width:{{ today_status.bar_pct|default:0 }}%"></div></div>
+    {% endif %}
+
     <div id="reading-viewer" class="reading-viewer">
         <div class="reading-toolbar" id="reading-toolbar" hidden>
             <button type="button" class="ghost-btn reading-toolbar__btn" id="reading-zoom-out" title="Alejar">−</button>
@@ -103,6 +110,8 @@
     var reselectBtn = document.getElementById('reading-reselect-btn');
     var paceLabel = document.getElementById('reading-pace');
     var progressBar = document.getElementById('reading-progress-bar');
+    var todayLabel = document.getElementById('reading-today-label');
+    var todayBar = document.getElementById('reading-today-bar');
     var finishBanner = document.getElementById('reading-finish-banner');
     var sessionActions = document.getElementById('reading-session-actions');
     var finishSessionBtn = document.getElementById('reading-finish-session-btn');
@@ -480,6 +489,16 @@
             paceLabel.textContent = data.status.is_overdue
                 ? ('Vas ' + Math.abs(data.status.days_left) + ' días tarde — ' + data.status.pace_per_day + ' pág./día para ponerte al día')
                 : ('Te faltan ' + data.status.days_left + ' días · ritmo: ' + data.status.pace_per_day + ' pág./día');
+        }
+        // Objetivo de HOY -- fijo durante el día (ver Task.reading_today_status),
+        // así que a diferencia de la barra de arriba esta sí puede pasar del
+        // 100% con un color distinto en vez de recortarse.
+        if (data.today && todayBar) {
+            todayBar.style.width = data.today.bar_pct + '%';
+            todayBar.classList.toggle('stats-bar__done--over', data.today.pct > 100);
+            if (todayLabel) {
+                todayLabel.textContent = 'Hoy: ' + data.today.pages_today + '/' + data.today.goal + ' pág. · ' + data.today.pct + '%';
+            }
         }
         if (data.finished) {
             finished = true;

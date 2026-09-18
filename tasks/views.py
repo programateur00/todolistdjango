@@ -1085,6 +1085,10 @@ def reading_plan_form(request, pk=None):
                 reading_started_on=today,
                 repeat=Task.REPEAT_CUSTOM, custom_days=custom_days, due_date=today, series_start_date=today,
             )
+            # Objetivo de HOY para esta primera instancia -- reading_current_page
+            # todavía está a 0 (default del modelo), así que el "inicio del
+            # día" es 0 y el objetivo sale del ritmo completo del plan.
+            task.ensure_reading_day_goal()
         else:
             task.title = title
             # El plazo puede tocarse desde aquí sin más -- lo único que NO
@@ -1098,9 +1102,10 @@ def reading_plan_form(request, pk=None):
             task.custom_days = custom_days
             if pdf_key:
                 task.reading_pdf_key = pdf_key
+            task.recompute_reading_day_goal()
             task.save(update_fields=[
                 "title", "reading_first_page", "reading_last_page", "reading_target_weeks",
-                "reading_pdf_key", "repeat", "custom_days",
+                "reading_pdf_key", "repeat", "custom_days", "reading_day_goal",
             ])
         messages.success(request, "Plan de lectura guardado.")
         return redirect(reverse("tasks:task_reading", args=[task.pk]))
@@ -1126,9 +1131,14 @@ def task_reading(request, pk):
         category=Task.CATEGORY_WORK, subcategory=Task.SUBCATEGORY_READING,
         reading_mode=Task.READING_MODE_PLAN,
     )
+    # Planes abiertos antes de que existiera el objetivo diario todavía no
+    # tienen reading_day_goal -- se rellena aquí mismo, la primera vez que
+    # se abre el visor con este campo vacío (ver ensure_reading_day_goal).
+    task.ensure_reading_day_goal()
     return render(request, "tasks/task_reading.html", {
         "task": task,
         "status": task.reading_plan_status,
+        "today_status": task.reading_today_status,
     })
 
 
@@ -1158,7 +1168,11 @@ def task_reading_progress(request, pk):
         return JsonResponse({"ok": False, "error": "Falta 'page'"}, status=400)
 
     finished = task.record_reading_page(page)
-    response = {"ok": True, "finished": finished, "status": task.reading_plan_status}
+    response = {
+        "ok": True, "finished": finished,
+        "status": task.reading_plan_status,
+        "today": task.reading_today_status,
+    }
     if finished:
         response["redirect_url"] = reverse("tasks:task_list")
         messages.success(
