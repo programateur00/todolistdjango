@@ -1052,11 +1052,6 @@ def running_import(request, uuid):
         if not isinstance(run, dict):
             continue
         external_id = str(run.get("external_id") or "").strip()[:120]
-        if external_id and WorkoutSession.objects.filter(
-            user=_user(), external_id=external_id, deleted_at__isnull=True
-        ).exists():
-            skipped += 1
-            continue
 
         distance_km = _f(run.get("distance_km"))
         duration_seconds = _f(run.get("duration_seconds"))
@@ -1069,21 +1064,56 @@ def running_import(request, uuid):
             continue
 
         pace = round(duration_seconds / distance_km, 2) if (distance_km and duration_seconds) else None
-        ws = WorkoutSession.objects.create(
-            task=t, plan=t.plan, user=_user(), series_id=t.series_id,
-            exercise=run.get("exercise") or t.subcategory or "running",
-            session_duration_seconds=int(round(duration_seconds)) if duration_seconds else 0,
-            avg_rep_seconds=pace,
-            distance_km=distance_km,
-            steps=steps,
-            source=source,
-            external_id=external_id,
-            # Objetivo vigente en ESE momento — si viene de un plan que
-            # progresa semana a semana, esto deja constancia de qué se
-            # pedía entonces, no de lo que se pide ahora.
-            target_distance_km=min_distance,
-            target_pace_seconds_per_km=max_pace,
+        session_duration = int(round(duration_seconds)) if duration_seconds else 0
+
+        # Con external_id repetido no se salta sin más: se actualiza la
+        # sesión que ya había, si algo cambió. Esto es lo que hace falta
+        # para que un resumen "de todo el día" (como los pasos, con un
+        # external_id fijo por fecha) refleje el total real al
+        # resincronizar por la tarde, en vez de quedarse congelado con
+        # lo que hubiera la primera vez que se importó ese external_id.
+        existing = (
+            WorkoutSession.objects.filter(
+                user=_user(), external_id=external_id, deleted_at__isnull=True
+            ).first()
+            if external_id
+            else None
         )
+
+        if existing is not None:
+            sin_cambios = (
+                existing.distance_km == distance_km
+                and existing.steps == steps
+                and existing.session_duration_seconds == session_duration
+            )
+            if sin_cambios:
+                skipped += 1
+                continue
+            existing.exercise = run.get("exercise") or t.subcategory or "running"
+            existing.session_duration_seconds = session_duration
+            existing.avg_rep_seconds = pace
+            existing.distance_km = distance_km
+            existing.steps = steps
+            existing.target_distance_km = min_distance
+            existing.target_pace_seconds_per_km = max_pace
+            existing.save()
+            ws = existing
+        else:
+            ws = WorkoutSession.objects.create(
+                task=t, plan=t.plan, user=_user(), series_id=t.series_id,
+                exercise=run.get("exercise") or t.subcategory or "running",
+                session_duration_seconds=session_duration,
+                avg_rep_seconds=pace,
+                distance_km=distance_km,
+                steps=steps,
+                source=source,
+                external_id=external_id,
+                # Objetivo vigente en ESE momento — si viene de un plan que
+                # progresa semana a semana, esto deja constancia de qué se
+                # pedía entonces, no de lo que se pide ahora.
+                target_distance_km=min_distance,
+                target_pace_seconds_per_km=max_pace,
+            )
         imported.append(str(ws.uuid))
         total_steps += steps or 0
         # La distancia solo cuenta si la carrera se hizo al ritmo pedido:
@@ -1100,14 +1130,28 @@ def running_import(request, uuid):
     # Pasos y distancia se acumulan a lo largo del día: 10.000 pasos en
     # tres paseos cuentan igual que en uno. Y hay que contar TODO lo de
     # hoy, no solo lo de esta tanda — si sincronizas a mediodía y otra
-    # vez por la tarde, la segunda solo trae lo nuevo.
-    if min_steps is not None:
+    # vez por la tarde, la segunda solo trae lo nuevo. Antes esto solo se
+    # hacía para pasos; distancia se quedaba con el total de esta tanda
+    # nada más, así que una caminata sincronizada aparte se perdía.
+    if min_steps is not None or min_distance is not None:
         hoy = timezone.localtime(timezone.now()).date()
         de_hoy = WorkoutSession.objects.filter(
             user=_user(), series_id=t.series_id,
             recorded_at__date=hoy, deleted_at__isnull=True,
         )
-        total_steps = de_hoy.aggregate(pasos=Sum("steps"))["pasos"] or 0
+        if min_steps is not None:
+            total_steps = de_hoy.aggregate(pasos=Sum("steps"))["pasos"] or 0
+        if min_distance is not None:
+            # Mismo criterio de ritmo que arriba (cumple_ritmo), pero
+            # sobre TODAS las sesiones de hoy, no solo las de esta tanda.
+            total_distance = 0.0
+            for sesion in de_hoy:
+                if not sesion.distance_km:
+                    continue
+                if max_pace is None or (
+                    sesion.avg_rep_seconds is not None and sesion.avg_rep_seconds <= max_pace
+                ):
+                    total_distance += sesion.distance_km
 
     if min_steps is not None and total_steps >= min_steps:
         qualifying += 1
