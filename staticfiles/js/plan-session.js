@@ -21,7 +21,7 @@
 import {
   checkPlankPosture, checkSidePlankPosture, checkWallSitPosture,
   checkKneeHoldBarPosture, checkHandstandPosture,
-  speakOut, numeroEnPalabras, isVoiceEnabled,
+  speakOut, numeroEnPalabras, isVoiceEnabled, exportDebugLogText,
 } from "./workout.js";
 import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./mediapipe-vendor.js";
 
@@ -138,6 +138,8 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
           <button type="button" class="workout__btn workout__btn--primary" id="run-skip">${hasNext() ? "Siguiente ▸" : "Terminar"}</button>
         </div>
         <button type="button" class="workout__btn workout__btn--subtle" id="run-quit">Terminar sesión antes</button>
+        <button type="button" class="workout__btn workout__btn--ghost" id="run-debug-export">📋 Enviar registro de depuración</button>
+        <p id="run-debug-export-status" class="workout__debug"></p>
       </div>`;
 
     let remaining = item.work;
@@ -146,12 +148,24 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     const timerEl = document.getElementById("run-timer");
     paused = false;
 
+    // Registro de depuración -- misma idea que this.scissorLog en
+    // workout.js (ver exportDebugLogText), pero sin controller de
+    // cámara: aquí no hay reps que contar, así que basta una línea por
+    // segundo con lo que estaba pasando (cuánto llevaba, paused...).
+    const debugLines = [];
+    const DEBUG_LINES_MAX = 3600;
+    const logDebugLine = (line) => {
+      debugLines.push(`${elapsed}s ${line}`);
+      if (debugLines.length > DEBUG_LINES_MAX) debugLines.shift();
+    };
+
     clearInterval(timerId);
     timerId = setInterval(() => {
       if (paused) return;
       elapsed += 1;
       if (isFailure) {
         timerEl.textContent = fmt(elapsed);
+        logDebugLine("al fallo (cuenta libre)");
         if (isVoiceEnabled() && elapsed % 5 === 0 && elapsed !== lastSpokenNumber) {
           lastSpokenNumber = elapsed;
           speakOut(numeroEnPalabras(elapsed));
@@ -161,11 +175,13 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       remaining -= 1;
       if (remaining <= 0) {
         clearInterval(timerId);
+        logDebugLine(`objetivo cumplido (${item.work}s)`);
         record({ exercise: item.slug, seconds: item.work });
         beep(880, 0.2);
         advance();
         return;
       }
+      logDebugLine(`restantes=${remaining}s de ${item.work}s`);
       if (remaining <= 3) beep(660, 0.1);
       // Cuenta atrás dicha en voz alta cada segundo — igual que ya hacía
       // runTimerWithPosture() más abajo (mismo motivo: se pidió poder
@@ -184,6 +200,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     pauseBtn.addEventListener("click", () => {
       paused = !paused;
       pauseBtn.textContent = paused ? "Reanudar" : "Pausar";
+      logDebugLine(paused ? "pausado" : "reanudado");
     });
     document.getElementById("run-skip").addEventListener("click", () => {
       clearInterval(timerId);
@@ -195,6 +212,14 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       clearInterval(timerId);
       if (elapsed > 0) record({ exercise: item.slug, seconds: elapsed });
       finish();
+    });
+    document.getElementById("run-debug-export").addEventListener("click", () => {
+      exportDebugLogText({
+        lines: debugLines,
+        counterKey: item.counter_key || item.slug,
+        statusEl: document.getElementById("run-debug-export-status"),
+        platform: "web",
+      });
     });
   }
 
@@ -245,6 +270,8 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
           }</button>
         </div>
         <button type="button" class="workout__btn workout__btn--subtle" id="run-quit">Terminar sesión antes</button>
+        <button type="button" class="workout__btn workout__btn--ghost" id="run-debug-export">📋 Enviar registro de depuración</button>
+        <p id="run-debug-export-status" class="workout__debug"></p>
         <p class="workout__note">${
           isFailure
             ? "Aguanta hasta que ya no puedas y pulsa Siguiente/Terminar."
@@ -256,6 +283,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     let postureOk = false;
     let goalReached = false;
     let lastSpokenNumber = null; // último entero (cuenta atrás o adelante) ya dicho, para no repetirlo en el mismo segundo
+    let lastPostureReason = ""; // último check.reason (o motivo de "no visible"), para el registro de depuración
     let running = true;
     let stream = null;
     let poseLandmarker = null;
@@ -265,6 +293,16 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     const skipBtn = document.getElementById("run-skip");
     const video = document.getElementById("posture-video");
     const canvas = document.getElementById("posture-canvas");
+
+    // Registro de depuración -- ver exportDebugLogText en workout.js.
+    // Aquí sí hay datos reales de postura por segundo (postureOk,
+    // check.reason), a diferencia del cronómetro puro de runTimer().
+    const debugLines = [];
+    const DEBUG_LINES_MAX = 3600;
+    const logDebugLine = (line) => {
+      debugLines.push(`${elapsed}s ${line}`);
+      if (debugLines.length > DEBUG_LINES_MAX) debugLines.shift();
+    };
 
     function stopCamera() {
       running = false;
@@ -286,6 +324,14 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       if (!confirm("¿Terminar la sesión ahora? Se guarda lo hecho hasta aquí.")) return;
       finishThis(elapsed);
       finish();
+    });
+    document.getElementById("run-debug-export").addEventListener("click", () => {
+      exportDebugLogText({
+        lines: debugLines,
+        counterKey: item.counter_key || item.slug,
+        statusEl: document.getElementById("run-debug-export-status"),
+        platform: "web",
+      });
     });
 
     try {
@@ -326,9 +372,11 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
           if (result.landmarks && result.landmarks.length) {
             const check = checker(result.landmarks[0]);
             postureOk = check.ok;
+            lastPostureReason = check.ok ? "" : check.reason;
             statusEl.textContent = check.ok ? "Postura correcta — aguanta." : `⚠️ ${check.reason}`;
           } else {
             postureOk = false;
+            lastPostureReason = "no visible";
             statusEl.textContent = "No se te ve — sal en el encuadre.";
           }
           requestAnimationFrame(loop);
@@ -339,11 +387,15 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 
     clearInterval(timerId);
     timerId = setInterval(() => {
-      if (!postureOk) return; // pausado mientras la postura no sea válida
+      if (!postureOk) {
+        logDebugLine(`pausado (postura no válida: ${lastPostureReason || "?"})`);
+        return; // pausado mientras la postura no sea válida
+      }
       elapsed += 1;
 
       if (isFailure) {
         timerEl.textContent = fmt(elapsed);
+        logDebugLine("al fallo (cuenta libre), postura ok");
         if (isVoiceEnabled() && elapsed % 5 === 0 && elapsed !== lastSpokenNumber) {
           lastSpokenNumber = elapsed;
           speakOut(numeroEnPalabras(elapsed));
@@ -354,6 +406,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       if (!goalReached && elapsed < item.work) {
         const remaining = item.work - elapsed;
         timerEl.textContent = fmt(remaining);
+        logDebugLine(`restantes=${remaining}s de ${item.work}s, postura ok`);
         if (remaining <= 3) beep(660, 0.1);
         // Cada 5 segundos, no cada uno - ver nota junto a runTimer() más
         // arriba.
@@ -367,6 +420,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       if (!goalReached) {
         goalReached = true;
         lastSpokenNumber = 0;
+        logDebugLine(`objetivo cumplido (${item.work}s)`);
         beep(880, 0.2);
         if (isVoiceEnabled()) speakOut(numeroEnPalabras(0), { flush: true });
         if (goalBannerEl) {
@@ -382,6 +436,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 
       const over = elapsed - item.work;
       timerEl.textContent = `+${fmt(over)}`;
+      logDebugLine(`propina +${over}s por encima del objetivo`);
       if (isVoiceEnabled() && over % 5 === 0 && over !== lastSpokenNumber) {
         lastSpokenNumber = over;
         speakOut(numeroEnPalabras(over));
@@ -415,6 +470,8 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
           <canvas id="workout-canvas" class="workout__canvas"></canvas>
         </div>
         <p id="workout-goal-banner" class="workout__goal-banner" hidden></p>
+        <button type="button" id="workout-debug-export" class="workout__btn workout__btn--ghost">📋 Copiar registro de depuración</button>
+        <p id="workout-debug-export-status" class="workout__debug"></p>
         <div class="workout__stats">
           <div class="workout__stat"><span class="workout__stat-value" id="workout-reps">0</span><span class="workout__stat-label">reps</span></div>
           <div class="workout__stat"><span class="workout__stat-value" id="workout-sets">1</span><span class="workout__stat-label">serie</span></div>

@@ -691,6 +691,8 @@ button { font-family:var(--font-b); cursor:pointer; }
 .circuit__phase--rest { background:var(--gold-soft); color:var(--gold); }
 .circuit__timer { font-family:var(--font-mono); font-size:64px; font-weight:600; line-height:1; margin:6px 0; }
 .circuit__next { font-size:13px; color:var(--bone-faded); min-height:18px; margin:0; }
+.circuit__side-badge { font-size:14px; font-weight:500; color:var(--bone-faded); }
+.circuit__side-hint { font-size:13px; color:var(--gold); background:var(--gold-soft); border-radius:8px; padding:6px 12px; margin:0; text-align:center; }
 .circuit__controls { display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; justify-content:center; }
 
 /* ── Enfoque: temporizador de leer/estudiar/estirar ───────────────────── */

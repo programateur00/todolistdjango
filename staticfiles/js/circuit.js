@@ -109,6 +109,41 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   // checkHandstandPosture más abajo.
   const POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
 
+  // Estiramientos bilaterales cronometrados (armcrossstretch/
+  // tricepsoverheadstretch: un brazo y luego el otro; seatedhamstringstretch/
+  // standingquadstretch: una pierna y luego la otra) -- en ROUTINES
+  // (seed_warmup_routines.py) aparecen dos veces seguidas, una por lado,
+  // porque un RoutineItem cronometrado no tiene "series" que alternar por
+  // sí solo (a diferencia de armcircles/legrotation, que sí llevan el
+  // sentido bloqueado dentro del propio contador -- ver processArmCircles
+  // en workout.js). Aquí se avisa (no se bloquea, el lado detectado por
+  // cámara puede fallar) si el lado de esta 2ª vez parece el mismo que la
+  // 1ª -- ver stretchSideDone/occurrenceInfo más abajo.
+  const STRETCH_SIDE_COUNTERS = new Set(["armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
+  const STRETCH_SIDE_LABEL = {
+    armcrossstretch: "brazo",
+    tricepsoverheadstretch: "brazo",
+    seatedhamstringstretch: "pierna",
+    standingquadstretch: "pierna",
+  };
+  // Lado (izquierdo/derecho) detectado por cámara en la última vez que se
+  // completó cada counter_key de STRETCH_SIDE_COUNTERS -- se reinicia en
+  // begin() (nuevo circuito). Un solo mapa vale para las dos apariciones
+  // seguidas del mismo ejercicio en la rutina.
+  let stretchSideDone = {};
+
+  /** Para STRETCH_SIDE_COUNTERS con más de una aparición en `sequence`:
+   *  en qué posición (1 de 2, 2 de 2...) está `item` entre las suyas -- para
+   *  poder avisar "ahora el otro lado" en vez de repetir el mismo nombre
+   *  sin más contexto. null si el ejercicio no es de este grupo o solo
+   *  aparece una vez (nada que numerar). */
+  function occurrenceInfo(item) {
+    if (!STRETCH_SIDE_COUNTERS.has(item.counter_key)) return null;
+    const siblings = sequence.filter((i) => i.counter_key === item.counter_key);
+    if (siblings.length < 2) return null;
+    return { occurrence: siblings.indexOf(item) + 1, total: siblings.length };
+  }
+
   function runCurrent() {
     const item = current();
     if (!item) return finish();
@@ -234,12 +269,21 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     // principal para avanzar está disponible desde ya (como en runCamera),
     // no escondido detrás de un objetivo que aquí no existe.
     const isFailure = !item.work;
+    const occ = occurrenceInfo(item);
+    const sideLabel = STRETCH_SIDE_LABEL[item.counter_key] || "lado";
 
     playerHost.innerHTML = `
       <div class="circuit">
         <p class="circuit__progress">${esc(progressLabel())}</p>
-        <h2 class="circuit__exercise-name">${esc(item.name)}</h2>
+        <h2 class="circuit__exercise-name">${esc(item.name)}${occ ? ` <span class="circuit__side-badge">(lado ${occ.occurrence} de ${occ.total})</span>` : ""}</h2>
         <p class="circuit__phase circuit__phase--work">${isFailure ? "Al fallo" : "Trabajo"}</p>
+        ${
+          occ
+            ? occ.occurrence > 1
+              ? `<p class="circuit__side-hint">🔁 Lado ${occ.occurrence} de ${occ.total} -- usa el ${sideLabel} contrario al de la vez anterior.</p>`
+              : `<p class="circuit__side-hint">Lado ${occ.occurrence} de ${occ.total} -- elige un ${sideLabel} para empezar; el siguiente será con el contrario.</p>`
+            : ""
+        }
         <div class="workout__camera">
           <video id="posture-video" playsinline muted class="workout__video"></video>
           <canvas id="posture-canvas" class="workout__canvas"></canvas>
@@ -272,6 +316,8 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     let postureOk = false;
     let goalReached = false;
     let lastSpokenNumber = null; // último entero (cuenta atrás o adelante) ya dicho, para no repetirlo en el mismo segundo
+    let detectedSide = null; // último lado ("left"/"right") que devolvió checker(), solo para STRETCH_SIDE_COUNTERS
+    const previousSide = STRETCH_SIDE_COUNTERS.has(item.counter_key) ? stretchSideDone[item.counter_key] : null;
     let running = true;
     let stream = null;
     let poseLandmarker = null;
@@ -291,6 +337,9 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     function finishThis(secondsHeld) {
       clearInterval(timerId);
       stopCamera();
+      if (STRETCH_SIDE_COUNTERS.has(item.counter_key) && detectedSide) {
+        stretchSideDone[item.counter_key] = detectedSide;
+      }
       record({ exercise: item.slug, seconds: secondsHeld });
     }
 
@@ -342,7 +391,12 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
           if (result.landmarks && result.landmarks.length) {
             const check = checker(result.landmarks[0]);
             postureOk = check.ok;
-            statusEl.textContent = check.ok ? "Postura correcta — aguanta." : `⚠️ ${check.reason}`;
+            if (check.ok && check.side) detectedSide = check.side;
+            const sameSideWarning =
+              check.ok && previousSide && detectedSide && detectedSide === previousSide
+                ? ` ⚠️ Parece el mismo ${sideLabel} que la vez anterior -- prueba con el contrario para trabajar los dos lados.`
+                : "";
+            statusEl.textContent = check.ok ? `Postura correcta — aguanta.${sameSideWarning}` : `⚠️ ${check.reason}`;
           } else {
             postureOk = false;
             statusEl.textContent = "No se te ve — sal en el encuadre.";
@@ -601,6 +655,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     if (!items.length) return;
     sequence = randomize ? shuffle(items) : items.slice();
     index = 0;
+    stretchSideDone = {};
     breakdown = [];
     modeSelect.hidden = true;
     playerHost.hidden = false;
