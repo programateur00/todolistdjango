@@ -645,8 +645,17 @@ class Task(models.Model):
             for ws in sesiones_hoy:
                 if not ws.distance_km:
                     continue
-                if max_pace is not None and (
-                    ws.pace_seconds_per_km is None or ws.pace_seconds_per_km > max_pace
+                # Sin duración no se puede saber el ritmo -- y "no se
+                # sabe" no es lo mismo que "no lo cumplió". Antes se
+                # descartaba igual que un ritmo demasiado lento, así que
+                # una distancia sin sesión propia (el resumen del día
+                # que manda health-sync.js cuando el Detector de
+                # Actividad no crea sesión para una caminata corta)
+                # desaparecía entera si la tarea pedía un ritmo mínimo.
+                if (
+                    max_pace is not None
+                    and ws.pace_seconds_per_km is not None
+                    and ws.pace_seconds_per_km > max_pace
                 ):
                     continue
                 km_hoy += ws.distance_km

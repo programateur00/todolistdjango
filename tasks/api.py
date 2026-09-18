@@ -1118,8 +1118,11 @@ def running_import(request, uuid):
         total_steps += steps or 0
         # La distancia solo cuenta si la carrera se hizo al ritmo pedido:
         # el objetivo es "5 km a 6:30/km", no "5 km O 6:30/km". Andar 5 km
-        # muy despacio no completa una tarea de correr.
-        cumple_ritmo = max_pace is None or (pace is not None and pace <= max_pace)
+        # muy despacio no completa una tarea de correr. Pero sin duración
+        # no se puede saber el ritmo -- "no se sabe" no es lo mismo que
+        # "no lo cumplió" (mismo criterio que Task.auto_progress): solo
+        # se descarta cuando el ritmo SÍ se conoce y no llega al mínimo.
+        cumple_ritmo = max_pace is None or pace is None or pace <= max_pace
         if cumple_ritmo:
             total_distance += distance_km or 0
             # Con ritmo pedido pero sin distancia, basta con una carrera
@@ -1142,16 +1145,19 @@ def running_import(request, uuid):
         if min_steps is not None:
             total_steps = de_hoy.aggregate(pasos=Sum("steps"))["pasos"] or 0
         if min_distance is not None:
-            # Mismo criterio de ritmo que arriba (cumple_ritmo), pero
-            # sobre TODAS las sesiones de hoy, no solo las de esta tanda.
+            # Mismo criterio que Task.auto_progress (pace_seconds_per_km,
+            # no avg_rep_seconds -- se recalcula de distance_km /
+            # session_duration_seconds en vez de fiarse del valor
+            # guardado al importar): sin ritmo conocido no se descarta,
+            # solo cuando el ritmo SÍ se conoce y no llega al mínimo.
             total_distance = 0.0
             for sesion in de_hoy:
                 if not sesion.distance_km:
                     continue
-                if max_pace is None or (
-                    sesion.avg_rep_seconds is not None and sesion.avg_rep_seconds <= max_pace
-                ):
-                    total_distance += sesion.distance_km
+                pace_sesion = sesion.pace_seconds_per_km
+                if max_pace is not None and pace_sesion is not None and pace_sesion > max_pace:
+                    continue
+                total_distance += sesion.distance_km
 
     if min_steps is not None and total_steps >= min_steps:
         qualifying += 1
