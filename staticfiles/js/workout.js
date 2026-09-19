@@ -252,6 +252,9 @@ const SQUATFRONT_ARM_MAX_JUMP = 0.15;      // salto máximo del ratio entre fram
 const SQUATFRONT_DOWN_FRACTION = 0.72;     // ratio <= 65% del de pie -> abajo
 const SQUATFRONT_UP_FRACTION = 0.90;       // ratio >= 88% del de pie -> arriba (rep completa)
 const SQUATFRONT_SMOOTH_ALPHA = 0.5;
+const SQUATFRONT_SHOULDER_DROP_DOWN = 0.30; // hombros bajan >= 30% de su ancho respecto a de pie -> abajo (sentadilla de verdad: ~0.7-1.0)
+const SQUATFRONT_SHOULDER_DROP_UP = 0.12;   // vuelven a menos de 12% -> arriba (rep completa)
+const SQUATFRONT_SHOULDER_ARM_MAX_JUMP = 0.08; // salto máximo de la altura de hombros entre frames (en anchos de hombros) para considerarte quieto al armar
 const SQUATFRONT_ARM_SETTLE_MS = 600;
 const SQUATFRONT_ARMS_UP_MS = 600;        // las dos muñecas por encima de la nariz seguido esto (de pie, arriba) = 'he terminado' (Cindy: pasar a la siguiente ronda sin tocar la pantalla)
 // Para el aviso hablado corto de "ponte en posición" (ver
@@ -3845,20 +3848,20 @@ class WorkoutSession {
    * nada, para no tragarse a media palabra el "¡tres!" de una repetición
    * que acabas de contar.
    */
-  speak(text, { flush = true } = {}) {
+  speak(text, { flush = true, force = false } = {}) {
     if (!this.voiceEnabled) return;
     // Todavía en el tramo silencioso del descanso (ver restVoiceQuiet):
     // ni avisos, ni consejos, ni "te veo"/"no te veo" — nada de voz. El
     // descanso es de verdad de los 90s (REST_ALERT_SECONDS), cámara
     // colocada una vez al principio de la sesión incluido — así que
     // esto no necesita excepciones.
-    if (this.restVoiceQuiet) return;
+    if (this.restVoiceQuiet && !force) return;
     // El motor de verdad (Web Speech API) vive en speakOut(), suelto más
     // arriba en este mismo fichero — así circuit.js/plan-session.js
     // también pueden hablar (la cuenta atrás de plancha/plancha
     // lateral/etc. dentro de un circuito o una sesión de plan) sin
     // duplicar aquí esa misma llamada.
-    speakOut(text, { flush });
+    speakOut(text, { flush, force });
   }
 
   /**
@@ -3892,7 +3895,7 @@ class WorkoutSession {
    * CUALQUIER aviso hablado, sea del tipo que sea, solo para no
    * solapar dos avisos casi en el mismo instante.
    */
-  announceStatus(text, key = text, speechText = text) {
+  announceStatus(text, key = text, speechText = text, force = false) {
     this.setStatus(text);
     if (!this.voiceEnabled) return;
     const now = performance.now();
@@ -3903,7 +3906,7 @@ class WorkoutSession {
     if (anyGap < STATUS_VOICE_MIN_GAP_MS) return;
     this.lastSpokenStatusAt = now;
     this.lastSpokenAtByKey.set(key, now);
-    this.speak(speechText, { flush: false });
+    this.speak(speechText, { flush: false, force });
   }
 
   /**
@@ -4203,6 +4206,7 @@ class WorkoutSession {
       this.groundStableSince = null;
       this.offGroundSince = null;
       this.squatArmedAt = null;
+      this.frontW = null;
       this.setStatus(this.groundWaitingMessage());
     } else if (this.counterKey === "squat") {
       // Tampoco hay barra que calibrar aquí: el ángulo de rodilla no
@@ -4675,20 +4679,18 @@ class WorkoutSession {
    * Sin gesto de agitar la mano (los brazos suelen ir al frente en la sentadilla).
    */
   processSquatFront(lm, now) {
+    // REDISEÑO 2026-09-20 tras un log real: el método cadera-tobillo exigía ver piernas enteras y con
+    // la cámara cerca (hombros = 87% del ancho) caderas/tobillos daban visibilidad ~0.1 -> nunca armaba.
+    // Ahora se sigue la ALTURA GENERAL DEL CUERPO: la altura de los hombros (siempre visibles) relativa
+    // al ancho de hombros, contra la de pie. Si además se ven las caderas, cuentan como confirmación
+    // en el debug, pero no hacen falta.
     const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
     const lH = lm[L_HIP], rH = lm[R_HIP];
-    const lA = lm[L_ANKLE], rA = lm[R_ANKLE];
-    const vis = [lS, rS, lH, rH, lA, rA].reduce((a, p) => a + (p.visibility ?? 1), 0) / 6;
+    const shoulderVis = ((lS.visibility ?? 1) + (rS.visibility ?? 1)) / 2;
     const shoulderW = Math.abs(lS.x - rS.x);
-    if (vis < FRONT_MIN_VISIBILITY || shoulderW < 0.02) {
-      this.announceStatus(
-        "No se te ven bien los hombros, las caderas y los tobillos. Ponte de frente a la cámara, con el cuerpo entero en el encuadre.",
-        "squatfront_novis"
-      );
-      if (this.debugEl) {
-        const v = (pt) => (pt.visibility ?? 1).toFixed(2);
-        this.debugEl.textContent = `buscando hombros, caderas y tobillos de frente… vis media ${vis.toFixed(2)} (mín ${FRONT_MIN_VISIBILITY}) | hombros ${v(lS)}/${v(rS)} caderas ${v(lH)}/${v(rH)} tobillos ${v(lA)}/${v(rA)} | ancho hombros ${shoulderW.toFixed(3)}`;
-      }
+    if (shoulderVis < 0.5 || shoulderW < 0.02) {
+      this.announceStatus("No se te ven los hombros. Ponte de frente a la cámara.", "squatfront_novis");
+      if (this.debugEl) this.debugEl.textContent = `buscando hombros de frente… vis ${shoulderVis.toFixed(2)} ancho ${shoulderW.toFixed(3)}`;
       this.frontSmooth = null;
       this.frontArmSince = null;
       this.noteAbsence(now);
@@ -4713,19 +4715,20 @@ class WorkoutSession {
       }
     }
 
-    const hipY = (lH.y + rH.y) / 2, ankleY = (lA.y + rA.y) / 2;
-    const raw = (ankleY - hipY) / shoulderW;
-    const prev = this.frontSmooth;
-    this.frontSmooth = prev == null ? raw : SQUATFRONT_SMOOTH_ALPHA * raw + (1 - SQUATFRONT_SMOOTH_ALPHA) * prev;
-    const ratio = this.frontSmooth;
+    const rawY = (lS.y + rS.y) / 2;
+    const prevY = this.frontSmooth;
+    this.frontSmooth = prevY == null ? rawY : SQUATFRONT_SMOOTH_ALPHA * rawY + (1 - SQUATFRONT_SMOOTH_ALPHA) * prevY;
+    this.frontW = this.frontW == null ? shoulderW : 0.3 * shoulderW + 0.7 * this.frontW;
+    const W = Math.max(this.frontW, 0.02);
+    const y = this.frontSmooth;
 
     if (this.state === null) {
-      const still = prev != null && Math.abs(ratio - prev) <= SQUATFRONT_ARM_MAX_JUMP;
-      if (ratio >= SQUATFRONT_MIN_STAND_RATIO && still) {
+      const still = prevY != null && Math.abs(y - prevY) / W <= SQUATFRONT_SHOULDER_ARM_MAX_JUMP;
+      if (still) {
         if (this.frontArmSince == null) { this.frontArmSince = now; this.frontRefSum = 0; this.frontRefN = 0; }
-        this.frontRefSum += ratio; this.frontRefN += 1;
+        this.frontRefSum += y; this.frontRefN += 1;
         if (now - this.frontArmSince >= SQUATFRONT_ARM_STABLE_MS) {
-          this.frontRef = this.frontRefSum / this.frontRefN;
+          this.frontRef = this.frontRefSum / this.frontRefN; // altura de hombros de pie (coordenada y de imagen)
           this.state = "top";
           this.frontArmSince = null;
           this.squatArmedAt = now;
@@ -4737,24 +4740,29 @@ class WorkoutSession {
         this.frontArmSince = null;
         this.setStatus(this.groundWaitingMessage());
       }
-    } else if (this.state === "top") {
+    }
+
+    const drop = this.frontRef != null ? (y - this.frontRef) / W : 0; // >0 = hombros más bajos que de pie
+    if (this.state === "top") {
       const armSettled = this.squatArmedAt === null || (now - this.squatArmedAt) >= SQUATFRONT_ARM_SETTLE_MS;
-      if (ratio <= this.frontRef * SQUATFRONT_DOWN_FRACTION && armSettled) {
+      if (drop >= SQUATFRONT_SHOULDER_DROP_DOWN && armSettled) {
         this.state = "bottom";
         this.repStartTime = now;
-      } else if (ratio >= this.frontRef * 0.95 && ratio <= this.frontRef * 1.3) {
+      } else if (Math.abs(drop) < 0.08) {
         // Deriva lenta de la referencia (te acercas/alejas o cambia la inclinación del móvil).
-        this.frontRef = 0.98 * this.frontRef + 0.02 * ratio;
+        this.frontRef = 0.98 * this.frontRef + 0.02 * y;
       }
-    } else if (ratio >= this.frontRef * SQUATFRONT_UP_FRACTION) {
+    } else if (this.state === "bottom" && drop <= SQUATFRONT_SHOULDER_DROP_UP) {
       this.countRep((now - this.repStartTime) / 1000, now, "Sentadilla");
       this.state = "top";
     }
 
     if (this.debugEl) {
+      const hipVis = (((lH.visibility ?? 1) + (rH.visibility ?? 1)) / 2).toFixed(2);
       this.debugEl.textContent =
-        `[de frente] cadera-tobillo/hombros: ${ratio.toFixed(2)} | de pie: ${this.frontRef != null ? this.frontRef.toFixed(2) : "sin calibrar"} | ` +
-        `estado: ${this.state ?? "esperando"} (abajo ≤${(SQUATFRONT_DOWN_FRACTION * 100).toFixed(0)}%, arriba ≥${(SQUATFRONT_UP_FRACTION * 100).toFixed(0)}%)`;
+        `[de frente] altura hombros: ${y.toFixed(3)} | de pie: ${this.frontRef != null ? this.frontRef.toFixed(3) : "sin calibrar"} | ` +
+        `bajada: ${drop.toFixed(2)} anchos de hombros (abajo ≥${SQUATFRONT_SHOULDER_DROP_DOWN}, arriba ≤${SQUATFRONT_SHOULDER_DROP_UP}) | ` +
+        `ancho ${W.toFixed(2)} vis caderas ${hipVis} | estado: ${this.state ?? "esperando"}`;
     }
   }
 
