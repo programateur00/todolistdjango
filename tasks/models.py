@@ -2937,6 +2937,12 @@ class PlanItem(models.Model):
     # completa exactamente igual que una tarea suelta de Udemy — ver
     # Plan._study_target_fields() y Plan.auto_close_expired().
     watch_keyword = models.CharField(max_length=120, blank=True)
+    # Progreso del curso guardado EN el propio objetivo (lo manda la
+    # extensión de Chrome desde la API de Udemy). No depende de que la
+    # tarea diaria del plan exista/tenga la misma serie/palabra clave.
+    course_progress_pct = models.PositiveIntegerField(null=True, blank=True)
+    course_lessons_done = models.PositiveIntegerField(null=True, blank=True)
+    course_lessons_total = models.PositiveIntegerField(null=True, blank=True)
     target_minutes = models.PositiveIntegerField(null=True, blank=True)
     target_video_count = models.PositiveIntegerField(null=True, blank=True)
 
@@ -3097,6 +3103,22 @@ class PlanItem(models.Model):
         info = self.course_progress()
         return info["pct"] if info else None
 
+    def record_course_progress(self, pct, done=None, total=None):
+        try:
+            pct = max(0, min(100, round(float(pct))))
+        except (TypeError, ValueError):
+            return
+        self.course_progress_pct = pct
+        fields = ["course_progress_pct"]
+        try:
+            if done is not None and total is not None and int(total) > 0:
+                self.course_lessons_total = int(total)
+                self.course_lessons_done = max(0, min(int(done), int(total)))
+                fields += ["course_lessons_done", "course_lessons_total"]
+        except (TypeError, ValueError):
+            pass
+        self.save(update_fields=fields)
+
     def course_progress(self):
         """
         {pct, done, total, left} del curso de Udemy según las fracciones
@@ -3104,7 +3126,15 @@ class PlanItem(models.Model):
         Mira la última tarea de la serie QUE TENGA dato (no simplemente
         la de fecha más reciente: la del día siguiente nace vacía).
         """
-        if not self.watch_keyword or not self.series_id:
+        if not self.watch_keyword:
+            return None
+        if self.course_progress_pct is not None:
+            done, total = self.course_lessons_done, self.course_lessons_total
+            return {
+                "pct": self.course_progress_pct, "done": done, "total": total,
+                "left": (total - done) if (done is not None and total) else None,
+            }
+        if not self.series_id:
             return None
         task = (
             Task.objects.filter(series_id=self.series_id, course_progress_pct__isnull=False)

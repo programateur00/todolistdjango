@@ -452,7 +452,7 @@ async function detectCourseProgressInPage() {
   }
 }
 
-async function checkCourseCompletion(taskUuid, tabId) {
+async function checkCourseCompletion(taskUuid, tabId, itemId = null) {
   let progress;
   try {
     const [{ result } = {}] = await chrome.scripting.executeScript({
@@ -478,7 +478,10 @@ async function checkCourseCompletion(taskUuid, tabId) {
   // otro.
   if (progress.pct !== null && progress.pct !== undefined) {
     try {
-      const res = await fetch(apiUrl(cfg, `/tasks/${taskUuid}/course-progress/`), {
+      const progressUrl = itemId
+        ? `/plan-items/${itemId}/course-progress/`
+        : `/tasks/${taskUuid}/course-progress/`;
+      const res = await fetch(apiUrl(cfg, progressUrl), {
         method: "POST",
         headers: { Authorization: authHeader(cfg), "Content-Type": "application/json" },
         body: JSON.stringify({ pct: progress.pct, done: progress.done, total: progress.total }),
@@ -489,7 +492,7 @@ async function checkCourseCompletion(taskUuid, tabId) {
     }
   }
 
-  if (!progress.complete) return;
+  if (!progress.complete || !taskUuid) return;
   try {
     await fetch(apiUrl(cfg, `/tasks/${taskUuid}/mark/course-complete/`), {
       method: "POST",
@@ -551,6 +554,33 @@ async function reevaluate({ allowEndOnNoMatch = true } = {}) {
 // El % del curso NO depende de que haya una sesión de tiempo en marcha
 // (que exige audio sonando + ventana enfocada): basta con estar en una
 // pestaña de Udemy cuyo título case con la palabra clave de un curso.
+// Los cursos de Udemy vienen de los OBJETIVOS de los planes activos
+// (palabra clave + id del objetivo), no de la tarea diaria: esa puede no
+// existir hoy, estar hecha o no llevar la palabra clave.
+let udemyCoursesCache = { at: 0, courses: [] };
+async function getUdemyCourses() {
+  if (Date.now() - udemyCoursesCache.at < 5 * 60 * 1000 && udemyCoursesCache.courses.length) {
+    return udemyCoursesCache.courses;
+  }
+  const cfg = await getConfig();
+  if (!isConfigured(cfg)) {
+    console.warn("[Libreta] extensión sin configurar (URL/usuario/contraseña en Opciones)");
+    return [];
+  }
+  try {
+    const resp = await fetch(apiUrl(cfg, "/plans/udemy-courses/"), { headers: { Authorization: authHeader(cfg) } });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const courses = (data.courses || []).filter((c) => (c.watch_keyword || "").trim());
+    udemyCoursesCache = { at: Date.now(), courses };
+    console.log("[Libreta] cursos de Udemy en planes:", courses.map((c) => c.watch_keyword));
+    return courses;
+  } catch (err) {
+    console.warn("[Libreta] no se pudo pedir los cursos de Udemy (¿desplegado el servidor?):", err);
+    return udemyCoursesCache.courses;
+  }
+}
+
 let lastProgressCheckAt = 0;
 async function checkProgressOnActiveUdemyTab(force = false) {
   try {
@@ -558,23 +588,20 @@ async function checkProgressOnActiveUdemyTab(force = false) {
     const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     const tab = tabs[0];
     if (!tab || !tab.url || !isUdemyUrl(tab.url)) return;
-    const tasks = await getCachedTasks();
-    const candidates = tasks.filter(
-      (t) => t.subcategory === "udemy" && (t.watch_keyword || "").trim()
-    );
+    const candidates = await getUdemyCourses();
     const title = (tab.title || "").toLowerCase();
     let best = null;
-    for (const t of candidates) {
-      const kw = t.watch_keyword.trim().toLowerCase();
-      if (title.includes(kw) && (!best || kw.length > best.kw.length)) best = { task: t, kw };
+    for (const c of candidates) {
+      const kw = c.watch_keyword.trim().toLowerCase();
+      if (title.includes(kw) && (!best || kw.length > best.kw.length)) best = { course: c, kw };
     }
     if (!best) {
       console.log("[Libreta] pestaña de Udemy sin curso que case. Título:", tab.title,
-        "| palabras clave:", candidates.map((t) => t.watch_keyword));
+        "| palabras clave:", candidates.map((c) => c.watch_keyword));
       return;
     }
     lastProgressCheckAt = Date.now();
-    await checkCourseCompletion(best.task.uuid, tab.id);
+    await checkCourseCompletion(null, tab.id, best.course.item_id);
   } catch (err) {
     console.warn("[Libreta] checkProgressOnActiveUdemyTab falló:", err);
   }

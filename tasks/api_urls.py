@@ -37,6 +37,8 @@ urlpatterns = [
     path("videos/", api.saved_video_list, name="saved_video_list"),
     path("videos/<uuid:uuid>/", api.saved_video_delete, name="saved_video_delete"),
 
+    path("plans/udemy-courses/", api.plan_udemy_courses, name="plan_udemy_courses"),
+    path("plan-items/<int:pk>/course-progress/", api.plan_item_course_progress_save, name="plan_item_course_progress_save"),
     path("plans/", api.plan_list, name="plan_list"),
     path("plans/create/", api.plan_create, name="plan_create"),
     path("plans/generate/", api.plan_generate, name="plan_generate"),

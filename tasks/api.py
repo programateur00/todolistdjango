@@ -621,6 +621,32 @@ def course_progress_save(request, uuid):
     return JsonResponse({"ok": True, "task": task_json(t)})
 
 
+@api("GET")
+def plan_udemy_courses(request):
+    """Cursos de Udemy de los planes activos (objetivos con palabra clave),
+    para que la extensión sepa qué pestaña es qué curso y dónde mandar el %."""
+    items = PlanItem.objects.filter(
+        plan__in=plans_qs().filter(closed_at__isnull=True, is_active=True),
+        exercise__isnull=True,
+    ).exclude(watch_keyword="")
+    return JsonResponse({"courses": [
+        {"item_id": i.pk, "watch_keyword": i.watch_keyword, "name": i.display_name}
+        for i in items
+    ]})
+
+
+@api("POST")
+def plan_item_course_progress_save(request, pk):
+    item = get_object_or_404(
+        PlanItem, pk=pk, plan__user=_user(), plan__deleted_at__isnull=True,
+    )
+    data = body(request)
+    pct = data.get("pct")
+    if isinstance(pct, (int, float)) and not isinstance(pct, bool):
+        item.record_course_progress(pct, data.get("done"), data.get("total"))
+    return JsonResponse({"ok": True, "pct": item.course_progress_pct})
+
+
 # --------------------------------------------------------- circuitos
 
 @api("GET", "POST")
