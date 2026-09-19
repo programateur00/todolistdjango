@@ -38,8 +38,12 @@
                         <p class="plan-card__head">
                             {{ p.headline.display_name }}:
                             <strong>
+                                {% if p.headline.exercise %}
                                 {% if p.target.reps %}{{ p.target.sets }} × {{ p.target.reps }}{% else %}{{ p.target.sets }} × {{ p.target.seconds }}s{% endif %}
                                 {% if p.target.weight_kg %}con {{ p.target.weight_kg|floatformat:"-1" }} kg{% endif %}
+                                {% else %}
+                                {{ p.headline.display_target_text }}
+                                {% endif %}
                             </strong>
                             {% if p.remaining %}<span class="plan-item__left">faltan {{ p.remaining }}</span>{% endif %}
                         </p>

@@ -515,6 +515,12 @@ class Task(models.Model):
         help_text="Cuándo devolviste la tarea a pendientes a mano. Sirve para que el "
                    "barrido automático no vuelva a cerrarla en el acto.",
     )
+    started_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Cuándo entraste a hacer la tarea (entreno, vídeo, lectura...). Si "
+                   "entras antes de la hora límite, no se auto-marca como no hecha "
+                   "mientras la estás haciendo (ver Task.STARTED_GRACE_HOURS).",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -760,6 +766,9 @@ class Task(models.Model):
     # resolvía en el mismo instante en que sonaba el aviso, y contestar no
     # servía de nada.
     AVOID_GRACE_HOURS = 2
+    # Si entraste a la tarea ANTES de su hora límite, tienes este margen
+    # extra para terminarla y guardarla sin que se cierre como no hecha.
+    STARTED_GRACE_HOURS = 3
 
     def resolve_datetime(self):
         """Momento a partir del cual la tarea se resuelve sola.
@@ -775,6 +784,25 @@ class Task(models.Model):
             return dl + timedelta(hours=self.AVOID_GRACE_HOURS)
         return dl
 
+    def mark_started(self):
+        """Apunta la primera entrada a la tarea, solo si es antes del límite."""
+        if self.is_done or self.expired or self.started_at:
+            return
+        limit = self.resolve_datetime()
+        now = timezone.now()
+        now_local = timezone.localtime(now).replace(tzinfo=None)
+        if limit is None or now_local > limit:
+            return
+        self.started_at = now
+        self.save(update_fields=["started_at"])
+
+    def in_progress_grace(self, limit, now_local):
+        """True si empezaste antes del límite y aún estás dentro del margen."""
+        if not self.started_at:
+            return False
+        started = timezone.localtime(self.started_at).replace(tzinfo=None)
+        return started <= limit and now_local <= limit + timedelta(hours=self.STARTED_GRACE_HOURS)
+
     def is_overdue(self):
         """True si ya toca resolverla sola y sigue pendiente."""
         if self.is_done or self.expired:
@@ -783,6 +811,8 @@ class Task(models.Model):
         if limit is None:
             return False
         now = timezone.localtime(timezone.now()).replace(tzinfo=None)
+        if now > limit and self.in_progress_grace(limit, now):
+            return False
         return now > limit
 
     def minutes_remaining(self):
@@ -1344,6 +1374,7 @@ class Task(models.Model):
         self.expired = False
         self.completed_at = None
         self.reopened_at = timezone.now()
+        self.started_at = None
         self.save()
 
     def finish_recurring_series(self):
@@ -1736,6 +1767,8 @@ class Task(models.Model):
             # la hora límite salta el aviso, y solo pasado ese rato sin
             # respuesta se resuelve sola.
             if now_local > limit:
+                if task.in_progress_grace(limit, now_local):
+                    continue
                 if not dry_run:
                     task.mark_expired()
                 expired_tasks.append(task)
@@ -3435,6 +3468,15 @@ class PlanItem(models.Model):
         convertir en un %. Plan.progress_pct() ignora los None al
         promediar en vez de tratarlos como 0.
         """
+        if self.watch_keyword and not self.exercise_id:
+            # Curso de Udemy: el progreso es lo que Udemy dice que llevas
+            # (fracciones "x/x" de Contenido del curso, ver
+            # record_course_progress), NO cuántas veces se "cumplió" la
+            # tarea -- eso daba 100% con solo marcar el día como hecho.
+            # Sin dato todavía -> None (queda fuera de la media del plan)
+            # en vez de inventar un 0 o un 100.
+            return self.current_course_progress_pct()
+
         if self.progression == self.PROG_COMPLETION:
             # Cumplimiento no tiene escalones que subir — se mide en
             # cuántas veces de las que tocaba se cumplió, usando el

@@ -557,6 +557,7 @@ def task_workout(request, pk):
        Con ?video=<id>: va directo al vídeo, sin pasar por lo demás.
     """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    task.mark_started()
     gate = _require_warmup(request, task)
     if gate:
         return gate
@@ -809,6 +810,7 @@ def task_warmup(request, pk):
     lo volverá a pedir mientras siga "fresco".
     """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    task.mark_started()
     next_url = request.GET.get("next") or reverse("tasks:task_workout", args=[task.pk])
     if request.method == "POST":
         WarmupStatus.mark_done(get_current_user())
@@ -882,6 +884,7 @@ def task_warmup_routine(request, pk, routine_pk):
     pedirlo de nuevo sería un bucle.
     """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    task.mark_started()
     routine = get_object_or_404(Routine, pk=routine_pk, user=get_current_user())
     next_url = request.GET.get("next") or reverse("tasks:task_workout", args=[task.pk])
     items = list(routine.items.select_related("exercise"))
@@ -916,6 +919,7 @@ def task_cooldown_routine(request, pk, routine_pk):
     sesión de verdad.
     """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    task.mark_started()
     routine = get_object_or_404(Routine, pk=routine_pk, user=get_current_user())
     items = list(routine.items.select_related("exercise"))
     if not items:
@@ -957,6 +961,7 @@ def task_focus(request, pk):
     hiciera falta recuperar la idea más adelante.
     """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    task.mark_started()
     video_id = request.GET.get("video")
     if video_id:
         # Mismo contexto completo que task_video: la plantilla necesita
@@ -1134,6 +1139,7 @@ def task_reading(request, pk):
     # Planes abiertos antes de que existiera el objetivo diario todavía no
     # tienen reading_day_goal -- se rellena aquí mismo, la primera vez que
     # se abre el visor con este campo vacío (ver ensure_reading_day_goal).
+    task.mark_started()
     task.ensure_reading_day_goal()
     return render(request, "tasks/task_reading.html", {
         "task": task,
@@ -1274,6 +1280,7 @@ def task_video(request, pk):
     Plan.upcoming_course_queue).
     """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    task.mark_started()
     override_video_id = request.GET.get("video")
     video_id = override_video_id or task.youtube_video_id
     plan = None if override_video_id else task.plan
@@ -1495,6 +1502,7 @@ def routine_play(request, pk, routine_pk):
     activo siguiéndolo.
     """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    task.mark_started()
     gate = _require_warmup(request, task)
     if gate:
         return gate
@@ -3005,6 +3013,7 @@ def plan_session(request, pk, plan_pk):
     con el objetivo que toca. Sin elegir nada — el plan ya lo decidió.
     """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    task.mark_started()
     gate = _require_warmup(request, task)
     if gate:
         return gate

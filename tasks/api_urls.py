@@ -17,6 +17,7 @@ urlpatterns = [
     path("tasks/", api.task_list, name="task_list"),
     path("tasks/create/", api.task_create, name="task_create"),
     path("tasks/<uuid:uuid>/", api.task_detail, name="task_detail"),
+    path("tasks/<uuid:uuid>/started/", api.task_started, name="task_started"),
     path("tasks/<uuid:uuid>/mark/<str:action>/", api.task_mark, name="task_mark"),
     path("series/<uuid:series_id>/mark/<str:action>/", api.task_mark_by_series, name="task_mark_by_series"),
 

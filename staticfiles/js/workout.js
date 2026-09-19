@@ -40,7 +40,19 @@ const DEBUG_LOG_TOKEN = "R4Xg0yUJWyZKObyTH4lhOlVkzJbpKvny";
  * instancia de WorkoutController. Best-effort: nunca lanza, solo devuelve
  * si se pudo mandar o no -- igual que el bloque original.
  */
-export async function sendDebugLogToServer({ counterKey, note = "", content, build = WORKOUT_JS_BUILD, platform = "web" }
+export async function sendDebugLogToServer({ counterKey, note = "", content, build = WORKOUT_JS_BUILD, platform = "web" }) {
+  try {
+    const resp = await fetch("/api/debug-log/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: DEBUG_LOG_TOKEN, platform, counter_key: counterKey, build, note, content }),
+    });
+    return resp.ok;
+  } catch (e) {
+    console.warn("No se pudo mandar el registro al servidor:", e);
+    return false;
+  }
+}
 
 /**
  * Comparte/copia/descarga (y, best-effort, manda al servidor vía
@@ -117,19 +129,6 @@ export async function exportDebugLogText({ lines, counterKey, statusEl, build = 
     statusEl.textContent = `Enviado \u2713 (${n} líneas, build ${build}) -- no se ha podido además copiar/descargar, pero esto sí ha llegado.`;
   } else {
     statusEl.textContent = "No se ha podido copiar, descargar ni enviar -- mira la consola del navegador (F12).";
-  }
-}
-) {
-  try {
-    const resp = await fetch("/api/debug-log/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: DEBUG_LOG_TOKEN, platform, counter_key: counterKey, build, note, content }),
-    });
-    return resp.ok;
-  } catch (e) {
-    console.warn("No se pudo mandar el registro al servidor:", e);
-    return false;
   }
 }
 

@@ -2408,6 +2408,14 @@ def plan_generate(request):
     return JsonResponse({"ok": True, "draft": draft})
 
 
+@api("POST")
+def task_started(request, uuid):
+    """La app avisa al entrar a hacer la tarea (ver Task.mark_started)."""
+    task = get_object_or_404(tasks_qs(), uuid=uuid)
+    task.mark_started()
+    return JsonResponse({"ok": True})
+
+
 @api("GET")
 def plan_session(request, uuid, plan_uuid):
     """
@@ -2415,6 +2423,7 @@ def plan_session(request, uuid, plan_uuid):
     toca. No hay nada que elegir — el plan ya lo decidió.
     """
     task = get_object_or_404(tasks_qs(), uuid=uuid)
+    task.mark_started()
     plan = get_object_or_404(plans_qs(), uuid=plan_uuid)
     return JsonResponse({
         "plan": plan_json(plan),
