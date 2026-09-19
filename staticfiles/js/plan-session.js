@@ -472,12 +472,15 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         <p id="workout-goal-banner" class="workout__goal-banner" hidden></p>
         <button type="button" id="workout-debug-export" class="workout__btn workout__btn--ghost">📋 Copiar registro de depuración</button>
         <p id="workout-debug-export-status" class="workout__debug"></p>
-        <div class="workout__stats">
-          <div class="workout__stat"><span class="workout__stat-value" id="workout-reps">0</span><span class="workout__stat-label">reps</span></div>
-          <div class="workout__stat"><span class="workout__stat-value" id="workout-sets">1</span><span class="workout__stat-label">serie</span></div>
-          <div class="workout__stat"><span class="workout__stat-value" id="workout-timer">0:00</span><span class="workout__stat-label">sesión</span></div>
-          <div class="workout__stat"><span class="workout__stat-value" id="workout-rest">0:00</span><span class="workout__stat-label">descanso</span></div>
-        </div>
+        <details class="workout__stats-toggle">
+          <summary class="workout__stats-summary">Datos</summary>
+          <div class="workout__stats">
+            <div class="workout__stat"><span class="workout__stat-value" id="workout-reps">0</span><span class="workout__stat-label">reps</span></div>
+            <div class="workout__stat"><span class="workout__stat-value" id="workout-sets">1</span><span class="workout__stat-label">serie</span></div>
+            <div class="workout__stat"><span class="workout__stat-value" id="workout-timer">0:00</span><span class="workout__stat-label">sesión</span></div>
+            <div class="workout__stat"><span class="workout__stat-value" id="workout-rest">0:00</span><span class="workout__stat-label">descanso</span></div>
+          </div>
+        </details>
         <div class="workout__actions">
           <button type="button" id="workout-cancel" class="workout__btn workout__btn--ghost">Saltar</button>
           <button type="button" id="workout-recalibrate" class="workout__btn workout__btn--ghost">↻ Recalibrar</button>

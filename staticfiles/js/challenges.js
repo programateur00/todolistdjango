@@ -331,12 +331,15 @@ function runPullupSet(host, state) {
         <canvas id="workout-canvas" class="workout__canvas"></canvas>
       </div>
       <p id="workout-goal-banner" class="workout__goal-banner" hidden></p>
-      <div class="workout__stats">
-        <div class="workout__stat"><span class="workout__stat-value" id="workout-reps">0</span><span class="workout__stat-label">reps</span></div>
-        <div class="workout__stat"><span class="workout__stat-value" id="workout-sets">1</span><span class="workout__stat-label">serie</span></div>
-        <div class="workout__stat"><span class="workout__stat-value" id="workout-timer">0:00</span><span class="workout__stat-label">sesión</span></div>
-        <div class="workout__stat"><span class="workout__stat-value" id="workout-rest">0:00</span><span class="workout__stat-label">descanso</span></div>
-      </div>
+      <details class="workout__stats-toggle">
+        <summary class="workout__stats-summary">Datos</summary>
+        <div class="workout__stats">
+          <div class="workout__stat"><span class="workout__stat-value" id="workout-reps">0</span><span class="workout__stat-label">reps</span></div>
+          <div class="workout__stat"><span class="workout__stat-value" id="workout-sets">1</span><span class="workout__stat-label">serie</span></div>
+          <div class="workout__stat"><span class="workout__stat-value" id="workout-timer">0:00</span><span class="workout__stat-label">sesión</span></div>
+          <div class="workout__stat"><span class="workout__stat-value" id="workout-rest">0:00</span><span class="workout__stat-label">descanso</span></div>
+        </div>
+      </details>
       <div class="workout__actions">
         <button type="button" id="workout-cancel" class="workout__btn workout__btn--ghost">Salir del reto</button>
         <button type="button" id="workout-recalibrate" class="workout__btn workout__btn--ghost">↻ Recalibrar</button>

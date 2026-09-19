@@ -871,6 +871,10 @@ class Task(models.Model):
         return None
 
     def save(self, *args, **kwargs):
+        if self.due_time is None:
+            # Sin hora puesta, fin del día: así la notificación y el
+            # cierre automático siempre tienen un momento límite.
+            self.due_time = _dt.time(23, 59)
         if self.series_start_date is None and self.due_date is not None:
             self.series_start_date = self.due_date
         raw = (self.youtube_video_id or "").strip()
@@ -4410,6 +4414,26 @@ class Occurrence(models.Model):
             "week_end": week_end,
             "done": done,
             "not_done": total - done,
+            "total": total,
+            "pct": round(100 * done / total) if total else None,
+        }
+
+    @classmethod
+    def daily_completion(cls, user, reference_date=None):
+        """
+        Progreso de HOY: tareas hechas / tareas del día. Mismo criterio de
+        día que weekly_completion (due_date, o recorded_at si no tiene).
+        """
+        today = reference_date or timezone.localtime(timezone.now()).date()
+        occs = cls.objects.filter(user=user, deleted_at__isnull=True).filter(
+            models.Q(due_date=today)
+            | models.Q(due_date__isnull=True, recorded_at__date=today)
+        )
+        total = occs.count()
+        done = occs.filter(result=cls.RESULT_DONE).count()
+        return {
+            "date": today,
+            "done": done,
             "total": total,
             "pct": round(100 * done / total) if total else None,
         }

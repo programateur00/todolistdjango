@@ -335,24 +335,19 @@ def task_list(request):
         "range_choices": Task.RANGE_CHOICES,
         "active_range": active_range,
         "weekly": Occurrence.weekly_completion(get_current_user()),
+        "daily": Occurrence.daily_completion(get_current_user()),
     })
 
 
 def task_create(request):
     if request.method == "POST":
         title = request.POST.get("title", "").strip()
-        due_time = request.POST.get("due_time") or None
+        # Sin hora, 23:59: así siempre hay a qué hora sonar el aviso y
+        # cuándo darla por no hecha al final del día (ver
+        # Task.expire_overdue y notifications.js, en la app móvil).
+        due_time = request.POST.get("due_time") or "23:59"
         if not title:
             messages.error(request, "Ponle un título a la tarea.")
-        elif not due_time:
-            # Sin hora no hay a qué hora sonar el aviso ni cuándo darla
-            # por no hecha sola al final del día (ver Task.expire_overdue
-            # y notifications.js, en la app móvil). El HTML ya la pide
-            # con `required`, pero eso no protege envíos que se lo salten.
-            messages.error(
-                request,
-                "Ponle una hora — la notificación y el aviso de «no hecha» al final del día la necesitan.",
-            )
         else:
             client_uuid = _read_client_uuid(request)
             repeat = request.POST.get("repeat", Task.REPEAT_NONE)
@@ -460,7 +455,7 @@ def task_edit(request, pk):
             # que si no se pone ninguna se usa hoy como punto de partida.
             due_date = timezone.localtime(timezone.now()).date()
         task.due_date = due_date
-        task.due_time = request.POST.get("due_time") or None
+        task.due_time = request.POST.get("due_time") or "23:59"
         task.interval = request.POST.get("interval") or 1
         task.custom_days = ",".join(request.POST.getlist("custom_days"))
         task.is_important = bool(request.POST.get("is_important"))
@@ -471,12 +466,7 @@ def task_edit(request, pk):
         if task.subcategory == Task.SUBCATEGORY_UDEMY:
             task.watch_keyword = ""
         link_error = task.study_link_error()
-        if not task.due_time:
-            messages.error(
-                request,
-                "Ponle una hora — la notificación y el aviso de «no hecha» al final del día la necesitan.",
-            )
-        elif link_error:
+        if link_error:
             messages.error(request, link_error)
         else:
             task.save()
@@ -510,7 +500,7 @@ def task_edit(request, pk):
 def task_delete(request, pk):
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
     task.delete()
-    messages.success(request, "Tarea eliminada.")
+    messages.success(request, "Tarea eliminada. Su historial y estadísticas se conservan.")
     return redirect(reverse("tasks:task_list"))
 
 
@@ -1615,6 +1605,7 @@ def stats_list(request):
     return render(request, "tasks/stats_list.html", {
         "series_list": series_list,
         "weekly": Occurrence.weekly_completion(get_current_user()),
+        "daily": Occurrence.daily_completion(get_current_user()),
         "time_buckets": time_stats.time_totals(get_current_user()),
     })
 
@@ -1774,6 +1765,7 @@ def weekly_review(request):
         })
     return render(request, "tasks/weekly_review.html", {
         "weekly": Occurrence.weekly_completion(get_current_user()),
+        "daily": Occurrence.daily_completion(get_current_user()),
         "plans": plans,
     })
 

@@ -1,0 +1,21 @@
+{# Dos barras: progreso de hoy y de la semana. Necesita `daily` y `weekly`. #}
+<section class="week-summary" aria-label="Progreso de hoy y de la semana">
+    <div class="week-summary__top">
+        <span class="week-summary__label">Hoy</span>
+        <span class="week-summary__pct">{% if daily.pct is not None %}{{ daily.pct }}%{% else %}—{% endif %}</span>
+    </div>
+    <div class="stats-bar"><div class="stats-bar__done" style="width:{{ daily.pct|default:0 }}%"></div></div>
+    <p class="week-summary__meta">
+        {% if daily.total %}{{ daily.done }} de {{ daily.total }} tareas hechas hoy{% else %}No hay tareas para hoy{% endif %}
+    </p>
+
+    <div class="week-summary__top week-summary__top--second">
+        <span class="week-summary__label">Esta semana</span>
+        <span class="week-summary__pct">{% if weekly.pct is not None %}{{ weekly.pct }}%{% else %}—{% endif %}</span>
+    </div>
+    <div class="stats-bar"><div class="stats-bar__done" style="width:{{ weekly.pct|default:0 }}%"></div></div>
+    <p class="week-summary__meta">
+        {% if weekly.total %}{{ weekly.done }} de {{ weekly.total }} tareas hechas · {{ weekly.week_start|date:"d M" }}–{{ weekly.week_end|date:"d M" }}
+        {% else %}No hay tareas esta semana{% endif %}
+    </p>
+</section>

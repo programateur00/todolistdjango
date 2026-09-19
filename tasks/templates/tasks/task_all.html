@@ -49,7 +49,7 @@
                         </div>
                     </a>
 
-                    <form action="{% url 'tasks:task_delete' task.pk %}" method="post" class="task-card__delete">
+                    <form action="{% url 'tasks:task_delete' task.pk %}" method="post" class="task-card__delete" onsubmit="return confirm('Se eliminará la tarea de la lista. Tu historial y estadísticas se conservan. ¿Continuar?');">
                         {% csrf_token %}
                         <button type="submit" title="Eliminar" aria-label="Eliminar tarea">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m1 0l-.8 12.2a2 2 0 01-2 1.8H8.8a2 2 0 01-2-1.8L6 7"/></svg>
@@ -87,7 +87,7 @@
                         </div>
                     {% endif %}
                 </div>
-                <form action="{% url 'tasks:task_delete' task.pk %}" method="post" class="task-card__delete">
+                <form action="{% url 'tasks:task_delete' task.pk %}" method="post" class="task-card__delete" onsubmit="return confirm('Se eliminará la tarea de la lista. Tu historial y estadísticas se conservan. ¿Continuar?');">
                     {% csrf_token %}
                     <button type="submit" title="Eliminar" aria-label="Eliminar tarea">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m1 0l-.8 12.2a2 2 0 01-2 1.8H8.8a2 2 0 01-2-1.8L6 7"/></svg>

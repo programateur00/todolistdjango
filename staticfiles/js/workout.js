@@ -1250,6 +1250,11 @@ const LEGROTATION_MAX_HIP_DRIFT_FACTOR = 1.4; // reportado en vivo: "estaba yend
 // un fallo, es el cierre normal de cada subida (no hay postura de
 // reposo que reconfirmar entre repeticiones).
 // ---------------------------------------------------------------------
+// 2026-09-19: rodillas altas pasa a hacerse DE FRENTE. Se compara la altura de cada rodilla+tobillo con la de la OTRA pierna
+// (la que sube se ve por encima de la que se queda apoyada), normalizado por la longitud de pierna: sin calibrar
+// distancias, una pierna cada vez, y vale a cualquier velocidad porque solo mira 'cual va mas alta'.
+const KNEERAISE_LIFT_FULL = 0.45; // diferencia de altura (fraccion de longitud de pierna) que equivale a rodilla a la altura de la cadera -> bajada=0
+const KNEERAISE_ARM_MAX_DIFF = 0.09; // al armar se aprende el desnivel de reposo (camara torcida) mientras la diferencia entre piernas sea menor que esto
 const KNEERAISE_MIN_VISIBILITY = 0.4; // visibilidad media de caderas+rodillas+tobillos exigida para fiarse del frame (mismo umbral que el resto de la familia)
 const KNEERAISE_STABLE_MS = 400; // de pie con las dos piernas apoyadas sostenido esto antes de armar el contador, para no contar media repetición si entras en encuadre a media zancada (mismo espíritu que LEGROTATION_STABLE_MS)
 const KNEERAISE_RAISE_ENTER_FRACTION = 0.75; // fracción cadera->rodilla (0 = rodilla a la altura de la cadera, 1 = pierna colgando recta) por debajo de la cual se considera que ESA pierna se ha levantado -- deliberadamente MÁS laxo que LEGROTATION_RAISE_ENTER_FRACTION (0.6): pedido explícitamente "que el umbral sea relajado en caso que no lleguen tan alto", así que basta con un recorrido de rodilla moderado, no hace falta acercarse a la horizontal
@@ -1299,8 +1304,18 @@ const KNEERAISE_VISIBLE_CONFIRM_MS = 500; // mismo motivo que LEGROTATION_VISIBL
 // (no compara las dos caderas entre si) y fue ademas sugerido
 // directamente por el usuario tras el fallo.
 // ---------------------------------------------------------------------
+// 2026-09-19: talones al gluteo pasa a hacerse DE FRENTE. Las constantes HEELKICK_KNEE_ANGLE_* de arriba YA NO SE USAN
+// (eran del angulo 2D de perfil). Ahora: el talon que sube se ve como el TOBILLO que sube respecto al otro tobillo
+// (normalizado por la longitud de pierna, sin calibrar nada) O como el tobillo que DESAPARECE (visibilidad baja) al ir
+// hacia atras, detras de la pierna. El debug del 📋 dice cual de las dos ha disparado.
+const HEELKICK_LIFT_ENTER = 0.15; // tobillo vigilado al menos esta fraccion de la longitud de pierna POR ENCIMA del otro tobillo => talon arriba
+const HEELKICK_LIFT_EXIT = 0.07; // por debajo de esto => vuelve a estar apoyado (histeresis)
+const HEELKICK_ANKLE_SEEN_VIS = 0.6; // visibilidad a partir de la cual un tobillo/rodilla se considera bien visto
+const HEELKICK_ANKLE_HIDDEN_VIS = 0.5; // por debajo de esto (con la rodilla bien vista y el tobillo visto hace poco) se considera que el pie ha desaparecido por detras
+const HEELKICK_HIDDEN_MAX_MS = 1000; // el 'desaparecido' solo vale si el tobillo se vio bien en el ultimo segundo (si no, es que el pie esta fuera de encuadre, no que patee)
+const HEELKICK_LIFT_HIDDEN_VALUE = 0.25; // valor de 'subida' que se asigna mientras el tobillo esta oculto
 const HEELKICK_MIN_VISIBILITY = 0.4; // visibilidad media de caderas+rodillas+tobillos exigida para fiarse del frame (mismo umbral que el resto de la familia)
-const HEELKICK_MAX_HIP_DRIFT_FACTOR = 0.25; // desplazamiento del punto medio de caderas durante una subida, respecto a la longitud de la pierna QUE SE QUEDA apoyada (no la que patea), por encima del cual la repeticion se descarta por "te has desplazado" (caminar) en vez de patear en el sitio. Bajado de 0.5 a 0.25 en v7 tras un registro en vivo: las 13 repeticiones limpias de una serie marchando en el sitio dieron deriva 0.02-0.15, mientras que las sospechosas de arrastrar caminar (justo tras reposicionarte, ver el hueco de deteccion antes de HEELKICK_VISIBLE_CONFIRM_MS mas abajo) dieron 0.32-1.71 -- separacion clara, 0.25 deja margen a ambos lados sin necesitar mas datos todavia.
+const HEELKICK_MAX_HIP_DRIFT_FACTOR = 0.4; // 2026-09-19: subido de 0.25 a 0.4 al pasar a vista de frente (el peso se balancea de lado a lado). Sin datos reales todavia. Texto original: // desplazamiento del punto medio de caderas durante una subida, respecto a la longitud de la pierna QUE SE QUEDA apoyada (no la que patea), por encima del cual la repeticion se descarta por "te has desplazado" (caminar) en vez de patear en el sitio. Bajado de 0.5 a 0.25 en v7 tras un registro en vivo: las 13 repeticiones limpias de una serie marchando en el sitio dieron deriva 0.02-0.15, mientras que las sospechosas de arrastrar caminar (justo tras reposicionarte, ver el hueco de deteccion antes de HEELKICK_VISIBLE_CONFIRM_MS mas abajo) dieron 0.32-1.71 -- separacion clara, 0.25 deja margen a ambos lados sin necesitar mas datos todavia.
 const HEELKICK_KNEE_ANGLE_ENTER_DEG = 90; // angulo cadera-rodilla-tobillo por DEBAJO del cual se considera que ESA pierna ha llevado el talon hacia el gluteo -- pedido directamente por el usuario ("que sea minimo 90 grados") tras el fallo de la v4; deliberadamente relajado, en linea con "que el umbral sea relajado en caso que no lleguen tan alto": no hace falta doblar la rodilla del todo
 const HEELKICK_KNEE_ANGLE_EXIT_DEG = 160; // para dar la pierna por "vuelta a apoyar" (estirada de nuevo) hace falta que el angulo suba de esto -- histeresis por encima de HEELKICK_KNEE_ANGLE_ENTER_DEG para que el ruido de tracking justo en el umbral no abra y cierre repeticiones fantasma; mismo valor que SQUAT_UP_ANGLE_DEG para "de pie"
 const HEELKICK_MIN_REP_SECONDS = 0.12; // una subida+bajada por debajo de esto es ruido, no una repeticion de verdad -- bajo a proposito (igual que KNEERAISE_MIN_REP_SECONDS/JUMPINGJACK_MIN_REP_SECONDS) para no descartar reps reales rapidas en marcha a buen ritmo
@@ -4299,7 +4314,8 @@ class WorkoutSession {
       this.kneeRaiseRepStartTime = null;
       this.kneeRaiseLastActivityAt = null;
       this.kneeRaiseVisibleSince = null;
-      this.setStatus("Ponte de pie, de perfil a la cámara, con las dos piernas apoyadas, para empezar.");
+      this.kneeRaiseBias = null;
+      this.setStatus("Ponte de pie, de frente a la cámara, con las dos piernas apoyadas, para empezar.");
     } else if (this.counterKey === "heelkicks") {
       // Tampoco hay nada que calibrar: los umbrales son proporcionales a
       // tu propia pierna (cadera-tobillo respecto a muslo+espinilla), no
@@ -4320,7 +4336,9 @@ class WorkoutSession {
       this.heelKickSmoothAngleL = null;
       this.heelKickSmoothAngleR = null;
       this.heelKickPrevAngleR = null;
-      this.setStatus("Ponte de pie, de perfil a la cámara, con las dos piernas apoyadas, para empezar.");
+      this.heelKickAnkleSeenAtL = null;
+      this.heelKickAnkleSeenAtR = null;
+      this.setStatus("Ponte de pie, de frente a la cámara, con las dos piernas apoyadas, para empezar.");
     } else if (this.counterKey === "forearmrotation") {
       // Tampoco hay nada que calibrar: los umbrales son proporcionales
       // al ancho de hombros, no a la distancia a la cámara. Solo hace
@@ -8259,8 +8277,8 @@ class WorkoutSession {
     ) / 6;
 
     if (vis < KNEERAISE_MIN_VISIBILITY) {
-      this.announceStatus("No se te ve bien la cadera, la rodilla y el tobillo. Ponte de perfil a la cámara, con toda la pierna en el encuadre.");
-      if (this.debugEl) this.debugEl.textContent = "buscando cadera, rodilla y tobillo de perfil…";
+      this.announceStatus("No se te ve bien la cadera, la rodilla y el tobillo. Ponte de frente a la cámara, con toda la pierna en el encuadre.");
+      if (this.debugEl) this.debugEl.textContent = "buscando cadera, rodilla y tobillo de frente…";
       this.kneeRaiseVisibleSince = null; // corta la racha -- el aviso de "a la vista" exige KNEERAISE_VISIBLE_CONFIRM_MS SEGUIDOS por encima del umbral (ver más abajo)
       this.noteAbsence(now, KNEERAISE_OUT_OF_FRAME_MS);
       return;
@@ -8275,7 +8293,7 @@ class WorkoutSession {
     if (!this.startupVoiceGiven && now - this.kneeRaiseVisibleSince >= KNEERAISE_VISIBLE_CONFIRM_MS) {
       this.startupVoiceGiven = true;
       this.announceStatus(
-        "Cadera, rodilla y tobillo a la vista. ¡Listo! Marca el paso levantando las rodillas. Para terminar, párate quieto un par de segundos, o sal del encuadre.",
+        "Piernas a la vista, de frente. ¡Listo! Marca el paso levantando las rodillas hacia el pecho. Para terminar, párate quieto un par de segundos, o sal del encuadre.",
         "startup_ready"
       );
     }
@@ -8286,10 +8304,25 @@ class WorkoutSession {
     // altura que la cadera. Self-relativa (no depende de lo lejos que
     // estés de la cámara), mismo cálculo que dropFraction en
     // processLegRotation.
-    const thighL = Math.hypot(lKnee.x - lHip.x, lKnee.y - lHip.y) || 1;
-    const thighR = Math.hypot(rKnee.x - rHip.x, rKnee.y - rHip.y) || 1;
-    const dropFractionL = (lKnee.y - lHip.y) / thighL;
-    const dropFractionR = (rKnee.y - rHip.y) / thighR;
+    // DE FRENTE (2026-09-19): en vez de medir cada muslo por separado se compara la altura de las dos piernas.
+    // rawDiff > 0 = la izquierda (rodilla y tobillo, promediados) va mas alta que la derecha; < 0 al reves.
+    // Normalizado por la longitud de pierna (cadera->tobillo, la mayor de las dos = la que esta apoyada).
+    const legLen = Math.max(
+      Math.hypot(lAnkle.x - lHip.x, lAnkle.y - lHip.y),
+      Math.hypot(rAnkle.x - rHip.x, rAnkle.y - rHip.y)
+    ) || 1;
+    const rawDiff = ((rKnee.y - lKnee.y) + (rAnkle.y - lAnkle.y)) / 2 / legLen;
+    // Desnivel de reposo (camara/suelo torcidos): se aprende al armar y se sigue afinando despacio mientras las piernas estan apoyadas.
+    if (this.kneeRaiseBias == null) this.kneeRaiseBias = 0;
+    if (this.state === null) {
+      if (Math.abs(rawDiff) < KNEERAISE_ARM_MAX_DIFF) this.kneeRaiseBias += 0.2 * (rawDiff - this.kneeRaiseBias);
+    } else if (Math.abs(rawDiff - this.kneeRaiseBias) < 0.04) {
+      this.kneeRaiseBias += 0.02 * (rawDiff - this.kneeRaiseBias);
+    }
+    const diff = rawDiff - this.kneeRaiseBias;
+    // Se reutiliza la escala 'bajada' de siempre (1 = apoyada, 0 = rodilla a la altura de la cadera) para no tocar la maquina de estados ni los umbrales.
+    const dropFractionL = 1 - diff / KNEERAISE_LIFT_FULL;
+    const dropFractionR = 1 + diff / KNEERAISE_LIFT_FULL;
 
     if (this.state === null) {
       // Armado: de pie con las dos piernas apoyadas (ninguna levantada)
@@ -8309,7 +8342,7 @@ class WorkoutSession {
         }
       } else {
         this.kneeRaiseStableSince = null;
-        this.setStatus("Ponte de pie, de perfil a la cámara, con las dos piernas apoyadas, para empezar.");
+        this.setStatus("Ponte de pie, de frente a la cámara, con las dos piernas apoyadas, para empezar.");
       }
       if (this.debugEl) {
         this.debugEl.textContent =
@@ -8437,8 +8470,8 @@ class WorkoutSession {
     ) / 6;
 
     if (vis < HEELKICK_MIN_VISIBILITY) {
-      this.announceStatus("No se te ve bien la cadera, la rodilla y el tobillo. Ponte de perfil a la camara, con toda la pierna en el encuadre.");
-      if (this.debugEl) this.debugEl.textContent = "buscando cadera, rodilla y tobillo de perfil…";
+      this.announceStatus("No se te ve bien la cadera, la rodilla y el tobillo. Ponte de frente a la camara, con toda la pierna en el encuadre.");
+      if (this.debugEl) this.debugEl.textContent = "buscando cadera, rodilla y tobillo de frente…";
       this.heelKickVisibleSince = null; // corta la racha -- el aviso de "a la vista" exige HEELKICK_VISIBLE_CONFIRM_MS SEGUIDOS por encima del umbral (ver mas abajo)
       this.noteAbsence(now, HEELKICK_OUT_OF_FRAME_MS);
       return;
@@ -8452,7 +8485,7 @@ class WorkoutSession {
     if (!this.startupVoiceGiven && now - this.heelKickVisibleSince >= HEELKICK_VISIBLE_CONFIRM_MS) {
       this.startupVoiceGiven = true;
       this.announceStatus(
-        "Cadera, rodilla y tobillo a la vista. ¡Listo! Lleva el talón hacia el glúteo, alternando las piernas. Para terminar, párate quieto un par de segundos, o sal del encuadre.",
+        "Piernas a la vista, de frente. ¡Listo! Lleva el talón hacia el glúteo, alternando las piernas. Para terminar, párate quieto un par de segundos, o sal del encuadre.",
         "startup_ready"
       );
     }
@@ -8502,52 +8535,25 @@ class WorkoutSession {
     // ademas sugerido directamente por el usuario tras el fallo ("no
     // puedes anadir contar a traves de angulo que hace la rodilla y el
     // talon junto a la cadera y que sea minimo 90 grados?").
-    const kneeAngleL = angle(lHip, lKnee, lAnkle) ?? 180;
-    const kneeAngleR = angle(rHip, rKnee, rAnkle) ?? 180;
-    let angleL = kneeAngleL;
-    let angleR = kneeAngleR;
-
-    // Mismo limitador de velocidad (ratchet) que la v3 aplicaba a la
-    // fraccion de distancia, ahora en grados: recorta un salto de un
-    // solo fotograma al maximo fisicamente plausible, pero la
-    // referencia SIEMPRE avanza hacia el dato crudo (nunca se congela),
-    // para no repetir el bloqueo permanente de la v2 (ver el
-    // comentario junto a HEELKICK_MAX_ANGLE_DELTA).
-    if (this.heelKickPrevAngleL !== null) {
-      const deltaL = angleL - this.heelKickPrevAngleL;
-      if (Math.abs(deltaL) > HEELKICK_MAX_ANGLE_DELTA) {
-        angleL = this.heelKickPrevAngleL + Math.sign(deltaL) * HEELKICK_MAX_ANGLE_DELTA;
-      }
-    }
-    this.heelKickPrevAngleL = angleL;
-    if (this.heelKickPrevAngleR !== null) {
-      const deltaR = angleR - this.heelKickPrevAngleR;
-      if (Math.abs(deltaR) > HEELKICK_MAX_ANGLE_DELTA) {
-        angleR = this.heelKickPrevAngleR + Math.sign(deltaR) * HEELKICK_MAX_ANGLE_DELTA;
-      }
-    }
-    this.heelKickPrevAngleR = angleR;
-
-    // Suaviza el angulo YA limitado por el ratchet con una media movil
-    // exponencial, una pierna a la vez (ver HEELKICK_ANGLE_SMOOTHING_ALPHA
-    // mas arriba para el porque -- misma tecnica que tijeretas usa para
-    // la pierna que la camara ve peor). angleL/angleR de aqui en
-    // adelante son el valor SUAVIZADO; el ratchet de arriba sigue
-    // trabajando sobre el valor sin suavizar (heelKickPrevAngleL/R), asi
-    // que su propio limite de grados/fotograma no se ve afectado por el
-    // retraso que anade el suavizado.
-    if (this.heelKickSmoothAngleL === null) {
-      this.heelKickSmoothAngleL = angleL;
-    } else {
-      this.heelKickSmoothAngleL += HEELKICK_ANGLE_SMOOTHING_ALPHA * (angleL - this.heelKickSmoothAngleL);
-    }
-    angleL = this.heelKickSmoothAngleL;
-    if (this.heelKickSmoothAngleR === null) {
-      this.heelKickSmoothAngleR = angleR;
-    } else {
-      this.heelKickSmoothAngleR += HEELKICK_ANGLE_SMOOTHING_ALPHA * (angleR - this.heelKickSmoothAngleR);
-    }
-    angleR = this.heelKickSmoothAngleR;
+    // DE FRENTE (2026-09-19): sin angulo 2D. El talon que sube = el tobillo vigilado queda POR ENCIMA del otro tobillo
+    // (fraccion de la longitud de pierna), o el pie DESAPARECE por detras (visibilidad del tobillo baja con la rodilla bien vista).
+    // 'Suavizado' (heelKickSmoothAngleL/R, nombre heredado) guarda ahora la subida suavizada.
+    const legLenH = Math.max(
+      Math.hypot(lAnkle.x - lHip.x, lAnkle.y - lHip.y),
+      Math.hypot(rAnkle.x - rHip.x, rAnkle.y - rHip.y)
+    ) || 1;
+    if ((lAnkle.visibility ?? 1) >= HEELKICK_ANKLE_SEEN_VIS) this.heelKickAnkleSeenAtL = now;
+    if ((rAnkle.visibility ?? 1) >= HEELKICK_ANKLE_SEEN_VIS) this.heelKickAnkleSeenAtR = now;
+    const hiddenL = (lAnkle.visibility ?? 1) < HEELKICK_ANKLE_HIDDEN_VIS && (lKnee.visibility ?? 1) >= HEELKICK_ANKLE_SEEN_VIS && now - (this.heelKickAnkleSeenAtL ?? -1e9) < HEELKICK_HIDDEN_MAX_MS;
+    const hiddenR = (rAnkle.visibility ?? 1) < HEELKICK_ANKLE_HIDDEN_VIS && (rKnee.visibility ?? 1) >= HEELKICK_ANKLE_SEEN_VIS && now - (this.heelKickAnkleSeenAtR ?? -1e9) < HEELKICK_HIDDEN_MAX_MS;
+    const rawLiftL = (rAnkle.y - lAnkle.y) / legLenH;
+    const rawLiftR = (lAnkle.y - rAnkle.y) / legLenH;
+    let liftL = hiddenL ? Math.max(rawLiftL, HEELKICK_LIFT_HIDDEN_VALUE) : rawLiftL;
+    let liftR = hiddenR ? Math.max(rawLiftR, HEELKICK_LIFT_HIDDEN_VALUE) : rawLiftR;
+    this.heelKickSmoothAngleL = this.heelKickSmoothAngleL === null || this.heelKickSmoothAngleL === undefined ? liftL : this.heelKickSmoothAngleL + HEELKICK_ANGLE_SMOOTHING_ALPHA * (liftL - this.heelKickSmoothAngleL);
+    this.heelKickSmoothAngleR = this.heelKickSmoothAngleR === null || this.heelKickSmoothAngleR === undefined ? liftR : this.heelKickSmoothAngleR + HEELKICK_ANGLE_SMOOTHING_ALPHA * (liftR - this.heelKickSmoothAngleR);
+    liftL = this.heelKickSmoothAngleL;
+    liftR = this.heelKickSmoothAngleR;
 
     if (this.state === null) {
       // Se arma de inmediato, SIN exigir de pie quieto con las dos
@@ -8604,12 +8610,13 @@ class WorkoutSession {
     // Solo se procesa la pierna elegida al armar (ver mas arriba) -- la
     // otra no se mira en absoluto, ni para "subir" ni para "bajar".
     const side = this.heelKickTrackedSide;
-    const trackedAngle = side === "left" ? angleL : angleR;
-    const trackedRawAngle = side === "left" ? kneeAngleL : kneeAngleR;
+    const trackedLift = side === "left" ? liftL : liftR;
+    const trackedRawLift = side === "left" ? rawLiftL : rawLiftR;
+    const trackedHidden = side === "left" ? hiddenL : hiddenR;
     const sideLabel = side === "left" ? "izquierda" : "derecha";
 
     if (!this.heelKickUp) {
-      if (trackedAngle <= HEELKICK_KNEE_ANGLE_ENTER_DEG) {
+      if (trackedLift >= HEELKICK_LIFT_ENTER) {
         this.heelKickUp = true;
         this.heelKickRepStart = now;
         this.heelKickLastActivityAt = now; // subida nueva empezada: ya cuenta como actividad
@@ -8625,7 +8632,7 @@ class WorkoutSession {
       }
       if (this.debugEl) {
         this.debugEl.textContent =
-          `pierna vigilada: ${sideLabel} | apoyada angulo=${trackedAngle.toFixed(0)}°(bruto ${trackedRawAngle.toFixed(0)}°) umbral_subida=${HEELKICK_KNEE_ANGLE_ENTER_DEG}° | quieto desde hace: ${this.heelKickLastActivityAt ? Math.round(now - this.heelKickLastActivityAt) + "ms" : "-"}`;
+          `pierna vigilada: ${sideLabel} | apoyada subida=${trackedLift.toFixed(2)} (bruta ${trackedRawLift.toFixed(2)}, tobillo oculto=${trackedHidden}) umbral_subida=${HEELKICK_LIFT_ENTER} | quieto desde hace: ${this.heelKickLastActivityAt ? Math.round(now - this.heelKickLastActivityAt) + "ms" : "-"}`;
       }
       return;
     }
@@ -8634,10 +8641,10 @@ class WorkoutSession {
     // Histeresis por encima de HEELKICK_KNEE_ANGLE_ENTER_DEG (hay que
     // pasar de HEELKICK_KNEE_ANGLE_EXIT_DEG) para que el ruido justo en
     // el umbral no abra y cierre repeticiones fantasma.
-    if (trackedAngle < HEELKICK_KNEE_ANGLE_EXIT_DEG) {
+    if (trackedLift > HEELKICK_LIFT_EXIT) {
       if (this.debugEl) {
         this.debugEl.textContent =
-          `pierna vigilada: ${sideLabel} | talon arriba angulo=${trackedAngle.toFixed(0)}°(bruto ${trackedRawAngle.toFixed(0)}°) (umbral_bajada ${HEELKICK_KNEE_ANGLE_EXIT_DEG}°) | quieto desde hace: ${this.heelKickLastActivityAt ? Math.round(now - this.heelKickLastActivityAt) + "ms" : "-"}`;
+          `pierna vigilada: ${sideLabel} | talon arriba subida=${trackedLift.toFixed(2)} (bruta ${trackedRawLift.toFixed(2)}, tobillo oculto=${trackedHidden}) (umbral_bajada ${HEELKICK_LIFT_EXIT}) | quieto desde hace: ${this.heelKickLastActivityAt ? Math.round(now - this.heelKickLastActivityAt) + "ms" : "-"}`;
       }
       return;
     }
@@ -9088,9 +9095,9 @@ class WorkoutSession {
       case "legrotation":
         return "Ponte de pie, de frente a la cámara, con las dos piernas apoyadas, para empezar.";
       case "kneeraises":
-        return "Ponte de pie, de perfil a la cámara, con las dos piernas apoyadas, para empezar.";
+        return "Ponte de pie, de frente a la cámara, con las dos piernas apoyadas, para empezar.";
       case "heelkicks":
-        return "Ponte de pie, de perfil a la cámara, con las dos piernas apoyadas, para empezar.";
+        return "Ponte de pie, de frente a la cámara, con las dos piernas apoyadas, para empezar.";
       case "forearmrotation":
         return "Agarra el codo de un brazo con la otra mano, cerca del cuerpo, para empezar.";
       case "wristrotation":

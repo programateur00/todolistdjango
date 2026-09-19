@@ -15,6 +15,7 @@ la app debe mandar la cabecera Authorization en cada llamada. Las vistas
 van con @csrf_exempt porque la API no usa cookies de sesión — la
 protección CSRF existe para ataques basados en cookies, y aquí no aplica.
 """
+import datetime as _dt
 import json
 import re
 import unicodedata
@@ -448,7 +449,7 @@ def _apply_task_fields(t, data):
     if "due_time" in data:
         raw = data["due_time"]
         if not raw:
-            t.due_time = None
+            t.due_time = _dt.time(23, 59)
         else:
             parsed = parse_time(raw) if isinstance(raw, str) else raw
             if parsed is None:

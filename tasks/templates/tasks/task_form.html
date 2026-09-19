@@ -25,7 +25,7 @@
         </label>
         <label class="field">
             <span class="field__label" data-label-time>Hora límite</span>
-            <input type="time" name="due_time" value="{{ task.due_time|time:'H:i'|default:'' }}" required>
+            <input type="time" name="due_time" value="{{ task.due_time|time:'H:i'|default:'23:59' }}">
             <span class="field__hint" data-hint-time>Si pasa sin marcarla → auto no hecha. También es la hora del aviso.</span>
         </label>
     </div>
@@ -365,7 +365,7 @@
     <div class="task-form__actions">
         <button type="submit" class="primary-btn">{% if task %}Guardar cambios{% else %}Crear tarea{% endif %}</button>
         {% if task %}
-        <form action="{% url 'tasks:task_delete' task.pk %}" method="post" class="inline-delete">
+        <form action="{% url 'tasks:task_delete' task.pk %}" method="post" class="inline-delete" onsubmit="return confirm('Se eliminará la tarea de la lista. Tu historial y estadísticas se conservan. ¿Continuar?');">
             {% csrf_token %}
             <button type="submit" class="ghost-btn ghost-btn--danger">Eliminar</button>
         </form>

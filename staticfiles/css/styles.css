@@ -349,6 +349,8 @@ button { font-family:var(--font-b); cursor:pointer; }
 .week-summary__label { font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--bone-faded); }
 .week-summary__pct   { font-family:var(--font-mono); font-weight:700; font-size:20px; color:var(--gold); }
 .week-summary__meta  { margin:8px 0 0; font-size:12px; color:var(--bone-faded); }
+.week-summary__top--second { margin-top:18px; }
+.week-summary .stats-bar { margin-bottom:0; }
 
 /* ── Tiempo acumulado (Deporte/Enfoque, ver tasks/time_stats.py) ──────── */
 .time-totals__heading { font-size:13px; letter-spacing:.06em; text-transform:uppercase; color:var(--bone-faded); margin:0 0 8px; }
@@ -487,6 +489,72 @@ button { font-family:var(--font-b); cursor:pointer; }
 .ghost-btn--danger:hover { border-color:var(--ember); color:var(--ember); background:var(--ember-soft); }
 .inline-delete { display:inline; }
 
+/* ── Sesión de entreno (cámara) ────────────────────────────────────────
+   Misma estructura y clases que la app móvil (workout__camera/stats/
+   actions/btn), pero en escritorio no hay que llenar toda la pantalla:
+   se centra con un ancho máximo cómodo para no verse gigante en un
+   monitor ancho. Los datos (reps/series/cronómetro/descanso) van en un
+   desplegable "Datos", igual que en el móvil -- nada flota encima del
+   vídeo. */
+.workout { display:flex; flex-direction:column; gap:16px; max-width:460px; margin:0 auto; }
+.workout__camera { position:relative; width:100%; aspect-ratio:3/4; max-height:62vh; background:var(--bone);
+  border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow); }
+.workout__video, .workout__canvas { position:absolute; inset:0; width:100%; height:100%;
+  object-fit:cover; transform:scaleX(-1); }
+.workout__canvas { transform:none; } /* el espejo ya se aplica dentro del propio canvas */
+.workout__status { text-align:center; font-size:15px; color:var(--bone-faded); min-height:22px; margin:0; }
+.workout__goal-banner {
+  text-align:center; font-family:var(--font-d); font-weight:600; font-size:17px;
+  color:var(--gold); background:var(--gold-soft); border-radius:10px;
+  padding:10px 16px; margin:8px 0 0; animation:goalPulse 1.6s ease-in-out 2;
+}
+@keyframes goalPulse {
+  0%, 100% { transform:scale(1); }
+  50% { transform:scale(1.03); }
+}
+.workout__debug { text-align:center; font-size:11px; font-family:monospace; color:var(--bone-faded); opacity:.65; margin:-8px 0 0; }
+.workout__stats { display:flex; flex-wrap:wrap; gap:12px; }
+.workout__stat { flex:1 1 calc(50% - 6px); min-width:100px; background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
+  padding:14px; display:flex; flex-direction:column; align-items:center; gap:2px; box-shadow:var(--shadow); }
+.workout__stat-value { font-family:var(--font-mono); font-size:28px; font-weight:700; line-height:1; }
+.workout__stat-label { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--bone-faded); }
+.workout__actions { display:flex; gap:10px; }
+.workout__btn { flex:1; padding:14px; border-radius:999px; border:1px solid var(--line);
+  font-weight:600; font-size:15px; transition: transform .15s ease, box-shadow .15s ease; cursor:pointer; }
+.workout__btn:hover:not(:disabled) { transform:translateY(-2px); box-shadow:0 10px 20px -12px rgba(184,66,15,.5); }
+.workout__btn--primary { background:linear-gradient(135deg, var(--ember) 0%, var(--ember-deep) 100%);
+  color:var(--ash); border-color:var(--ember); font-weight:700; }
+.workout__btn--primary:hover:not(:disabled) { background:linear-gradient(135deg, #FF7A35 0%, var(--ember) 100%); }
+.workout__btn--primary:disabled { opacity:.6; }
+.workout__btn--ghost { background:var(--paper); color:var(--bone); }
+.workout__btn--ghost:hover:not(:disabled) { border-color:var(--ember-deep); color:var(--ember); }
+.workout__btn--subtle { flex:0 0 auto; display:block; margin:6px auto 0; padding:8px 10px;
+  border:none; background:none; color:var(--bone-faded); font-weight:500; font-size:13px;
+  text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
+.workout__btn--subtle:hover:not(:disabled) { transform:none; box-shadow:none; color:var(--bone); }
+.workout__note { font-size:12px; color:var(--bone-faded); text-align:center; margin:0; }
+.workout__note--warn { color:var(--danger); }
+
+/* Datos (reps/series/cronómetro/descanso) en un desplegable, igual que
+   en el móvil: por defecto solo se ve la cámara + un botón "Datos"
+   discreto, en vez de la cuadrícula de números siempre a la vista. */
+.workout__stats-toggle summary { list-style:none; cursor:pointer; }
+.workout__stats-summary { display:flex; align-items:center; justify-content:space-between;
+  background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
+  padding:12px 16px; font-weight:600; font-size:14px; color:var(--bone); box-shadow:var(--shadow); }
+.workout__stats-summary::-webkit-details-marker { display:none; }
+.workout__stats-summary::after {
+  content:""; flex:none; width:8px; height:8px; margin-left:8px;
+  border-right:2px solid var(--bone-faded); border-bottom:2px solid var(--bone-faded);
+  transform:rotate(45deg); transition:transform .2s ease;
+}
+.workout__stats-toggle[open] .workout__stats-summary { border-radius:var(--radius) var(--radius) 0 0; }
+.workout__stats-toggle[open] .workout__stats-summary::after { transform:rotate(-135deg); }
+.workout__stats-toggle .workout__stats {
+  margin-top:-1px; border:1px solid var(--line); border-top:none;
+  border-radius:0 0 var(--radius) var(--radius); padding:14px; gap:10px; background:var(--ash-soft);
+}
+
 /* ── Responsive ─────────────────────────────────────────────────────── */
 @media (max-width:480px) {
   .topbar__title h1 { font-size:32px; }
@@ -584,49 +652,6 @@ button { font-family:var(--font-b); cursor:pointer; }
 
 .meta-pill--capability { background:var(--ash-soft); color:var(--bone-faded);
   font-style:italic; }
-
-/* ── Sesión de entreno (cámara) ────────────────────────────────────── */
-.workout { display:flex; flex-direction:column; gap:16px; }
-.workout__camera { position:relative; width:100%; aspect-ratio:4/3; background:var(--bone);
-  border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow); }
-.workout__video, .workout__canvas { position:absolute; inset:0; width:100%; height:100%;
-  object-fit:cover; transform:scaleX(-1); }
-.workout__canvas { transform:none; } /* el espejo ya se aplica dentro del propio canvas */
-.workout__status { text-align:center; font-size:15px; color:var(--bone-faded); min-height:22px; margin:0; }
-
-.workout__goal-banner {
-  text-align:center; font-family:var(--font-d); font-weight:600; font-size:17px;
-  color:var(--gold); background:var(--gold-soft); border-radius:10px;
-  padding:10px 16px; margin:8px 0 0; animation:goalPulse 1.6s ease-in-out 2;
-}
-@keyframes goalPulse {
-  0%, 100% { transform:scale(1); }
-  50% { transform:scale(1.03); }
-}
-.workout__debug { text-align:center; font-size:11px; font-family:monospace; color:var(--bone-faded); opacity:.65; margin:-8px 0 0; }
-.workout__stats { display:flex; flex-wrap:wrap; gap:12px; }
-.workout__stat { flex:1 1 calc(50% - 6px); min-width:100px; background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
-  padding:14px; display:flex; flex-direction:column; align-items:center; gap:2px; box-shadow:var(--shadow); }
-.workout__stat-value { font-family:var(--font-mono); font-size:28px; font-weight:700; line-height:1; }
-.workout__stat-label { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--bone-faded); }
-.workout__actions { display:flex; gap:10px; }
-.workout__btn { flex:1; padding:14px; border-radius:999px; border:1px solid var(--line);
-  font-weight:600; font-size:15px; transition: transform .15s ease, box-shadow .15s ease; }
-.workout__btn:hover:not(:disabled) { transform:translateY(-2px); box-shadow:0 10px 20px -12px rgba(184,66,15,.5); }
-.workout__btn--primary { background:var(--ember); color:var(--ash); border-color:var(--ember); font-weight:700; }
-.workout__btn--primary:disabled { opacity:.6; }
-.workout__btn--ghost { background:var(--paper); color:var(--bone); }
-/* Botón de "terminar sesión antes" en los ejercicios con cronómetro
-   (runTimer/runTimerWithPosture, circuit.js/plan-session.js): antes tenía
-   el mismo peso visual que el botón de avanzar al siguiente ejercicio, y
-   se confundía con él -- de ahí que quede aparte, más discreto, en su
-   propia línea (ver circuit__controls, ya no lo incluye). */
-.workout__btn--subtle { flex:0 0 auto; display:block; margin:6px auto 0; padding:8px 10px;
-  border:none; background:none; color:var(--bone-faded); font-weight:500; font-size:13px;
-  text-decoration:underline; text-underline-offset:2px; }
-.workout__btn--subtle:hover:not(:disabled) { transform:none; box-shadow:none; color:var(--bone); }
-.workout__note { font-size:12px; color:var(--bone-faded); text-align:center; margin:0; }
-.workout__note--warn { color:var(--danger); }
 
 .exercise-picker__hint { font-family:var(--font-d); font-size:19px; margin:4px 0 2px; }
 .exercise-picker { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }

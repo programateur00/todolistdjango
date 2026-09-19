@@ -10,19 +10,7 @@
     <a href="{% url 'tasks:plan_list' %}" class="stats-link">← Planes</a>
 </header>
 
-<section class="week-summary" aria-label="Progreso global de la semana">
-    <div class="week-summary__top">
-        <span class="week-summary__label">Global — todo lo que llevas</span>
-        <span class="week-summary__pct">{% if weekly.pct is not None %}{{ weekly.pct }}%{% else %}—{% endif %}</span>
-    </div>
-    {% if weekly.pct is not None %}
-    <div class="stats-bar"><div class="stats-bar__done" style="width:{{ weekly.pct }}%"></div></div>
-    {% endif %}
-    <p class="week-summary__meta">
-        {% if weekly.total %}{{ weekly.done }} de {{ weekly.total }} ocurrencias · {{ weekly.week_start|date:"d M" }}–{{ weekly.week_end|date:"d M" }}
-        {% else %}Todavía no hay ocurrencias esta semana{% endif %}
-    </p>
-</section>
+{% include "tasks/_progress_bars.html" %}
 
 <h2 class="section-title">Tus objetivos esta semana</h2>
 

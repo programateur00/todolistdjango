@@ -72,7 +72,7 @@
 {% if headline %}
 {# La medida principal: la prueba concreta de que vas hacia el objetivo. #}
 <section class="plan-head">
-    <p class="plan-head__eyebrow">Medida del plan</p>
+    <p class="plan-head__eyebrow">Objetivo destacado</p>
     <h2 class="plan-head__name">{{ headline.item.display_name }}</h2>
 
     <div class="plan-head__now">
@@ -115,8 +115,8 @@
 {% endif %}
 
 {% if supports %}
-<h2 class="section-title">El camino</h2>
-<p class="field__hint">Ejercicios que te llevan hasta ahí. Progresan, pero no deciden el plan.</p>
+<h2 class="section-title">Resto de objetivos</h2>
+<p class="field__hint">Todos cuentan por igual: el progreso del plan es la media de todos los objetivos.</p>
 {% for pack in supports %}
     {% include "tasks/_plan_item.html" with pack=pack plan=plan is_support=True is_first=forloop.first is_last=forloop.last %}
 {% endfor %}
