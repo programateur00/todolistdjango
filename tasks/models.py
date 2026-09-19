@@ -3195,12 +3195,60 @@ class PlanItem(models.Model):
             recorded_at__date__gte=self.plan.started_on,
         ).order_by("recorded_at")
 
+    @property
+    def is_distance(self):
+        """Objetivo de correr/caminar (mide km y ritmo, no series)."""
+        return bool(self.exercise_id and self.exercise.mode == Exercise.MODE_DISTANCE)
+
+    def distance_days(self):
+        """
+        Para objetivos de distancia: UN resultado por DÍA (de más antiguo a
+        más nuevo), sumando todas las sesiones de ese día.
+
+        Health Connect / el móvil pueden mandar varias sesiones el mismo
+        día (paseos partidos, resincronizaciones...) y el plan pide una
+        cosa al día ("10 km a 15 min/km"), así que el día cuenta como
+        cumplido si entre todas las sesiones suman la distancia pedida Y
+        el ritmo medio del día llega al ritmo pedido (si lo hay).
+        """
+        by_day = {}
+        for s in self._sessions():
+            by_day.setdefault(timezone.localtime(s.recorded_at).date(), []).append(s)
+        rows = []
+        for day in sorted(by_day):
+            ss = by_day[day]
+            dist = sum(s.distance_km or 0 for s in ss)
+            secs = sum((s.session_duration_seconds or 0) for s in ss if s.distance_km)
+            tgt = next((s for s in reversed(ss) if s.target_distance_km), None)
+            if tgt:
+                pct = round(100 * dist / tgt.target_distance_km)
+                pace = (secs / dist) if dist and secs else None
+                tp = tgt.target_pace_seconds_per_km
+                if tp and (pace is None or pace > tp):
+                    pct = 0
+            else:
+                pct = max(((s.achievement_pct or 0) for s in ss), default=0)
+                pace = None
+            rows.append({
+                "date": day, "distance": dist, "pace": pace, "pct": min(200, pct),
+                "met": pct >= 100,
+                "target_km": tgt.target_distance_km if tgt else None,
+                "target_pace": tgt.target_pace_seconds_per_km if tgt else None,
+            })
+        return rows
+
+    def session_count(self):
+        """Sesiones que cuentan para el objetivo (días, si es de distancia)."""
+        return len(self.distance_days()) if self.is_distance else self._sessions().count()
+
     def successes_and_streak(self):
         """
         Cuántas veces se cumplió el objetivo, y cuántos fallos seguidos
         van al final. Lo segundo es lo que dispara la bajada de escalón.
         """
-        if self.progression == self.PROG_COMPLETION:
+        if self.is_distance and not (self.progression == self.PROG_COMPLETION and self.series_id):
+            results = [d["met"] for d in self.distance_days()]
+        elif self.progression == self.PROG_COMPLETION:
             results = [
                 o.result == Occurrence.RESULT_DONE for o in self._occurrences()
             ] if self.series_id else [
@@ -3490,6 +3538,26 @@ class PlanItem(models.Model):
                 for o in self._occurrences().order_by("-recorded_at")[:limit]
             ]
 
+        if self.is_distance:
+            def _pace(sec):
+                mm, ss = divmod(int(round(sec)), 60)
+                return f"{mm}:{ss:02d}/km"
+
+            def _km(v):
+                return (f"{v:.2f}".rstrip("0").rstrip(".") if v else "0") + " km"
+
+            rows = []
+            for d in reversed(self.distance_days()):
+                pedia = "—"
+                if d["target_km"]:
+                    pedia = _km(d["target_km"]) + (f" a {_pace(d['target_pace'])}" if d["target_pace"] else "")
+                hecho = _km(d["distance"]) + (f" a {_pace(d['pace'])}" if d["pace"] else "")
+                rows.append({
+                    "date": d["date"], "target": pedia, "done": hecho,
+                    "pct": d["pct"], "met": d["met"], "auto": False,
+                })
+            return rows[:limit]
+
         rows = []
         for s in self._sessions().order_by("-recorded_at")[:limit]:
             hecho = (
@@ -3555,7 +3623,7 @@ class PlanItem(models.Model):
             # los ejercicios no tienen).
             total = (
                 self._occurrences().count() if self.series_id
-                else self._sessions().count()
+                else self.session_count()
             )
             if not total:
                 return 0

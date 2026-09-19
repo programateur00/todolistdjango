@@ -47,7 +47,9 @@ apoyo, así que va como bloque aparte.
                     <td>{{ h.target }}</td>
                     <td>{{ h.done }}{% if h.auto %} <em>(sin marcar)</em>{% endif %}</td>
                     <td>
-                        {% if h.pct is not None %}
+                        {% if h.met is not None %}
+                        <span class="plan-pct {% if h.met %}plan-pct--full{% else %}plan-pct--partial{% endif %}">{% if h.met %}✓ cumplido{% else %}✗ no cumplido{% endif %}</span>
+                        {% elif h.pct is not None %}
                         <span class="plan-pct {% if h.pct >= 100 %}plan-pct--full{% else %}plan-pct--partial{% endif %}">{{ h.pct }}%</span>
                         {% else %}—{% endif %}
                     </td>
