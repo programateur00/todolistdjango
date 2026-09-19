@@ -463,8 +463,10 @@ async function checkCourseCompletion(taskUuid, tabId) {
   } catch (err) {
     // La pestaña pudo cerrarse, cambiar de origen, etc. — no es un error
     // real, simplemente no se pudo comprobar esta vez.
+    console.warn("[Libreta] no se pudo leer el progreso en la pestaña:", err);
     return;
   }
+  console.log("[Libreta] progreso del curso leído:", JSON.stringify(progress));
   if (!progress) return;
 
   const cfg = await getConfig();
@@ -476,11 +478,12 @@ async function checkCourseCompletion(taskUuid, tabId) {
   // otro.
   if (progress.pct !== null && progress.pct !== undefined) {
     try {
-      await fetch(apiUrl(cfg, `/tasks/${taskUuid}/course-progress/`), {
+      const res = await fetch(apiUrl(cfg, `/tasks/${taskUuid}/course-progress/`), {
         method: "POST",
         headers: { Authorization: authHeader(cfg), "Content-Type": "application/json" },
         body: JSON.stringify({ pct: progress.pct, done: progress.done, total: progress.total }),
       });
+      console.log("[Libreta] % del curso enviado al servidor -> HTTP", res.status);
     } catch (err) {
       console.warn("[Libreta] no se pudo mandar el % del curso (se reintentará en el próximo heartbeat):", err);
     }
@@ -545,7 +548,40 @@ async function reevaluate({ allowEndOnNoMatch = true } = {}) {
   }
 }
 
+// El % del curso NO depende de que haya una sesión de tiempo en marcha
+// (que exige audio sonando + ventana enfocada): basta con estar en una
+// pestaña de Udemy cuyo título case con la palabra clave de un curso.
+let lastProgressCheckAt = 0;
+async function checkProgressOnActiveUdemyTab(force = false) {
+  try {
+    if (!force && Date.now() - lastProgressCheckAt < 20000) return;
+    const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    const tab = tabs[0];
+    if (!tab || !tab.url || !isUdemyUrl(tab.url)) return;
+    const tasks = await getCachedTasks();
+    const candidates = tasks.filter(
+      (t) => t.subcategory === "udemy" && (t.watch_keyword || "").trim()
+    );
+    const title = (tab.title || "").toLowerCase();
+    let best = null;
+    for (const t of candidates) {
+      const kw = t.watch_keyword.trim().toLowerCase();
+      if (title.includes(kw) && (!best || kw.length > best.kw.length)) best = { task: t, kw };
+    }
+    if (!best) {
+      console.log("[Libreta] pestaña de Udemy sin curso que case. Título:", tab.title,
+        "| palabras clave:", candidates.map((t) => t.watch_keyword));
+      return;
+    }
+    lastProgressCheckAt = Date.now();
+    await checkCourseCompletion(best.task.uuid, tab.id);
+  } catch (err) {
+    console.warn("[Libreta] checkProgressOnActiveUdemyTab falló:", err);
+  }
+}
+
 async function heartbeat() {
+  await checkProgressOnActiveUdemyTab();
   await reevaluate();
   const current = await getCurrentSession();
   if (current && current.task.subcategory === "udemy" && (current.task.watch_keyword || "").trim()) {
@@ -556,7 +592,7 @@ async function heartbeat() {
 
 // ------------------------------------------------------------ arranque
 
-chrome.tabs.onActivated.addListener(() => reevaluate());
+chrome.tabs.onActivated.addListener(() => { reevaluate(); checkProgressOnActiveUdemyTab(); });
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
   if (
     changeInfo.title !== undefined ||
@@ -568,6 +604,7 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
     // pero no la CORTA solo porque en este instante concreto no
     // coincida nada — ver más arriba, en reevaluate().
     reevaluate({ allowEndOnNoMatch: false });
+    if (changeInfo.status === "complete") setTimeout(() => checkProgressOnActiveUdemyTab(), 4000);
   }
 });
 chrome.tabs.onRemoved.addListener(async (tabId) => {
