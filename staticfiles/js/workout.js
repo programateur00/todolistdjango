@@ -249,8 +249,8 @@ const PUSHUPFRONT_BREAK_STABLE_MS = 1000;
 const SQUATFRONT_MIN_STAND_RATIO = 1.4;    // cadera-tobillo vertical / ancho de hombros mínimo para fiarse de "de pie"
 const SQUATFRONT_ARM_STABLE_MS = 700;
 const SQUATFRONT_ARM_MAX_JUMP = 0.15;      // salto máximo del ratio entre frames para considerarte quieto al armar
-const SQUATFRONT_DOWN_FRACTION = 0.65;     // ratio <= 65% del de pie -> abajo
-const SQUATFRONT_UP_FRACTION = 0.88;       // ratio >= 88% del de pie -> arriba (rep completa)
+const SQUATFRONT_DOWN_FRACTION = 0.72;     // ratio <= 65% del de pie -> abajo
+const SQUATFRONT_UP_FRACTION = 0.90;       // ratio >= 88% del de pie -> arriba (rep completa)
 const SQUATFRONT_SMOOTH_ALPHA = 0.5;
 const SQUATFRONT_ARM_SETTLE_MS = 600;
 const SQUATFRONT_ARMS_UP_MS = 600;        // las dos muñecas por encima de la nariz seguido esto (de pie, arriba) = 'he terminado' (Cindy: pasar a la siguiente ronda sin tocar la pantalla)
@@ -3317,7 +3317,16 @@ export function isVoiceEnabled() {
  * más abajo) para que circuit.js/plan-session.js puedan usarlo también,
  * sin duplicar aquí la misma llamada a speechSynthesis.
  */
-export function speakOut(texto, { flush = true, rate = 1 } = {}) {
+// Modo silencioso (reto Cindy, contrarreloj): speakOut() no dice nada salvo lo que se pase con
+// force:true (las órdenes cortas del reto y el número de cada rep). Lo activa/desactiva
+// challenges.js con setQuietVoice().
+let _quietVoice = false;
+export function setQuietVoice(on) {
+  _quietVoice = !!on;
+}
+
+export function speakOut(texto, { flush = true, rate = 1, force = false } = {}) {
+  if (_quietVoice && !force) return;
   if (typeof speechSynthesis === "undefined") return;
   try {
     if (flush) speechSynthesis.cancel();
@@ -3398,6 +3407,8 @@ class WorkoutSession {
     // Sin esto (o si no viene ninguno) simplemente no hay aviso.
     this.targetSets = root.dataset.targetSets ? parseInt(root.dataset.targetSets, 10) : null;
     this.targetReps = root.dataset.targetReps ? parseInt(root.dataset.targetReps, 10) : null;
+    // Reps EXACTAS (reto Cindy): ni una más ni una menos por serie.
+    this.exactReps = root.dataset.exactReps ? parseInt(root.dataset.exactReps, 10) : null;
     this.targetAnnounced = false;
     // Indice de serie (this.sets.length en el momento de avisar) en el
     // que ya se ha dado el aviso de "objetivo cumplido" (de serie o de
@@ -4674,7 +4685,10 @@ class WorkoutSession {
         "No se te ven bien los hombros, las caderas y los tobillos. Ponte de frente a la cámara, con el cuerpo entero en el encuadre.",
         "squatfront_novis"
       );
-      if (this.debugEl) this.debugEl.textContent = "buscando hombros, caderas y tobillos de frente…";
+      if (this.debugEl) {
+        const v = (pt) => (pt.visibility ?? 1).toFixed(2);
+        this.debugEl.textContent = `buscando hombros, caderas y tobillos de frente… vis media ${vis.toFixed(2)} (mín ${FRONT_MIN_VISIBILITY}) | hombros ${v(lS)}/${v(rS)} caderas ${v(lH)}/${v(rH)} tobillos ${v(lA)}/${v(rA)} | ancho hombros ${shoulderW.toFixed(3)}`;
+      }
       this.frontSmooth = null;
       this.frontArmSince = null;
       this.noteAbsence(now);
@@ -4970,11 +4984,12 @@ class WorkoutSession {
     // número real siempre se ve aunque la voz solo marque los múltiplos
     // de voiceStep.
     if (n % this.voiceStep !== 0) return;
-    speakOut(numeroEnPalabras(n), { rate: 1.1 }); // un poco más rápido que el habla normal, para no quedarse atrás
+    speakOut(numeroEnPalabras(n), { rate: 1.1, force: true }); // un poco más rápido que el habla normal, para no quedarse atrás
   }
 
   countRep(duration, now, label, minSeconds = MIN_REP_SECONDS) {
     if (duration < minSeconds) return false;   // ruido, no cuenta
+    if (this.exactReps && this.currentSetReps >= this.exactReps) return false; // reto de reps exactas: ya completas
     if (this.currentSetReps === 0 && this.setClosedAt !== null && now - this.setClosedAt < MIN_REST_MS && !NO_REST_COUNTERS.has(this.counterKey)) {
       // Descanso obligatorio en curso: aunque te coloques y te muevas
       // antes de tiempo, esto NO cuenta como repetición — antes sí se

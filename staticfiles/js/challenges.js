@@ -22,7 +22,7 @@
  */
 import {
   checkPushupTopHoldPosture, checkPushupBottomHoldPosture,
-  speakOut, stopSpeaking, isVoiceEnabled, startWorkout,
+  speakOut, stopSpeaking, isVoiceEnabled, startWorkout, setQuietVoice,
 } from "./workout.js";
 import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./mediapipe-vendor.js";
 
@@ -441,9 +441,9 @@ function finishPullups(host, state) {
 const CINDY_ID = "cindy";
 const CINDY_LIMIT_SECONDS = 20 * 60;
 const CINDY_PHASES = [
-  { key: "pullups", name: "Dominadas", counter: "pullup", slug: "pullup", min: 5, exit: "Para pasar al siguiente: suéltate de la barra y baja los brazos.", say: "Al acabar, baja los brazos." },
-  { key: "pushups", name: "Flexiones", counter: "pushupfront", slug: "push-up", min: 10, exit: "Para pasar al siguiente: levántate del suelo.", say: "Al acabar, levántate." },
-  { key: "squats", name: "Sentadillas", counter: "squatfront", slug: "squat", min: 15, exit: "Para empezar otra ronda: levanta los brazos por encima de la cabeza.", say: "Al acabar, levanta los brazos." },
+  { key: "pullups", name: "Dominadas", counter: "pullup", slug: "pullup", min: 5, exit: "Al llegar a 5 pasa solo al siguiente.", say: "Dominadas. A la barra." },
+  { key: "pushups", name: "Flexiones", counter: "pushupfront", slug: "push-up", min: 10, exit: "Al llegar a 10 pasa solo al siguiente.", say: "Flexiones. Al suelo." },
+  { key: "squats", name: "Sentadillas", counter: "squatfront", slug: "squat", min: 15, exit: "Al llegar a 15 pasa solo a la siguiente ronda.", say: "Sentadillas. Levántate." },
 ];
 const CINDY_HISTORY_KEY = "reto_historial__cindy";
 
@@ -476,8 +476,9 @@ function initCindy(host) {
     <p>
       El circuito de Tom Holland, en bucle durante <strong>${CINDY_LIMIT_SECONDS / 60} minutos</strong>:
       <strong>${CINDY_PHASES[0].min} dominadas → ${CINDY_PHASES[1].min} flexiones → ${CINDY_PHASES[2].min} sentadillas</strong>
-      y vuelta a empezar. Puedes hacer <em>más</em> de esas repeticiones en cada ejercicio, pero no menos:
-      no te deja pasar al siguiente hasta llegar al mínimo. Cuenta cuántas rondas completas te caben.
+      y vuelta a empezar. Cada ejercicio es <strong>una sola serie con esas repeticiones exactas</strong>: ni más ni menos.
+      Al llegar al número pasa solo al siguiente. Si cortas la serie antes (te levantas, sales del encuadre, paras)
+      o intentas una segunda serie, <strong>el reto queda fallado</strong>. Cuenta cuántas rondas completas te caben.
     </p>
     <p class="workout__note" style="text-align:left">
       Flexiones: pon el móvil delante de ti (en el suelo o en un trípode alto), ponte de pie mirando a la cámara
@@ -522,11 +523,11 @@ function runCindyPhase(host, state) {
     <div id="workout-root" class="workout"
          data-save-url="local" data-cancel-url="#" data-exercise-slug="${phase.slug}"
          data-counter-key="${phase.counter}"
-         data-target-sets="1" data-target-reps="${phase.min}">
+         data-target-sets="1" data-target-reps="${phase.min}" data-exact-reps="${phase.min}">
       <p class="circuit__progress">Cindy · ronda ${roundNo} · ejercicio ${state.phaseIdx + 1} de ${CINDY_PHASES.length}
         · <strong id="cindy-clock">${fmt(Math.ceil(remainingMs() / 1000))}</strong> restantes</p>
       <h2 class="circuit__exercise-name">${phase.name}</h2>
-      <p class="run-target">Mínimo ${phase.min} — puedes hacer más. <span id="cindy-gate"></span><br><small>${phase.exit}</small></p>
+      <p class="run-target">Exactamente ${phase.min}, en una sola serie. <span id="cindy-gate"></span><br><small>${phase.exit}</small></p>
       <div class="workout__camera">
         <video id="workout-video" playsinline muted class="workout__video"></video>
         <canvas id="workout-canvas" class="workout__canvas"></canvas>
@@ -551,6 +552,7 @@ function runCindyPhase(host, state) {
       <p class="workout__note">El vídeo no sale de tu móvil. Solo se guardan los números.</p>
     </div>`;
 
+  setQuietVoice(true);
   let workoutSession = startWorkout();
   let tick = null;
   let done = false;
@@ -601,6 +603,7 @@ function runCindyPhase(host, state) {
 
   window.__currentViewCleanup = () => {
     if (tick) clearInterval(tick);
+    setQuietVoice(false);
     workoutSession?.stopCamera?.();
     window.__currentViewGuard = null;
   };
@@ -622,19 +625,23 @@ function runCindyPhase(host, state) {
     const left = remainingMs();
     if (clockEl) clockEl.textContent = fmt(Math.ceil(left / 1000));
     const { reps } = currentResult();
-    if (reps >= phase.min) {
-      finishBtn.disabled = false;
-      finishBtn.textContent = lastLabel;
-      gateEl.textContent = `✓ Mínimo hecho (${reps}).`;
-    } else {
-      finishBtn.disabled = true;
-      gateEl.textContent = `Llevas ${reps} de ${phase.min}.`;
+    // Serie cerrada (te levantas, sales del encuadre…) con menos de las reps exactas, o una
+    // segunda serie: reto fallado.
+    const closed = workoutSession?.sets || [];
+    if (closed.some((x) => x.reps < phase.min) || closed.length > 1) {
+      done = true;
+      const r = currentResult();
+      beep(220, 0.5);
+      stopAll();
+      savePhase({ reps: r.reps, sets: r.sets });
+      finishCindy(host, state, `${phase.name}: serie de ${closed[0]?.reps ?? r.reps} en vez de ${phase.min}. Es una serie exacta o nada.`);
+      return;
     }
-    // Manos libres: serie cerrada por el contador (currentSetReps vuelve a 0 con series ya
-    // guardadas) y mínimo cumplido -> siguiente ejercicio.
-    if (reps >= phase.min && (workoutSession?.currentSetReps || 0) === 0 && (workoutSession?.sets || []).length > 0) {
+    gateEl.textContent = `Llevas ${reps} de ${phase.min}.`;
+    // Reps exactas conseguidas: siguiente ejercicio al momento, sin tocar la pantalla.
+    if (reps >= phase.min) {
       beep(880, 0.15);
-      advance(currentResult());
+      advance({ reps: phase.min, sets: [phase.min] });
       return;
     }
     if (left <= 0) {
@@ -655,25 +662,28 @@ function runCindyPhase(host, state) {
       if (!confirm("¿Salir del reto? Se pierde el progreso.")) return;
       done = true;
       stopAll();
+      setQuietVoice(false);
       window.location.href = document.referrer || "/";
     },
     true
   );
 
   if (isVoiceEnabled()) {
-    speakOut(`Ronda ${roundNo}. ${phase.name}, mínimo ${phase.min}. ${phase.say}`, { flush: true });
+    speakOut(phase.say, { flush: true, force: true });
   }
 }
 
-function finishCindy(host, state) {
+function finishCindy(host, state, failReason = null) {
+  setQuietVoice(false);
   const rounds = [...state.rounds];
   if (state.round && Object.keys(state.round).length) rounds.push(state.round); // ronda a medias
   const complete = cindyCompleteRounds(rounds);
   const totalReps = cindyTotalReps(rounds);
   const best = getBest(CINDY_ID);
-  const isNewBest = !best || complete > best.rounds || (complete === best.rounds && totalReps > best.totalReps);
+  const isNewBest = !failReason && (!best || complete > best.rounds || (complete === best.rounds && totalReps > best.totalReps));
   if (isNewBest) setBest(CINDY_ID, { rounds: complete, totalReps });
-  pushCindyHistory({ at: Date.now(), rounds: complete, totalReps, detail: rounds });
+  pushCindyHistory({ at: Date.now(), rounds: complete, totalReps, detail: rounds, failed: !!failReason });
+  if (failReason && isVoiceEnabled()) speakOut("Reto fallido.", { flush: true, force: true });
 
   const cell = (r, p) => {
     const x = r[p.key];
@@ -683,7 +693,8 @@ function finishCindy(host, state) {
   };
   host.innerHTML = `
     <div class="circuit__done">
-      <p class="circuit__done-title">¡Cindy workout terminado! 💪</p>
+      <p class="circuit__done-title">${failReason ? "Reto fallido ❌" : "¡Cindy workout terminado! 💪"}</p>
+      ${failReason ? `<p>${String(failReason).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c])}</p>` : ""}
       <p>${complete} ronda(s) completa(s) · ${totalReps} repeticiones en ${CINDY_LIMIT_SECONDS / 60} min</p>
       ${isNewBest ? `<p class="run-pct run-pct--full">🏆 Nueva mejor marca</p>` : ""}
       <table class="plan-table" style="width:100%;text-align:center">
