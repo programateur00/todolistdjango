@@ -38,6 +38,7 @@ urlpatterns = [
     path("retos/", views.challenges_list, name="challenges_list"),
     path("retos/bring-sally-up/", views.challenge_sally_pushups, name="challenge_sally_pushups"),
     path("retos/100-dominadas/", views.challenge_pullups_100, name="challenge_pullups_100"),
+    path("retos/cindy/", views.challenge_cindy, name="challenge_cindy"),
     path("revision/", views.weekly_review, name="weekly_review"),
     path("<int:pk>/plan/<int:plan_pk>/", views.plan_session, name="plan_session"),
     path("<int:pk>/plan/<int:plan_pk>/guardar/", views.plan_session_save, name="plan_session_save"),

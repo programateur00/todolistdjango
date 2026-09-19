@@ -1750,6 +1750,14 @@ def challenge_pullups_100(request):
     return render(request, "tasks/challenge_pullups_100.html")
 
 
+def challenge_cindy(request):
+    """Cindy workout (Tom Holland): 5 dominadas -> 10 flexiones -> 15
+    sentadillas en bucle durante 20 min, mínimo por ronda, más si quieres.
+    Flexiones y sentadillas se cuentan de frente (pushupfront/squatfront
+    en workout.js). Todo en el navegador — ver challenges.js."""
+    return render(request, "tasks/challenge_cindy.html")
+
+
 def weekly_review(request):
     """
     La revisión semanal del 12 Week Year: cómo ha ido la semana en

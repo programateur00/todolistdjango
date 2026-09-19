@@ -283,6 +283,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     let postureOk = false;
     let goalReached = false;
     let lastSpokenNumber = null; // último entero (cuenta atrás o adelante) ya dicho, para no repetirlo en el mismo segundo
+    let lastPostureDebug = ""; // valores medidos (angulos, etc.) del ultimo check, para el registro
     let lastPostureReason = ""; // último check.reason (o motivo de "no visible"), para el registro de depuración
     let running = true;
     let stream = null;
@@ -373,6 +374,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
             const check = checker(result.landmarks[0]);
             postureOk = check.ok;
             lastPostureReason = check.ok ? "" : check.reason;
+            lastPostureDebug = check.debug ? Object.entries(check.debug).map(([k, v]) => `${k}=${v ?? "-"}`).join(" ") : "";
             statusEl.textContent = check.ok ? "Postura correcta — aguanta." : `⚠️ ${check.reason}`;
           } else {
             postureOk = false;
@@ -388,7 +390,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     clearInterval(timerId);
     timerId = setInterval(() => {
       if (!postureOk) {
-        logDebugLine(`pausado (postura no válida: ${lastPostureReason || "?"})`);
+        logDebugLine(`pausado (postura no válida: ${lastPostureReason || "?"}) ${lastPostureDebug}`);
         return; // pausado mientras la postura no sea válida
       }
       elapsed += 1;

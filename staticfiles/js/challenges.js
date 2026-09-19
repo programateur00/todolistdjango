@@ -425,6 +425,278 @@ function finishPullups(host, state) {
   document.getElementById("pullups-retry").addEventListener("click", () => initPullups100(host));
 }
 
+// ------------------------------------------------------- Cindy workout
+
+/**
+ * Cindy workout (el circuito de Tom Holland): dominadas → flexiones →
+ * sentadillas, una detrás de otra, y vuelta a empezar. MÍNIMO por ronda
+ * CINDY_MINS (no se puede pasar al siguiente ejercicio con menos, sí con
+ * más), tantas rondas como quepan en CINDY_LIMIT_SECONDS. Flexiones y
+ * sentadillas se cuentan DE FRENTE a la cámara (counterKey pushupfront /
+ * squatfront, ver workout.js); las dominadas ya eran de frente.
+ * Todo local (localStorage), como el resto de retos: borrador para
+ * retomar, mejor marca e historial de intentos con las reps de cada
+ * serie y ronda.
+ */
+const CINDY_ID = "cindy";
+const CINDY_LIMIT_SECONDS = 20 * 60;
+const CINDY_PHASES = [
+  { key: "pullups", name: "Dominadas", counter: "pullup", slug: "pullup", min: 5, exit: "Para pasar al siguiente: suéltate de la barra y baja los brazos.", say: "Al acabar, baja los brazos." },
+  { key: "pushups", name: "Flexiones", counter: "pushupfront", slug: "push-up", min: 10, exit: "Para pasar al siguiente: levántate del suelo.", say: "Al acabar, levántate." },
+  { key: "squats", name: "Sentadillas", counter: "squatfront", slug: "squat", min: 15, exit: "Para empezar otra ronda: levanta los brazos por encima de la cabeza.", say: "Al acabar, levanta los brazos." },
+];
+const CINDY_HISTORY_KEY = "reto_historial__cindy";
+
+function getCindyHistory() {
+  try {
+    return JSON.parse(localStorage.getItem(CINDY_HISTORY_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+function pushCindyHistory(entry) {
+  try {
+    const h = getCindyHistory();
+    h.unshift(entry);
+    localStorage.setItem(CINDY_HISTORY_KEY, JSON.stringify(h.slice(0, 30)));
+  } catch {
+    /* sin historial, el reto sigue igual */
+  }
+}
+
+const cindyTotalReps = (rounds) =>
+  rounds.reduce((t, r) => t + CINDY_PHASES.reduce((a, p) => a + (r[p.key]?.reps || 0), 0), 0);
+const cindyCompleteRounds = (rounds) =>
+  rounds.filter((r) => CINDY_PHASES.every((p) => (r[p.key]?.reps || 0) >= p.min)).length;
+
+function initCindy(host) {
+  const best = getBest(CINDY_ID);
+  const hist = getCindyHistory();
+  host.innerHTML = `
+    <p>
+      El circuito de Tom Holland, en bucle durante <strong>${CINDY_LIMIT_SECONDS / 60} minutos</strong>:
+      <strong>${CINDY_PHASES[0].min} dominadas → ${CINDY_PHASES[1].min} flexiones → ${CINDY_PHASES[2].min} sentadillas</strong>
+      y vuelta a empezar. Puedes hacer <em>más</em> de esas repeticiones en cada ejercicio, pero no menos:
+      no te deja pasar al siguiente hasta llegar al mínimo. Cuenta cuántas rondas completas te caben.
+    </p>
+    <p class="workout__note" style="text-align:left">
+      Flexiones: pon el móvil delante de ti (en el suelo o en un trípode alto), ponte de pie mirando a la cámara
+      y luego túmbate boca abajo, también mirando a la cámara. Sentadillas: de pie, de frente, con el cuerpo entero
+      en el encuadre. El reloj de ${CINDY_LIMIT_SECONDS / 60} min no se para mientras te colocas.
+    </p>
+    ${
+      best
+        ? `<p class="plan-card__meta">Tu mejor marca: ${best.rounds} ronda(s) completa(s) · ${best.totalReps} reps en total</p>`
+        : ""
+    }
+    ${
+      hist.length
+        ? `<p class="plan-card__meta">Últimos intentos: ${hist
+            .slice(0, 3)
+            .map((h) => `${h.rounds} ronda(s)/${h.totalReps} reps`)
+            .join(" · ")}</p>`
+        : ""
+    }
+    <button type="button" class="primary-btn" id="cindy-start">Empezar</button>`;
+  document.getElementById("cindy-start").addEventListener("click", () => {
+    runCindyPhase(host, {
+      rounds: [],
+      round: {},
+      phaseIdx: 0,
+      elapsedMs: 0,
+      deadline: Date.now() + CINDY_LIMIT_SECONDS * 1000,
+    });
+  });
+}
+
+function runCindyPhase(host, state) {
+  const phase = CINDY_PHASES[state.phaseIdx];
+  const roundNo = state.rounds.length + 1;
+  const remainingMs = () => Math.max(0, state.deadline - Date.now());
+  if (remainingMs() <= 0) {
+    finishCindy(host, state);
+    return;
+  }
+
+  host.innerHTML = `
+    <div id="workout-root" class="workout"
+         data-save-url="local" data-cancel-url="#" data-exercise-slug="${phase.slug}"
+         data-counter-key="${phase.counter}"
+         data-target-sets="1" data-target-reps="${phase.min}">
+      <p class="circuit__progress">Cindy · ronda ${roundNo} · ejercicio ${state.phaseIdx + 1} de ${CINDY_PHASES.length}
+        · <strong id="cindy-clock">${fmt(Math.ceil(remainingMs() / 1000))}</strong> restantes</p>
+      <h2 class="circuit__exercise-name">${phase.name}</h2>
+      <p class="run-target">Mínimo ${phase.min} — puedes hacer más. <span id="cindy-gate"></span><br><small>${phase.exit}</small></p>
+      <div class="workout__camera">
+        <video id="workout-video" playsinline muted class="workout__video"></video>
+        <canvas id="workout-canvas" class="workout__canvas"></canvas>
+      </div>
+      <p id="workout-goal-banner" class="workout__goal-banner" hidden></p>
+      <button type="button" id="workout-debug-export" class="workout__btn workout__btn--ghost">📋 Copiar registro de depuración</button>
+      <p id="workout-debug-export-status" class="workout__debug"></p>
+      <details class="workout__stats-toggle">
+        <summary class="workout__stats-summary">Datos</summary>
+        <div class="workout__stats">
+        <div class="workout__stat"><span class="workout__stat-value" id="workout-reps">0</span><span class="workout__stat-label">reps</span></div>
+        <div class="workout__stat"><span class="workout__stat-value" id="workout-sets">1</span><span class="workout__stat-label">serie</span></div>
+        <div class="workout__stat"><span class="workout__stat-value" id="workout-timer">0:00</span><span class="workout__stat-label">sesión</span></div>
+        <div class="workout__stat"><span class="workout__stat-value" id="workout-rest">0:00</span><span class="workout__stat-label">descanso</span></div>
+        </div>
+      </details>
+      <div class="workout__actions">
+        <button type="button" id="workout-cancel" class="workout__btn workout__btn--ghost">Salir del reto</button>
+        <button type="button" id="workout-recalibrate" class="workout__btn workout__btn--ghost">↻ Recalibrar</button>
+        <button type="button" id="workout-finish" class="workout__btn workout__btn--primary" disabled>Siguiente ▸</button>
+      </div>
+      <p class="workout__note">El vídeo no sale de tu móvil. Solo se guardan los números.</p>
+    </div>`;
+
+  let workoutSession = startWorkout();
+  let tick = null;
+  let done = false;
+  const finishBtn = document.getElementById("workout-finish");
+  const gateEl = document.getElementById("cindy-gate");
+  const clockEl = document.getElementById("cindy-clock");
+  const lastLabel = state.phaseIdx === CINDY_PHASES.length - 1 ? "Terminar ronda ▸" : "Siguiente ▸";
+
+  const stopAll = () => {
+    if (tick) clearInterval(tick);
+    tick = null;
+    workoutSession?.stopCamera?.();
+    window.__currentViewCleanup = null;
+    window.__currentViewGuard = null;
+    window.__workoutSubmit = null;
+  };
+
+  // Reps y series REALES del ejercicio en curso, sin esperar al botón (lo
+  // necesita tanto el candado del mínimo como el corte por tiempo).
+  const currentResult = () => {
+    const s = workoutSession;
+    const sets = (s?.sets || []).map((x) => x.reps);
+    if ((s?.currentSetReps || 0) > 0) sets.push(s.currentSetReps);
+    return { reps: s?.reps || 0, sets };
+  };
+
+  const savePhase = (result) => {
+    state.round = { ...state.round, [phase.key]: result };
+    if (state.phaseIdx === CINDY_PHASES.length - 1) {
+      state.rounds = [...state.rounds, state.round];
+      state.round = {};
+      state.phaseIdx = 0;
+    } else {
+      state.phaseIdx += 1;
+    }
+      };
+
+  // Pasar al siguiente ejercicio: por botón, o SIN tocar la pantalla cuando el propio contador
+  // cierra la serie (bajar los brazos / levantarte / levantar los brazos) con el mínimo ya hecho.
+  const advance = (result) => {
+    if (done) return;
+    done = true;
+    stopAll();
+    savePhase(result);
+    if (remainingMs() <= 0) finishCindy(host, state);
+    else runCindyPhase(host, state);
+  };
+
+  window.__currentViewCleanup = () => {
+    if (tick) clearInterval(tick);
+    workoutSession?.stopCamera?.();
+    window.__currentViewGuard = null;
+  };
+
+  // El botón «Siguiente» de la sesión llama aquí (solo se puede pulsar con el mínimo hecho).
+  window.__workoutSubmit = async (payload) => {
+    if (done) return;
+    done = true;
+    const reps = payload.total_reps || 0;
+    const sets = (payload.sets || []).map((x) => x.reps);
+    stopAll();
+    savePhase({ reps, sets });
+    if (remainingMs() <= 0) finishCindy(host, state);
+    else runCindyPhase(host, state);
+  };
+
+  tick = setInterval(() => {
+    if (done) return;
+    const left = remainingMs();
+    if (clockEl) clockEl.textContent = fmt(Math.ceil(left / 1000));
+    const { reps } = currentResult();
+    if (reps >= phase.min) {
+      finishBtn.disabled = false;
+      finishBtn.textContent = lastLabel;
+      gateEl.textContent = `✓ Mínimo hecho (${reps}).`;
+    } else {
+      finishBtn.disabled = true;
+      gateEl.textContent = `Llevas ${reps} de ${phase.min}.`;
+    }
+    // Manos libres: serie cerrada por el contador (currentSetReps vuelve a 0 con series ya
+    // guardadas) y mínimo cumplido -> siguiente ejercicio.
+    if (reps >= phase.min && (workoutSession?.currentSetReps || 0) === 0 && (workoutSession?.sets || []).length > 0) {
+      beep(880, 0.15);
+      advance(currentResult());
+      return;
+    }
+    if (left <= 0) {
+      // Se acabó el tiempo: se guarda lo que haya en este ejercicio (aunque no llegue al mínimo).
+      done = true;
+      const r = currentResult();
+      beep(440, 0.4);
+      stopAll();
+      savePhase({ reps: r.reps, sets: r.sets });
+      finishCindy(host, state);
+    }
+  }, 250);
+
+  document.getElementById("workout-cancel").addEventListener(
+    "click",
+    (e) => {
+      e.stopImmediatePropagation();
+      if (!confirm("¿Salir del reto? Se pierde el progreso.")) return;
+      done = true;
+      stopAll();
+      window.location.href = document.referrer || "/";
+    },
+    true
+  );
+
+  if (isVoiceEnabled()) {
+    speakOut(`Ronda ${roundNo}. ${phase.name}, mínimo ${phase.min}. ${phase.say}`, { flush: true });
+  }
+}
+
+function finishCindy(host, state) {
+  const rounds = [...state.rounds];
+  if (state.round && Object.keys(state.round).length) rounds.push(state.round); // ronda a medias
+  const complete = cindyCompleteRounds(rounds);
+  const totalReps = cindyTotalReps(rounds);
+  const best = getBest(CINDY_ID);
+  const isNewBest = !best || complete > best.rounds || (complete === best.rounds && totalReps > best.totalReps);
+  if (isNewBest) setBest(CINDY_ID, { rounds: complete, totalReps });
+  pushCindyHistory({ at: Date.now(), rounds: complete, totalReps, detail: rounds });
+
+  const cell = (r, p) => {
+    const x = r[p.key];
+    if (!x) return "—";
+    const sets = x.sets && x.sets.length > 1 ? ` (${x.sets.join("+")})` : "";
+    return `${x.reps}${sets}`;
+  };
+  host.innerHTML = `
+    <div class="circuit__done">
+      <p class="circuit__done-title">¡Cindy workout terminado! 💪</p>
+      <p>${complete} ronda(s) completa(s) · ${totalReps} repeticiones en ${CINDY_LIMIT_SECONDS / 60} min</p>
+      ${isNewBest ? `<p class="run-pct run-pct--full">🏆 Nueva mejor marca</p>` : ""}
+      <table class="plan-table" style="width:100%;text-align:center">
+        <thead><tr><th>Ronda</th>${CINDY_PHASES.map((p) => `<th>${p.name}</th>`).join("")}</tr></thead>
+        <tbody>${rounds
+          .map((r, i) => `<tr><td>${i + 1}</td>${CINDY_PHASES.map((p) => `<td>${cell(r, p)}</td>`).join("")}</tr>`)
+          .join("")}</tbody>
+      </table>
+      <button type="button" class="primary-btn" id="cindy-retry">Volver a intentarlo</button>
+    </div>`;
+  document.getElementById("cindy-retry").addEventListener("click", () => initCindy(host));
+}
+
 // ------------------------------------------------------------- arranque
 
 const sallyHost = document.getElementById("sally-challenge-root");
@@ -432,3 +704,6 @@ if (sallyHost) initSallyPushups(sallyHost);
 
 const pullupsHost = document.getElementById("pullups-challenge-root");
 if (pullupsHost) initPullups100(pullupsHost);
+
+const cindyHost = document.getElementById("cindy-challenge-root");
+if (cindyHost) initCindy(cindyHost);
