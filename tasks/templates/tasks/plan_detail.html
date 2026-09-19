@@ -90,19 +90,7 @@
 
     {% if headline.item.watch_keyword %}
     {# Barra de progreso del curso #}
-    {% with udemy_pct=headline.item.current_course_progress_pct %}
-    {% if udemy_pct is not None %}
-    <div class="plan-bar" role="img" aria-label="Progreso del curso: {{ udemy_pct }}%">
-        <div class="plan-bar__fill" style="width: {{ udemy_pct }}%"></div>
-    </div>
-    <p class="plan-head__meta">{{ udemy_pct }}% del curso completado</p>
-    {% else %}
-    <p class="field__hint">
-        Todavía no hay datos del curso — se rellena solo la próxima vez
-        que lo veas en Chrome con la extensión activa.
-    </p>
-    {% endif %}
-    {% endwith %}
+    {% include "tasks/_course_bar.html" with item=headline.item %}
     {% endif %}
 
     {% if headline.deloaded %}

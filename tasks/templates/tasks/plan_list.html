@@ -48,7 +48,9 @@
                             {% if p.remaining %}<span class="plan-item__left">faltan {{ p.remaining }}</span>{% endif %}
                         </p>
                         {% endif %}
-                        {% if p.progress is not None %}
+                        {% if p.headline.watch_keyword and not p.headline.exercise %}
+                        {% include "tasks/_course_bar.html" with item=p.headline %}
+                        {% elif p.progress is not None %}
                         <div class="plan-card__progress">
                             <div class="plan-bar"><div class="plan-bar__fill" style="width: {{ p.progress }}%"></div></div>
                             <span class="plan-card__pct">{{ p.progress }}%</span>

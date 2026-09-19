@@ -261,6 +261,11 @@ class Task(models.Model):
     # maquetación y la extensión no la reconoce) — no se asume 0, que
     # sería mentir sobre "no has visto nada".
     course_progress_pct = models.PositiveIntegerField(null=True, blank=True)
+    # Las fracciones en bruto detrás de course_progress_pct: lecciones
+    # vistas / lecciones totales (suma de todos los "x/y" de "Contenido
+    # del curso"), para poder enseñar "12 de 40 clases · quedan 28".
+    course_lessons_done = models.PositiveIntegerField(null=True, blank=True)
+    course_lessons_total = models.PositiveIntegerField(null=True, blank=True)
     youtube_video_id = models.CharField(
         max_length=255, blank=True,
         help_text="ID o URL de un vídeo de YouTube (ej. 'dQw4w9WgXcQ' o el enlace completo — "
@@ -1243,6 +1248,8 @@ class Task(models.Model):
             # siguiente, aunque Udemy siga reportando el mismo curso a
             # medias -- ver Task.record_course_progress.
             course_progress_pct=self.course_progress_pct,
+            course_lessons_done=self.course_lessons_done,
+            course_lessons_total=self.course_lessons_total,
             target_minutes=self.target_minutes,
             target_video_count=self.target_video_count,
             target_steps=self.target_steps,
@@ -1400,7 +1407,7 @@ class Task(models.Model):
         if not self.is_done:
             self.mark_done()
 
-    def record_course_progress(self, pct):
+    def record_course_progress(self, pct, done=None, total=None):
         """
         Guarda el % de curso de Udemy detectado por la extensión de
         Chrome (ver checkCourseCompletion/detectCourseProgressInPage en
@@ -1418,7 +1425,15 @@ class Task(models.Model):
         except (TypeError, ValueError):
             return
         self.course_progress_pct = pct
-        self.save(update_fields=["course_progress_pct"])
+        fields = ["course_progress_pct"]
+        try:
+            if done is not None and total is not None and int(total) > 0:
+                self.course_lessons_total = int(total)
+                self.course_lessons_done = max(0, min(int(done), int(total)))
+                fields += ["course_lessons_done", "course_lessons_total"]
+        except (TypeError, ValueError):
+            pass
+        self.save(update_fields=fields)
 
     def mark_not_done(self):
         """
@@ -3079,10 +3094,31 @@ class PlanItem(models.Model):
         maquetación y la extensión no la reconoce) — nunca se inventa
         un 0 de partida.
         """
+        info = self.course_progress()
+        return info["pct"] if info else None
+
+    def course_progress(self):
+        """
+        {pct, done, total, left} del curso de Udemy según las fracciones
+        "x/y" que leyó la extensión, o None si aún no hay ningún dato.
+        Mira la última tarea de la serie QUE TENGA dato (no simplemente
+        la de fecha más reciente: la del día siguiente nace vacía).
+        """
         if not self.watch_keyword or not self.series_id:
             return None
-        task = Task.objects.filter(series_id=self.series_id).order_by("-due_date").first()
-        return task.course_progress_pct if task else None
+        task = (
+            Task.objects.filter(series_id=self.series_id, course_progress_pct__isnull=False)
+            .order_by("-due_date").first()
+        )
+        if not task:
+            return None
+        done, total = task.course_lessons_done, task.course_lessons_total
+        return {
+            "pct": task.course_progress_pct,
+            "done": done,
+            "total": total,
+            "left": (total - done) if (done is not None and total) else None,
+        }
 
     def display_target_text(self):
         """

@@ -104,7 +104,7 @@ _EXCLUDED_FROM_AUTOGEN = {"bicycle-crunch"}
 # `_select_sport_exercises`) es EN DURO para los tres niveles: si un
 # ejercicio no está en la lista filtrada, directamente no se puede elegir.
 _EXERCISE_DIFFICULTY = {
-    # Tren superior
+    # Tren superiorp
     "push-up": "beginner",
     "jumping-pullup": "beginner",
     "incline-push-up": "beginner",

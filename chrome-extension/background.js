@@ -280,7 +280,7 @@ async function flushPendingUploads() {
 // una sola por casualidad no basta (aunque, al estar acotado al apartado
 // de contenido del curso, ya cuesta mucho más que cuele algo que no sea
 // una sección real).
-const COURSE_PROGRESS_MIN_FRACTIONS = 2;
+const COURSE_PROGRESS_MIN_FRACTIONS = 1;
 
 // Título de "Contenido del curso" tal cual lo pone Udemy según el idioma
 // de la interfaz — para poder acotar la búsqueda SOLO a ese apartado y
@@ -382,6 +382,8 @@ function detectCourseProgressInPage() {
         return {
           complete: fractions.every(([d, t]) => d === t),
           pct: total > 0 ? Math.round((done / total) * 100) : null,
+          done,
+          total,
         };
       }
       // Encontramos el apartado pero no salen suficientes fracciones
@@ -431,7 +433,7 @@ async function checkCourseCompletion(taskUuid, tabId) {
       await fetch(apiUrl(cfg, `/tasks/${taskUuid}/course-progress/`), {
         method: "POST",
         headers: { Authorization: authHeader(cfg), "Content-Type": "application/json" },
-        body: JSON.stringify({ pct: progress.pct }),
+        body: JSON.stringify({ pct: progress.pct, done: progress.done, total: progress.total }),
       });
     } catch (err) {
       console.warn("[Libreta] no se pudo mandar el % del curso (se reintentará en el próximo heartbeat):", err);
@@ -492,6 +494,9 @@ async function reevaluate({ allowEndOnNoMatch = true } = {}) {
 
   if (current) await endSession(current);
   await startSession(match);
+  if (match.task.subcategory === "udemy" && (match.task.watch_keyword || "").trim()) {
+    checkCourseCompletion(match.task.uuid, match.tabId);
+  }
 }
 
 async function heartbeat() {

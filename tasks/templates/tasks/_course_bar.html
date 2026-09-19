@@ -1,0 +1,13 @@
+{# Barra del curso de Udemy: total y lo hecho, sacado de las fracciones x/y. Uso: include con item=<PlanItem> #}
+{% with cp=item.course_progress %}
+<div class="plan-bar" role="img" aria-label="Progreso del curso: {% if cp %}{{ cp.pct }}%{% else %}sin datos{% endif %}">
+    <div class="plan-bar__fill" style="width: {% if cp %}{{ cp.pct }}{% else %}0{% endif %}%"></div>
+</div>
+<p class="plan-head__meta">
+    {% if cp %}
+        {% if cp.total %}{{ cp.done }} de {{ cp.total }} clases · quedan {{ cp.left }} ({{ cp.pct }}%){% else %}{{ cp.pct }}% del curso completado{% endif %}
+    {% else %}
+        Sin datos todavía: abre el curso en Udemy con la extensión activa y se rellena solo.
+    {% endif %}
+</p>
+{% endwith %}

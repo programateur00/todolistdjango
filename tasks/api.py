@@ -617,7 +617,7 @@ def course_progress_save(request, uuid):
     data = body(request)
     pct = data.get("pct")
     if isinstance(pct, (int, float)) and not isinstance(pct, bool):
-        t.record_course_progress(pct)
+        t.record_course_progress(pct, data.get("done"), data.get("total"))
     return JsonResponse({"ok": True, "task": task_json(t)})
 
 
