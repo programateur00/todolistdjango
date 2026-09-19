@@ -252,9 +252,13 @@ const SQUATFRONT_ARM_MAX_JUMP = 0.15;      // salto máximo del ratio entre fram
 const SQUATFRONT_DOWN_FRACTION = 0.72;     // ratio <= 65% del de pie -> abajo
 const SQUATFRONT_UP_FRACTION = 0.90;       // ratio >= 88% del de pie -> arriba (rep completa)
 const SQUATFRONT_SMOOTH_ALPHA = 0.5;
-const SQUATFRONT_SHOULDER_DROP_DOWN = 0.30; // hombros bajan >= 30% de su ancho respecto a de pie -> abajo (sentadilla de verdad: ~0.7-1.0)
-const SQUATFRONT_SHOULDER_DROP_UP = 0.12;   // vuelven a menos de 12% -> arriba (rep completa)
-const SQUATFRONT_SHOULDER_ARM_MAX_JUMP = 0.08; // salto máximo de la altura de hombros entre frames (en anchos de hombros) para considerarte quieto al armar
+const SQUATFRONT_MAX_W_CHANGE = 0.15;   // si el ancho de hombros cambia más de esto respecto a de pie, te estás acercando/alejando de la cámara: no es una sentadilla
+const SQUATFRONT_REF_TRACK_BAND = 0.20; // mientras la bajada sea menor que esto, la referencia de pie sigue a tu altura
+const SQUATFRONT_REF_ALPHA = 0.05;
+const SQUATFRONT_MAX_REP_MS = 6000;     // más tiempo abajo que esto = no es una rep, se descarta
+const SQUATFRONT_SHOULDER_DROP_DOWN = 0.40; // tronco baja >= 40% del ancho de hombros respecto a de pie -> abajo (sentadilla de verdad: ~0.7-1.0)
+const SQUATFRONT_SHOULDER_DROP_UP = 0.18;   // vuelven a menos de 12% -> arriba (rep completa)
+const SQUATFRONT_SHOULDER_ARM_MAX_JUMP = 0.10; // salto máximo de la altura de hombros entre frames (en anchos de hombros) para considerarte quieto al armar
 const SQUATFRONT_ARM_SETTLE_MS = 600;
 const SQUATFRONT_ARMS_UP_MS = 600;        // las dos muñecas por encima de la nariz seguido esto (de pie, arriba) = 'he terminado' (Cindy: pasar a la siguiente ronda sin tocar la pantalla)
 // Para el aviso hablado corto de "ponte en posición" (ver
@@ -4715,20 +4719,28 @@ class WorkoutSession {
       }
     }
 
-    const rawY = (lS.y + rS.y) / 2;
+    // Altura del tronco superior: hombros (siempre visibles) + nariz si se ve. Se convierte a la
+    // MISMA unidad que el ancho de hombros (x va en fracción del ancho de imagen, y en fracción del
+    // alto: en vertical 9:16 sin esto la bajada parecería 1.8x mayor de lo que es).
+    const nose = lm[0];
+    const noseOk = (nose.visibility ?? 1) >= 0.5;
+    const rawY = noseOk ? (0.5 * ((lS.y + rS.y) / 2) + 0.5 * nose.y) : (lS.y + rS.y) / 2;
+    const aspect = (this.video && this.video.videoWidth) ? (this.video.videoHeight / this.video.videoWidth) : 1.78;
     const prevY = this.frontSmooth;
     this.frontSmooth = prevY == null ? rawY : SQUATFRONT_SMOOTH_ALPHA * rawY + (1 - SQUATFRONT_SMOOTH_ALPHA) * prevY;
     this.frontW = this.frontW == null ? shoulderW : 0.3 * shoulderW + 0.7 * this.frontW;
     const W = Math.max(this.frontW, 0.02);
     const y = this.frontSmooth;
+    const dropOf = (yy) => ((yy - this.frontRef) * aspect) / W; // >0 = más bajo que de pie, en anchos de hombros
 
     if (this.state === null) {
-      const still = prevY != null && Math.abs(y - prevY) / W <= SQUATFRONT_SHOULDER_ARM_MAX_JUMP;
+      const still = prevY != null && (Math.abs(y - prevY) * aspect) / W <= SQUATFRONT_SHOULDER_ARM_MAX_JUMP;
       if (still) {
-        if (this.frontArmSince == null) { this.frontArmSince = now; this.frontRefSum = 0; this.frontRefN = 0; }
-        this.frontRefSum += y; this.frontRefN += 1;
+        if (this.frontArmSince == null) { this.frontArmSince = now; this.frontRefSum = 0; this.frontRefN = 0; this.frontRefWSum = 0; }
+        this.frontRefSum += y; this.frontRefN += 1; this.frontRefWSum += W;
         if (now - this.frontArmSince >= SQUATFRONT_ARM_STABLE_MS) {
-          this.frontRef = this.frontRefSum / this.frontRefN; // altura de hombros de pie (coordenada y de imagen)
+          this.frontRef = this.frontRefSum / this.frontRefN; // altura de pie
+          this.frontRefW = this.frontRefWSum / this.frontRefN; // ancho de hombros de pie (distancia a la cámara)
           this.state = "top";
           this.frontArmSince = null;
           this.squatArmedAt = now;
@@ -4742,27 +4754,48 @@ class WorkoutSession {
       }
     }
 
-    const drop = this.frontRef != null ? (y - this.frontRef) / W : 0; // >0 = hombros más bajos que de pie
+    let drop = 0, wChange = 0;
+    if (this.frontRef != null) {
+      drop = dropOf(y);
+      wChange = Math.abs(W - this.frontRefW) / this.frontRefW;
+    }
     if (this.state === "top") {
-      const armSettled = this.squatArmedAt === null || (now - this.squatArmedAt) >= SQUATFRONT_ARM_SETTLE_MS;
-      if (drop >= SQUATFRONT_SHOULDER_DROP_DOWN && armSettled) {
-        this.state = "bottom";
-        this.repStartTime = now;
-      } else if (Math.abs(drop) < 0.08) {
-        // Deriva lenta de la referencia (te acercas/alejas o cambia la inclinación del móvil).
-        this.frontRef = 0.98 * this.frontRef + 0.02 * y;
+      if (wChange > SQUATFRONT_MAX_W_CHANGE) {
+        // Te has acercado o alejado de la cámara (no es una sentadilla, que no cambia tu distancia):
+        // se recalibra la altura de pie aquí en vez de contar el desplazamiento como bajada.
+        this.frontRef = y;
+        this.frontRefW = W;
+        drop = 0;
+      } else {
+        const armSettled = this.squatArmedAt === null || (now - this.squatArmedAt) >= SQUATFRONT_ARM_SETTLE_MS;
+        if (drop >= SQUATFRONT_SHOULDER_DROP_DOWN && armSettled) {
+          this.state = "bottom";
+          this.repStartTime = now;
+        } else if (drop < SQUATFRONT_REF_TRACK_BAND) {
+          // La referencia sigue a tu altura de pie (subes de puntillas, te mueves un poco...) y a tu distancia.
+          this.frontRef = (1 - SQUATFRONT_REF_ALPHA) * this.frontRef + SQUATFRONT_REF_ALPHA * y;
+          this.frontRefW = (1 - SQUATFRONT_REF_ALPHA) * this.frontRefW + SQUATFRONT_REF_ALPHA * W;
+        }
       }
-    } else if (this.state === "bottom" && drop <= SQUATFRONT_SHOULDER_DROP_UP) {
-      this.countRep((now - this.repStartTime) / 1000, now, "Sentadilla");
-      this.state = "top";
+    } else if (this.state === "bottom") {
+      if (wChange > SQUATFRONT_MAX_W_CHANGE * 1.5 || now - this.repStartTime > SQUATFRONT_MAX_REP_MS) {
+        // Te has desplazado hacia/desde la cámara, o llevas demasiado abajo: se descarta, no cuenta.
+        this.state = "top";
+        this.frontRef = y;
+        this.frontRefW = W;
+        drop = 0;
+      } else if (drop <= SQUATFRONT_SHOULDER_DROP_UP) {
+        this.countRep((now - this.repStartTime) / 1000, now, "Sentadilla");
+        this.state = "top";
+      }
     }
 
     if (this.debugEl) {
       const hipVis = (((lH.visibility ?? 1) + (rH.visibility ?? 1)) / 2).toFixed(2);
       this.debugEl.textContent =
-        `[de frente] altura hombros: ${y.toFixed(3)} | de pie: ${this.frontRef != null ? this.frontRef.toFixed(3) : "sin calibrar"} | ` +
-        `bajada: ${drop.toFixed(2)} anchos de hombros (abajo ≥${SQUATFRONT_SHOULDER_DROP_DOWN}, arriba ≤${SQUATFRONT_SHOULDER_DROP_UP}) | ` +
-        `ancho ${W.toFixed(2)} vis caderas ${hipVis} | estado: ${this.state ?? "esperando"}`;
+        `[de frente] alturaTronco ${y.toFixed(3)} (nariz ${noseOk ? nose.y.toFixed(3) : "no"}, hombros ${((lS.y + rS.y) / 2).toFixed(3)}, caderas ${((lH.y + rH.y) / 2).toFixed(3)} vis ${hipVis}) | ` +
+        `de pie: ${this.frontRef != null ? this.frontRef.toFixed(3) : "sin calibrar"} | bajada: ${drop.toFixed(2)} (abajo ≥${SQUATFRONT_SHOULDER_DROP_DOWN}, arriba ≤${SQUATFRONT_SHOULDER_DROP_UP}) | ` +
+        `ancho ${W.toFixed(2)} cambioAncho ${(wChange * 100).toFixed(0)}% | estado: ${this.state ?? "esperando"}`;
     }
   }
 
