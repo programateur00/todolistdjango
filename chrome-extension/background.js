@@ -371,11 +371,57 @@ function extractSectionFractions(text) {
  * hay suficientes fracciones fiables (mismo umbral que la detección de
  * completado) o cuando se cae al respaldo de texto, que no da números.
  */
-function detectCourseProgressInPage() {
+async function detectCourseProgressInPage() {
+  // Vía principal: la API de Udemy (misma origin, con la sesión del
+  // usuario). El panel "Contenido del curso" ya no enseña fracciones x/y
+  // como texto, así que leer el DOM no da nada. Ojo: esta función se
+  // serializa y se ejecuta DENTRO de la página, por eso no puede usar
+  // helpers ni constantes definidos fuera de ella.
   try {
-    const scoped = getCourseContentSectionText();
+    const slug = location.pathname.split("/")[2];
+    if (location.pathname.startsWith("/course/") && slug) {
+      const get = async (u) => {
+        const r = await fetch(u, { credentials: "include" });
+        return r.ok ? r.json() : null;
+      };
+      const c = await get(`/api-2.0/courses/${slug}/?fields[course]=id`);
+      if (c && c.id) {
+        const p = await get(
+          `/api-2.0/users/me/subscribed-courses/${c.id}/?fields[course]=completion_ratio,num_published_lectures`
+        );
+        if (p && typeof p.completion_ratio === "number" && p.num_published_lectures > 0) {
+          const total = p.num_published_lectures;
+          const pct = Math.max(0, Math.min(100, Math.round(p.completion_ratio)));
+          const done = Math.min(total, Math.round((total * p.completion_ratio) / 100));
+          return { complete: pct >= 100, pct, done, total };
+        }
+      }
+    }
+  } catch (e) {
+    // sigue con el respaldo de abajo
+  }
+  try {
+    // Varias vías para localizar el temario (Udemy cambia el marcado y
+    // el título "Contenido del curso" no siempre es un <h2>): 1) por
+    // título, 2) por las cabeceras de sección (data-purpose), 3) por el
+    // contenedor del temario. La primera que dé fracciones gana.
+    const candidates = [getCourseContentSectionText()];
+    const collect = (selector) => {
+      const els = Array.from(document.querySelectorAll(selector));
+      return els.length ? els.map((el) => el.innerText || el.textContent || "").join("\n") : null;
+    };
+    candidates.push(collect('[data-purpose*="section-heading"], [data-purpose*="section-title"]'));
+    candidates.push(collect('[data-purpose*="curriculum-section"], [data-purpose*="section-panel"]'));
+    candidates.push(collect('[data-purpose*="curriculum"], [data-purpose*="sidebar"]'));
+    let scoped = null;
+    let fractions = [];
+    for (const c of candidates) {
+      if (!c) continue;
+      const f = extractSectionFractions(c);
+      if (f.length >= COURSE_PROGRESS_MIN_FRACTIONS) { scoped = c; fractions = f; break; }
+    }
+    console.log("[Libreta] curso Udemy: fracciones detectadas =", fractions.length);
     if (scoped) {
-      const fractions = extractSectionFractions(scoped);
       if (fractions.length >= COURSE_PROGRESS_MIN_FRACTIONS) {
         const done = fractions.reduce((sum, [d]) => sum + d, 0);
         const total = fractions.reduce((sum, [, t]) => sum + t, 0);
