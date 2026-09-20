@@ -3442,16 +3442,16 @@ function getCookie(name) {
 const LSIT_MIN_VISIBILITY = 0.4;             // media hombro+cadera+rodilla+tobillo del lado elegido
 const LSIT_STAND_MIN_TILT_DEG = 65;          // tronco (hombro-cadera) casi vertical para aprender la altura de pie
 const LSIT_STAND_KNEE_MIN_DEG = 150;         // rodilla casi estirada para aprender la altura de pie (agacharte no cuenta)
-const LSIT_MOUNT_RISE_FACTOR = 0.15;         // cuánto tiene que subir el centro del tronco (en largos de tronco) para considerarte montado. Estimado: paralelas a ~1.1m -> ~0.4; si no arma estando montado, bajar; si arma de pie o al saltar, subir.
+const LSIT_MOUNT_RISE_FACTOR = 0.05;         // cuánto tiene que subir el centro del tronco (en largos de tronco) para considerarte montado. BAJADO de 0.15 a 0.05 (2026-09-20, primera prueba real): agarrarte y levantarte un par de centímetros (~0.05 de un tronco de ~50cm) ya cuenta como subido, no hace falta saltar a las paralelas. Si no arma, bajar; si arma de pie o al balancearte, subir. La subida en vivo sale en el estado en pantalla y en el log 📋 (campo subida).
 const LSIT_RISE_FREEZE_FRACTION = 0.5;       // por encima de esta fracción de LSIT_MOUNT_RISE_FACTOR la referencia de pie deja de seguirte (estás subiendo)
-const LSIT_MOUNT_STABLE_MS = 500;            // subida sostenida para armar (un salto suelto dura menos)
+const LSIT_MOUNT_STABLE_MS = 400;            // subida sostenida para armar (un salto suelto dura menos)
 const LSIT_MOUNT_TORSO_MIN_TILT_DEG = 55;    // tronco erguido para contar como montado
 const LSIT_MOUNT_ARM_MIN_DEG = 140;          // codo (si se ve) casi estirado para armar: brazos en apoyo, no flexión de fondos
 const LSIT_REF_ALPHA = 0.15;                 // EMA de la referencia de pie
 const LSIT_CY_SMOOTH_ALPHA = 0.4;            // EMA de la altura del centro del tronco
 const LSIT_CY_MAX_JUMP = 0.04;               // salto máximo por frame de esa altura (fallo puntual de tracking) -- mismo criterio que DIP_SHOULDER_MAX_Y_JUMP
 const LSIT_DISMOUNT_FRACTION = 0.4;          // te bajaste si la subida cae por debajo de esta fracción de la máxima de la subida
-const LSIT_DISMOUNT_MIN_RISE = 0.05;         // ...y nunca por encima de este suelo mínimo (en largos de tronco)
+const LSIT_DISMOUNT_MIN_RISE = 0.02;         // ...y nunca por encima de este suelo mínimo (en largos de tronco)
 const LSIT_DISMOUNT_STABLE_MS = 700;         // bajada sostenida para dar por terminada la serie
 const LSIT_LEG_SMOOTH_ALPHA = 0.5;           // EMA de kneeRel/ankleRel (~10fps: mitad de respuesta inmediata)
 const LSIT_UP_ANKLE_REL = 0.30;              // tobillo como mucho ~17° por debajo de la horizontal de la cadera = L
@@ -3581,8 +3581,8 @@ export class LSitTracker {
 
     const risenSome = rise !== null && rise >= LSIT_MOUNT_RISE_FACTOR * LSIT_RISE_FREEZE_FRACTION;
     const mountReason = risenSome
-      ? "Súbete a las paralelas con los brazos estirados y el torso recto, y aguanta un momento."
-      : "Ponte de pie junto a las paralelas, de perfil (un momento, para que aprenda tu altura), y luego súbete con los brazos estirados.";
+      ? "Estira los brazos y levántate un poco sobre las paralelas, con el torso recto, y aguanta un momento."
+      : "Ponte de pie junto a las paralelas, de perfil (un momento, para que aprenda tu altura); luego agárrate y levántate un par de centímetros con los brazos estirados.";
     const legsReason = !straight
       ? "Estira las rodillas: las piernas van rectas, juntas, a la altura de la cadera (forma de L)."
       : "Sube las piernas rectas hasta la altura de la cadera (forma de L).";
@@ -10874,9 +10874,9 @@ class WorkoutSession {
     if (!this.startupVoiceGiven) {
       this.startupVoiceGiven = true;
       this.announceStatus(
-        "Te veo. ¡Listo! Ponte de pie junto a las paralelas, de perfil, un momento; luego súbete con los brazos estirados y sube y baja las piernas rectas, hasta la altura de la cadera. Para terminar una serie, bájate de las paralelas o sal del encuadre.",
+        "Te veo. Ponte de pie junto a las paralelas, de perfil, un momento; luego agárrate y levántate un par de centímetros con los brazos estirados. Cuando te detecte subido te aviso, y entonces sube y baja las piernas rectas hasta la altura de la cadera. Para terminar una serie, bájate de las paralelas o sal del encuadre.",
         "startup_ready",
-        "Listo. Ponte de pie junto a las paralelas y luego súbete."
+        "Te veo. Ponte de pie junto a las paralelas."
       );
     }
 
@@ -10891,7 +10891,7 @@ class WorkoutSession {
         this.lsitDownSince = null;
         this.announceStatus("¡Listo! Sube las piernas rectas hasta la L y bájalas.", "ready_to_go", "Listo. Sube las piernas.");
       } else {
-        this.setStatus(info.mountReason);
+        this.setStatus(`${info.mountReason} (subida ${info.rise === null ? "-" : info.rise.toFixed(2)} de ${LSIT_MOUNT_RISE_FACTOR})`);
       }
       if (this.debugEl) this.debugEl.textContent = `esperando a que te subas | ${dbg}`;
       return;
