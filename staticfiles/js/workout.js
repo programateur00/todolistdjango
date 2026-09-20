@@ -3962,6 +3962,7 @@ class WorkoutSession {
     this.curlElbowBaselineY = null;  // curl: altura (y) del codo en el momento de armar — referencia para medir si el codo SUBE durante la serie (ver processDumbbellCurl, CURL_ELBOW_RISE_MAX_FACTOR)
     this.curlRestSince = null;       // curl: desde cuándo lleva el brazo estirado y quieto, seguido, en el estado "bottom" — para el cierre automático de serie por descanso (ver CURL_REST_AUTO_CLOSE_MS)
     this.legRaiseSide = null;  // mismo concepto que squatSide, para elevación de piernas
+    this.lsitHoldArmed = false; // lsithold: ya te has subido a las paralelas (armado), a la espera de/aguantando la L
     this.lsitTracker = new LSitTracker(); // L-sit en paralelas (reps): altura de pie, montado/desmontado y piernas -- ver el bloque LSIT_*
     this.lsitHoldChecker = createLSitHoldChecker(); // L-sit en paralelas (aguante): comprobador de postura con estado propio
     this.lsitDownConfirmed = false; // lsit: ya se han visto las piernas abajo desde que se armó -- sin esto, armar ya con las piernas en L contaría una repetición sin haber visto la subida
@@ -4913,7 +4914,7 @@ class WorkoutSession {
       this.prepping = false;
       this.state = null;
       this.currentHoldSeconds = 0;
-      if (this.counterKey === "lsithold") this.lsitHoldChecker.reset();
+      if (this.counterKey === "lsithold") { this.lsitHoldChecker.reset(); this.lsitTracker.reset(); this.lsitHoldArmed = false; }
       this.postureGroundConfirmed = false;
       this.postureGroundSince = null;
       this.postureLastOk = null;
@@ -10979,7 +10980,7 @@ class WorkoutSession {
       this.announceStatus(
         "Te veo. Ponte de pie junto a las paralelas, de perfil, un momento; luego agárrate y levántate un par de centímetros con los brazos estirados. Cuando te detecte subido te aviso, y entonces sube y baja las piernas rectas hasta la altura de la cadera. Para terminar una serie, bájate de las paralelas o sal del encuadre.",
         "startup_ready",
-        "Te veo. Ponte de pie junto a las paralelas."
+        "Te veo. Ponte de pie junto a las paralelas y súbete."
       );
     }
 
@@ -11042,6 +11043,78 @@ class WorkoutSession {
       this.debugEl.textContent =
         `${dbg} | estado: ${this.state} ` +
         `(L: tobillo ≤${LSIT_UP_ANKLE_REL}, rodilla ≤${LSIT_UP_KNEE_REL}; abajo: tobillo ≥${LSIT_DOWN_ANKLE_REL}, rodilla ≥${LSIT_DOWN_KNEE_REL})`;
+    }
+  }
+
+  /**
+   * L-sit en paralelas AGUANTADO (lsithold). Mismo flujo y mismos avisos que processLSit (repeticiones):
+   * de pie junto a las paralelas -> agarre y subida (LSitTracker.mounted) -> "¡Listo! Sube las piernas"
+   * -> al llegar a la L, "¡Aguanta!" y corre el cronómetro (notePostureOk) mientras las piernas sigan
+   * arriba. Si bajas las piernas (LSITHOLD_INVALID_STABLE_MS) se cierra el tramo, pero sigues montado y
+   * puedes volver a subirlas para otro; al bajarte de las paralelas o salir del encuadre se cierra la serie.
+   */
+  processLSitHold(lm, now) {
+    const logTick = !this.lsitLastLogAt || now - this.lsitLastLogAt >= LSIT_LOG_INTERVAL_MS;
+    if (logTick) this.lsitLastLogAt = now;
+    const info = this.lsitTracker.update(lm, now);
+    if (!info.visible) {
+      if (logTick) {
+        this.announceStatus(LSIT_NOT_VISIBLE_MSG);
+        if (this.debugEl) this.debugEl.textContent = "buscando hombro, cadera, rodilla y tobillo de perfil…";
+      }
+      this.notePostureBroken(now, null);
+      return;
+    }
+
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Te veo. Ponte de pie junto a las paralelas, de perfil, un momento; luego agárrate y súbete con los brazos estirados. Cuando te detecte subido te aviso, y entonces sube las piernas rectas hasta la altura de la cadera y aguanta. Para terminar una serie, baja las piernas, bájate de las paralelas o sal del encuadre.",
+        "startup_ready",
+        "Te veo. Ponte de pie junto a las paralelas y súbete."
+      );
+    }
+
+    const dbg = Object.entries(info.debug).map(([k, v]) => `${k}=${v ?? "-"}`).join(" ");
+    if (logTick) this.logScissor(`[lsithold] armado=${this.lsitHoldArmed ? 1 : 0} aguantando=${this.postureValidSince !== null ? 1 : 0} ${dbg} L=${info.legsUp ? 1 : 0} loose=${info.legsUpLoose ? 1 : 0}`);
+
+    if (!this.lsitHoldArmed) {
+      if (info.mounted) {
+        this.lsitHoldArmed = true;
+        this.logScissor("[lsithold] ARMADO: montado en las paralelas");
+        this.announceStatus("¡Listo! Sube las piernas rectas hasta la L y aguanta.", "ready_to_go", "Listo. Sube las piernas.");
+      } else if (logTick) {
+        this.setStatus(`${info.mountReason} (subida ${info.rise === null ? "-" : info.rise.toFixed(2)} de ${LSIT_MOUNT_RISE_FACTOR})`);
+      }
+      if (this.debugEl && logTick) this.debugEl.textContent = `esperando a que te subas | ${dbg}`;
+      return;
+    }
+
+    if (!info.mounted) {
+      this.logScissor("[lsithold] desmonte detectado, cerrando serie");
+      this.lsitHoldArmed = false;
+      this.closeActivePostureSet();
+      return;
+    }
+
+    const holding = this.postureValidSince !== null;
+    const legsOk = holding ? info.legsUpLoose : info.legsUp;
+    if (legsOk) {
+      if (!holding) {
+        this.logScissor(`[lsithold] EN L: tobillo=${info.ankleRel.toFixed(2)} rodilla=${info.kneeRel.toFixed(2)} ang_rodilla=${info.kneeAngle.toFixed(0)}`);
+        this.announceStatus("¡Aguanta! Piernas rectas en L, brazos estirados.", "hold_start", "Aguanta.");
+      }
+      this.notePostureOk(now);
+    } else {
+      if (holding) this.logScissor("[lsithold] piernas fuera de la L (margen antes de cortar)");
+      else if (logTick) this.setStatus("Sube las piernas rectas hasta la L y aguanta.");
+      this.notePostureBroken(now, null);
+    }
+
+    if (this.debugEl && logTick) {
+      this.debugEl.textContent =
+        `${dbg} | aguantado: ${this.currentHoldSeconds.toFixed(1)}s ` +
+        `(L: tobillo ≤${LSIT_UP_ANKLE_REL}, rodilla ≤${LSIT_UP_KNEE_REL}; tolerancia: ≤${LSIT_HOLD_LOOSE_ANKLE_REL}/${LSIT_HOLD_LOOSE_KNEE_REL})`;
     }
   }
 
@@ -12262,6 +12335,10 @@ class WorkoutSession {
     }
     if (this.counterKey === "lsit") {
       this.processLSit(lm, now);
+      return;
+    }
+    if (this.counterKey === "lsithold") {
+      this.processLSitHold(lm, now);
       return;
     }
     if (this.counterKey === "situp") {
