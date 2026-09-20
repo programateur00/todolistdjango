@@ -21,7 +21,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v1+wristrotation-v2+standingquadstretch-v1+hipforwardback-v3+frontpos-v1+cindy-v2";
+const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v1+wristrotation-v2+standingquadstretch-v1+hipforwardback-v3+frontpos-v1+cindy-v2+lsithold-flow-v10+superman-v1";
 
 // Token del registro de depuración remoto (ver settings.DEBUG_LOG_TOKEN
 // en el backend) -- exportScissorLog() lo manda junto al registro para
@@ -210,7 +210,7 @@ const OUT_OF_FRAME_STABLE_MS = 1200;
 // les aplica el cierre por salir del encuadre de arriba, y también el
 // cierre por ponerte de pie en el caso de los abdominales tumbado (ver
 // ON_GROUND_STABLE_MS más abajo).
-const GROUND_STYLE_COUNTERS = new Set(["lsit", "pushupfront", "squatfront", "squat", "splitsquat", "crunch", "legraise", "situp", "scissor", "doublecrunch", "pushup", "dip", "inclinepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "wristrotation", "hipforwardback"]);
+const GROUND_STYLE_COUNTERS = new Set(["superman", "lsit", "pushupfront", "squatfront", "squat", "splitsquat", "crunch", "legraise", "situp", "scissor", "doublecrunch", "pushup", "dip", "inclinepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "wristrotation", "hipforwardback"]);
 // Plancha / plancha lateral: a diferencia del resto de GROUND_STYLE_COUNTERS
 // (que cuentan repeticiones), aquí se cuenta TIEMPO aguantando la postura
 // — el cierre de serie no es "te has puesto de pie o has salido del
@@ -223,7 +223,7 @@ const GROUND_STYLE_COUNTERS = new Set(["lsit", "pushupfront", "squatfront", "squ
 // pie, salir del encuadre, agitar la mano) ya rompen la postura por sí
 // solas. Por eso plank/sideplank no viven en GROUND_STYLE_COUNTERS ni
 // comparten su lógica de cierre.
-const CAMERA_POSTURE_COUNTERS = new Set(["lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
+const CAMERA_POSTURE_COUNTERS = new Set(["supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
 // Calentamientos y estiramientos (Exercise.body_area="warmup": jumping
 // jacks, estiramiento cruzado de brazo…): pedido explicitamente no forzar
 // el descanso obligatorio (MIN_REST_MS) entre series/lados aqui - no tiene
@@ -3724,6 +3724,205 @@ export function createLSitHoldChecker() {
   return check;
 }
 
+// ---------------------------------------------------------------------------
+// Superman (2026-09-20) -- "superman" (repeticiones) y "supermanhold" (aguante)
+// ---------------------------------------------------------------------------
+// Tumbado BOCA ABAJO, de perfil a la cámara: posición de partida = completamente estirado, con los brazos
+// estirados al frente y las piernas estiradas, TODO apoyado en el suelo. Superman = levantar A LA VEZ brazos
+// y piernas del suelo; solo cuenta si suben las dos cosas (levantar solo los brazos, o solo las piernas, no
+// vale). Vídeo de referencia de Alex (WIN_20260920_03_12_31_Pro.mp4): brazos y pies suben ~0.3-0.4 largos de
+// tronco sobre su posición de reposo.
+//   - superman: cada vez que brazos+piernas suben a la vez se cuenta 1 rep; para la siguiente hay que bajar
+//     los dos del todo. La serie se rompe al LEVANTARTE (torso > SUPERMAN_GETUP_TILT_DEG o rodillas dobladas
+//     como al ponerse a cuatro patas/de rodillas, SUPERMAN_GETUP_STABLE_MS seguidos) o al salir del encuadre.
+//   - supermanhold: mismo chequeo (brazos+piernas arriba) pero AGUANTADO -- cuenta segundos por el mecanismo
+//     de aguante de plancha/silla en pared (notePostureOk/notePostureBroken). Se cierra al bajar
+//     brazos/piernas (SUPERMANHOLD_INVALID_STABLE_MS), al levantarte o al salir del encuadre.
+// Medición (SupermanTracker): la altura de la MUÑECA y del TOBILLO respecto a la CADERA (que se queda en el
+// suelo), en largos de tronco (hombro-cadera, con corrección de aspecto de la cámara). La posición de reposo
+// se APRENDE tumbado y quieto (SUPERMAN_CALIB_MS) y "subir" = cuánto sube respecto a ella -- así no depende
+// de la distancia, del ángulo de la cámara ni de cómo apoyes los pies. Va con la cadera y NO con el hombro
+// como referencia del brazo a propósito: al levantar los brazos el pecho también sube, y eso movería el
+// hombro con la muñeca. PRIMERA VERSIÓN, umbrales estimados sobre el vídeo de referencia (sin log real de la
+// app todavía): si no cuenta o cuenta de más, pedir 📋 (campos brazo_sube / pierna_sube).
+const SUPERMAN_MIN_VISIBILITY = 0.4;            // media hombro+cadera+rodilla+tobillo del lado elegido
+const SUPERMAN_MIN_WRIST_VISIBILITY = 0.3;      // sin muñeca visible no se puede comprobar el brazo
+const SUPERMAN_MIN_TORSO_LEN = 0.05;            // largo hombro-cadera mínimo (alto de imagen) -- por debajo, no estás de perfil/no se te ve
+const SUPERMAN_CALIB_MS = 800;                  // tumbado, estirado y quieto tanto tiempo, para dar el reposo por aprendido
+const SUPERMAN_CALIB_MAX_DRIFT = 0.08;          // cuánto puede moverse brazo/pierna (largos de tronco) durante la calibración
+const SUPERMAN_CALIB_MAX_TILT_DEG = 20;         // mismo criterio que ON_GROUND_ARM_MAX_TILT_DEG: tumbado de verdad, no agachado
+const SUPERMAN_CALIB_KNEE_MIN_DEG = 140;        // piernas estiradas para calibrar (a cuatro patas/de rodillas el tronco también está horizontal)
+const SUPERMAN_SMOOTH_ALPHA = 0.5;              // EMA de la altura de muñeca/tobillo (~10fps)
+const SUPERMAN_ARM_UP_LIFT = 0.18;              // brazo "arriba": la muñeca sube al menos esto sobre su reposo (largos de tronco)
+const SUPERMAN_LEG_UP_LIFT = 0.20;              // pierna "arriba": el tobillo sube al menos esto sobre su reposo
+const SUPERMAN_LEG_UP_KNEE_MIN_DEG = 120;       // piernas "arriba" solo si van estiradas (rodillas dobladas no cuentan como superman)
+const SUPERMAN_ARM_DOWN_LIFT = 0.08;            // brazo "abajo": vuelve a estar como mucho esto sobre su reposo (histéresis con ARM_UP)
+const SUPERMAN_LEG_DOWN_LIFT = 0.09;            // pierna "abajo"
+const SUPERMAN_HOLD_LOOSE_ARM_LIFT = 0.12;      // aguante: mientras ya aguantabas, se tolera que bajen un poco
+const SUPERMAN_HOLD_LOOSE_LEG_LIFT = 0.14;
+const SUPERMAN_HOLD_LOOSE_KNEE_MIN_DEG = 100;
+const SUPERMAN_UP_STABLE_MS = 100;              // brazos+piernas arriba seguidos para contar (debounce contra un frame suelto)
+const SUPERMAN_DOWN_STABLE_MS = 100;            // brazos+piernas abajo seguidos para poder contar la siguiente
+const SUPERMAN_MIN_REP_SECONDS = 0.25;          // del despegue del suelo a estar arriba: menos que esto es ruido
+const SUPERMAN_GETUP_TILT_DEG = 30;             // torso por encima de esto = te estás levantando (subir el pecho en el superman llega a ~10-20°)
+const SUPERMAN_GETUP_KNEE_DEG = 100;            // rodilla más doblada que esto = de rodillas/cuatro patas, no tumbado
+const SUPERMAN_GETUP_STABLE_MS = 500;           // levantado seguido tanto tiempo para romper la serie
+const SUPERMANHOLD_INVALID_STABLE_MS = 1200;    // tiempo seguido sin brazos+piernas arriba para dar el tramo por terminado (temblor/caída leve)
+const SUPERMAN_LOG_INTERVAL_MS = 150;           // como mucho una línea de estado en el log 📋 cada esto
+const SUPERMAN_NOT_VISIBLE_MSG = "No se te ven bien el hombro, la cadera, la rodilla y el tobillo. Ponte de perfil a la cámara, tumbado boca abajo, con el cuerpo entero en el encuadre.";
+const SUPERMAN_LIE_DOWN_MSG = "Túmbate boca abajo, de perfil a la cámara, completamente estirado: brazos al frente y piernas estiradas, todo apoyado en el suelo, y quédate quieto un momento.";
+
+// Proporción ancho/alto del vídeo de la cámara. Se lee del <video> de la página cuando quien llama no la pasa
+// (los comprobadores de session-runner.js/circuit.js/plan-session.js solo reciben los landmarks); solo hay
+// uno abierto a la vez.
+function supermanPoseAspect() {
+  try {
+    const v = document.querySelector("video");
+    if (v && v.videoWidth && v.videoHeight) return v.videoWidth / v.videoHeight;
+  } catch (e) { /* sin DOM */ }
+  return 1.78;
+}
+
+export class SupermanTracker {
+  constructor() { this.reset(); }
+
+  reset() {
+    this.calibrated = false;
+    this.baseArm = null;       // altura de la muñeca sobre la cadera en reposo (largos de tronco, + = por debajo)
+    this.baseLeg = null;       // ídem del tobillo
+    this.calibSince = null;
+    this.calibArmRef = null;
+    this.calibLegRef = null;
+    this.armS = null;          // altura suavizada (EMA)
+    this.legS = null;
+    this.getUpSince = null;
+  }
+
+  update(lm, now, aspectArg) {
+    const A = aspectArg || supermanPoseAspect();
+    const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER], lW = lm[L_WRIST], rW = lm[R_WRIST];
+    const lH = lm[L_HIP], rH = lm[R_HIP], lK = lm[L_KNEE], rK = lm[R_KNEE], lA = lm[L_ANKLE], rA = lm[R_ANKLE];
+    const vis4 = (s, h, k, a) => ((s.visibility ?? 1) + (h.visibility ?? 1) + (k.visibility ?? 1) + (a.visibility ?? 1)) / 4;
+    const leftVis = vis4(lS, lH, lK, lA), rightVis = vis4(rS, rH, rK, rA);
+    const useLeft = leftVis >= rightVis;
+    const vis = useLeft ? leftVis : rightVis;
+    if (vis < SUPERMAN_MIN_VISIBILITY) return { visible: false, vis, calibrated: this.calibrated, gotUp: false };
+
+    const s = useLeft ? lS : rS, w = useLeft ? lW : rW, h = useLeft ? lH : rH, k = useLeft ? lK : rK, a = useLeft ? lA : rA;
+    const torsoLen = Math.hypot((s.x - h.x) * A, s.y - h.y);
+    const tilt = tiltFromHorizontal(s, h);
+    const kneeAngle = angle(h, k, a);
+    if (tilt === null || kneeAngle === null || torsoLen < SUPERMAN_MIN_TORSO_LEN) {
+      return { visible: false, vis, calibrated: this.calibrated, gotUp: false };
+    }
+    const armKnown = (w.visibility ?? 1) >= SUPERMAN_MIN_WRIST_VISIBILITY;
+    const armRel = armKnown ? (w.y - h.y) / torsoLen : null;
+    const legRel = (a.y - h.y) / torsoLen;
+    if (armRel !== null) this.armS = this.armS === null ? armRel : this.armS + SUPERMAN_SMOOTH_ALPHA * (armRel - this.armS);
+    if (this.legS === null) this.legS = legRel; else this.legS += SUPERMAN_SMOOTH_ALPHA * (legRel - this.legS);
+
+    // Calibración del reposo: tumbado (tronco horizontal), piernas estiradas y brazo/pierna QUIETOS.
+    if (!this.calibrated) {
+      const flat = tilt <= SUPERMAN_CALIB_MAX_TILT_DEG && kneeAngle >= SUPERMAN_CALIB_KNEE_MIN_DEG && armKnown && this.armS !== null;
+      if (flat) {
+        const moved = this.calibSince === null ||
+          Math.abs(this.armS - this.calibArmRef) > SUPERMAN_CALIB_MAX_DRIFT ||
+          Math.abs(this.legS - this.calibLegRef) > SUPERMAN_CALIB_MAX_DRIFT;
+        if (moved) {
+          this.calibSince = now; this.calibArmRef = this.armS; this.calibLegRef = this.legS;
+        } else if (now - this.calibSince >= SUPERMAN_CALIB_MS) {
+          this.calibrated = true; this.baseArm = this.armS; this.baseLeg = this.legS; this.getUpSince = null;
+        }
+      } else {
+        this.calibSince = null;
+      }
+    }
+
+    // Levantarse: solo tiene sentido una vez aprendido el reposo. Rompe la serie y olvida el reposo (hay que
+    // volver a tumbarse, estirado y quieto, para empezar otra).
+    let gotUp = false;
+    if (this.calibrated) {
+      const gettingUp = tilt > SUPERMAN_GETUP_TILT_DEG || kneeAngle < SUPERMAN_GETUP_KNEE_DEG;
+      if (gettingUp) {
+        if (this.getUpSince === null) this.getUpSince = now;
+        gotUp = now - this.getUpSince >= SUPERMAN_GETUP_STABLE_MS;
+      } else {
+        this.getUpSince = null;
+      }
+    }
+
+    const armLift = this.calibrated && this.armS !== null ? this.baseArm - this.armS : null;
+    const legLift = this.calibrated ? this.baseLeg - this.legS : null;
+    const straight = kneeAngle >= SUPERMAN_LEG_UP_KNEE_MIN_DEG;
+    const armsUp = armLift !== null && armLift >= SUPERMAN_ARM_UP_LIFT;
+    const legsUp = legLift !== null && legLift >= SUPERMAN_LEG_UP_LIFT && straight;
+    const armsUpLoose = armLift !== null && armLift >= SUPERMAN_HOLD_LOOSE_ARM_LIFT;
+    const legsUpLoose = legLift !== null && legLift >= SUPERMAN_HOLD_LOOSE_LEG_LIFT && kneeAngle >= SUPERMAN_HOLD_LOOSE_KNEE_MIN_DEG;
+    const armsDown = armLift !== null && armLift <= SUPERMAN_ARM_DOWN_LIFT;
+    const legsDown = legLift !== null && legLift <= SUPERMAN_LEG_DOWN_LIFT;
+    // Tumbado y estirado en el suelo, brazos y piernas abajo: la postura de partida (para armar).
+    const flatAtRest = this.calibrated && tilt <= SUPERMAN_CALIB_MAX_TILT_DEG && kneeAngle >= SUPERMAN_CALIB_KNEE_MIN_DEG && armsDown && legsDown;
+
+    const reason = !this.calibrated
+      ? (!armKnown ? "No se te ve bien la mano/muñeca. Ponte de perfil, con el brazo estirado al frente a la vista de la cámara." : SUPERMAN_LIE_DOWN_MSG)
+      : !armKnown ? "No se te ve bien la mano/muñeca. Ponte de perfil, con el brazo estirado al frente a la vista de la cámara."
+      : !armsUp && !legsUp ? "Levanta a la vez los brazos y las piernas del suelo."
+      : !armsUp ? "Levanta también los brazos, estirados al frente."
+      : !legsUp ? "Levanta también las piernas, rectas."
+      : "";
+    const f = (v, d = 2) => (v === null || v === undefined ? null : v.toFixed(d));
+    const result = {
+      visible: true, side: useLeft ? "left" : "right", vis, tilt, kneeAngle, armKnown,
+      calibrated: this.calibrated, gotUp, armLift, legLift,
+      armsUp, legsUp, armsUpLoose, legsUpLoose, armsDown, legsDown, flatAtRest, reason,
+      debug: {
+        calib: this.calibrated ? "sí" : "no",
+        brazo_sube: f(armLift), pierna_sube: f(legLift),
+        brazo_rel: f(this.armS), pierna_rel: f(this.legS),
+        ang_rodilla: f(kneeAngle, 0), tronco: f(tilt, 0), largo_tronco: f(torsoLen, 3),
+      },
+    };
+    if (gotUp) this.reset();
+    return result;
+  }
+}
+
+/**
+ * Comprobador de postura para el Superman aguantado (supermanhold), con el mismo formato que
+ * checkPlankPosture y compañía ({ ok, reason, debug, side }) pero con estado propio (aprende tu reposo
+ * tumbado, ver SupermanTracker) -- por eso es una fábrica: cada sitio que lo use (session-runner.js,
+ * circuit.js, plan-session.js) crea el suyo. El objeto devuelto tiene .reset(). Ok = brazos Y piernas
+ * arriba a la vez (con más tolerancia mientras ya estabas aguantando).
+ */
+export function createSupermanHoldChecker() {
+  const tracker = new SupermanTracker();
+  let lastOk = false;
+  const check = (lm) => {
+    const info = tracker.update(lm, performance.now());
+    if (!info.visible) {
+      lastOk = false;
+      return { ok: false, reason: SUPERMAN_NOT_VISIBLE_MSG, debug: { visibilidad: info.vis.toFixed(2) } };
+    }
+    if (info.gotUp) {
+      lastOk = false;
+      return { ok: false, reason: "Te has levantado. Túmbate boca abajo, estirado, para empezar otra vez.", side: info.side, debug: info.debug };
+    }
+    if (!info.calibrated) {
+      lastOk = false;
+      return { ok: false, reason: info.reason, side: info.side, debug: info.debug };
+    }
+    const up = lastOk ? (info.armsUpLoose && info.legsUpLoose) : (info.armsUp && info.legsUp);
+    if (!up) {
+      lastOk = false;
+      return { ok: false, reason: info.reason || "Levanta a la vez los brazos y las piernas del suelo.", side: info.side, debug: info.debug };
+    }
+    lastOk = true;
+    return { ok: true, side: info.side, debug: info.debug };
+  };
+  check.reset = () => { tracker.reset(); lastOk = false; };
+  return check;
+}
+
 class WorkoutSession {
   constructor(root) {
     this.root = root;
@@ -3968,6 +4167,12 @@ class WorkoutSession {
     this.lsitDownConfirmed = false; // lsit: ya se han visto las piernas abajo desde que se armó -- sin esto, armar ya con las piernas en L contaría una repetición sin haber visto la subida
     this.lsitUpSince = null;   // lsit: desde cuándo cumples la L seguido (debounce)
     this.lsitDownSince = null; // lsit: desde cuándo tienes las piernas abajo seguido (debounce)
+    this.supermanTracker = new SupermanTracker(); // Superman (reps y aguante): aprende el reposo tumbado y mide cuánto suben brazos y piernas -- ver el bloque SUPERMAN_*
+    this.supermanUpSince = null;   // superman: desde cuándo tienes brazos+piernas arriba seguido (debounce)
+    this.supermanDownSince = null; // superman: desde cuándo tienes brazos+piernas abajo seguido (debounce)
+    this.supermanLiftSince = null; // superman: desde cuándo empezó a despegar algo del suelo (para el tiempo de la rep)
+    this.supermanLastLogAt = null; // superman: último instante con línea de estado en el log (ver SUPERMAN_LOG_INTERVAL_MS)
+    this.supermanHoldArmed = false; // supermanhold: ya te ha visto tumbado y estirado (reposo aprendido), a la espera de/aguantando arriba
     this.lsitLastLogAt = null; // lsit: último instante en que se escribió una línea de estado en el log (ver LSIT_LOG_INTERVAL_MS)
     this.pushupSide = null;    // mismo concepto que squatSide, para flexiones
     this.archerPeakLeftAngle = null;  // dominadas de arquero: ángulo de codo izquierdo en el punto más alto visto de la subida en curso
@@ -4854,6 +5059,15 @@ class WorkoutSession {
       this.state = null;
       this.legRaiseSide = null;
       this.setStatus("Túmbate boca arriba, con la cámara a un lado (de perfil), y encuadra el cuerpo entero, de los hombros a los tobillos.");
+    } else if (this.counterKey === "superman") {
+      // Recalibrar/empezar: olvida el reposo aprendido -- hay que tumbarse boca abajo, estirado y quieto, otra vez.
+      this.prepping = false;
+      this.state = null;
+      this.supermanTracker.reset();
+      this.supermanUpSince = null;
+      this.supermanDownSince = null;
+      this.supermanLiftSince = null;
+      this.setStatus(SUPERMAN_LIE_DOWN_MSG);
     } else if (this.counterKey === "lsit") {
       // Recalibrar/empezar: olvida la altura de pie aprendida y el estado montado -- hay que
       // volver a ponerse de pie junto a las paralelas un momento y subir (ver LSitTracker).
@@ -4915,6 +5129,7 @@ class WorkoutSession {
       this.state = null;
       this.currentHoldSeconds = 0;
       if (this.counterKey === "lsithold") { this.lsitHoldChecker.reset(); this.lsitTracker.reset(); this.lsitHoldArmed = false; }
+      if (this.counterKey === "supermanhold") { this.supermanTracker.reset(); this.supermanHoldArmed = false; this.setStatus(SUPERMAN_LIE_DOWN_MSG); }
       this.postureGroundConfirmed = false;
       this.postureGroundSince = null;
       this.postureLastOk = null;
@@ -9773,6 +9988,8 @@ class WorkoutSession {
         return "Túmbate boca arriba, con los hombros en el suelo, para empezar.";
       case "legraise":
         return "Túmbate boca arriba con las piernas estiradas para empezar.";
+      case "superman":
+        return "Túmbate boca abajo, de perfil a la cámara, completamente estirado (brazos al frente y piernas en el suelo), para empezar.";
       case "lsit":
         return "Ponte de pie junto a las paralelas, de perfil, y luego súbete con los brazos estirados para empezar.";
       case "situp":
@@ -9878,6 +10095,9 @@ class WorkoutSession {
     // checkHandstandPosture); a diferencia de silla en pared, aquí no hay
     // ninguna postura cotidiana (sentarse en una silla…) que pueda colarse
     // como un falso positivo.
+    if (this.counterKey === "supermanhold") {
+      return "Túmbate boca abajo, de perfil a la cámara, completamente estirado (brazos al frente y piernas en el suelo); luego levanta a la vez brazos y piernas y aguanta.";
+    }
     if (this.counterKey === "lsithold") {
       return "Ponte de pie junto a las paralelas, de perfil, un momento; luego súbete con los brazos estirados y sube las piernas rectas hasta la altura de la cadera (forma de L).";
     }
@@ -10075,6 +10295,8 @@ class WorkoutSession {
           ? "Postura correcta. ¡Listo! Aguanta con las rodillas arriba, sin balancearte. Para terminar una serie, suelta la barra o sal del encuadre."
           : this.counterKey === "handstand"
           ? "Postura correcta. ¡Listo! Aguanta el pino, con el abdomen apretado y el cuerpo recto. Para terminar una serie, baja del pino o sal del encuadre."
+          : this.counterKey === "supermanhold"
+          ? "Postura correcta. ¡Listo! Aguanta con brazos y piernas levantados a la vez. Para terminar una serie, baja brazos y piernas, levántate o sal del encuadre."
           : this.counterKey === "lsithold"
           ? "Postura correcta. ¡Listo! Aguanta las piernas rectas en L, con los brazos estirados y los hombros hacia abajo. Para terminar una serie, baja las piernas, bájate de las paralelas o sal del encuadre."
           : this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch"
@@ -10285,6 +10507,7 @@ class WorkoutSession {
     // con la rodilla muy flexionada.
     const invalidStableMs =
       this.counterKey === "kneeholdbar" ? KNEEHOLDBAR_INVALID_STABLE_MS
+      : this.counterKey === "supermanhold" ? SUPERMANHOLD_INVALID_STABLE_MS
       : this.counterKey === "lsithold" ? LSITHOLD_INVALID_STABLE_MS
       : this.counterKey === "handstand" ? HANDSTAND_INVALID_STABLE_MS
       : this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch" || this.counterKey === "seatedhamstringstretch" || this.counterKey === "standingquadstretch" ? STRETCH_INVALID_STABLE_MS
@@ -10952,6 +11175,180 @@ class WorkoutSession {
       this.debugEl.textContent =
         `ángulo cadera (${useLeft ? "izq" : "der"}): ${hipAngle.toFixed(0)}° | rodilla: ${kneeAngle.toFixed(0)}° | tilt: ${tilt.toFixed(0)}° (${onGround ? "en el suelo" : "fuera del suelo"}) | estado: ${this.state ?? "esperando"} ` +
         `(abajo ≥${LEG_RAISE_DOWN_ANGLE_DEG}°, arriba ≤${LEG_RAISE_UP_ANGLE_DEG}°)`;
+    }
+  }
+
+  /** Proporción ancho/alto del vídeo (para SupermanTracker); undefined si aún no hay medidas. */
+  videoAspect() {
+    return (this.video && this.video.videoWidth && this.video.videoHeight) ? this.video.videoWidth / this.video.videoHeight : undefined;
+  }
+
+  /**
+   * Superman (repeticiones). Ver el bloque SUPERMAN_* de más arriba. Se arma al verte tumbado boca abajo,
+   * estirado y quieto (reposo aprendido) con brazos y piernas en el suelo; una repetición = brazos Y piernas
+   * arriba a la vez (se cuenta al llegar arriba); para la siguiente hay que volver a bajar los dos del todo.
+   * La serie se rompe al levantarte (SupermanTracker.gotUp) o al salir del encuadre. Sin gesto de mano:
+   * levantar los brazos tumbado es justo el movimiento del ejercicio.
+   */
+  processSuperman(lm, now) {
+    const logTick = !this.supermanLastLogAt || now - this.supermanLastLogAt >= SUPERMAN_LOG_INTERVAL_MS;
+    if (logTick) this.supermanLastLogAt = now;
+    const info = this.supermanTracker.update(lm, now, this.videoAspect());
+    if (!info.visible) {
+      if (logTick) {
+        this.announceStatus(SUPERMAN_NOT_VISIBLE_MSG);
+        if (this.debugEl) this.debugEl.textContent = "buscando hombro, cadera, rodilla y tobillo de perfil…";
+      }
+      this.noteAbsence(now);
+      return;
+    }
+    this.outOfFrameSince = null;
+
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Te veo. Túmbate boca abajo, de perfil a la cámara, completamente estirado: brazos al frente y piernas en el suelo, quieto un momento. Cuando te detecte, levanta a la vez los brazos y las piernas y bájalos. Para terminar una serie, levántate o sal del encuadre.",
+        "startup_ready",
+        "Te veo. Túmbate boca abajo, estirado."
+      );
+    }
+
+    const dbg = Object.entries(info.debug).map(([k, v]) => `${k}=${v ?? "-"}`).join(" ");
+    if (logTick) this.logScissor(`[superman] estado=${this.state ?? "null"} ${dbg} brazos=${info.armsUp ? "arriba" : info.armsDown ? "abajo" : "medio"} piernas=${info.legsUp ? "arriba" : info.legsDown ? "abajo" : "medio"}`);
+
+    if (info.gotUp) {
+      this.logScissor("[superman] levantarse detectado, cerrando serie");
+      this.supermanUpSince = null;
+      this.supermanDownSince = null;
+      this.supermanLiftSince = null;
+      if (this.state !== null) this.closeActiveSet();
+      else this.setStatus(SUPERMAN_LIE_DOWN_MSG);
+      return;
+    }
+
+    if (this.state === null) {
+      if (info.flatAtRest) {
+        this.state = "down";
+        this.supermanUpSince = null;
+        this.supermanDownSince = null;
+        this.supermanLiftSince = null;
+        this.logScissor("[superman] ARMADO: tumbado boca abajo, estirado, brazos y piernas en el suelo");
+        this.announceStatus("¡Listo! Levanta a la vez brazos y piernas y bájalos.", "ready_to_go", "Listo. Levanta brazos y piernas.");
+      } else if (logTick) {
+        this.setStatus(info.calibrated ? "Baja los brazos y las piernas al suelo, estirado, para empezar." : info.reason);
+      }
+      if (this.debugEl && logTick) this.debugEl.textContent = `esperando a que te tumbes estirado | ${dbg}`;
+      return;
+    }
+
+    if (this.state === "down") {
+      if (info.armsDown && info.legsDown) this.supermanLiftSince = null;
+      else if (this.supermanLiftSince === null) this.supermanLiftSince = now;
+      if (info.armsUp && info.legsUp) {
+        if (this.supermanUpSince === null) this.supermanUpSince = now;
+        if (now - this.supermanUpSince >= SUPERMAN_UP_STABLE_MS) {
+          const repSeconds = (now - (this.supermanLiftSince ?? this.supermanUpSince)) / 1000;
+          const counted = this.countRep(repSeconds, now, "Superman", SUPERMAN_MIN_REP_SECONDS);
+          this.logScissor(`[superman] ARRIBA: rep ${counted ? "CONTADA" : "descartada"} (${repSeconds.toFixed(2)}s, mín ${SUPERMAN_MIN_REP_SECONDS}s) brazo_sube=${info.armLift.toFixed(2)} pierna_sube=${info.legLift.toFixed(2)}`);
+          this.state = "up";
+          this.supermanUpSince = null;
+          this.supermanDownSince = null;
+          this.supermanLiftSince = null;
+        }
+      } else {
+        this.supermanUpSince = null;
+        if (logTick && info.armsUp !== info.legsUp) this.setStatus(info.reason);
+      }
+    } else if (this.state === "up") {
+      if (info.armsDown && info.legsDown) {
+        if (this.supermanDownSince === null) this.supermanDownSince = now;
+        if (now - this.supermanDownSince >= SUPERMAN_DOWN_STABLE_MS) {
+          this.state = "down";
+          this.supermanDownSince = null;
+          this.supermanLiftSince = null;
+          this.logScissor("[superman] ABAJO: listo para otra repetición");
+        }
+      } else {
+        this.supermanDownSince = null;
+      }
+    }
+
+    if (this.debugEl && logTick) {
+      this.debugEl.textContent =
+        `${dbg} | estado: ${this.state} ` +
+        `(arriba: brazo ≥${SUPERMAN_ARM_UP_LIFT}, pierna ≥${SUPERMAN_LEG_UP_LIFT}; abajo: brazo ≤${SUPERMAN_ARM_DOWN_LIFT}, pierna ≤${SUPERMAN_LEG_DOWN_LIFT})`;
+    }
+  }
+
+  /**
+   * Superman AGUANTADO (supermanhold). Mismo arranque que processSuperman (tumbado boca abajo, estirado,
+   * quieto), y en cuanto brazos Y piernas están arriba a la vez corre el cronómetro (notePostureOk). Si los
+   * bajas (SUPERMANHOLD_INVALID_STABLE_MS) se cierra el tramo aguantado, pero sigues tumbado y puedes volver
+   * a subirlos para otro; al levantarte o salir del encuadre se cierra la serie.
+   */
+  processSupermanHold(lm, now) {
+    const logTick = !this.supermanLastLogAt || now - this.supermanLastLogAt >= SUPERMAN_LOG_INTERVAL_MS;
+    if (logTick) this.supermanLastLogAt = now;
+    const info = this.supermanTracker.update(lm, now, this.videoAspect());
+    if (!info.visible) {
+      if (logTick) {
+        this.announceStatus(SUPERMAN_NOT_VISIBLE_MSG);
+        if (this.debugEl) this.debugEl.textContent = "buscando hombro, cadera, rodilla y tobillo de perfil…";
+      }
+      this.notePostureBroken(now, null);
+      return;
+    }
+
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Te veo. Túmbate boca abajo, de perfil a la cámara, completamente estirado: brazos al frente y piernas en el suelo, quieto un momento. Cuando te detecte, levanta a la vez los brazos y las piernas y aguanta. Para terminar una serie, baja brazos y piernas, levántate o sal del encuadre.",
+        "startup_ready",
+        "Te veo. Túmbate boca abajo, estirado."
+      );
+    }
+
+    const dbg = Object.entries(info.debug).map(([k, v]) => `${k}=${v ?? "-"}`).join(" ");
+    if (logTick) this.logScissor(`[supermanhold] armado=${this.supermanHoldArmed ? 1 : 0} aguantando=${this.postureValidSince !== null ? 1 : 0} ${dbg} brazos=${info.armsUp ? "arriba" : info.armsDown ? "abajo" : "medio"} piernas=${info.legsUp ? "arriba" : info.legsDown ? "abajo" : "medio"}`);
+
+    if (info.gotUp) {
+      this.logScissor("[supermanhold] levantarse detectado, cerrando serie");
+      this.supermanHoldArmed = false;
+      this.closeActivePostureSet();
+      this.setStatus(SUPERMAN_LIE_DOWN_MSG);
+      return;
+    }
+
+    if (!this.supermanHoldArmed) {
+      if (info.flatAtRest) {
+        this.supermanHoldArmed = true;
+        this.logScissor("[supermanhold] ARMADO: tumbado boca abajo, estirado, brazos y piernas en el suelo");
+        this.announceStatus("¡Listo! Levanta a la vez brazos y piernas y aguanta.", "ready_to_go", "Listo. Levanta brazos y piernas.");
+      } else if (logTick) {
+        this.setStatus(info.calibrated ? "Baja los brazos y las piernas al suelo, estirado, para empezar." : info.reason);
+      }
+      if (this.debugEl && logTick) this.debugEl.textContent = `esperando a que te tumbes estirado | ${dbg}`;
+      return;
+    }
+
+    const holding = this.postureValidSince !== null;
+    const upOk = holding ? (info.armsUpLoose && info.legsUpLoose) : (info.armsUp && info.legsUp);
+    if (upOk) {
+      if (!holding) {
+        this.logScissor(`[supermanhold] ARRIBA: brazo_sube=${info.armLift.toFixed(2)} pierna_sube=${info.legLift.toFixed(2)}`);
+        this.announceStatus("¡Aguanta! Brazos y piernas arriba.", "hold_start", "Aguanta.");
+      }
+      this.notePostureOk(now);
+    } else {
+      if (holding) this.logScissor("[supermanhold] brazos/piernas fuera de posición (margen antes de cortar)");
+      else if (logTick) this.setStatus(info.reason || "Levanta a la vez los brazos y las piernas del suelo.");
+      this.notePostureBroken(now, null);
+    }
+
+    if (this.debugEl && logTick) {
+      this.debugEl.textContent =
+        `${dbg} | aguantado: ${this.currentHoldSeconds.toFixed(1)}s ` +
+        `(arriba: brazo ≥${SUPERMAN_ARM_UP_LIFT}, pierna ≥${SUPERMAN_LEG_UP_LIFT}; tolerancia: ≥${SUPERMAN_HOLD_LOOSE_ARM_LIFT}/${SUPERMAN_HOLD_LOOSE_LEG_LIFT})`;
     }
   }
 
@@ -12331,6 +12728,14 @@ class WorkoutSession {
     }
     if (this.counterKey === "legraise") {
       this.processLegRaise(lm, now);
+      return;
+    }
+    if (this.counterKey === "superman") {
+      this.processSuperman(lm, now);
+      return;
+    }
+    if (this.counterKey === "supermanhold") {
+      this.processSupermanHold(lm, now);
       return;
     }
     if (this.counterKey === "lsit") {

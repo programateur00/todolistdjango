@@ -131,6 +131,9 @@ _EXERCISE_DIFFICULTY = {
     "situp": "beginner",
     "crunch": "beginner",
     "plank": "beginner",
+    # Superman (2026-09-20): tumbado boca abajo, sin material -- principiante.
+    "superman": "beginner",
+    "superman-hold": "beginner",
     "bicycle-crunch": "intermediate",
     "leg-raise": "intermediate",
     "side-plank": "intermediate",

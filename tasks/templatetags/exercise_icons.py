@@ -27,7 +27,7 @@ AVAILABLE = {
 
 # Isométricos: no hay dos posturas, así que se enseña una y se indica
 # que hay que aguantar, en vez de fingir un movimiento.
-STATIC = {"plank", "side-plank", "wall-sit", "kneehold-bar"}
+STATIC = {"plank", "side-plank", "wall-sit", "kneehold-bar", "superman-hold"}
 
 # Variantes que comparten dibujo: el movimiento es el mismo y solo cambia
 # el agarre (ancho, supino) o si añades peso o impulso. Repetir la
@@ -81,6 +81,7 @@ ALIAS = {
     "double-crunch": "situp",
     "scissor-kick": "leg-raise",
     "wall-sit": "squat",
+    "superman-hold": "superman",
     "kneehold-bar": "pullup",
     "archer-pullup": "pullup",
     "incline-push-up": "push-up",
@@ -99,6 +100,7 @@ LABELS = {
     "incline-push-up": "Flexiones inclinadas",
     "dumbbell-curl": "Curl con mancuernas",
     "l-sit": "L-sit en paralelas", "l-sit-hold": "L-sit en paralelas (hold)",
+    "superman-hold": "Superman (hold)",
     "jumping-jack": "Jumping Jacks",
     "bench-dip": "Fondos en banco",
 }

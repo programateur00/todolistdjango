@@ -40,7 +40,7 @@
             <div class="workout__stat">
                 <span class="workout__stat-value" id="workout-reps">0</span>
                 <span class="workout__stat-label">
-                    {% if exercise.counter_key == "plank" or exercise.counter_key == "sideplank" or exercise.counter_key == "wallsit" or exercise.counter_key == "kneeholdbar" or exercise.counter_key == "lsithold" %}segundos{% else %}{{ exercise.name|lower }}{% endif %}
+                    {% if exercise.counter_key == "plank" or exercise.counter_key == "sideplank" or exercise.counter_key == "wallsit" or exercise.counter_key == "kneeholdbar" or exercise.counter_key == "lsithold" or exercise.counter_key == "supermanhold" %}segundos{% else %}{{ exercise.name|lower }}{% endif %}
                 </span>
             </div>
             <div class="workout__stat">
@@ -204,6 +204,18 @@
         📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti) y encuadra el hombro,
         el codo y la muñeca del lado que mira a la cámara — no hace falta que se vean las piernas ni los pies.
         Agárrate a las paralelas con los brazos estirados, para empezar.
+    </p>
+    {% elif exercise.counter_key == "superman" or exercise.counter_key == "supermanhold" %}
+    <p class="workout__note">
+        📐 Túmbate <strong>boca abajo</strong> y coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti), con el
+        <strong>cuerpo entero</strong> en el encuadre, de las manos a los pies. Empieza <strong>completamente estirado</strong>: brazos al
+        frente y piernas estiradas, todo apoyado en el suelo, y quédate quieto un momento para que la cámara aprenda tu posición de
+        reposo. Después <strong>levanta a la vez los brazos y las piernas</strong> del suelo
+        {% if exercise.counter_key == "superman" %}y vuelve a bajarlos: cuenta una repetición cada vez que los levantas (solo cuenta si
+        suben los brazos <em>y</em> las piernas; para la siguiente hay que bajar los dos del todo). Para terminar una serie, levántate o
+        sal del encuadre.{% else %}y aguanta arriba. Aquí no se cuentan repeticiones: el contador de arriba muestra los
+        <strong>segundos aguantados</strong>. Si bajas los brazos o las piernas, te levantas o sales del encuadre un par de segundos, la
+        serie se cierra sola.{% endif %}
     </p>
     {% elif exercise.counter_key == "lsit" or exercise.counter_key == "lsithold" %}
     <p class="workout__note">

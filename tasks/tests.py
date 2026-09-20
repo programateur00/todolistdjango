@@ -1293,9 +1293,9 @@ class ExerciseCatalogTests(TestCase):
     counter_key para la comprobación de postura.
     """
 
-    def test_ab_circuit_and_superman_are_gone(self):
+    def test_ab_circuit_is_gone(self):
         self.assertFalse(Exercise.objects.filter(slug="ab-circuit").exists())
-        self.assertFalse(Exercise.objects.filter(slug="superman").exists())
+        # Superman se borró en la 0011 pero volvió (con cámara) en la 0069 -- ver test_superman_variants.
 
     def test_crunch_and_leg_raise_are_camera_exercises(self):
         crunch = Exercise.objects.get(slug="crunch")
@@ -1365,6 +1365,20 @@ class ExerciseCatalogTests(TestCase):
         self.assertEqual(hold.counter_key, "lsithold")
         self.assertIn("lsit", COUNTERS)
         self.assertIn("lsithold", POSTURE_COUNTERS)
+
+    def test_superman_variants(self):
+        """Superman (2026-09-20): repeticiones (pose, "superman") y aguante
+        (timed con counter_key, "supermanhold", como plancha/L-sit hold).
+        Los dos tienen que estar en los sets de contadores de views.py."""
+        from tasks.views import COUNTERS, POSTURE_COUNTERS
+        reps = Exercise.objects.get(slug="superman")
+        hold = Exercise.objects.get(slug="superman-hold")
+        self.assertEqual(reps.mode, Exercise.MODE_POSE)
+        self.assertEqual(reps.counter_key, "superman")
+        self.assertEqual(hold.mode, Exercise.MODE_TIMED)
+        self.assertEqual(hold.counter_key, "supermanhold")
+        self.assertIn("superman", COUNTERS)
+        self.assertIn("supermanhold", POSTURE_COUNTERS)
 
     def test_archer_pullup_is_a_camera_exercise(self):
         """Dominadas de arquero: mismo criterio de subida/bajada que las
