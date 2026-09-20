@@ -21,7 +21,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v1+wristrotation-v2+standingquadstretch-v1+hipforwardback-v3+frontpos-v1+cindy-v2+lsithold-flow-v11+superman-v2+pikepushup-v1+mountainclimber-v2";
+const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v1+wristrotation-v2+standingquadstretch-v1+hipforwardback-v3+frontpos-v1+cindy-v2+lsithold-flow-v13+superman-v2+pikepushup-v1+mountainclimber-v4";
 
 // Token del registro de depuración remoto (ver settings.DEBUG_LOG_TOKEN
 // en el backend) -- exportScissorLog() lo manda junto al registro para
@@ -813,6 +813,15 @@ const MC_BROKEN_STABLE_MS = 1000;        // fuera de la postura tanto tiempo seg
 // de ruido a 30fps (reps 2,3,4 en 0.2s; 8,9,10 en 0.3s) -- ahora hay un mínimo entre dos reps contadas, sea la pierna que sea.
 const MC_ARM_STABLE_MS = 400;            // postura de plancha estable tanto tiempo para armar (antes 600ms con piernas estiradas)
 const MC_ARM_GRACE_MS = 300;             // un frame/varios frames fuera de postura menos de esto NO reinician el temporizador de armado
+// 2026-09-20, log real (id 25): (1) reps falsas quieto en plancha: la pierna izquierda "saltaba" en UN frame de 154/169° a 34/50°
+// sin que el tronco ni las caderas se movieran (inclinación de tronco 3-7°, caderas a 0.6-0.7) y volvía sola. Un impulso real
+// levanta las caderas: inclinación de tronco 12-23° y caderas a 0.75-0.95. Medir la velocidad del salto NO separa bien (algunas
+// reps reales también caen 60-100° entre dos frames), la inclinación de tronco sí -- sin ella no cuenta. (2) reps al levantarte/piquear: las DOS piernas flexionadas a la vez
+// (o una tras otra en <150ms) no es un mountain climber -- solo cuenta si la otra pierna sigue sin flexionarse.
+// (3) la rep se confirma cuando la pierna sigue flexionada MC_CONFIRM_MS (se cuenta ese instante después de llegar la rodilla).
+const MC_MIN_DRIVE_TILT_DEG = 10;        // inclinación de tronco mínima (grados, hombro-cadera) durante la rep: un impulso real levanta las caderas
+const MC_CONFIRM_MS = 100;               // la pierna tiene que seguir flexionada tanto tiempo para contar la rep
+const MC_OTHER_LEG_WINDOW_MS = 150;      // la otra pierna flexionada en esta ventana (antes o durante) anula la rep
 const MC_MIN_INTERVAL_MS = 350;          // mínimo entre dos reps contadas (cualquier pierna); a ~2 reps/s reales queda margen
 
 
@@ -3526,22 +3535,24 @@ const LSIT_DISMOUNT_FRACTION = 0.4;          // te bajaste si la subida cae por 
 const LSIT_DISMOUNT_MIN_RISE = 0.02;         // ...y nunca por encima de este suelo mínimo (en largos de tronco)
 const LSIT_DISMOUNT_STABLE_MS = 700;         // bajada sostenida para dar por terminada la serie
 const LSIT_LEG_SMOOTH_ALPHA = 0.5;           // EMA de kneeRel/ankleRel (~10fps: mitad de respuesta inmediata)
-const LSIT_UP_ANKLE_REL = 0.55;  // MODO RELAJADO (2026-09-20). Tobillo hasta ~33° por debajo de la horizontal de la cadera cuenta como L. Modo estricto futuro: 0.30
-const LSIT_UP_KNEE_REL = 0.50;  // RELAJADO: rodilla hasta ~30° por debajo de la horizontal. Estricto futuro: 0.25
+const LSIT_UP_ANKLE_REL = 0.77;  // MODO RELAJADO (2026-09-20). Tobillo hasta ~33° por debajo de la horizontal de la cadera cuenta como L. Modo estricto futuro: 0.30
+const LSIT_UP_KNEE_REL = 0.77;  // RELAJADO: rodilla hasta ~30° por debajo de la horizontal. Estricto futuro: 0.25
 const LSIT_KNEE_STRAIGHT_MIN_DEG = 100;  // RELAJADO: casi no se exige rodilla estirada (solo descarta rodillas al pecho, <100°). Estricto futuro: 140
-const LSIT_DOWN_ANKLE_REL = 0.70;  // RELAJADO: piernas abajo = tobillo >= ~44° por debajo de la horizontal. Estricto futuro: 0.65 (más colgando del todo)
-const LSIT_DOWN_KNEE_REL = 0.55;  // RELAJADO: rodilla >= ~33° por debajo de la horizontal (siempre por encima del umbral de subida 0.50, para que 'arriba' y 'abajo' no se solapen)
+const LSIT_DOWN_ANKLE_REL = 0.88;  // RELAJADO: piernas abajo = tobillo >= ~44° por debajo de la horizontal. Estricto futuro: 0.65 (más colgando del todo)
+const LSIT_DOWN_KNEE_REL = 0.82;  // RELAJADO: rodilla >= ~33° por debajo de la horizontal (siempre por encima del umbral de subida 0.50, para que 'arriba' y 'abajo' no se solapen)
 const LSIT_UP_STABLE_MS = 40;  // debounce de "L" (repeticiones)
 const LSIT_DOWN_STABLE_MS = 60;  // RELAJADO: debounce de "abajo" (antes 100)
 const LSIT_MIN_REP_SECONDS = 0.15;  // RELAJADO: L -> abajo por debajo de esto es ruido (antes 0.25)
 // Aguante: una vez confirmada la L, se tolera un poco más de caída (temblor) antes de romperla.
 const LSIT_HOLD_LOOSE_ANKLE_REL = 0.66;  // hold: tolerancia mientras ya aguantabas (RELAJADO)
 const LSIT_HOLD_LOOSE_KNEE_REL = 0.55;  // hold: tolerancia mientras ya aguantabas (RELAJADO)
-const LSITHOLD_UP_ANKLE_REL = 0.75;  // HOLD MUY RELAJADO (2026-09-20, log 23: las piernas oscilan 0.45-0.62 al aguantar y cortaba el cronómetro). Solo para lsithold; las reps siguen con LSIT_UP_*
-const LSITHOLD_UP_KNEE_REL = 0.68;
-const LSITHOLD_LOOSE_ANKLE_REL = 0.85;  // ya aguantando
-const LSITHOLD_LOOSE_KNEE_REL = 0.78;
+const LSITHOLD_UP_ANKLE_REL = 0.77;  // HOLD MUY RELAJADO (2026-09-20, log 23: las piernas oscilan 0.45-0.62 al aguantar y cortaba el cronómetro). Solo para lsithold; las reps siguen con LSIT_UP_*
+const LSITHOLD_UP_KNEE_REL = 0.77;
+const LSITHOLD_LOOSE_ANKLE_REL = 0.87;  // ya aguantando
+const LSITHOLD_LOOSE_KNEE_REL = 0.87;
 const LSITHOLD_LOOSE_KNEE_MIN_DEG = 70;  // ya aguantando: un glitch puntual de tracking (rodilla 85° un frame) no corta
+const LSIT_LEG_ABOVE_MIN_REL = -0.34;  // ángulo de pierna <= 200° (hasta 20° por ENCIMA de la horizontal, 180° = horizontal exacta); 130° = 50° por debajo = 0.77
+const LSIT_LEG_ABOVE_LOOSE_MIN_REL = -0.50;  // ya aguantando: hasta 30° por encima (210°)
 const LSITHOLD_FLICKER_GRACE_MS = 800;   // una salida de la L más corta que esto NO reinicia el cronómetro (antes cada parpadeo lo ponía a 0 -> "solo cuenta un segundo")
 const LSIT_HOLD_LOOSE_KNEE_MIN_DEG = 90;  // hold: tolerancia mientras ya aguantabas (RELAJADO)
 const LSITHOLD_INVALID_STABLE_MS = 1500;     // cuánto tiempo seguido sin L para dar el tramo por terminado (más margen que la plancha: las piernas tiemblan y caen un poco)
@@ -3702,11 +3713,11 @@ export class LSitTracker {
     this.ankleRelS = this.ankleRelS === null ? ankleRel : this.ankleRelS + LSIT_LEG_SMOOTH_ALPHA * (ankleRel - this.ankleRelS);
     const kr = this.kneeRelS, ar = this.ankleRelS;
     const straight = kneeAngle >= LSIT_KNEE_STRAIGHT_MIN_DEG;
-    const legsUp = ar <= LSIT_UP_ANKLE_REL && kr <= LSIT_UP_KNEE_REL && straight;
+    const legsUp = ar <= LSIT_UP_ANKLE_REL && kr <= LSIT_UP_KNEE_REL && ar >= LSIT_LEG_ABOVE_MIN_REL && kr >= LSIT_LEG_ABOVE_MIN_REL && straight;
     const legsUpLoose = ar <= LSIT_HOLD_LOOSE_ANKLE_REL && kr <= LSIT_HOLD_LOOSE_KNEE_REL && kneeAngle >= LSIT_HOLD_LOOSE_KNEE_MIN_DEG;
     const legsDown = ar >= LSIT_DOWN_ANKLE_REL && kr >= LSIT_DOWN_KNEE_REL;
-    const legsUpHold = ar <= LSITHOLD_UP_ANKLE_REL && kr <= LSITHOLD_UP_KNEE_REL && kneeAngle >= LSIT_KNEE_STRAIGHT_MIN_DEG;
-    const legsUpHoldLoose = ar <= LSITHOLD_LOOSE_ANKLE_REL && kr <= LSITHOLD_LOOSE_KNEE_REL && kneeAngle >= LSITHOLD_LOOSE_KNEE_MIN_DEG;
+    const legsUpHold = ar <= LSITHOLD_UP_ANKLE_REL && kr <= LSITHOLD_UP_KNEE_REL && ar >= LSIT_LEG_ABOVE_MIN_REL && kr >= LSIT_LEG_ABOVE_MIN_REL && kneeAngle >= LSIT_KNEE_STRAIGHT_MIN_DEG;
+    const legsUpHoldLoose = ar <= LSITHOLD_LOOSE_ANKLE_REL && kr <= LSITHOLD_LOOSE_KNEE_REL && ar >= LSIT_LEG_ABOVE_LOOSE_MIN_REL && kr >= LSIT_LEG_ABOVE_LOOSE_MIN_REL && kneeAngle >= LSITHOLD_LOOSE_KNEE_MIN_DEG;
 
     const mountReason = !this.calibrated
       ? "Ponte de pie, quieto, de perfil, con el cuerpo entero en el encuadre, un par de segundos (aprendiendo tu altura de pie)."
@@ -3724,7 +3735,7 @@ export class LSitTracker {
       legsUp, legsUpLoose, legsUpHold, legsUpHoldLoose, legsDown, legsReason,
       debug: {
         subida: f(rise), montado: this.mounted ? "sí" : "no", agarre: gripRecent ? "sí" : "no", calib: this.calibrated ? "sí" : "no",
-        rodilla_rel: f(kr), tobillo_rel: f(ar),
+        rodilla_rel: f(kr), tobillo_rel: f(ar), ang_pierna: f(180 - Math.asin(Math.max(-1, Math.min(1, ar))) * 180 / Math.PI, 0),
         ang_rodilla: f(kneeAngle, 0), ang_codo: f(elbowAngle, 0), tronco: f(tilt, 0),
       },
     };
@@ -3758,7 +3769,7 @@ export function createLSitHoldChecker() {
     let viaL = false;
     if (!info.mounted) {
       const armOk = info.elbowAngle === null || info.elbowAngle >= LSIT_MOUNT_ARM_MIN_DEG;
-      if (info.legsUp && armOk && info.tilt !== null && info.tilt >= LSIT_MOUNT_TORSO_MIN_TILT_DEG) {
+      if (info.legsUpHold && armOk && info.tilt !== null && info.tilt >= LSIT_MOUNT_TORSO_MIN_TILT_DEG) {
         if (lOnlySince === null) lOnlySince = nowMs;
         viaL = nowMs - lOnlySince >= 500;
       } else {
@@ -6908,7 +6919,7 @@ class WorkoutSession {
           this.mcOutSince = null;
           // Si ya llevas una rodilla al pecho al armar, esa pierna no cuenta hasta que se estire (no es una rep que empieza desde la plancha).
           const startFlexed = (k) => legs[k].hip <= MC_HIP_FLEX_DEG && legs[k].knee <= MC_KNEE_FLEX_DEG;
-          this.mcLegs = { L: { flexed: startFlexed("L"), extAt: now }, R: { flexed: startFlexed("R"), extAt: now } };
+          this.mcLegs = { L: { flexed: startFlexed("L"), counted: true, extAt: now }, R: { flexed: startFlexed("R"), counted: true, extAt: now } };
           this.mcLastRepAt = null;
           if (!this.startupVoiceGiven) {
             this.startupVoiceGiven = true;
@@ -6933,22 +6944,36 @@ class WorkoutSession {
       }
     } else {
       if (!this.mcLegs) this.mcLegs = { L: { flexed: false, extAt: now }, R: { flexed: false, extAt: now } };
+      const rawFlex = {};
+      for (const k of ["L", "R"]) rawFlex[k] = legs[k].hip <= MC_HIP_FLEX_DEG && legs[k].knee <= MC_KNEE_FLEX_DEG;
       for (const k of ["L", "R"]) {
         const leg = this.mcLegs[k];
+        const other = this.mcLegs[k === "L" ? "R" : "L"];
         const { hip, knee } = legs[k];
         if (!leg.flexed) {
-          if (hip <= MC_HIP_FLEX_DEG && knee <= MC_KNEE_FLEX_DEG) {
+          if (rawFlex[k]) {
             leg.flexed = true;
-            // Un solo impulso puede marcar las dos piernas (solapadas de perfil) o rebotar por ruido: mínimo entre reps contadas.
-            if (this.mcLastRepAt == null || now - this.mcLastRepAt >= MC_MIN_INTERVAL_MS) {
-              this.mcLastRepAt = now;
-              this.countRep((now - leg.extAt) / 1000, now, "Mountain climber", MC_MIN_REP_SECONDS);
-            }
+            leg.flexAt = now;
+            leg.counted = false;
+            leg.maxTilt = torsoTilt;
+            leg.otherSeen = rawFlex[k === "L" ? "R" : "L"] || (other.lastRawFlexAt != null && now - other.lastRawFlexAt < MC_OTHER_LEG_WINDOW_MS);
           }
         } else if (hip >= MC_HIP_EXTEND_DEG || knee >= MC_KNEE_EXTEND_DEG) {
           leg.flexed = false;
           leg.extAt = now;
+        } else if (!leg.counted) {
+          if (rawFlex[k === "L" ? "R" : "L"]) leg.otherSeen = true;
+          leg.maxTilt = Math.max(leg.maxTilt ?? 0, torsoTilt);
+          if (now - leg.flexAt >= MC_CONFIRM_MS) {
+            leg.counted = true;
+            // Un solo impulso puede marcar las dos piernas (solapadas de perfil) o rebotar por ruido: mínimo entre reps contadas.
+            if ((leg.maxTilt ?? 0) >= MC_MIN_DRIVE_TILT_DEG && !leg.otherSeen && (this.mcLastRepAt == null || now - this.mcLastRepAt >= MC_MIN_INTERVAL_MS)) {
+              this.mcLastRepAt = now;
+              this.countRep((now - leg.extAt) / 1000, now, "Mountain climber", MC_MIN_REP_SECONDS);
+            }
+          }
         }
+        if (rawFlex[k]) leg.lastRawFlexAt = now;
       }
     }
 
