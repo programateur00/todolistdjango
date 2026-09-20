@@ -2542,7 +2542,7 @@ def debug_log_create(request):
     except json.JSONDecodeError:
         return JsonResponse({"ok": False, "error": "JSON inválido"}, status=400)
 
-    content = str(data.get("content", ""))[:200_000]  # margen de sobra sobre scissorLogMax*2 líneas
+    content = str(data.get("content", ""))[-200_000:]  # se conserva el FINAL (lo más reciente), no el principio: con [:200_000] una sesión larga perdía justo lo último (2026-09-20)
     if not content.strip():
         return JsonResponse({"ok": False, "error": "Registro vacío"}, status=400)
 
