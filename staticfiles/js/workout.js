@@ -3446,7 +3446,26 @@ const LSIT_MOUNT_RISE_FACTOR = 0.05;         // cuánto tiene que subir el centr
 const LSIT_RISE_FREEZE_FRACTION = 0.5;       // por encima de esta fracción de LSIT_MOUNT_RISE_FACTOR la referencia de pie deja de seguirte (estás subiendo)
 const LSIT_MOUNT_STABLE_MS = 400;            // subida sostenida para armar (un salto suelto dura menos)
 const LSIT_MOUNT_TORSO_MIN_TILT_DEG = 55;    // tronco erguido para contar como montado
-const LSIT_MOUNT_ARM_MIN_DEG = 140;          // codo (si se ve) casi estirado para armar: brazos en apoyo, no flexión de fondos
+const LSIT_MOUNT_ARM_MIN_DEG = 165;          // codo (si se ve) casi del todo estirado para armar: brazos en apoyo agarrado a las paralelas, no flexión de fondos (subido de 140)
+// Señal del BRAZO (pedida por Alex): al agarrarte las paralelas el codo está algo doblado y al subirte se estira -- se sube unos
+// centímetros. Con esa señal basta una subida pequeña (LSIT_MOUNT_RISE_FACTOR); sin ella (codo no visible, o ya estaba estirado)
+// hace falta una subida mayor (LSIT_MOUNT_RISE_NO_ARM_FACTOR) para no armar por ruido estando de pie.
+const LSIT_ARM_STRAIGHT_DEG = 168;           // codo COMPLETAMENTE estirado = al menos esto ahora
+// SECUENCIA DE AGARRE (Alex, 2026-09-20): al CAMINAR los brazos ya van rectos, así que "brazos rectos" solo no dice nada. Lo que
+// distingue subirte a las paralelas es: 1) un momento con los brazos algo doblados y las manos QUIETAS (agarrar las paralelas),
+// 2) luego los brazos rectos del todo y el cuerpo sube un poco. Sin ese agarre previo no se arma (con el codo visible).
+const LSIT_GRIP_MAX_DEG = 162;               // codo "algo doblado": como mucho esto (en los logs reales el agarre midió 117-161°)
+const LSIT_GRIP_MIN_DEG = 90;                // ...y al menos esto (más doblado ya no es agarrar para subir)
+const LSIT_GRIP_MIN_MS = 250;                // tiempo seguido con el codo doblado y la muñeca quieta para dar el agarre por hecho
+const LSIT_GRIP_VALID_MS = 5000;             // cuánto tiempo vale ese agarre para armar después (agarras, y hasta 5 s después estiras y subes)
+const LSIT_GRIP_WRIST_MAX_MOVE = 0.15;       // cuánto se puede mover la muñeca durante el agarre (en largos de tronco) para contar como quieta -- caminando o moviendo los brazos se mueve mucho más
+const LSIT_MOUNT_RISE_NO_ARM_FACTOR = 0.15;  // subida exigida SOLO si no se ve el codo (no se puede comprobar el agarre)
+// Anti falsos positivos (2026-09-20, logs reales 18/19: armó "Listo" estando de pie junto a las paralelas). Armar exige además haber
+// estado de pie QUIETO LSIT_CALIB_MS aprendiendo la altura (antes de eso ni se mira la subida) y que el largo del tronco no cambie (si te
+// acercas/alejas de la cámara, la referencia se re-aprende). NO se exige que los pies se levanten del suelo: una persona alta puede llegar
+// a las paralelas sin despegarlos.
+const LSIT_CALIB_MS = 1500;                  // de pie, recto y con la rodilla estirada, seguido, para dar la referencia por aprendida
+const LSIT_SCALE_CHANGE_MAX = 0.10;          // cambio máximo (fracción) del largo de tronco respecto a la referencia sin re-aprender
 const LSIT_REF_ALPHA = 0.15;                 // EMA de la referencia de pie
 const LSIT_CY_SMOOTH_ALPHA = 0.4;            // EMA de la altura del centro del tronco
 const LSIT_CY_MAX_JUMP = 0.04;               // salto máximo por frame de esa altura (fallo puntual de tracking) -- mismo criterio que DIP_SHOULDER_MAX_Y_JUMP
@@ -3454,18 +3473,18 @@ const LSIT_DISMOUNT_FRACTION = 0.4;          // te bajaste si la subida cae por 
 const LSIT_DISMOUNT_MIN_RISE = 0.02;         // ...y nunca por encima de este suelo mínimo (en largos de tronco)
 const LSIT_DISMOUNT_STABLE_MS = 700;         // bajada sostenida para dar por terminada la serie
 const LSIT_LEG_SMOOTH_ALPHA = 0.5;           // EMA de kneeRel/ankleRel (~10fps: mitad de respuesta inmediata)
-const LSIT_UP_ANKLE_REL = 0.30;              // tobillo como mucho ~17° por debajo de la horizontal de la cadera = L
-const LSIT_UP_KNEE_REL = 0.25;               // rodilla como mucho ~14° por debajo de la horizontal
-const LSIT_KNEE_STRAIGHT_MIN_DEG = 140;      // rodilla estirada (cadera-rodilla-tobillo) para que sea L y no rodillas al pecho
+const LSIT_UP_ANKLE_REL = 0.40;              // tobillo como mucho ~24° por debajo de la horizontal de la cadera = L (subido de 0.30: en los logs reales 18/19 sus subidas llegaban a 0.14-0.44)
+const LSIT_UP_KNEE_REL = 0.35;               // rodilla como mucho ~20° por debajo de la horizontal (subido de 0.25, mismo motivo)
+const LSIT_KNEE_STRAIGHT_MIN_DEG = 125;      // rodilla estirada (cadera-rodilla-tobillo) para que sea L y no rodillas al pecho. BAJADO de 140 a 125: en el log real 19 la rodilla midió 137-148° con las piernas arriba y el umbral de 140 cortaba la subida (nada contó)
 const LSIT_DOWN_ANKLE_REL = 0.65;            // tobillo ≥ ~40° por debajo de la horizontal = piernas abajo
 const LSIT_DOWN_KNEE_REL = 0.45;             // rodilla ≥ ~27° por debajo de la horizontal
-const LSIT_UP_STABLE_MS = 100;               // debounce de "L" (repeticiones)
+const LSIT_UP_STABLE_MS = 40;                // debounce de "L" (repeticiones). BAJADO de 100: la L real del log 19 duró ~0.4s con la rodilla flotando en el umbral
 const LSIT_DOWN_STABLE_MS = 100;             // debounce de "abajo" (repeticiones)
 const LSIT_MIN_REP_SECONDS = 0.25;           // L -> abajo por debajo de esto es ruido
 // Aguante: una vez confirmada la L, se tolera un poco más de caída (temblor) antes de romperla.
-const LSIT_HOLD_LOOSE_ANKLE_REL = 0.42;
-const LSIT_HOLD_LOOSE_KNEE_REL = 0.35;
-const LSIT_HOLD_LOOSE_KNEE_MIN_DEG = 130;
+const LSIT_HOLD_LOOSE_ANKLE_REL = 0.50;
+const LSIT_HOLD_LOOSE_KNEE_REL = 0.42;
+const LSIT_HOLD_LOOSE_KNEE_MIN_DEG = 115;
 const LSITHOLD_INVALID_STABLE_MS = 1500;     // cuánto tiempo seguido sin L para dar el tramo por terminado (más margen que la plancha: las piernas tiemblan y caen un poco)
 const LSIT_NOT_VISIBLE_MSG = "No se te ven bien el hombro, la cadera, la rodilla y el tobillo. Ponte de perfil a la cámara, con el cuerpo entero en el encuadre.";
 
@@ -3481,6 +3500,11 @@ export class LSitTracker {
     this.mountSince = null;
     this.dismountSince = null;
     this.peakRise = 0;
+    this.wristHist = [];
+    this.gripSince = null;
+    this.gripAt = null;
+    this.calibSince = null;
+    this.calibrated = false;
     this.kneeRelS = null;
     this.ankleRelS = null;
   }
@@ -3508,6 +3532,29 @@ export class LSitTracker {
     const armVis = ((e.visibility ?? 1) + (w.visibility ?? 1)) / 2;
     const elbowAngle = armVis >= LSIT_MIN_VISIBILITY ? angle(s, e, w) : null;
 
+    // Agarre: codo algo doblado con la muñeca QUIETA durante LSIT_GRIP_MIN_MS (manos en las paralelas). Solo cuenta antes de
+    // montar y con la referencia de pie ya aprendida. gripAt = último instante en que se cumplía.
+    this.wristHist.push({ t: now, x: w.x, y: w.y });
+    while (this.wristHist.length && now - this.wristHist[0].t > LSIT_GRIP_MIN_MS) this.wristHist.shift();
+    let gripNow = false;
+    if (elbowAngle !== null && !this.mounted && this.calibrated && elbowAngle <= LSIT_GRIP_MAX_DEG && elbowAngle >= LSIT_GRIP_MIN_DEG) {
+      let minX = w.x, maxX = w.x, minY = w.y, maxY = w.y;
+      for (const p of this.wristHist) {
+        if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+      }
+      const still = Math.max(maxX - minX, maxY - minY) <= LSIT_GRIP_WRIST_MAX_MOVE * torsoLen;
+      if (still) {
+        if (this.gripSince === null) this.gripSince = now;
+        if (now - this.gripSince >= LSIT_GRIP_MIN_MS) { gripNow = true; this.gripAt = now; }
+      } else {
+        this.gripSince = null;
+      }
+    } else {
+      this.gripSince = null;
+    }
+    const gripRecent = this.gripAt !== null && now - this.gripAt <= LSIT_GRIP_VALID_MS;
+
     // Altura del centro del tronco: recorte de salto + media móvil (mismo patrón que processDip).
     let rawCy = (s.y + h.y) / 2;
     if (this.cyRawPrev !== null) {
@@ -3519,21 +3566,36 @@ export class LSitTracker {
     const cy = this.cySmooth;
 
     // Referencia de pie: se aprende la primera vez que estás recto, y luego SOLO sigue tu altura
-    // mientras no estés subiendo/montado y estés recto con la rodilla estirada.
+    // mientras no estés subiendo/montado y estés recto con la rodilla estirada. Hasta que estés
+    // LSIT_CALIB_MS de pie y quieto (this.calibrated) la referencia te sigue siempre y NO se detecta
+    // ninguna subida; si cambia el largo del tronco (te acercas/alejas) se vuelve a aprender.
     const upright = tilt >= LSIT_STAND_MIN_TILT_DEG;
     const kneesStraight = kneeAngle >= LSIT_STAND_KNEE_MIN_DEG;
+    const standing = upright && kneesStraight && !this.mounted;
     if (this.refY === null && upright && !this.mounted) {
       this.refY = cy;
       this.refLen = torsoLen;
     }
     let rise = null;
     if (this.refY !== null) {
+      if (!this.mounted && Math.abs(torsoLen / this.refLen - 1) > LSIT_SCALE_CHANGE_MAX) {
+        this.refY = cy; this.refLen = torsoLen;
+        this.calibSince = null; this.calibrated = false;
+      }
       rise = (this.refY - cy) / this.refLen;
       const rising = rise >= LSIT_MOUNT_RISE_FACTOR * LSIT_RISE_FREEZE_FRACTION;
-      if (!this.mounted && !rising && upright && kneesStraight) {
+      if (standing && (!this.calibrated || !rising)) {
         this.refY += LSIT_REF_ALPHA * (cy - this.refY);
         this.refLen += LSIT_REF_ALPHA * (torsoLen - this.refLen);
         rise = (this.refY - cy) / this.refLen;
+      }
+      if (!this.calibrated) {
+        if (standing) {
+          if (this.calibSince === null) this.calibSince = now;
+          if (now - this.calibSince >= LSIT_CALIB_MS) this.calibrated = true;
+        } else {
+          this.calibSince = null;
+        }
       }
     }
 
@@ -3542,12 +3604,17 @@ export class LSitTracker {
     const armsOk = elbowAngle === null || elbowAngle >= LSIT_MOUNT_ARM_MIN_DEG;
     if (rise !== null) {
       if (!this.mounted) {
-        if (rise >= LSIT_MOUNT_RISE_FACTOR && torsoOk && armsOk) {
+        const riseOk = elbowAngle === null
+          ? rise >= LSIT_MOUNT_RISE_NO_ARM_FACTOR
+          : gripRecent && elbowAngle >= LSIT_ARM_STRAIGHT_DEG && rise >= LSIT_MOUNT_RISE_FACTOR;
+        if (this.calibrated && riseOk && torsoOk && armsOk) {
           if (this.mountSince === null) this.mountSince = now;
           if (now - this.mountSince >= LSIT_MOUNT_STABLE_MS) {
             this.mounted = true;
             this.peakRise = Math.min(rise, 1);
             this.dismountSince = null;
+            this.gripAt = null;
+            this.gripSince = null;
           }
         } else {
           this.mountSince = null;
@@ -3579,10 +3646,11 @@ export class LSitTracker {
     const legsUpLoose = ar <= LSIT_HOLD_LOOSE_ANKLE_REL && kr <= LSIT_HOLD_LOOSE_KNEE_REL && kneeAngle >= LSIT_HOLD_LOOSE_KNEE_MIN_DEG;
     const legsDown = ar >= LSIT_DOWN_ANKLE_REL && kr >= LSIT_DOWN_KNEE_REL;
 
-    const risenSome = rise !== null && rise >= LSIT_MOUNT_RISE_FACTOR * LSIT_RISE_FREEZE_FRACTION;
-    const mountReason = risenSome
-      ? "Estira los brazos y levántate un poco sobre las paralelas, con el torso recto, y aguanta un momento."
-      : "Ponte de pie junto a las paralelas, de perfil (un momento, para que aprenda tu altura); luego agárrate y levántate un par de centímetros con los brazos estirados.";
+    const mountReason = !this.calibrated
+      ? "Ponte de pie, quieto, de perfil, con el cuerpo entero en el encuadre, un par de segundos (aprendiendo tu altura de pie)."
+      : !gripRecent && elbowAngle !== null
+      ? "Agárrate a las paralelas (brazos algo doblados, manos quietas) y luego estira los brazos del todo levantándote un poco."
+      : "Estira los brazos del todo y levántate un poco sobre las paralelas, con el torso recto, y aguanta un momento.";
     const legsReason = !straight
       ? "Estira las rodillas: las piernas van rectas, juntas, a la altura de la cadera (forma de L)."
       : "Sube las piernas rectas hasta la altura de la cadera (forma de L).";
@@ -3593,7 +3661,7 @@ export class LSitTracker {
       kneeRel: kr, ankleRel: ar, kneeAngle, elbowAngle, tilt,
       legsUp, legsUpLoose, legsDown, legsReason,
       debug: {
-        subida: f(rise), montado: this.mounted ? "sí" : "no",
+        subida: f(rise), montado: this.mounted ? "sí" : "no", agarre: gripRecent ? "sí" : "no", calib: this.calibrated ? "sí" : "no",
         rodilla_rel: f(kr), tobillo_rel: f(ar),
         ang_rodilla: f(kneeAngle, 0), ang_codo: f(elbowAngle, 0), tronco: f(tilt, 0),
       },
