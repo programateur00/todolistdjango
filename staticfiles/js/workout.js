@@ -21,7 +21,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v1+wristrotation-v2+standingquadstretch-v1+hipforwardback-v3+frontpos-v1+cindy-v2+lsithold-flow-v10+superman-v1";
+const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v1+wristrotation-v2+standingquadstretch-v1+hipforwardback-v3+frontpos-v1+cindy-v2+lsithold-flow-v10+superman-v2";
 
 // Token del registro de depuración remoto (ver settings.DEBUG_LOG_TOKEN
 // en el backend) -- exportScissorLog() lo manda junto al registro para
@@ -3754,7 +3754,7 @@ const SUPERMAN_CALIB_MAX_TILT_DEG = 20;         // mismo criterio que ON_GROUND_
 const SUPERMAN_CALIB_KNEE_MIN_DEG = 140;        // piernas estiradas para calibrar (a cuatro patas/de rodillas el tronco también está horizontal)
 const SUPERMAN_SMOOTH_ALPHA = 0.5;              // EMA de la altura de muñeca/tobillo (~10fps)
 const SUPERMAN_ARM_UP_LIFT = 0.18;              // brazo "arriba": la muñeca sube al menos esto sobre su reposo (largos de tronco)
-const SUPERMAN_LEG_UP_LIFT = 0.20;              // pierna "arriba": el tobillo sube al menos esto sobre su reposo
+const SUPERMAN_LEG_UP_LIFT = 0.15;              // pierna "arriba": el tobillo sube al menos esto sobre su reposo (BAJADO de 0.20, 2026-09-20: log real, subidas buenas de 0.27-0.37 y una floja de 0.12)
 const SUPERMAN_LEG_UP_KNEE_MIN_DEG = 120;       // piernas "arriba" solo si van estiradas (rodillas dobladas no cuentan como superman)
 const SUPERMAN_ARM_DOWN_LIFT = 0.08;            // brazo "abajo": vuelve a estar como mucho esto sobre su reposo (histéresis con ARM_UP)
 const SUPERMAN_LEG_DOWN_LIFT = 0.09;            // pierna "abajo"
@@ -3763,7 +3763,8 @@ const SUPERMAN_HOLD_LOOSE_LEG_LIFT = 0.14;
 const SUPERMAN_HOLD_LOOSE_KNEE_MIN_DEG = 100;
 const SUPERMAN_UP_STABLE_MS = 100;              // brazos+piernas arriba seguidos para contar (debounce contra un frame suelto)
 const SUPERMAN_DOWN_STABLE_MS = 100;            // brazos+piernas abajo seguidos para poder contar la siguiente
-const SUPERMAN_MIN_REP_SECONDS = 0.25;          // del despegue del suelo a estar arriba: menos que esto es ruido
+const SUPERMAN_MIN_REP_SECONDS = 0.1;           // del despegue del suelo a estar arriba: menos que esto es ruido (BAJADO de 0.25, 2026-09-20: log real, una rep buena subida en 0.22s se descartó)
+const SUPERMAN_REST_ADAPT_ALPHA = 0.10;         // en reposo (tumbado, brazos y piernas abajo) el reposo aprendido se reajusta con esta EMA por frame: la calibración inicial pilló los pies aún sin apoyar del todo (log real: pierna_rel -0.07 al calibrar vs +0.06 ya asentado) y desplazó 0.13 la medida de las piernas
 const SUPERMAN_GETUP_TILT_DEG = 30;             // torso por encima de esto = te estás levantando (subir el pecho en el superman llega a ~10-20°)
 const SUPERMAN_GETUP_KNEE_DEG = 100;            // rodilla más doblada que esto = de rodillas/cuatro patas, no tumbado
 const SUPERMAN_GETUP_STABLE_MS = 500;           // levantado seguido tanto tiempo para romper la serie
@@ -3862,6 +3863,10 @@ export class SupermanTracker {
     const legsDown = legLift !== null && legLift <= SUPERMAN_LEG_DOWN_LIFT;
     // Tumbado y estirado en el suelo, brazos y piernas abajo: la postura de partida (para armar).
     const flatAtRest = this.calibrated && tilt <= SUPERMAN_CALIB_MAX_TILT_DEG && kneeAngle >= SUPERMAN_CALIB_KNEE_MIN_DEG && armsDown && legsDown;
+    if (flatAtRest && !gotUp) {
+      this.baseArm += SUPERMAN_REST_ADAPT_ALPHA * (this.armS - this.baseArm);
+      this.baseLeg += SUPERMAN_REST_ADAPT_ALPHA * (this.legS - this.baseLeg);
+    }
 
     const reason = !this.calibrated
       ? (!armKnown ? "No se te ve bien la mano/muñeca. Ponte de perfil, con el brazo estirado al frente a la vista de la cámara." : SUPERMAN_LIE_DOWN_MSG)
@@ -3878,7 +3883,7 @@ export class SupermanTracker {
       debug: {
         calib: this.calibrated ? "sí" : "no",
         brazo_sube: f(armLift), pierna_sube: f(legLift),
-        brazo_rel: f(this.armS), pierna_rel: f(this.legS),
+        brazo_rel: f(this.armS), pierna_rel: f(this.legS), base_brazo: f(this.baseArm), base_pierna: f(this.baseLeg),
         ang_rodilla: f(kneeAngle, 0), tronco: f(tilt, 0), largo_tronco: f(torsoLen, 3),
       },
     };
