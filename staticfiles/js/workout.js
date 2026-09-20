@@ -21,7 +21,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v1+wristrotation-v2+standingquadstretch-v1+hipforwardback-v3+frontpos-v1+cindy-v2+lsithold-flow-v13+superman-v2+pikepushup-v1+mountainclimber-v4";
+const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v1+wristrotation-v2+standingquadstretch-v1+hipforwardback-v3+frontpos-v1+cindy-v2+lsithold-flow-v14+superman-v2+pikepushup-v1+mountainclimber-v4";
 
 // Token del registro de depuración remoto (ver settings.DEBUG_LOG_TOKEN
 // en el backend) -- exportScissorLog() lo manda junto al registro para
@@ -3548,12 +3548,12 @@ const LSIT_HOLD_LOOSE_ANKLE_REL = 0.66;  // hold: tolerancia mientras ya aguanta
 const LSIT_HOLD_LOOSE_KNEE_REL = 0.55;  // hold: tolerancia mientras ya aguantabas (RELAJADO)
 const LSITHOLD_UP_ANKLE_REL = 0.77;  // HOLD MUY RELAJADO (2026-09-20, log 23: las piernas oscilan 0.45-0.62 al aguantar y cortaba el cronómetro). Solo para lsithold; las reps siguen con LSIT_UP_*
 const LSITHOLD_UP_KNEE_REL = 0.77;
-const LSITHOLD_LOOSE_ANKLE_REL = 0.87;  // ya aguantando
-const LSITHOLD_LOOSE_KNEE_REL = 0.87;
+const LSITHOLD_LOOSE_ANKLE_REL = 0.93;  // ya aguantando: sigue contando hasta que las piernas caen ~68° por debajo de la horizontal (ángulo de pierna ~112°); un descanso/bajada leve NO corta
+const LSITHOLD_LOOSE_KNEE_REL = 0.90;
 const LSITHOLD_LOOSE_KNEE_MIN_DEG = 70;  // ya aguantando: un glitch puntual de tracking (rodilla 85° un frame) no corta
 const LSIT_LEG_ABOVE_MIN_REL = -0.34;  // ángulo de pierna <= 200° (hasta 20° por ENCIMA de la horizontal, 180° = horizontal exacta); 130° = 50° por debajo = 0.77
 const LSIT_LEG_ABOVE_LOOSE_MIN_REL = -0.50;  // ya aguantando: hasta 30° por encima (210°)
-const LSITHOLD_FLICKER_GRACE_MS = 800;   // una salida de la L más corta que esto NO reinicia el cronómetro (antes cada parpadeo lo ponía a 0 -> "solo cuenta un segundo")
+const LSITHOLD_FLICKER_GRACE_MS = 1200;   // una salida de la L más corta que esto NO reinicia el cronómetro (antes cada parpadeo lo ponía a 0 -> "solo cuenta un segundo")
 const LSIT_HOLD_LOOSE_KNEE_MIN_DEG = 90;  // hold: tolerancia mientras ya aguantabas (RELAJADO)
 const LSITHOLD_INVALID_STABLE_MS = 1500;     // cuánto tiempo seguido sin L para dar el tramo por terminado (más margen que la plancha: las piernas tiemblan y caen un poco)
 const LSIT_LOG_INTERVAL_MS = 150;            // el log 📋 de L-sit escribe como mucho una línea de estado cada esto (el servidor recorta a 200.000 caracteres: a cada frame no cabían ni 25 s)
