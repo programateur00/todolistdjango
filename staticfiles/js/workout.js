@@ -21,7 +21,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v1+wristrotation-v2+standingquadstretch-v1+hipforwardback-v3+frontpos-v1+cindy-v2+lsithold-flow-v11+superman-v2+pikepushup-v1+mountainclimber-v1";
+const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v1+wristrotation-v2+standingquadstretch-v1+hipforwardback-v3+frontpos-v1+cindy-v2+lsithold-flow-v11+superman-v2+pikepushup-v1+mountainclimber-v2";
 
 // Token del registro de depuración remoto (ver settings.DEBUG_LOG_TOKEN
 // en el backend) -- exportScissorLog() lo manda junto al registro para
@@ -806,6 +806,14 @@ const MC_HIP_EXTEND_DEG = 110;           // pierna otra vez estirada (permite co
 const MC_KNEE_EXTEND_DEG = 130;          // ... O rodilla por encima de esto
 const MC_MIN_REP_SECONDS = 0.1;          // de estirar la pierna a volver a subirla: menos es ruido
 const MC_BROKEN_STABLE_MS = 1000;        // fuera de la postura tanto tiempo seguido = serie terminada
+// 2026-09-20, log real (id 24, ~30fps): (1) armar tardó 10s -- exigía las DOS piernas estiradas 600ms seguidos y un solo frame
+// malo reiniciaba el temporizador, con Alex ya moviendo las piernas; ahora arma solo con la POSTURA de plancha (tronco/cuerpo
+// tumbados y a la altura de plancha) estable MC_ARM_STABLE_MS, con MC_ARM_GRACE_MS de tolerancia a frames sueltos. (2) contaba
+// "de 3 en 3": con las piernas solapadas de perfil, un solo impulso marca las dos piernas flexionadas a la vez y con oscilaciones
+// de ruido a 30fps (reps 2,3,4 en 0.2s; 8,9,10 en 0.3s) -- ahora hay un mínimo entre dos reps contadas, sea la pierna que sea.
+const MC_ARM_STABLE_MS = 400;            // postura de plancha estable tanto tiempo para armar (antes 600ms con piernas estiradas)
+const MC_ARM_GRACE_MS = 300;             // un frame/varios frames fuera de postura menos de esto NO reinician el temporizador de armado
+const MC_MIN_INTERVAL_MS = 350;          // mínimo entre dos reps contadas (cualquier pierna); a ~2 reps/s reales queda margen
 
 
 // ── Fondos en banco (bench dip) ─────────────────────────────────────
@@ -4799,6 +4807,9 @@ class WorkoutSession {
       this.groundStableSince = null;
       this.offGroundSince = null;
       this.mcLegs = null;
+      this.mcSeenAnnounced = false;
+      this.mcOutSince = null;
+      this.mcLastRepAt = null;
       this.setStatus(this.groundWaitingMessage());
     } else if (this.counterKey === "pikepushup") {
       // Nada que calibrar (postura comprobada en directo, ver processPikePushup): solo esperar a verte en V invertida.
@@ -6838,6 +6849,10 @@ class WorkoutSession {
       return;
     }
     this.outOfFrameSince = null;
+    if (this.state === null && !this.mcSeenAnnounced) {
+      this.mcSeenAnnounced = true;
+      this.announceStatus("Te veo. Ponte en plancha, de perfil, con las piernas estiradas.", "mc_seen");
+    }
 
     const shM = { x: (P(L_SHOULDER).x + P(R_SHOULDER).x) / 2, y: (P(L_SHOULDER).y + P(R_SHOULDER).y) / 2 };
     const hipM = { x: (P(L_HIP).x + P(R_HIP).x) / 2, y: (P(L_HIP).y + P(R_HIP).y) / 2 };
@@ -6883,30 +6898,38 @@ class WorkoutSession {
     this.pushupSide = null;
 
     if (this.state === null) {
-      const legsStraight = ["L", "R"].every((k) => legs[k].hip >= MC_ARM_HIP_MIN_DEG && legs[k].knee >= MC_ARM_KNEE_MIN_DEG);
-      if (inPosition && legsStraight) {
+      if (inPosition) {
+        this.mcOutSince = null;
         if (this.groundStableSince === null) this.groundStableSince = now;
-        if (now - this.groundStableSince >= ON_GROUND_STABLE_MS) {
+        if (now - this.groundStableSince >= MC_ARM_STABLE_MS) {
           this.state = "top";
           this.groundStableSince = null;
           this.offGroundSince = null;
-          this.mcLegs = { L: { flexed: false, extAt: now }, R: { flexed: false, extAt: now } };
+          this.mcOutSince = null;
+          // Si ya llevas una rodilla al pecho al armar, esa pierna no cuenta hasta que se estire (no es una rep que empieza desde la plancha).
+          const startFlexed = (k) => legs[k].hip <= MC_HIP_FLEX_DEG && legs[k].knee <= MC_KNEE_FLEX_DEG;
+          this.mcLegs = { L: { flexed: startFlexed("L"), extAt: now }, R: { flexed: startFlexed("R"), extAt: now } };
+          this.mcLastRepAt = null;
           if (!this.startupVoiceGiven) {
             this.startupVoiceGiven = true;
             this.announceStatus(
-              "Te veo. ¡Listo! Puedes empezar. Para terminar una serie, tírate al suelo, ponte de pie, sal del " +
+              "Postura correcta. ¡Empieza! Para terminar una serie, tírate al suelo, ponte de pie, sal del " +
               "encuadre, o levanta un brazo y agita la mano.",
               "startup_ready"
             );
           } else {
-            this.announceStatus("¡Listo! Puedes empezar.", "ready_to_go");
+            this.announceStatus("Postura correcta. ¡Empieza!", "ready_to_go");
           }
         } else {
-          this.setStatus("Postura vista… confirmando (no te muevas).");
+          this.setStatus("Postura de plancha vista… confirmando un instante.");
         }
       } else {
-        this.groundStableSince = null;
-        this.setStatus(this.groundWaitingMessage());
+        // Tolerancia a frames sueltos: el temporizador solo se reinicia si llevas MC_ARM_GRACE_MS seguidos fuera de la postura.
+        if (this.mcOutSince === null || this.mcOutSince === undefined) this.mcOutSince = now;
+        if (now - this.mcOutSince >= MC_ARM_GRACE_MS) {
+          this.groundStableSince = null;
+          this.setStatus(this.groundWaitingMessage());
+        }
       }
     } else {
       if (!this.mcLegs) this.mcLegs = { L: { flexed: false, extAt: now }, R: { flexed: false, extAt: now } };
@@ -6916,7 +6939,11 @@ class WorkoutSession {
         if (!leg.flexed) {
           if (hip <= MC_HIP_FLEX_DEG && knee <= MC_KNEE_FLEX_DEG) {
             leg.flexed = true;
-            this.countRep((now - leg.extAt) / 1000, now, "Mountain climber", MC_MIN_REP_SECONDS);
+            // Un solo impulso puede marcar las dos piernas (solapadas de perfil) o rebotar por ruido: mínimo entre reps contadas.
+            if (this.mcLastRepAt == null || now - this.mcLastRepAt >= MC_MIN_INTERVAL_MS) {
+              this.mcLastRepAt = now;
+              this.countRep((now - leg.extAt) / 1000, now, "Mountain climber", MC_MIN_REP_SECONDS);
+            }
           }
         } else if (hip >= MC_HIP_EXTEND_DEG || knee >= MC_KNEE_EXTEND_DEG) {
           leg.flexed = false;
