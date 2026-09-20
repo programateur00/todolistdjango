@@ -40,7 +40,7 @@
             <div class="workout__stat">
                 <span class="workout__stat-value" id="workout-reps">0</span>
                 <span class="workout__stat-label">
-                    {% if exercise.counter_key == "plank" or exercise.counter_key == "sideplank" or exercise.counter_key == "wallsit" or exercise.counter_key == "kneeholdbar" %}segundos{% else %}{{ exercise.name|lower }}{% endif %}
+                    {% if exercise.counter_key == "plank" or exercise.counter_key == "sideplank" or exercise.counter_key == "wallsit" or exercise.counter_key == "kneeholdbar" or exercise.counter_key == "lsithold" %}segundos{% else %}{{ exercise.name|lower }}{% endif %}
                 </span>
             </div>
             <div class="workout__stat">
@@ -204,6 +204,17 @@
         📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti) y encuadra el hombro,
         el codo y la muñeca del lado que mira a la cámara — no hace falta que se vean las piernas ni los pies.
         Agárrate a las paralelas con los brazos estirados, para empezar.
+    </p>
+    {% elif exercise.counter_key == "lsit" or exercise.counter_key == "lsithold" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti) y encuadra el
+        <strong>cuerpo entero</strong>, de los hombros a los tobillos. Primero <strong>ponte de pie</strong> junto a las
+        paralelas, un momento, para que la cámara aprenda tu altura; luego <strong>súbete</strong> con los brazos estirados
+        {% if exercise.counter_key == "lsit" %}y sube y baja las piernas rectas, juntas, hasta la altura de la cadera (forma de L):
+        cuenta una repetición cada vez que las subes a la L y las dejas colgar del todo. Para terminar una serie, bájate de las
+        paralelas o sal del encuadre.{% else %}y aguanta las piernas rectas en L, a la altura de la cadera. Aquí no se cuentan
+        repeticiones: el contador de arriba muestra los <strong>segundos aguantados</strong>. Si bajas las piernas, te bajas de
+        las paralelas o sales del encuadre un par de segundos, la serie se cierra sola.{% endif %}
     </p>
     {% elif exercise.counter_key == "jumpingjack" %}
     <p class="workout__note">

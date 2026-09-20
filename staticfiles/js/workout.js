@@ -21,7 +21,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v1+wristrotation-v2+standingquadstretch-v1+hipforwardback-v3+frontpos-v1";
+const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v1+wristrotation-v2+standingquadstretch-v1+hipforwardback-v3+frontpos-v1+cindy-v2";
 
 // Token del registro de depuración remoto (ver settings.DEBUG_LOG_TOKEN
 // en el backend) -- exportScissorLog() lo manda junto al registro para
@@ -210,7 +210,7 @@ const OUT_OF_FRAME_STABLE_MS = 1200;
 // les aplica el cierre por salir del encuadre de arriba, y también el
 // cierre por ponerte de pie en el caso de los abdominales tumbado (ver
 // ON_GROUND_STABLE_MS más abajo).
-const GROUND_STYLE_COUNTERS = new Set(["pushupfront", "squatfront", "squat", "splitsquat", "crunch", "legraise", "situp", "scissor", "doublecrunch", "pushup", "dip", "inclinepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "wristrotation", "hipforwardback"]);
+const GROUND_STYLE_COUNTERS = new Set(["lsit", "pushupfront", "squatfront", "squat", "splitsquat", "crunch", "legraise", "situp", "scissor", "doublecrunch", "pushup", "dip", "inclinepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "wristrotation", "hipforwardback"]);
 // Plancha / plancha lateral: a diferencia del resto de GROUND_STYLE_COUNTERS
 // (que cuentan repeticiones), aquí se cuenta TIEMPO aguantando la postura
 // — el cierre de serie no es "te has puesto de pie o has salido del
@@ -223,7 +223,7 @@ const GROUND_STYLE_COUNTERS = new Set(["pushupfront", "squatfront", "squat", "sp
 // pie, salir del encuadre, agitar la mano) ya rompen la postura por sí
 // solas. Por eso plank/sideplank no viven en GROUND_STYLE_COUNTERS ni
 // comparten su lógica de cierre.
-const CAMERA_POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
+const CAMERA_POSTURE_COUNTERS = new Set(["lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
 // Calentamientos y estiramientos (Exercise.body_area="warmup": jumping
 // jacks, estiramiento cruzado de brazo…): pedido explicitamente no forzar
 // el descanso obligatorio (MIN_REST_MS) entre series/lados aqui - no tiene
@@ -266,7 +266,7 @@ const SQUATFRONT_ARMS_UP_MS = 600;        // las dos muñecas por encima de la n
 // cámara), así que ese aviso añade "de perfil" — el resto de
 // CAMERA_POSTURE_COUNTERS (kneehold en barra, de frente; pino, sin
 // restricción de orientación) usa el genérico a secas.
-const PROFILE_POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "seatedhamstringstretch"]);
+const PROFILE_POSTURE_COUNTERS = new Set(["lsithold", "plank", "sideplank", "wallsit", "seatedhamstringstretch"]);
 // Vaivén de la mano para terminar una serie sin ponerte de pie ni salir
 // del encuadre — ver checkWaveGesture. Solo para GROUND_STYLE_COUNTERS:
 // ya se pueden cerrar poniéndote de pie o saliendo del encuadre, esto es
@@ -3332,6 +3332,13 @@ export function setQuietVoice(on) {
   _quietVoice = !!on;
 }
 
+// Reto Cindy: la calibración de la barra (dominadas) se guarda entre rondas para no perder las
+// primeras reps de cada ronda calibrando de nuevo (log real: 5 dominadas hechas, 1 contada).
+let _pullupCalibCache = null;
+export function clearPullupCalibCache() {
+  _pullupCalibCache = null;
+}
+
 export function speakOut(texto, { flush = true, rate = 1, force = false } = {}) {
   if (_quietVoice && !force) return;
   if (typeof speechSynthesis === "undefined") return;
@@ -3405,6 +3412,228 @@ function getCookie(name) {
   return match ? decodeURIComponent(match[2]) : null;
 }
 
+
+// ─────────────────────────────────────────────────────────────────────
+// L-sit en paralelas (2026-09-20) -- "lsit" (repeticiones) y "lsithold" (aguante)
+// ─────────────────────────────────────────────────────────────────────
+// PRIMERA VERSIÓN, sin probar en cámara real: todos los umbrales son valores de partida por
+// geometría, pendientes de ajustar con un log 📋 real.
+//
+// Cámara de PERFIL, cuerpo entero (hombro, cadera, rodilla y tobillo del lado que mira).
+//
+// 1) ARMAR = SUBIRTE A LAS PARALELAS. Mientras estás de pie junto a las paralelas (tronco vertical,
+//    rodilla estirada) se aprende la altura del "centro del tronco" (media de la Y del hombro y de la
+//    cadera) y el largo del tronco. Estás "montado" cuando ese centro sube LSIT_MOUNT_RISE_FACTOR
+//    largos de tronco por encima de esa referencia, con el tronco recto y el brazo estirado, de forma
+//    sostenida (LSIT_MOUNT_STABLE_MS). La referencia se queda CONGELADA mientras subes/estás montado y
+//    sigue tu altura de pie el resto del tiempo (así, tras bajarte, se reajusta sola). Te has bajado
+//    cuando la subida cae por debajo de ~40% de la máxima de esta subida (LSIT_DISMOUNT_FRACTION).
+//    No sirve para paralelas tan bajas que la cadera no quede más alta que de pie (parallettes).
+//
+// 2) PIERNAS: rodilla y tobillo respecto a la cadera, en proporción al largo de la propia pierna:
+//      kneeRel  = (rodilla.y - cadera.y) / muslo
+//      ankleRel = (tobillo.y - cadera.y) / (muslo + pantorrilla)
+//    0 = a la altura de la cadera (horizontal), 1 = colgando en vertical, negativo = por encima.
+//    "L" (arriba) = los dos por debajo de su umbral Y rodilla estirada. "Abajo" = los dos por encima
+//    del suyo (piernas claramente colgando).
+//
+// lsit: una repetición = L y de vuelta abajo. lsithold: mismo chequeo de "L", pero aguantado -- va por
+// el mecanismo de aguante de plancha/silla en pared (processPosture) con createLSitHoldChecker().
+const LSIT_MIN_VISIBILITY = 0.4;             // media hombro+cadera+rodilla+tobillo del lado elegido
+const LSIT_STAND_MIN_TILT_DEG = 65;          // tronco (hombro-cadera) casi vertical para aprender la altura de pie
+const LSIT_STAND_KNEE_MIN_DEG = 150;         // rodilla casi estirada para aprender la altura de pie (agacharte no cuenta)
+const LSIT_MOUNT_RISE_FACTOR = 0.15;         // cuánto tiene que subir el centro del tronco (en largos de tronco) para considerarte montado. Estimado: paralelas a ~1.1m -> ~0.4; si no arma estando montado, bajar; si arma de pie o al saltar, subir.
+const LSIT_RISE_FREEZE_FRACTION = 0.5;       // por encima de esta fracción de LSIT_MOUNT_RISE_FACTOR la referencia de pie deja de seguirte (estás subiendo)
+const LSIT_MOUNT_STABLE_MS = 500;            // subida sostenida para armar (un salto suelto dura menos)
+const LSIT_MOUNT_TORSO_MIN_TILT_DEG = 55;    // tronco erguido para contar como montado
+const LSIT_MOUNT_ARM_MIN_DEG = 140;          // codo (si se ve) casi estirado para armar: brazos en apoyo, no flexión de fondos
+const LSIT_REF_ALPHA = 0.15;                 // EMA de la referencia de pie
+const LSIT_CY_SMOOTH_ALPHA = 0.4;            // EMA de la altura del centro del tronco
+const LSIT_CY_MAX_JUMP = 0.04;               // salto máximo por frame de esa altura (fallo puntual de tracking) -- mismo criterio que DIP_SHOULDER_MAX_Y_JUMP
+const LSIT_DISMOUNT_FRACTION = 0.4;          // te bajaste si la subida cae por debajo de esta fracción de la máxima de la subida
+const LSIT_DISMOUNT_MIN_RISE = 0.05;         // ...y nunca por encima de este suelo mínimo (en largos de tronco)
+const LSIT_DISMOUNT_STABLE_MS = 700;         // bajada sostenida para dar por terminada la serie
+const LSIT_LEG_SMOOTH_ALPHA = 0.5;           // EMA de kneeRel/ankleRel (~10fps: mitad de respuesta inmediata)
+const LSIT_UP_ANKLE_REL = 0.30;              // tobillo como mucho ~17° por debajo de la horizontal de la cadera = L
+const LSIT_UP_KNEE_REL = 0.25;               // rodilla como mucho ~14° por debajo de la horizontal
+const LSIT_KNEE_STRAIGHT_MIN_DEG = 140;      // rodilla estirada (cadera-rodilla-tobillo) para que sea L y no rodillas al pecho
+const LSIT_DOWN_ANKLE_REL = 0.65;            // tobillo ≥ ~40° por debajo de la horizontal = piernas abajo
+const LSIT_DOWN_KNEE_REL = 0.45;             // rodilla ≥ ~27° por debajo de la horizontal
+const LSIT_UP_STABLE_MS = 100;               // debounce de "L" (repeticiones)
+const LSIT_DOWN_STABLE_MS = 100;             // debounce de "abajo" (repeticiones)
+const LSIT_MIN_REP_SECONDS = 0.25;           // L -> abajo por debajo de esto es ruido
+// Aguante: una vez confirmada la L, se tolera un poco más de caída (temblor) antes de romperla.
+const LSIT_HOLD_LOOSE_ANKLE_REL = 0.42;
+const LSIT_HOLD_LOOSE_KNEE_REL = 0.35;
+const LSIT_HOLD_LOOSE_KNEE_MIN_DEG = 130;
+const LSITHOLD_INVALID_STABLE_MS = 1500;     // cuánto tiempo seguido sin L para dar el tramo por terminado (más margen que la plancha: las piernas tiemblan y caen un poco)
+const LSIT_NOT_VISIBLE_MSG = "No se te ven bien el hombro, la cadera, la rodilla y el tobillo. Ponte de perfil a la cámara, con el cuerpo entero en el encuadre.";
+
+export class LSitTracker {
+  constructor() { this.reset(); }
+
+  reset() {
+    this.refY = null;          // altura (Y, 0-1) del centro del tronco de pie
+    this.refLen = null;        // largo hombro-cadera de pie
+    this.cySmooth = null;
+    this.cyRawPrev = null;
+    this.mounted = false;
+    this.mountSince = null;
+    this.dismountSince = null;
+    this.peakRise = 0;
+    this.kneeRelS = null;
+    this.ankleRelS = null;
+  }
+
+  update(lm, now) {
+    const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER], lE = lm[L_ELBOW], rE = lm[R_ELBOW];
+    const lW = lm[L_WRIST], rW = lm[R_WRIST], lH = lm[L_HIP], rH = lm[R_HIP];
+    const lK = lm[L_KNEE], rK = lm[R_KNEE], lA = lm[L_ANKLE], rA = lm[R_ANKLE];
+    const vis4 = (s, h, k, a) => ((s.visibility ?? 1) + (h.visibility ?? 1) + (k.visibility ?? 1) + (a.visibility ?? 1)) / 4;
+    const leftVis = vis4(lS, lH, lK, lA), rightVis = vis4(rS, rH, rK, rA);
+    const useLeft = leftVis >= rightVis;
+    const vis = useLeft ? leftVis : rightVis;
+    if (vis < LSIT_MIN_VISIBILITY) return { visible: false, vis, mounted: this.mounted };
+
+    const s = useLeft ? lS : rS, e = useLeft ? lE : rE, w = useLeft ? lW : rW;
+    const h = useLeft ? lH : rH, k = useLeft ? lK : rK, a = useLeft ? lA : rA;
+    const torsoLen = Math.hypot(s.x - h.x, s.y - h.y);
+    const thigh = Math.hypot(k.x - h.x, k.y - h.y);
+    const shin = Math.hypot(a.x - k.x, a.y - k.y);
+    const tilt = tiltFromHorizontal(s, h);
+    const kneeAngle = angle(h, k, a);
+    if (tilt === null || kneeAngle === null || torsoLen < 0.02 || thigh < 0.02 || thigh + shin < 0.05) {
+      return { visible: false, vis, mounted: this.mounted };
+    }
+    const armVis = ((e.visibility ?? 1) + (w.visibility ?? 1)) / 2;
+    const elbowAngle = armVis >= LSIT_MIN_VISIBILITY ? angle(s, e, w) : null;
+
+    // Altura del centro del tronco: recorte de salto + media móvil (mismo patrón que processDip).
+    let rawCy = (s.y + h.y) / 2;
+    if (this.cyRawPrev !== null) {
+      const d = rawCy - this.cyRawPrev;
+      if (Math.abs(d) > LSIT_CY_MAX_JUMP) rawCy = this.cyRawPrev + Math.sign(d) * LSIT_CY_MAX_JUMP;
+    }
+    this.cyRawPrev = rawCy;
+    this.cySmooth = this.cySmooth === null ? rawCy : this.cySmooth + LSIT_CY_SMOOTH_ALPHA * (rawCy - this.cySmooth);
+    const cy = this.cySmooth;
+
+    // Referencia de pie: se aprende la primera vez que estás recto, y luego SOLO sigue tu altura
+    // mientras no estés subiendo/montado y estés recto con la rodilla estirada.
+    const upright = tilt >= LSIT_STAND_MIN_TILT_DEG;
+    const kneesStraight = kneeAngle >= LSIT_STAND_KNEE_MIN_DEG;
+    if (this.refY === null && upright && !this.mounted) {
+      this.refY = cy;
+      this.refLen = torsoLen;
+    }
+    let rise = null;
+    if (this.refY !== null) {
+      rise = (this.refY - cy) / this.refLen;
+      const rising = rise >= LSIT_MOUNT_RISE_FACTOR * LSIT_RISE_FREEZE_FRACTION;
+      if (!this.mounted && !rising && upright && kneesStraight) {
+        this.refY += LSIT_REF_ALPHA * (cy - this.refY);
+        this.refLen += LSIT_REF_ALPHA * (torsoLen - this.refLen);
+        rise = (this.refY - cy) / this.refLen;
+      }
+    }
+
+    // Montado / desmontado, con histéresis.
+    const torsoOk = tilt >= LSIT_MOUNT_TORSO_MIN_TILT_DEG;
+    const armsOk = elbowAngle === null || elbowAngle >= LSIT_MOUNT_ARM_MIN_DEG;
+    if (rise !== null) {
+      if (!this.mounted) {
+        if (rise >= LSIT_MOUNT_RISE_FACTOR && torsoOk && armsOk) {
+          if (this.mountSince === null) this.mountSince = now;
+          if (now - this.mountSince >= LSIT_MOUNT_STABLE_MS) {
+            this.mounted = true;
+            this.peakRise = Math.min(rise, 1);
+            this.dismountSince = null;
+          }
+        } else {
+          this.mountSince = null;
+        }
+      } else {
+        this.peakRise = Math.max(this.peakRise, Math.min(rise, 1));
+        const dismountBelow = Math.max(LSIT_DISMOUNT_MIN_RISE, LSIT_DISMOUNT_FRACTION * this.peakRise);
+        if (rise < dismountBelow) {
+          if (this.dismountSince === null) this.dismountSince = now;
+          if (now - this.dismountSince >= LSIT_DISMOUNT_STABLE_MS) {
+            this.mounted = false;
+            this.mountSince = null;
+            this.dismountSince = null;
+          }
+        } else {
+          this.dismountSince = null;
+        }
+      }
+    }
+
+    // Piernas.
+    const kneeRel = (k.y - h.y) / thigh;
+    const ankleRel = (a.y - h.y) / (thigh + shin);
+    this.kneeRelS = this.kneeRelS === null ? kneeRel : this.kneeRelS + LSIT_LEG_SMOOTH_ALPHA * (kneeRel - this.kneeRelS);
+    this.ankleRelS = this.ankleRelS === null ? ankleRel : this.ankleRelS + LSIT_LEG_SMOOTH_ALPHA * (ankleRel - this.ankleRelS);
+    const kr = this.kneeRelS, ar = this.ankleRelS;
+    const straight = kneeAngle >= LSIT_KNEE_STRAIGHT_MIN_DEG;
+    const legsUp = ar <= LSIT_UP_ANKLE_REL && kr <= LSIT_UP_KNEE_REL && straight;
+    const legsUpLoose = ar <= LSIT_HOLD_LOOSE_ANKLE_REL && kr <= LSIT_HOLD_LOOSE_KNEE_REL && kneeAngle >= LSIT_HOLD_LOOSE_KNEE_MIN_DEG;
+    const legsDown = ar >= LSIT_DOWN_ANKLE_REL && kr >= LSIT_DOWN_KNEE_REL;
+
+    const risenSome = rise !== null && rise >= LSIT_MOUNT_RISE_FACTOR * LSIT_RISE_FREEZE_FRACTION;
+    const mountReason = risenSome
+      ? "Súbete a las paralelas con los brazos estirados y el torso recto, y aguanta un momento."
+      : "Ponte de pie junto a las paralelas, de perfil (un momento, para que aprenda tu altura), y luego súbete con los brazos estirados.";
+    const legsReason = !straight
+      ? "Estira las rodillas: las piernas van rectas, juntas, a la altura de la cadera (forma de L)."
+      : "Sube las piernas rectas hasta la altura de la cadera (forma de L).";
+    const f = (v, d = 2) => (v === null || v === undefined ? null : v.toFixed(d));
+    return {
+      visible: true, side: useLeft ? "left" : "right", vis,
+      mounted: this.mounted, rise, mountReason,
+      kneeRel: kr, ankleRel: ar, kneeAngle, elbowAngle, tilt,
+      legsUp, legsUpLoose, legsDown, legsReason,
+      debug: {
+        subida: f(rise), montado: this.mounted ? "sí" : "no",
+        rodilla_rel: f(kr), tobillo_rel: f(ar),
+        ang_rodilla: f(kneeAngle, 0), ang_codo: f(elbowAngle, 0), tronco: f(tilt, 0),
+      },
+    };
+  }
+}
+
+/**
+ * Comprobador de postura para el L-sit aguantado (lsithold), con el mismo formato que
+ * checkPlankPosture y compañía ({ ok, reason, debug, side }), pero con estado propio (aprende tu
+ * altura de pie y si estás montado, ver LSitTracker) -- por eso es una fábrica: cada sitio que lo
+ * use (WorkoutSession, session-runner.js, circuit.js, plan-session.js) crea el suyo. El objeto
+ * devuelto tiene .reset(). Ok = montado en las paralelas Y piernas en L (con más tolerancia
+ * mientras ya estabas aguantando).
+ */
+export function createLSitHoldChecker() {
+  const tracker = new LSitTracker();
+  let lastOk = false;
+  const check = (lm) => {
+    const info = tracker.update(lm, performance.now());
+    if (!info.visible) {
+      lastOk = false;
+      return { ok: false, reason: LSIT_NOT_VISIBLE_MSG, debug: { visibilidad: info.vis.toFixed(2) } };
+    }
+    if (!info.mounted) {
+      lastOk = false;
+      return { ok: false, reason: info.mountReason, side: info.side, debug: info.debug };
+    }
+    const up = lastOk ? info.legsUpLoose : info.legsUp;
+    if (!up) {
+      lastOk = false;
+      return { ok: false, reason: info.legsReason, side: info.side, debug: info.debug };
+    }
+    lastOk = true;
+    return { ok: true, side: info.side, debug: info.debug };
+  };
+  check.reset = () => { tracker.reset(); lastOk = false; };
+  return check;
+}
+
 class WorkoutSession {
   constructor(root) {
     this.root = root;
@@ -3416,6 +3645,10 @@ class WorkoutSession {
     this.targetReps = root.dataset.targetReps ? parseInt(root.dataset.targetReps, 10) : null;
     // Reps EXACTAS (reto Cindy): ni una más ni una menos por serie.
     this.exactReps = root.dataset.exactReps ? parseInt(root.dataset.exactReps, 10) : null;
+    // Contrarreloj (Cindy): armado y calibración más cortos, para no perder reps al empezar.
+    this.hangStableMs = this.exactReps ? 250 : HANG_STABLE_MS;
+    this.calibrationMs = this.exactReps ? 600 : CALIBRATION_MS;
+    this.groundStableMs = this.exactReps ? 250 : ON_GROUND_STABLE_MS;
     this.targetAnnounced = false;
     // Indice de serie (this.sets.length en el momento de avisar) en el
     // que ya se ha dado el aviso de "objetivo cumplido" (de serie o de
@@ -3639,6 +3872,11 @@ class WorkoutSession {
     this.curlElbowBaselineY = null;  // curl: altura (y) del codo en el momento de armar — referencia para medir si el codo SUBE durante la serie (ver processDumbbellCurl, CURL_ELBOW_RISE_MAX_FACTOR)
     this.curlRestSince = null;       // curl: desde cuándo lleva el brazo estirado y quieto, seguido, en el estado "bottom" — para el cierre automático de serie por descanso (ver CURL_REST_AUTO_CLOSE_MS)
     this.legRaiseSide = null;  // mismo concepto que squatSide, para elevación de piernas
+    this.lsitTracker = new LSitTracker(); // L-sit en paralelas (reps): altura de pie, montado/desmontado y piernas -- ver el bloque LSIT_*
+    this.lsitHoldChecker = createLSitHoldChecker(); // L-sit en paralelas (aguante): comprobador de postura con estado propio
+    this.lsitDownConfirmed = false; // lsit: ya se han visto las piernas abajo desde que se armó -- sin esto, armar ya con las piernas en L contaría una repetición sin haber visto la subida
+    this.lsitUpSince = null;   // lsit: desde cuándo cumples la L seguido (debounce)
+    this.lsitDownSince = null; // lsit: desde cuándo tienes las piernas abajo seguido (debounce)
     this.pushupSide = null;    // mismo concepto que squatSide, para flexiones
     this.archerPeakLeftAngle = null;  // dominadas de arquero: ángulo de codo izquierdo en el punto más alto visto de la subida en curso
     this.archerPeakRightAngle = null; // idem, codo derecho
@@ -4076,6 +4314,19 @@ class WorkoutSession {
     this.running = true;
     this.sessionStart = performance.now();
     this.beginPrep();
+    if (this.exactReps && this.counterKey === "pullup" && _pullupCalibCache) {
+      // Ronda 2 en adelante: se reutiliza la calibración de la barra, sin esperar a colgarte ni calibrar.
+      this.prepping = false;
+      this.calibrating = false;
+      this.shoulderWidth = _pullupCalibCache.shoulderWidth;
+      this.barY = _pullupCalibCache.barY;
+      this.localBottomY = _pullupCalibCache.localBottomY;
+      this.localTopY = this.localBottomY;
+      this.state = "down";
+      this.repStartTime = performance.now();
+      this.lastRepTime = this.repStartTime;
+      this.logScissor("[calibración reutilizada de la ronda anterior]");
+    }
 
     this.restIntervalId = setInterval(() => this.tickRestTimer(), 500);
     this.loop();
@@ -4511,6 +4762,16 @@ class WorkoutSession {
       this.state = null;
       this.legRaiseSide = null;
       this.setStatus("Túmbate boca arriba, con la cámara a un lado (de perfil), y encuadra el cuerpo entero, de los hombros a los tobillos.");
+    } else if (this.counterKey === "lsit") {
+      // Recalibrar/empezar: olvida la altura de pie aprendida y el estado montado -- hay que
+      // volver a ponerse de pie junto a las paralelas un momento y subir (ver LSitTracker).
+      this.prepping = false;
+      this.state = null;
+      this.lsitTracker.reset();
+      this.lsitDownConfirmed = false;
+      this.lsitUpSince = null;
+      this.lsitDownSince = null;
+      this.setStatus("Ponte de perfil a la cámara, de pie junto a las paralelas, con el cuerpo entero en el encuadre; luego súbete con los brazos estirados.");
     } else if (this.counterKey === "situp") {
       this.prepping = false;
       this.state = null;
@@ -4561,6 +4822,7 @@ class WorkoutSession {
       this.prepping = false;
       this.state = null;
       this.currentHoldSeconds = 0;
+      if (this.counterKey === "lsithold") this.lsitHoldChecker.reset();
       this.postureGroundConfirmed = false;
       this.postureGroundSince = null;
       this.postureLastOk = null;
@@ -4645,9 +4907,19 @@ class WorkoutSession {
     }
 
     if (this.state === null) {
-      if (!standingLike && elbowAngle >= PUSHUPFRONT_ARM_GATE_DEG) {
+      if (this.exactReps && !standingLike && elbowAngle <= PUSHUPFRONT_DOWN_DEG) {
+        // Contrarreloj: has empezado ya abajo (o bajando) sin pasar por la posición de brazos estirados:
+        // se arma directamente en "abajo" para que la primera rep cuente al subir.
         if (this.groundStableSince === null) this.groundStableSince = now;
-        if (now - this.groundStableSince >= ON_GROUND_STABLE_MS) {
+        if (now - this.groundStableSince >= this.groundStableMs) {
+          this.state = "bottom";
+          this.repStartTime = now;
+          this.groundStableSince = null;
+          this.offGroundSince = null;
+        }
+      } else if (!standingLike && elbowAngle >= PUSHUPFRONT_ARM_GATE_DEG) {
+        if (this.groundStableSince === null) this.groundStableSince = now;
+        if (now - this.groundStableSince >= this.groundStableMs) {
           this.state = "top";
           this.groundStableSince = null;
           this.offGroundSince = null;
@@ -9409,6 +9681,8 @@ class WorkoutSession {
         return "Túmbate boca arriba, con los hombros en el suelo, para empezar.";
       case "legraise":
         return "Túmbate boca arriba con las piernas estiradas para empezar.";
+      case "lsit":
+        return "Ponte de pie junto a las paralelas, de perfil, y luego súbete con los brazos estirados para empezar.";
       case "situp":
         return "Túmbate boca arriba del todo para empezar.";
       case "pushupfront":
@@ -9512,6 +9786,9 @@ class WorkoutSession {
     // checkHandstandPosture); a diferencia de silla en pared, aquí no hay
     // ninguna postura cotidiana (sentarse en una silla…) que pueda colarse
     // como un falso positivo.
+    if (this.counterKey === "lsithold") {
+      return "Ponte de pie junto a las paralelas, de perfil, un momento; luego súbete con los brazos estirados y sube las piernas rectas hasta la altura de la cadera (forma de L).";
+    }
     if (this.counterKey === "handstand") {
       return "Sube a un pino (con o sin apoyo en la pared) hasta que la cadera quede por encima de los hombros y los brazos por debajo de la cadera, aguantando el peso cerca del suelo.";
     }
@@ -9706,6 +9983,8 @@ class WorkoutSession {
           ? "Postura correcta. ¡Listo! Aguanta con las rodillas arriba, sin balancearte. Para terminar una serie, suelta la barra o sal del encuadre."
           : this.counterKey === "handstand"
           ? "Postura correcta. ¡Listo! Aguanta el pino, con el abdomen apretado y el cuerpo recto. Para terminar una serie, baja del pino o sal del encuadre."
+          : this.counterKey === "lsithold"
+          ? "Postura correcta. ¡Listo! Aguanta las piernas rectas en L, con los brazos estirados y los hombros hacia abajo. Para terminar una serie, baja las piernas, bájate de las paralelas o sal del encuadre."
           : this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch"
           ? "Postura correcta. ¡Listo! Aguanta el estiramiento, sin tirar de golpe. Para terminar, suelta el brazo (vuelve a standby) o sal del encuadre."
           : this.counterKey === "seatedhamstringstretch"
@@ -9906,6 +10185,7 @@ class WorkoutSession {
     // con la rodilla muy flexionada.
     const invalidStableMs =
       this.counterKey === "kneeholdbar" ? KNEEHOLDBAR_INVALID_STABLE_MS
+      : this.counterKey === "lsithold" ? LSITHOLD_INVALID_STABLE_MS
       : this.counterKey === "handstand" ? HANDSTAND_INVALID_STABLE_MS
       : this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch" || this.counterKey === "seatedhamstringstretch" || this.counterKey === "standingquadstretch" ? STRETCH_INVALID_STABLE_MS
       : PLANK_INVALID_STABLE_MS;
@@ -10151,6 +10431,8 @@ class WorkoutSession {
         ? checkKneeHoldBarPosture(lm)
         : this.counterKey === "handstand"
         ? checkHandstandPosture(lm)
+        : this.counterKey === "lsithold"
+        ? this.lsitHoldChecker(lm)
         : this.counterKey === "armcrossstretch"
         ? checkArmCrossStretch(lm)
         : this.counterKey === "tricepsoverheadstretch"
@@ -10212,6 +10494,8 @@ class WorkoutSession {
         ? "kneehold en barra"
         : this.counterKey === "handstand"
         ? "pino"
+        : this.counterKey === "lsithold"
+        ? "L-sit en paralelas"
         : this.counterKey === "armcrossstretch"
         ? "estiramiento cruzado de brazo"
         : this.counterKey === "tricepsoverheadstretch"
@@ -10568,6 +10852,89 @@ class WorkoutSession {
       this.debugEl.textContent =
         `ángulo cadera (${useLeft ? "izq" : "der"}): ${hipAngle.toFixed(0)}° | rodilla: ${kneeAngle.toFixed(0)}° | tilt: ${tilt.toFixed(0)}° (${onGround ? "en el suelo" : "fuera del suelo"}) | estado: ${this.state ?? "esperando"} ` +
         `(abajo ≥${LEG_RAISE_DOWN_ANGLE_DEG}°, arriba ≤${LEG_RAISE_UP_ANGLE_DEG}°)`;
+    }
+  }
+
+  /**
+   * L-sit en paralelas (repeticiones). Ver el bloque LSIT_* de más arriba. Se arma al SUBIRTE a las
+   * paralelas (LSitTracker.mounted); una repetición = piernas rectas subidas a la L (rodilla y
+   * tobillo a la altura de la cadera) y de vuelta abajo, colgando. La serie se cierra al bajarte de
+   * las paralelas o al salir del encuadre (no hay gesto de mano: las manos están agarradas).
+   */
+  processLSit(lm, now) {
+    const info = this.lsitTracker.update(lm, now);
+    if (!info.visible) {
+      this.announceStatus(LSIT_NOT_VISIBLE_MSG);
+      if (this.debugEl) this.debugEl.textContent = "buscando hombro, cadera, rodilla y tobillo de perfil…";
+      this.noteAbsence(now);
+      return;
+    }
+    this.outOfFrameSince = null;
+
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Te veo. ¡Listo! Ponte de pie junto a las paralelas, de perfil, un momento; luego súbete con los brazos estirados y sube y baja las piernas rectas, hasta la altura de la cadera. Para terminar una serie, bájate de las paralelas o sal del encuadre.",
+        "startup_ready",
+        "Listo. Ponte de pie junto a las paralelas y luego súbete."
+      );
+    }
+
+    const dbg = Object.entries(info.debug).map(([k, v]) => `${k}=${v ?? "-"}`).join(" ");
+    this.logScissor(`[lsit] estado=${this.state ?? "null"} ${dbg}`);
+
+    if (this.state === null) {
+      if (info.mounted) {
+        this.state = "down";
+        this.lsitDownConfirmed = false;
+        this.lsitUpSince = null;
+        this.lsitDownSince = null;
+        this.announceStatus("¡Listo! Sube las piernas rectas hasta la L y bájalas.", "ready_to_go", "Listo. Sube las piernas.");
+      } else {
+        this.setStatus(info.mountReason);
+      }
+      if (this.debugEl) this.debugEl.textContent = `esperando a que te subas | ${dbg}`;
+      return;
+    }
+
+    if (!info.mounted) {
+      this.logScissor("[lsit] desmonte detectado, cerrando serie");
+      this.closeActiveSet();
+      return;
+    }
+
+    if (this.state === "down") {
+      if (info.legsDown) this.lsitDownConfirmed = true;
+      if (this.lsitDownConfirmed && info.legsUp) {
+        if (this.lsitUpSince === null) this.lsitUpSince = now;
+        if (now - this.lsitUpSince >= LSIT_UP_STABLE_MS) {
+          this.state = "up";
+          this.repStartTime = now;
+          this.lsitUpSince = null;
+          this.lsitDownSince = null;
+        }
+      } else {
+        this.lsitUpSince = null;
+        if (!this.lsitDownConfirmed) this.setStatus("Deja las piernas colgando del todo para empezar.");
+      }
+    } else if (this.state === "up") {
+      if (info.legsDown) {
+        if (this.lsitDownSince === null) this.lsitDownSince = now;
+        if (now - this.lsitDownSince >= LSIT_DOWN_STABLE_MS) {
+          this.countRep((now - this.repStartTime) / 1000, now, "L-sit", LSIT_MIN_REP_SECONDS);
+          this.state = "down";
+          this.lsitDownConfirmed = true;
+          this.lsitDownSince = null;
+        }
+      } else {
+        this.lsitDownSince = null;
+      }
+    }
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `${dbg} | estado: ${this.state} ` +
+        `(L: tobillo ≤${LSIT_UP_ANKLE_REL}, rodilla ≤${LSIT_UP_KNEE_REL}; abajo: tobillo ≥${LSIT_DOWN_ANKLE_REL}, rodilla ≥${LSIT_DOWN_KNEE_REL})`;
     }
   }
 
@@ -11786,6 +12153,10 @@ class WorkoutSession {
       this.processLegRaise(lm, now);
       return;
     }
+    if (this.counterKey === "lsit") {
+      this.processLSit(lm, now);
+      return;
+    }
     if (this.counterKey === "situp") {
       this.processSitup(lm, now);
       return;
@@ -11853,7 +12224,7 @@ class WorkoutSession {
 
       if (armsUpNow) {
         if (this.hangStableSince === null) this.hangStableSince = now;
-        if (now - this.hangStableSince >= HANG_STABLE_MS) {
+        if (now - this.hangStableSince >= this.hangStableMs) {
           // Llevas ya un ratito con los brazos en alto de verdad -> calibra ya,
           // da igual si has tardado 3 segundos o 30 en llegar a la barra.
           this.prepping = false;
@@ -11895,9 +12266,9 @@ class WorkoutSession {
       const barRefY = wristVisible ? wristMidY : elbowMidY;
       this.calibrationSamples.push({ y, shoulderWidth, barRefY });
       const elapsed = now - this.calibrationStartTs;
-      const remaining = Math.max(0, Math.ceil((CALIBRATION_MS - elapsed) / 1000));
+      const remaining = Math.max(0, Math.ceil((this.calibrationMs - elapsed) / 1000));
       this.setStatus(`Calibrando, quédate colgado y quieto… (${remaining || 1}s)`);
-      if (elapsed >= CALIBRATION_MS) {
+      if (elapsed >= this.calibrationMs) {
         const ys = this.calibrationSamples.map((s) => s.y).sort((a, b) => a - b);
         const ws = this.calibrationSamples.map((s) => s.shoulderWidth).sort((a, b) => a - b);
         const wy = this.calibrationSamples.map((s) => s.barRefY).sort((a, b) => a - b);
@@ -11917,6 +12288,7 @@ class WorkoutSession {
         this.restAlerted = false;
         this.updateSetDisplay();
         this.logScissor(`[CALIBRADO] barra_y=${this.barY.toFixed(3)} hombros=${this.shoulderWidth.toFixed(3)}`);
+        if (this.exactReps && this.counterKey === "pullup") _pullupCalibCache = { shoulderWidth: this.shoulderWidth, barY: this.barY, localBottomY: this.localBottomY };
         // Si el descanso obligatorio (MIN_REST_MS) todavía no ha pasado
         // desde que se cerró la serie anterior, no se anuncia "empieza"
         // aunque ya estés calibrada/o y colgada/o -- decirlo aquí

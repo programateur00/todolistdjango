@@ -20,7 +20,7 @@
  */
 import {
   checkPlankPosture, checkSidePlankPosture, checkWallSitPosture,
-  checkKneeHoldBarPosture, checkHandstandPosture,
+  checkKneeHoldBarPosture, checkHandstandPosture, createLSitHoldChecker,
   speakOut, numeroEnPalabras, isVoiceEnabled, exportDebugLogText,
 } from "./workout.js";
 import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./mediapipe-vendor.js";
@@ -106,7 +106,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 
   // Ver checkPlankPosture/etc. importadas arriba — mismo set que
   // circuit.js.
-  const POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "handstand"]);
+  const POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "lsithold"]);
 
   function runCurrent() {
     const item = current();
@@ -242,6 +242,8 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         ? checkKneeHoldBarPosture
         : item.counter_key === "handstand"
         ? checkHandstandPosture
+        : item.counter_key === "lsithold"
+        ? createLSitHoldChecker()
         : checkPlankPosture;
 
     // "Al fallo" (item.work vacío/null -- PROG_FAILURE): sin objetivo de

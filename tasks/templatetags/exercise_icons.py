@@ -98,6 +98,7 @@ LABELS = {
     "handstand": "Handstand", "archer-pullup": "Dominadas de arquero",
     "incline-push-up": "Flexiones inclinadas",
     "dumbbell-curl": "Curl con mancuernas",
+    "l-sit": "L-sit en paralelas", "l-sit-hold": "L-sit en paralelas (hold)",
     "jumping-jack": "Jumping Jacks",
     "bench-dip": "Fondos en banco",
 }

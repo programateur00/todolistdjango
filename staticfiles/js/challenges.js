@@ -22,7 +22,7 @@
  */
 import {
   checkPushupTopHoldPosture, checkPushupBottomHoldPosture,
-  speakOut, stopSpeaking, isVoiceEnabled, startWorkout, setQuietVoice,
+  speakOut, stopSpeaking, isVoiceEnabled, startWorkout, setQuietVoice, clearPullupCalibCache, exportDebugLogText,
 } from "./workout.js";
 import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./mediapipe-vendor.js";
 
@@ -447,6 +447,34 @@ const CINDY_PHASES = [
 ];
 const CINDY_HISTORY_KEY = "reto_historial__cindy";
 
+// Registro de depuración de TODO el reto: cada ejercicio es una sesión distinta con su propio log,
+// así que al terminar cada uno se guardan aquí sus líneas, para poder mandarlo todo junto si falla.
+let cindyLogAll = []; // [{ header, lines }]
+function collectCindyLog(session, phase, roundNo, outcome) {
+  cindyLogAll.push({ header: `===== Ronda ${roundNo} · ${phase.name} · ${outcome} =====`, lines: [...(session?.scissorLog || [])] });
+}
+function cindyLogLines() {
+  // El servidor guarda como mucho 200.000 caracteres: presupuesto por ejercicio, conservando el
+  // principio (35%) y el final (65%) de los que se pasen.
+  const budget = Math.floor(180000 / Math.max(1, cindyLogAll.length));
+  const out = [];
+  for (const p of cindyLogAll) {
+    out.push(p.header);
+    let lines = p.lines;
+    const total = lines.reduce((a, l) => a + l.length + 1, 0);
+    if (total > budget) {
+      const head = [], tail = [];
+      let hs = 0, ts = 0;
+      for (const l of lines) { if (hs + l.length > budget * 0.35) break; head.push(l); hs += l.length + 1; }
+      for (let i = lines.length - 1; i >= head.length; i--) { if (ts + lines[i].length > budget * 0.65) break; tail.unshift(lines[i]); ts += lines[i].length + 1; }
+      lines = [...head, "[... recortado ...]", ...tail];
+    }
+    out.push(...lines);
+  }
+  return out;
+}
+
+
 function getCindyHistory() {
   try {
     return JSON.parse(localStorage.getItem(CINDY_HISTORY_KEY) || "[]");
@@ -500,6 +528,8 @@ function initCindy(host) {
     }
     <button type="button" class="primary-btn" id="cindy-start">Empezar</button>`;
   document.getElementById("cindy-start").addEventListener("click", () => {
+    cindyLogAll = [];
+    clearPullupCalibCache();
     runCindyPhase(host, {
       rounds: [],
       round: {},
@@ -595,6 +625,7 @@ function runCindyPhase(host, state) {
   const advance = (result) => {
     if (done) return;
     done = true;
+    collectCindyLog(workoutSession, phase, roundNo, "completada");
     stopAll();
     savePhase(result);
     if (remainingMs() <= 0) finishCindy(host, state);
@@ -632,6 +663,7 @@ function runCindyPhase(host, state) {
       done = true;
       const r = currentResult();
       beep(220, 0.5);
+      collectCindyLog(workoutSession, phase, roundNo, "FALLO");
       stopAll();
       savePhase({ reps: r.reps, sets: r.sets });
       finishCindy(host, state, `${phase.name}: serie de ${closed[0]?.reps ?? r.reps} en vez de ${phase.min}. Es una serie exacta o nada.`);
@@ -649,6 +681,7 @@ function runCindyPhase(host, state) {
       done = true;
       const r = currentResult();
       beep(440, 0.4);
+      collectCindyLog(workoutSession, phase, roundNo, "tiempo agotado");
       stopAll();
       savePhase({ reps: r.reps, sets: r.sets });
       finishCindy(host, state);
@@ -703,8 +736,13 @@ function finishCindy(host, state, failReason = null) {
           .map((r, i) => `<tr><td>${i + 1}</td>${CINDY_PHASES.map((p) => `<td>${cell(r, p)}</td>`).join("")}</tr>`)
           .join("")}</tbody>
       </table>
+      <button type="button" class="primary-btn" id="cindy-debug-send">📤 Enviar código de depuración de todo el reto</button>
+      <p id="cindy-debug-status" class="workout__debug"></p>
       <button type="button" class="primary-btn" id="cindy-retry">Volver a intentarlo</button>
     </div>`;
+  const sendDbg = () => exportDebugLogText({ lines: cindyLogLines(), counterKey: "cindy", statusEl: document.getElementById("cindy-debug-status"), platform: "web" });
+  document.getElementById("cindy-debug-send").addEventListener("click", sendDbg);
+  if (failReason && confirm("Reto fallado. ¿Quieres enviar el código de depuración de todo el reto?")) sendDbg();
   document.getElementById("cindy-retry").addEventListener("click", () => initCindy(host));
 }
 

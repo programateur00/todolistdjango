@@ -1351,6 +1351,21 @@ class ExerciseCatalogTests(TestCase):
         self.assertEqual(wall_sit.counter_key, "wallsit")
         self.assertEqual(wall_sit.body_area, "lower_body")
 
+    def test_l_sit_parallel_bars_variants(self):
+        """L-sit en paralelas: repeticiones (pose, "lsit") y aguante
+        (timed con counter_key, "lsithold", como plancha/silla en pared).
+        Los dos tienen que estar en los sets de contadores de views.py
+        para poder abrirse sueltos con cámara."""
+        from tasks.views import COUNTERS, POSTURE_COUNTERS
+        reps = Exercise.objects.get(slug="l-sit")
+        hold = Exercise.objects.get(slug="l-sit-hold")
+        self.assertEqual(reps.mode, Exercise.MODE_POSE)
+        self.assertEqual(reps.counter_key, "lsit")
+        self.assertEqual(hold.mode, Exercise.MODE_TIMED)
+        self.assertEqual(hold.counter_key, "lsithold")
+        self.assertIn("lsit", COUNTERS)
+        self.assertIn("lsithold", POSTURE_COUNTERS)
+
     def test_archer_pullup_is_a_camera_exercise(self):
         """Dominadas de arquero: mismo criterio de subida/bajada que las
         dominadas normales, con su propio counter_key porque además hace

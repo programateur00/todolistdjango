@@ -70,7 +70,7 @@ DEFAULT_TIMEOUT = 30
 # running) es peso corporal / aire libre.
 _NEEDS_BAR_EQUIPMENT = {
     "pullup", "wide-pullup", "chinup", "weighted-pullup", "jumping-pullup",
-    "dips", "weighted-dips",
+    "dips", "weighted-dips", "l-sit", "l-sit-hold",
 }
 
 # Ejercicios cuyo contador de cámara existe en la web (static/js/workout.js)
@@ -122,6 +122,10 @@ _EXERCISE_DIFFICULTY = {
     # archer pull-up -- bajado a intermedio (ajustado 2026-09, antes
     # "advanced").
     "handstand": "intermediate",
+    # L-sit en paralelas (2026-09-20): exige fuerza de core/flexores de
+    # cadera y de empuje de hombro/tríceps sostenida -- avanzado.
+    "l-sit": "advanced",
+    "l-sit-hold": "advanced",
     # Tren inferior / core
     "squat": "beginner",
     "situp": "beginner",
