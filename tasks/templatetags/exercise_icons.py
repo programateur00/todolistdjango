@@ -91,7 +91,7 @@ ALIAS = {
 
 LABELS = {
     "plank": "Plancha", "crunch": "Crunch", "leg-raise": "Elevación de piernas",
-    "bicycle-crunch": "Bicicleta", "mountain-climber": "Mountain climbers",
+    "bicycle-crunch": "Bicicleta",
     "superman": "Superman", "squat": "Sentadillas", "situp": "Abdominales",
     "pullup": "Dominadas", "push-up": "Flexiones", "side-plank": "Plancha lateral",
     "dips": "Fondos", "lunge": "Zancadas", "weighted-dips": "Fondos con peso",
@@ -99,7 +99,7 @@ LABELS = {
     "wall-sit": "Silla en pared", "kneehold-bar": "Kneehold Bar",
     "handstand": "Handstand", "archer-pullup": "Dominadas de arquero",
     "incline-push-up": "Flexiones inclinadas",
-    "pike-push-up": "Pike push-ups", "mountain-climber": "Mountain climbers",
+    "pike-push-up": "Pike push-ups",
     "dumbbell-curl": "Curl con mancuernas",
     "l-sit": "L-sit en paralelas", "l-sit-hold": "L-sit en paralelas (hold)",
     "superman-hold": "Superman (hold)",

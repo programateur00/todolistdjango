@@ -1431,15 +1431,11 @@ class ExerciseCatalogTests(TestCase):
         self.assertEqual(pike.body_area, "upper_body")
         self.assertIn("pikepushup", COUNTERS)
 
-    def test_mountain_climber_is_a_camera_exercise(self):
-        """Mountain climbers (0071): pose con su propio counter_key ("mountainclimber",
-        ver processMountainClimber en workout.js), registrado en COUNTERS."""
+    def test_mountain_climber_was_removed(self):
+        """Mountain climbers (0071) se retiró en 0072: ya no está en el catálogo ni en COUNTERS."""
         from tasks.views import COUNTERS
-        mc = Exercise.objects.get(slug="mountain-climber")
-        self.assertEqual(mc.mode, Exercise.MODE_POSE)
-        self.assertEqual(mc.counter_key, "mountainclimber")
-        self.assertEqual(mc.body_area, "lower_body")
-        self.assertIn("mountainclimber", COUNTERS)
+        self.assertFalse(Exercise.objects.filter(slug="mountain-climber").exists())
+        self.assertNotIn("mountainclimber", COUNTERS)
 
     def test_dumbbell_curl_is_a_camera_exercise(self):
         """Curl con mancuernas (0024_add_dumbbell_curl): counter_key propio

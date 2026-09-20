@@ -110,8 +110,6 @@ _EXERCISE_DIFFICULTY = {
     "incline-push-up": "beginner",
     # Pike push-ups (2026-09-20): flexión en V invertida, carga de hombro -- intermedio.
     "pike-push-up": "intermediate",
-    # Mountain climbers (2026-09-20): plancha dinámica, cardio/core -- intermedio.
-    "mountain-climber": "intermediate",
     "bench-dip": "beginner",
     "dumbbell-curl": "beginner",
     "chinup": "beginner",       # dominadas supinas — agarre más asistido por el bíceps
