@@ -85,6 +85,7 @@ ALIAS = {
     "kneehold-bar": "pullup",
     "archer-pullup": "pullup",
     "incline-push-up": "push-up",
+    "pike-push-up": "push-up",
     "bench-dip": "dips",
 }
 
@@ -98,6 +99,7 @@ LABELS = {
     "wall-sit": "Silla en pared", "kneehold-bar": "Kneehold Bar",
     "handstand": "Handstand", "archer-pullup": "Dominadas de arquero",
     "incline-push-up": "Flexiones inclinadas",
+    "pike-push-up": "Pike push-ups",
     "dumbbell-curl": "Curl con mancuernas",
     "l-sit": "L-sit en paralelas", "l-sit-hold": "L-sit en paralelas (hold)",
     "superman-hold": "Superman (hold)",

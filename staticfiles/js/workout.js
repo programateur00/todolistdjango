@@ -21,7 +21,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v1+wristrotation-v2+standingquadstretch-v1+hipforwardback-v3+frontpos-v1+cindy-v2+lsithold-flow-v10+superman-v2";
+const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v1+wristrotation-v2+standingquadstretch-v1+hipforwardback-v3+frontpos-v1+cindy-v2+lsithold-flow-v10+superman-v2+pikepushup-v1";
 
 // Token del registro de depuración remoto (ver settings.DEBUG_LOG_TOKEN
 // en el backend) -- exportScissorLog() lo manda junto al registro para
@@ -210,7 +210,7 @@ const OUT_OF_FRAME_STABLE_MS = 1200;
 // les aplica el cierre por salir del encuadre de arriba, y también el
 // cierre por ponerte de pie en el caso de los abdominales tumbado (ver
 // ON_GROUND_STABLE_MS más abajo).
-const GROUND_STYLE_COUNTERS = new Set(["superman", "lsit", "pushupfront", "squatfront", "squat", "splitsquat", "crunch", "legraise", "situp", "scissor", "doublecrunch", "pushup", "dip", "inclinepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "wristrotation", "hipforwardback"]);
+const GROUND_STYLE_COUNTERS = new Set(["superman", "lsit", "pushupfront", "squatfront", "squat", "splitsquat", "crunch", "legraise", "situp", "scissor", "doublecrunch", "pushup", "dip", "inclinepushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "wristrotation", "hipforwardback"]);
 // Plancha / plancha lateral: a diferencia del resto de GROUND_STYLE_COUNTERS
 // (que cuentan repeticiones), aquí se cuenta TIEMPO aguantando la postura
 // — el cierre de serie no es "te has puesto de pie o has salido del
@@ -762,6 +762,29 @@ const CURL_REST_WARN_MS = 2000; // a partir de aquí se avisa en pantalla de la 
 // PUSHUP_MIN_VISIBILITY, PUSHUP_LINE_MIN_DEG, ON_GROUND_STABLE_MS).
 const INCLINE_PUSHUP_MIN_FOOT_RISE_FACTOR = 0.12; // (muñeca.y - tobillo.y) en proporción al largo de tronco (hombro-cadera) — cuánto tiene que quedar el tobillo por ENCIMA de la muñeca en la imagen. Valor de partida, sin probar en cámara real: si cuesta armar con los pies solo un poco elevados, bajarlo; si sigue colándose una flexión plana, subirlo.
 const INCLINE_PUSHUP_BROKEN_STABLE_MS = 400; // cuánto tiempo seguido fuera de posición (pies ya no en alto, o cuerpo encogido) para dar la serie por rota y cerrarla — más corto que PUSHUP_BREAK_STABLE_MS (1000ms) a propósito: aquí un falso positivo importa más que cortar por un parpadeo de la detección
+
+// ── Pike push-ups (2026-09-20) ──────────────────────────────────────
+// A petición de Alex ("pike push ups", vídeo de referencia suyo, de perfil): posición inicial = cuerpo en
+// V invertida (caderas en alto, manos y pies en el suelo, brazos y piernas estirados). Una rep = bajar
+// doblando los brazos mientras la cabeza baja hacia el suelo y volver a estirar los brazos del todo.
+//
+// Mismo patrón que processInclinePushup (postura comprobada en DIRECTO en cada frame, sin calibrar nada):
+//   - caderas claramente POR ENCIMA del hombro (PIKE_MIN_HIP_RISE_FACTOR, en largos de tronco) -- de pie o
+//     tumbado boca abajo no se cumple;
+//   - cuerpo "doblado": ángulo hombro-cadera-tobillo <= PIKE_BODY_MAX_DEG (una flexión normal/plancha está
+//     a ~180°);
+//   - manos y pies en el suelo: muñeca y tobillo a una altura parecida en la imagen (PIKE_HANDS_FEET_MAX_DY_FACTOR).
+// Conteo por ángulo de codo, PERMISIVO a petición de Alex (respuesta "más permisivo"): abajo <= 115°, de
+// vuelta arriba >= 145°. Sin comprobación de la cabeza (la profundidad la da el codo): si en pruebas reales
+// cuenta reps sin bajar la cabeza, bajar PIKE_DOWN_ANGLE_DEG. Valores de partida sin probar en cámara real.
+const PIKE_MIN_HIP_RISE_FACTOR = 0.25;        // (hombro.y - cadera.y) / largo de tronco: cuánto tienen que quedar las caderas por encima del hombro
+const PIKE_BODY_MAX_DEG = 145;                // hombro-cadera-tobillo: por encima de esto el cuerpo está demasiado recto para ser una V invertida
+const PIKE_HANDS_FEET_MAX_DY_FACTOR = 1.0;    // |muñeca.y - tobillo.y| / largo de tronco: manos y pies apoyados en el suelo
+const PIKE_ARM_GATE_DEG = 145;                // brazos estirados para armar (posición de partida)
+const PIKE_DOWN_ANGLE_DEG = 115;              // codo doblado hasta aquí -> abajo (permisivo)
+const PIKE_UP_ANGLE_DEG = 145;                // brazo otra vez estirado -> rep completa
+const PIKE_MIN_REP_SECONDS = 0.3;             // de empezar a bajar a estar arriba: menos es ruido
+const PIKE_BROKEN_STABLE_MS = 1000;           // fuera de la postura V tanto tiempo seguido = serie terminada (te levantas, te tumbas...)
 
 // ── Fondos en banco (bench dip) ─────────────────────────────────────
 // A petición de Alex: variante de fondos donde, en vez de paralelas,
@@ -4733,6 +4756,14 @@ class WorkoutSession {
         "Túmbate boca abajo, de perfil a la cámara, con los brazos estirados, las manos a la altura del " +
         "pecho y los codos pegados al cuerpo (mirando hacia atrás), para empezar."
       );
+    } else if (this.counterKey === "pikepushup") {
+      // Nada que calibrar (postura comprobada en directo, ver processPikePushup): solo esperar a verte en V invertida.
+      this.prepping = false;
+      this.state = null;
+      this.pushupSide = null;
+      this.groundStableSince = null;
+      this.offGroundSince = null;
+      this.setStatus(this.groundWaitingMessage());
     } else if (this.counterKey === "benchdip") {
       // Tampoco hay nada que calibrar: ni el ángulo de codo ni las
       // comprobaciones de postura (manos sobre pies, ángulo de cuerpo
@@ -5531,7 +5562,7 @@ class WorkoutSession {
         drawArm(lm[R_SHOULDER], lm[R_ELBOW], lm[R_WRIST], this.archerLiveRightAngle);
       }
 
-      if ((this.counterKey === "pushup" || this.counterKey === "inclinepushup" || this.counterKey === "benchdip") && this.pushupSide) {
+      if ((this.counterKey === "pushup" || this.counterKey === "inclinepushup" || this.counterKey === "pikepushup" || this.counterKey === "benchdip") && this.pushupSide) {
         const shoulder = this.pushupSide === "left" ? lm[L_SHOULDER] : lm[R_SHOULDER];
         const elbow = this.pushupSide === "left" ? lm[L_ELBOW] : lm[R_ELBOW];
         const wrist = this.pushupSide === "left" ? lm[L_WRIST] : lm[R_WRIST];
@@ -6726,6 +6757,138 @@ class WorkoutSession {
       this.debugEl.textContent =
         `ángulo codo (${useLeft ? "izq" : "der"}): ${elbowAngle.toFixed(0)}° | pies sobre manos: ${(footRise * 100).toFixed(0)}% tronco (mínimo ${(INCLINE_PUSHUP_MIN_FOOT_RISE_FACTOR * 100).toFixed(0)}%) | estado: ${this.state ?? "esperando"} ` +
         `(abajo ≤${PUSHUP_COUNT_DOWN_ANGLE_DEG}°, arriba ≥${PUSHUP_COUNT_UP_ANGLE_DEG}°)`;
+    }
+  }
+
+  /**
+   * Pike push-ups: ver el bloque PIKE_* de más arriba para el diseño. De perfil a la cámara; se arma con la
+   * V invertida y los brazos estirados quietos ON_GROUND_STABLE_MS; cada bajada (codo <= PIKE_DOWN_ANGLE_DEG)
+   * seguida de volver a estirar (codo >= PIKE_UP_ANGLE_DEG) cuenta 1. Salir de la V (levantarte, tumbarte)
+   * durante PIKE_BROKEN_STABLE_MS, agitar la mano o salir de encuadre cierra la serie.
+   */
+  processPikePushup(lm, now) {
+    if (this.state !== null && this.checkWaveGesture(lm, now)) {
+      this.closeActiveSet();
+      return;
+    }
+
+    const lShoulder = lm[L_SHOULDER], rShoulder = lm[R_SHOULDER];
+    const lElbow = lm[L_ELBOW], rElbow = lm[R_ELBOW];
+    const lWrist = lm[L_WRIST], rWrist = lm[R_WRIST];
+    const lHip = lm[L_HIP], rHip = lm[R_HIP];
+    const lAnkle = lm[L_ANKLE], rAnkle = lm[R_ANKLE];
+
+    const leftVis = (
+      (lShoulder.visibility ?? 1) + (lElbow.visibility ?? 1) + (lWrist.visibility ?? 1) +
+      (lHip.visibility ?? 1) + (lAnkle.visibility ?? 1)
+    ) / 5;
+    const rightVis = (
+      (rShoulder.visibility ?? 1) + (rElbow.visibility ?? 1) + (rWrist.visibility ?? 1) +
+      (rHip.visibility ?? 1) + (rAnkle.visibility ?? 1)
+    ) / 5;
+    const useLeft = leftVis >= rightVis;
+    const vis = useLeft ? leftVis : rightVis;
+
+    if (vis < PUSHUP_MIN_VISIBILITY) {
+      this.announceStatus(
+        "No se te ven bien el hombro, el codo, la muñeca, la cadera y el tobillo. Ponte de perfil a la " +
+        "cámara, con el cuerpo entero en el encuadre, en V invertida: manos y pies en el suelo y las caderas en alto."
+      );
+      if (this.debugEl) this.debugEl.textContent = "buscando hombro, codo, muñeca, cadera y tobillo de perfil…";
+      this.pushupSide = null;
+      this.groundStableSince = null;
+      if (this.state !== null) {
+        if (this.offGroundSince === null) this.offGroundSince = now;
+        if (now - this.offGroundSince >= PIKE_BROKEN_STABLE_MS) {
+          this.closeActiveSet();
+          return;
+        }
+      }
+      this.noteAbsence(now);
+      return;
+    }
+    this.outOfFrameSince = null;
+
+    const shoulder = useLeft ? lShoulder : rShoulder;
+    const elbow = useLeft ? lElbow : rElbow;
+    const wrist = useLeft ? lWrist : rWrist;
+    const hip = useLeft ? lHip : rHip;
+    const ankle = useLeft ? lAnkle : rAnkle;
+
+    const elbowAngle = angle(shoulder, elbow, wrist);
+    const bodyAngle = angle(shoulder, hip, ankle);
+    if (elbowAngle === null || bodyAngle === null) return;
+
+    const torsoLength = Math.hypot(shoulder.x - hip.x, shoulder.y - hip.y);
+    if (!(torsoLength > 0)) return;
+    const hipRise = (shoulder.y - hip.y) / torsoLength;
+    const handsFeetDy = Math.abs(wrist.y - ankle.y) / torsoLength;
+    const hipsHigh = hipRise >= PIKE_MIN_HIP_RISE_FACTOR;
+    const bodyBent = bodyAngle <= PIKE_BODY_MAX_DEG;
+    const handsOnFloor = handsFeetDy <= PIKE_HANDS_FEET_MAX_DY_FACTOR;
+    const inPosition = hipsHigh && bodyBent && handsOnFloor;
+
+    this.pushupSide = useLeft ? "left" : "right";
+
+    if (this.state !== null) {
+      // Ya armado: fuera de la V el frame se descarta (un gesto suelto no puede colarse como rep) y, si se
+      // sostiene, la serie se cierra sola.
+      if (!inPosition) {
+        if (this.offGroundSince === null) this.offGroundSince = now;
+        if (now - this.offGroundSince >= PIKE_BROKEN_STABLE_MS) {
+          this.closeActiveSet();
+          return;
+        }
+        if (this.debugEl) {
+          this.debugEl.textContent =
+            `fuera de la V (caderas sobre hombro: ${(hipRise * 100).toFixed(0)}% tronco, mín ${(PIKE_MIN_HIP_RISE_FACTOR * 100).toFixed(0)}% · ` +
+            `ángulo cuerpo: ${bodyAngle.toFixed(0)}°, máx ${PIKE_BODY_MAX_DEG}° · manos/pies en suelo: ${handsOnFloor ? "sí" : "no"}) — se descarta este frame`;
+        }
+        return;
+      }
+      this.offGroundSince = null;
+    }
+
+    if (this.state === null) {
+      const armsStraight = elbowAngle >= PIKE_ARM_GATE_DEG;
+      if (inPosition && armsStraight) {
+        if (this.groundStableSince === null) this.groundStableSince = now;
+        if (now - this.groundStableSince >= ON_GROUND_STABLE_MS) {
+          this.state = "top";
+          this.groundStableSince = null;
+          this.offGroundSince = null;
+          if (!this.startupVoiceGiven) {
+            this.startupVoiceGiven = true;
+            this.announceStatus(
+              "Te veo. ¡Listo! Puedes empezar. Para terminar una serie, ponte de pie, sal del " +
+              "encuadre, o levanta un brazo y agita la mano.",
+              "startup_ready"
+            );
+          } else {
+            this.announceStatus("¡Listo! Puedes empezar.", "ready_to_go");
+          }
+        } else {
+          this.setStatus("Postura vista… confirmando (no te muevas).");
+        }
+      } else {
+        this.groundStableSince = null;
+        this.setStatus(this.groundWaitingMessage());
+      }
+    } else if (this.state === "top") {
+      if (elbowAngle <= PIKE_DOWN_ANGLE_DEG) {
+        this.state = "bottom";
+        this.repStartTime = now;
+      }
+    } else if (elbowAngle >= PIKE_UP_ANGLE_DEG) {
+      this.countRep((now - this.repStartTime) / 1000, now, "Pike push-up", PIKE_MIN_REP_SECONDS);
+      this.state = "top";
+    }
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `ángulo codo (${useLeft ? "izq" : "der"}): ${elbowAngle.toFixed(0)}° | caderas sobre hombro: ${(hipRise * 100).toFixed(0)}% tronco (mín ${(PIKE_MIN_HIP_RISE_FACTOR * 100).toFixed(0)}%) | ` +
+        `ángulo cuerpo: ${bodyAngle.toFixed(0)}° (máx ${PIKE_BODY_MAX_DEG}°) | manos/pies dy: ${(handsFeetDy * 100).toFixed(0)}% | estado: ${this.state ?? "esperando"} ` +
+        `(abajo ≤${PIKE_DOWN_ANGLE_DEG}°, arriba ≥${PIKE_UP_ANGLE_DEG}°)`;
     }
   }
 
@@ -10015,6 +10178,8 @@ class WorkoutSession {
         return "Túmbate boca arriba, levanta el torso hasta una posición intermedia y mantenla, para empezar.";
       case "pushup":
         return "Túmbate boca abajo, de perfil a la cámara, con los brazos estirados, las manos a la altura del pecho y los codos pegados al cuerpo, para empezar.";
+      case "pikepushup":
+        return "Ponte de perfil a la cámara, en V invertida: manos y pies en el suelo, caderas en alto y brazos estirados, para empezar.";
       case "dip":
         return "Ponte de perfil a la cámara, agárrate a las paralelas con los brazos estirados, para empezar.";
       case "dumbbellcurl":
@@ -12657,6 +12822,10 @@ class WorkoutSession {
     }
     if (this.counterKey === "inclinepushup") {
       this.processInclinePushup(lm, now);
+      return;
+    }
+    if (this.counterKey === "pikepushup") {
+      this.processPikePushup(lm, now);
       return;
     }
     if (this.counterKey === "benchdip") {

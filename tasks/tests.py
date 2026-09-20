@@ -1421,6 +1421,16 @@ class ExerciseCatalogTests(TestCase):
         from tasks.views import COUNTERS
         self.assertIn("inclinepushup", COUNTERS)
 
+    def test_pike_push_up_is_a_camera_exercise(self):
+        """Pike push-ups (0070): pose con su propio counter_key ("pikepushup",
+        ver processPikePushup en workout.js), tren superior, registrado en COUNTERS."""
+        from tasks.views import COUNTERS
+        pike = Exercise.objects.get(slug="pike-push-up")
+        self.assertEqual(pike.mode, Exercise.MODE_POSE)
+        self.assertEqual(pike.counter_key, "pikepushup")
+        self.assertEqual(pike.body_area, "upper_body")
+        self.assertIn("pikepushup", COUNTERS)
+
     def test_dumbbell_curl_is_a_camera_exercise(self):
         """Curl con mancuernas (0024_add_dumbbell_curl): counter_key propio
         ("dumbbellcurl") porque el contador mide el ángulo de codo de

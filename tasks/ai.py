@@ -108,6 +108,8 @@ _EXERCISE_DIFFICULTY = {
     "push-up": "beginner",
     "jumping-pullup": "beginner",
     "incline-push-up": "beginner",
+    # Pike push-ups (2026-09-20): flexión en V invertida, carga de hombro -- intermedio.
+    "pike-push-up": "intermediate",
     "bench-dip": "beginner",
     "dumbbell-curl": "beginner",
     "chinup": "beginner",       # dominadas supinas — agarre más asistido por el bíceps
