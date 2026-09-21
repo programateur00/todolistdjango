@@ -29,7 +29,7 @@ from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from django.utils import timezone
-from django.utils.dateparse import parse_date, parse_time
+from django.utils.dateparse import parse_date, parse_datetime, parse_time
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
@@ -1093,6 +1093,18 @@ def running_import(request, uuid):
         pace = round(duration_seconds / distance_km, 2) if (distance_km and duration_seconds) else None
         session_duration = int(round(duration_seconds)) if duration_seconds else 0
 
+        # Fecha REAL de la sesión (la app la manda como started_at). Sin
+        # ella, recorded_at sería el momento de importar y una caminata
+        # de días atrás contaría como "de hoy".
+        started_at = None
+        raw_start = run.get("started_at")
+        if raw_start:
+            started_at = parse_datetime(str(raw_start))
+            if started_at is not None and timezone.is_naive(started_at):
+                started_at = timezone.make_aware(started_at)
+            if started_at is not None and started_at > timezone.now():
+                started_at = None
+
         # Con external_id repetido no se salta sin más: se actualiza la
         # sesión que ya había, si algo cambió. Esto es lo que hace falta
         # para que un resumen "de todo el día" (como los pasos, con un
@@ -1141,6 +1153,9 @@ def running_import(request, uuid):
                 target_distance_km=min_distance,
                 target_pace_seconds_per_km=max_pace,
             )
+            if started_at is not None:
+                # recorded_at es auto_now_add: solo se puede fijar con update().
+                WorkoutSession.objects.filter(pk=ws.pk).update(recorded_at=started_at)
         imported.append(str(ws.uuid))
         total_steps += steps or 0
         # La distancia solo cuenta si la carrera se hizo al ritmo pedido:

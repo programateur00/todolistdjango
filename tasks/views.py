@@ -499,8 +499,32 @@ def task_edit(request, pk):
 @require_POST
 def task_delete(request, pk):
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    if (
+        task.reading_mode == Task.READING_MODE_PLAN and task.due_date
+        and task.repeat != Task.REPEAT_NONE and not task.reading_completed_at
+    ):
+        # Borrar el día de un plan de lectura en marcha NO debe acabar con
+        # el plan (era lo que pasaba: al borrar la instancia pendiente
+        # nadie generaba la siguiente y el libro dejaba de salir). Se
+        # salta ese día y se genera ya el siguiente; para borrar el plan
+        # entero está reading_plan_delete.
+        task._spawn_next()
+        task.delete()
+        messages.success(request, "Sesión saltada. El plan de lectura sigue en su próximo día.")
+        return redirect(reverse("tasks:task_list"))
     task.delete()
     messages.success(request, "Tarea eliminada. Su historial y estadísticas se conservan.")
+    return redirect(reverse("tasks:task_list"))
+
+
+@require_POST
+def reading_plan_delete(request, pk):
+    """Borra el plan de lectura ENTERO (todos sus días). Único sitio que lo hace."""
+    task = get_object_or_404(
+        Task, pk=pk, user=get_current_user(), reading_mode=Task.READING_MODE_PLAN,
+    )
+    Task.objects.filter(series_id=task.series_id, user=get_current_user()).delete()
+    messages.success(request, "Plan de lectura eliminado. Su historial y estadísticas se conservan.")
     return redirect(reverse("tasks:task_list"))
 
 
@@ -1702,13 +1726,24 @@ def plan_list(request):
         user=get_current_user(), category=Task.CATEGORY_WORK, subcategory=Task.SUBCATEGORY_READING,
         reading_mode=Task.READING_MODE_PLAN, deleted_at__isnull=True,
     )
+    # UNA tarjeta por plan, no una por cada día: un plan de lectura es una
+    # serie de tareas diarias (una fila por día, ver Task._spawn_next), y
+    # listarlas todas enseñaba el plan repetido -- la del día ya hecho y la
+    # de hoy, con el mismo título. Eso invitaba a borrar "la repetida", y
+    # borrar la instancia pendiente acaba con el plan entero (nadie
+    # genera ya la siguiente). Se queda la más reciente de cada serie, y
+    # es esa la que decide si el plan está abierto o terminado.
+    latest_by_series = {}
+    for t in reading_qs.order_by("-due_date", "-pk"):
+        latest_by_series.setdefault(t.series_id, t)
+    latest = list(latest_by_series.values())
     reading_plans = [
         {"task": t, "status": t.reading_plan_status}
-        for t in reading_qs.filter(reading_completed_at__isnull=True).order_by("title")
+        for t in sorted((t for t in latest if not t.reading_completed_at), key=lambda t: t.title)
     ]
     closed_reading_plans = [
         {"task": t, "status": t.reading_plan_status}
-        for t in reading_qs.filter(reading_completed_at__isnull=False).order_by("-reading_completed_at")
+        for t in sorted((t for t in latest if t.reading_completed_at), key=lambda t: t.reading_completed_at, reverse=True)
     ]
     return render(request, "tasks/plan_list.html", {
         "plans": plans, "closed_plans": closed_plans,

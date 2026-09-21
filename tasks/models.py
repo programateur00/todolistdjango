@@ -4459,7 +4459,7 @@ class DebugLog(models.Model):
     PLATFORM_MOBILE = "mobile"
     PLATFORM_CHOICES = [(PLATFORM_WEB, "Web"), (PLATFORM_MOBILE, "Móvil")]
 
-    MAX_ENTRIES = 30  # cuántas se conservan -- ver debug_log_create en api.py
+    MAX_ENTRIES = 5  # cuántas se conservan -- ver debug_log_create en api.py
 
     created_at = models.DateTimeField(auto_now_add=True)
     platform = models.CharField(max_length=10, choices=PLATFORM_CHOICES)

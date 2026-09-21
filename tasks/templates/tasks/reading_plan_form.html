@@ -81,8 +81,8 @@
 {# aquí no hay Plan detrás que soft-borrar (ver el comentario del radio de #}
 {# Lectura en plan_form.html) -- esto es la Task de siempre, task_delete. #}
 <div class="task-form__actions">
-    <form action="{% url 'tasks:task_delete' task.pk %}" method="post" class="inline-delete"
-          onsubmit="return confirm('¿Eliminar «{{ task.title|escapejs }}»? Se pierde el progreso guardado y no se puede deshacer.');">
+    <form action="{% url 'tasks:reading_plan_delete' task.pk %}" method="post" class="inline-delete"
+          onsubmit="return confirm('¿Eliminar el plan «{{ task.title|escapejs }}» ENTERO? Se acaba el plan y ya no saldrá ningún día más, se pierde el progreso guardado y no se puede deshacer.');">
         {% csrf_token %}
         <button type="submit" class="ghost-btn ghost-btn--danger">Eliminar plan de lectura</button>
     </form>
