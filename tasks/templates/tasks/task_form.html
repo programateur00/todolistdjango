@@ -211,18 +211,6 @@
         </label>
     </div>
 
-    {% if not task %}
-    <div id="reading-plan-switch" class="field" hidden>
-        <span class="field__hint">
-            ¿Prefieres un visor de PDF propio con seguimiento de página real y ritmo hasta un
-            plazo, en vez de cronómetro o extensión?
-        </span>
-        <div class="task-form__actions">
-            <a href="{% url 'tasks:reading_plan_create' %}" class="ghost-btn">Crear un Plan de lectura →</a>
-        </div>
-    </div>
-    {% endif %}
-
     <div id="udemy-generic-hint" class="field">
         <span class="field__hint">Hábito genérico: cuenta el tiempo en cualquier curso de Udemy, nunca se cierra solo.</span>
         <details class="hint-details">
@@ -406,7 +394,6 @@
     var languageFields = document.getElementById('language-fields');
     var udemyFields = document.getElementById('udemy-fields');
     var udemyGenericHint = document.getElementById('udemy-generic-hint');
-    var readingPlanSwitch = document.getElementById('reading-plan-switch');
     var focusTargetField = document.getElementById('focus-target-field');
     var generalTimerField = document.getElementById('general-timer-field');
     var wantsTimerInput = document.getElementById('wants-timer-input');
@@ -494,7 +481,6 @@
         // input de siempre, sin cambios.
         udemyFields.style.display = esLectura ? 'block' : 'none';
         udemyGenericHint.style.display = esUdemy ? 'block' : 'none';
-        if (readingPlanSwitch) readingPlanSwitch.hidden = !esLectura;
         var videoEnDeporte = esDeporte && modoActual === 'video';
         // Lectura vigilada por palabra clave no necesita ni tiene sentido
         // con un vídeo enganchado (ver esLectura más arriba) — se oculta

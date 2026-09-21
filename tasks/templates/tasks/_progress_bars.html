@@ -6,7 +6,7 @@
     </div>
     <div class="stats-bar"><div class="stats-bar__done" style="width:{{ daily.pct|default:0 }}%"></div></div>
     <p class="week-summary__meta">
-        {% if daily.total %}{{ daily.done }} de {{ daily.total }} tareas hechas hoy{% else %}No hay tareas para hoy{% endif %}
+        {% if daily.total %}{{ daily.done }} tarea{{ daily.done|pluralize }} de {{ daily.total }} hecha{{ daily.total|pluralize }} hoy{% else %}No hay tareas para hoy{% endif %}
     </p>
 
     <div class="week-summary__top week-summary__top--second">
@@ -15,7 +15,7 @@
     </div>
     <div class="stats-bar"><div class="stats-bar__done" style="width:{{ weekly.pct|default:0 }}%"></div></div>
     <p class="week-summary__meta">
-        {% if weekly.total %}{{ weekly.done }} de {{ weekly.total }} tareas hechas · {{ weekly.week_start|date:"d M" }}–{{ weekly.week_end|date:"d M" }}
+        {% if weekly.total %}{{ weekly.done }} tarea{{ weekly.done|pluralize }} de {{ weekly.total }} hecha{{ weekly.total|pluralize }} · {{ weekly.week_start|date:"d M" }}–{{ weekly.week_end|date:"d M" }}
         {% else %}No hay tareas esta semana{% endif %}
     </p>
 </section>

@@ -25,7 +25,7 @@
             <p class="review-label">Ejecución de esta semana</p>
             {% if p.weekly and p.weekly.total %}
             <div class="stats-bar"><div class="stats-bar__done" style="width:{{ p.weekly.pct }}%"></div></div>
-            <p class="plan-card__head">{{ p.weekly.pct }}% · {{ p.weekly.done }} de {{ p.weekly.total }} sesiones</p>
+            <p class="plan-card__head">{{ p.weekly.pct }}% · {{ p.weekly.done }} sesion{{ p.weekly.done|pluralize:'es' }} de {{ p.weekly.total }}</p>
             {% else %}
             <p class="plan-card__head">Todavía no ha tocado esta semana.</p>
             {% endif %}

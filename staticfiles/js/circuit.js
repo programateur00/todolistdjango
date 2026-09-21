@@ -120,6 +120,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   // cámara puede fallar) si el lado de esta 2ª vez parece el mismo que la
   // 1ª -- ver stretchSideDone/occurrenceInfo más abajo.
   const STRETCH_SIDE_COUNTERS = new Set(["armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
+  const STRETCH_FIXED_SECONDS = 30; // duración fija de los estiramientos con cronómetro
   const STRETCH_SIDE_LABEL = {
     armcrossstretch: "brazo",
     tricepsoverheadstretch: "brazo",
@@ -272,7 +273,11 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     // sentido -- se cuenta libremente desde el principio y el botón
     // principal para avanzar está disponible desde ya (como en runCamera),
     // no escondido detrás de un objetivo que aquí no existe.
-    const isFailure = !item.work;
+    // Estiramientos con cronómetro: 30 s fijos (da igual lo que diga el plan) y,
+    // en cuanto se cumplen, pasa solo al siguiente ejercicio (sin pulsar nada).
+    const isStretchFixed = STRETCH_SIDE_COUNTERS.has(item.counter_key);
+    const work = isStretchFixed ? STRETCH_FIXED_SECONDS : item.work;
+    const isFailure = !work;
     const occ = occurrenceInfo(item);
     const sideLabel = STRETCH_SIDE_LABEL[item.counter_key] || "lado";
 
@@ -305,7 +310,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         <p class="workout__note">${
           isFailure
             ? "Aguanta hasta que ya no puedas y pulsa Siguiente/Terminar."
-            : "La cuenta atrás se pausa sola mientras la postura no sea correcta. Si sigues después del objetivo, sigue sumando por encima del 100%."
+            : isStretchFixed ? "30 segundos fijos: la cuenta atrás se pausa sola mientras la postura no sea correcta y, al llegar a 0, pasa sola al siguiente ejercicio." : "La cuenta atrás se pausa sola mientras la postura no sea correcta. Si sigues después del objetivo, sigue sumando por encima del 100%."
         }</p>
       </div>`;
 
@@ -425,12 +430,12 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         return;
       }
 
-      if (!goalReached && elapsed < item.work) {
+      if (!goalReached && elapsed < work) {
         // Cuenta atrás normal hacia el objetivo — igual que antes, pero
         // ahora además dicha en voz alta cada segundo (como cada
         // repetición en dominadas/fondos), para poder seguir sin mirar
         // la pantalla.
-        const remaining = item.work - elapsed;
+        const remaining = work - elapsed;
         timerEl.textContent = fmt(remaining);
         if (remaining <= 3) beep(660, 0.1);
         // Cada 5 segundos, no cada uno - ver nota junto a runTimer() más
@@ -443,6 +448,13 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       }
 
       if (!goalReached) {
+        if (isStretchFixed) {
+          // 30 s cumplidos: aviso y siguiente ejercicio automático.
+          beep(880, 0.2);
+          finishThis(work);
+          advance();
+          return;
+        }
         // Objetivo alcanzado justo este segundo — un aviso, una sola vez,
         // y sin cortar nada (el ejercicio sigue: ya no se cierra solo).
         goalReached = true;
@@ -451,7 +463,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         if (isVoiceEnabled()) speakOut(numeroEnPalabras(0), { flush: true });
         if (goalBannerEl) {
           goalBannerEl.hidden = false;
-          goalBannerEl.textContent = `🎯 ¡Objetivo cumplido! (${fmt(item.work)}) Sigue si quieres, o termina cuando acabes.`;
+          goalBannerEl.textContent = `🎯 ¡Objetivo cumplido! (${fmt(work)}) Sigue si quieres, o termina cuando acabes.`;
         }
         // "Saltar" ya no describe bien lo que hace este botón una vez
         // cumplido el objetivo (no se está saltando nada) — mismo texto
@@ -468,7 +480,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       // objetivo de 8 dominadas — así se nota de oído que vas por encima
       // del 100% (y se guarda tal cual: ver finish(), el % de logro ya
       // sabe compararlo contra item.work).
-      const over = elapsed - item.work;
+      const over = elapsed - work;
       timerEl.textContent = `+${fmt(over)}`;
       if (isVoiceEnabled() && over % 5 === 0 && over !== lastSpokenNumber) {
         lastSpokenNumber = over;

@@ -153,6 +153,21 @@ const HANG_MARGIN_FACTOR = 0.08; // cuanto tienen que estar las munecas por enci
 const RELEASE_MARGIN_FACTOR = 0.15;
 const SCALE_TOLERANCE = 0.3; // cuanto puede variar el ancho de hombros (te acercas/alejas) antes de desconfiar del frame
 const MIN_REP_SECONDS = 0.3; // por debajo de esto, se descarta como ruido
+// --- Filtro global "hay una persona de verdad delante" (2026-09-21) ---
+// Reportado: sin estar delante de la cámara MediaPipe inventa un esqueleto sobre objetos/fondo, calibra
+// con él y hasta cuenta alguna repetición falsa. Antes de que NINGÚN ejercicio vea los puntos (processResult)
+// se exige: suficientes puntos con visibilidad real (cara+hombros+...), un ancla de tronco (hombro o cadera)
+// visible, un tamaño mínimo de esqueleto, sin "teletransportes" entre frames, y mantenerlo un rato seguido
+// antes de fiarse (los esqueletos fantasma parpadean). Si falla, se trata igual que "sin detección".
+// Pensado laxo a propósito: cubre de frente sin caderas visibles (Cindy), perfil tumbado y solo piernas.
+const PERSON_MIN_VIS = 0.35;                // visibilidad mínima para contar un punto como "visto"
+const PERSON_MIN_VISIBLE_LANDMARKS = 8;     // de los 33 puntos, cuántos hacen falta vistos a la vez
+const PERSON_ANCHOR_MIN_VIS = 0.5;          // al menos UN hombro o cadera con esta visibilidad (ancla de tronco)
+const PERSON_MIN_SPAN = 0.15;               // tamaño mínimo (diagonal, en fracción del encuadre) de los puntos vistos
+const PERSON_CONFIRM_MS = 400;              // rato seguido de esqueleto plausible antes de fiarse de él
+const PERSON_LOSS_GRACE_MS = 300;           // un hueco menor que esto no obliga a reconfirmar
+const PERSON_MAX_JUMP = 0.30;               // salto máximo del centro del esqueleto entre frames (fracción del encuadre)
+const POSE_MIN_DETECTION_CONFIDENCE = 0.6;  // confianza mínima de MediaPipe para DETECTAR una pose nueva (defecto 0.5)
 const PERF_LOG_EVERY_N_FRAMES = 90; // cada cuantos frames se vuelca al registro [perf] (ver loop()) un resumen de ms/frame real de detectForVideo -- ~3s a 30fps, ~1.5s a 60fps
 // Prueba hecha 2026-09-15 en el Redmi A5 de Alex: "GPU" prom=114.8ms/9fps
 // vs "CPU" prom=215.0ms/5fps (casi el doble de lento) — confirma que la
@@ -4624,6 +4639,7 @@ class WorkoutSession {
         baseOptions: { modelAssetPath: MODEL_URL, delegate: POSE_DELEGATE },
         runningMode: "VIDEO",
         numPoses: 1,
+        minPoseDetectionConfidence: POSE_MIN_DETECTION_CONFIDENCE,
       });
       this.logScissor(
         `[perf] PoseLandmarker creado pidiendo delegate=${POSE_DELEGATE} (con "GPU" la librería no ` +
@@ -12782,10 +12798,59 @@ class WorkoutSession {
     return this.curlCameraShakeSince !== null && now - this.curlCameraShakeSince >= CURL_CAMERA_SHAKE_STABLE_MS;
   }
 
+  checkRealPerson(lm, now) {
+    let n = 0, minX = 1, maxX = 0, minY = 1, maxY = 0, sx = 0, sy = 0;
+    const cnt = Math.min(lm.length, 33);
+    for (let i = 0; i < cnt; i++) {
+      const q = lm[i];
+      if (!q || (q.visibility ?? 1) < PERSON_MIN_VIS) continue;
+      n++;
+      sx += q.x; sy += q.y;
+      if (q.x < minX) minX = q.x;
+      if (q.x > maxX) maxX = q.x;
+      if (q.y < minY) minY = q.y;
+      if (q.y > maxY) maxY = q.y;
+    }
+    const vis = (i) => (lm[i] ? (lm[i].visibility ?? 1) : 0);
+    const anchor = Math.max(vis(11), vis(12), vis(23), vis(24));
+    let reason = null;
+    let cx = 0, cy = 0;
+    if (n < PERSON_MIN_VISIBLE_LANDMARKS) {
+      reason = `solo ${n}/${PERSON_MIN_VISIBLE_LANDMARKS} puntos con visibilidad`;
+    } else if (anchor < PERSON_ANCHOR_MIN_VIS) {
+      reason = `ni hombros ni caderas claros (${anchor.toFixed(2)})`;
+    } else {
+      cx = sx / n; cy = sy / n;
+      const span = Math.hypot(maxX - minX, maxY - minY);
+      if (span < PERSON_MIN_SPAN) {
+        reason = `esqueleto demasiado pequeño (${span.toFixed(2)})`;
+      } else if (
+        this._personLastAt != null && now - this._personLastAt <= PERSON_LOSS_GRACE_MS &&
+        Math.hypot(cx - this._personLastCx, cy - this._personLastCy) > PERSON_MAX_JUMP
+      ) {
+        reason = "esqueleto saltando de sitio";
+        this._personSince = now; // reinicia la confirmación
+        this._personLastAt = now;
+        this._personLastCx = cx; this._personLastCy = cy;
+      }
+    }
+    if (reason) return { ok: false, reason };
+    if (this._personLastAt == null || now - this._personLastAt > PERSON_LOSS_GRACE_MS) this._personSince = now;
+    this._personLastAt = now;
+    this._personLastCx = cx; this._personLastCy = cy;
+    const held = now - this._personSince;
+    if (held < PERSON_CONFIRM_MS) return { ok: false, reason: `confirmando que eres tú (${Math.round(held)}/${PERSON_CONFIRM_MS}ms)` };
+    return { ok: true, reason: null };
+  }
+
   processResult(result, now) {
     this.maybeAnnounceRestEnd(now);
-    if (!result.landmarks || !result.landmarks.length) {
-      if (this.debugEl) this.debugEl.textContent = "sin detección — ¿sales entero en el encuadre?";
+    const hasPose = !!(result.landmarks && result.landmarks.length);
+    const personCheck = hasPose ? this.checkRealPerson(result.landmarks[0], now) : null;
+    if (!hasPose || !personCheck.ok) {
+      if (this.debugEl) this.debugEl.textContent = hasPose
+        ? "sin persona fiable — " + personCheck.reason
+        : "sin detección — ¿sales entero en el encuadre?";
       // Sentadillas y los abdominales tumbado no tienen su propio cierre
       // de serie (a diferencia de dominadas y fondos): sin esto, salir
       // del encuadre dejaba la serie abierta en silencio. Aquí también

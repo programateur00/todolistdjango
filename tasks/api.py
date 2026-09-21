@@ -254,6 +254,7 @@ def task_list(request):
         "pending": [task_json(t) for t in Task.for_today(qs.filter(is_done=False))],
         "completed": [task_json(t) for t in Task.completed_today(qs)],
         "weekly": Occurrence.weekly_completion(_user()),
+        "daily": Occurrence.daily_completion(_user()),
     })
 
 

@@ -4407,8 +4407,12 @@ class Occurrence(models.Model):
                 recorded_at__date__lte=week_end,
             )
         )
-        total = occs.count()
-        done = occs.filter(result=cls.RESULT_DONE).count()
+        pending = Task.objects.filter(
+            user=user, deleted_at__isnull=True, is_done=False,
+        ).filter(models.Q(due_date__isnull=True) | models.Q(due_date__lte=week_end))
+        if series_id:
+            pending = pending.filter(series_id=series_id)
+        done, total = cls._count_done_total(occs, pending)
         return {
             "week_start": week_start,
             "week_end": week_end,
@@ -4417,6 +4421,33 @@ class Occurrence(models.Model):
             "total": total,
             "pct": round(100 * done / total) if total else None,
         }
+
+    @classmethod
+    def _count_done_total(cls, occs, pending):
+        """
+        (hechas, total) sumando lo ya resuelto (Occurrence) Y lo que
+        sigue pendiente (Task con is_done=False).
+
+        Antes el total solo eran las Occurrence, y una tarea sin resolver
+        no tiene ninguna: con 4 tareas y 2 hechas salía "2 de 2" (100%).
+        Las pendientes tienen que estar en el total.
+
+        Una tarea pendiente NO se cuenta dos veces: "Desmarcar" la deja
+        pendiente pero guarda una Occurrence de "no hecha" para ese día,
+        y ya cuenta ahí.
+        """
+        occ_rows = list(occs.values_list("series_id", "due_date", "result", "task_id"))
+        done = sum(1 for r in occ_rows if r[2] == cls.RESULT_DONE)
+        seen_slots = {(r[0], r[1]) for r in occ_rows if r[1] is not None}
+        seen_tasks = {r[3] for r in occ_rows if r[3] is not None and r[2] != cls.RESULT_DONE}
+        extra = 0
+        for t_id, t_series, t_due in pending.values_list("id", "series_id", "due_date"):
+            if t_due is not None and (t_series, t_due) in seen_slots:
+                continue
+            if t_due is None and t_id in seen_tasks:
+                continue
+            extra += 1
+        return done, len(occ_rows) + extra
 
     @classmethod
     def daily_completion(cls, user, reference_date=None):
@@ -4429,8 +4460,10 @@ class Occurrence(models.Model):
             models.Q(due_date=today)
             | models.Q(due_date__isnull=True, recorded_at__date=today)
         )
-        total = occs.count()
-        done = occs.filter(result=cls.RESULT_DONE).count()
+        pending = Task.objects.filter(
+            user=user, deleted_at__isnull=True, is_done=False,
+        ).filter(models.Q(due_date__isnull=True) | models.Q(due_date__lte=today))
+        done, total = cls._count_done_total(occs, pending)
         return {
             "date": today,
             "done": done,

@@ -57,18 +57,17 @@ ROUTINES = [
         # Orden de arriba a abajo del cuerpo: cuello, brazos, muñecas,
         # jumping jacks, flexiones (a petición de Alex).
         "items": [
-            ("neck-circles", 2, 30),           # bilateral: sentido horario y antihorario
-            ("neck-lateral-mobility", 2, 30),  # bilateral: inclinación izq. y dcha.
-            ("neck-turn-side", 2, 30),         # bilateral: giro izq. y dcha.
-            ("neck-half-turn", 1, 30),         # simétrico (barrido adelante-atrás)
-            ("arm-circles", 2, 30),            # bilateral: sentido horario y antihorario
-            ("arm-scissors", 1, 30),           # simétrico (los dos brazos a la vez)
-            ("arm-cross-stretch", None, None),        # cronometrado, bilateral -- serie 1: un brazo
-            ("arm-cross-stretch", None, None),        # cronometrado, bilateral -- serie 2: el otro brazo
-            ("triceps-overhead-stretch", None, None),  # cronometrado, bilateral -- serie 1: un brazo
-            ("triceps-overhead-stretch", None, None),  # cronometrado, bilateral -- serie 2: el otro brazo
-            ("forearm-rotation-elbow-hold", 2, 30),    # bilateral: sentido horario y antihorario
-            ("wrist-rotation-interlaced", 1, 30),      # simétrico (las dos muñecas entrelazadas)
+            # A petición de Alex (2026-09-21): UNA sola serie de 30 por
+            # ejercicio, sin dos series por lado/sentido (cada cronometrado
+            # aparece una sola vez). Flexiones se quedan en 10.
+            ("neck-lateral-mobility", 1, 30),  # oreja al hombro
+            ("neck-turn-side", 1, 30),         # el "no" con la cabeza
+            ("arm-circles", 1, 30),
+            ("arm-scissors", 1, 30),
+            ("arm-cross-stretch", None, None),         # cronometrado
+            ("triceps-overhead-stretch", None, None),  # cronometrado
+            ("forearm-rotation-elbow-hold", 1, 30),
+            ("wrist-rotation-interlaced", 1, 30),
             ("jumping-jack", 1, 30),
             ("push-up", 1, 10),
         ],

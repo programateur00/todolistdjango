@@ -108,6 +108,8 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   // circuit.js.
   const POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "lsithold", "supermanhold"]);
 
+  const STRETCH_FIXED_COUNTERS = new Set(["armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
+
   function runCurrent() {
     const item = current();
     if (!item) return finish();
@@ -124,14 +126,16 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     // se cuenta libremente hacia ADELANTE desde 0 hasta que el usuario
     // decida que ha llegado al fallo, igual que en session-runner.js
     // (móvil).
-    const isFailure = !item.work;
+    // Estiramientos con cronómetro: 30 s fijos, y al cumplirse pasa solo al siguiente.
+    const work = STRETCH_FIXED_COUNTERS.has(item.counter_key) ? 30 : item.work;
+    const isFailure = !work;
     playerHost.innerHTML = `
       <div class="circuit">
         <p class="circuit__progress">${esc(progressLabel())}</p>
         <div class="circuit__icon">${iconFor(item.slug)}</div>
         <h2 class="circuit__exercise-name">${esc(item.name)}</h2>
         <p class="circuit__phase circuit__phase--work">${isFailure ? "Al fallo" : "Trabajo"}</p>
-        <div class="circuit__timer" id="run-timer">${fmt(item.work || 0)}</div>
+        <div class="circuit__timer" id="run-timer">${fmt(work || 0)}</div>
         <p class="circuit__next">${hasNext() ? `Siguiente: ${esc(sequence[index + 1].name)}` : "¡Último!"}</p>
         <div class="circuit__controls">
           <button type="button" class="workout__btn workout__btn--ghost" id="run-pause">Pausar</button>
@@ -142,7 +146,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         <p id="run-debug-export-status" class="workout__debug"></p>
       </div>`;
 
-    let remaining = item.work;
+    let remaining = work;
     let elapsed = 0;
     let lastSpokenNumber = null; // último entero ya dicho, para no repetirlo en el mismo segundo
     const timerEl = document.getElementById("run-timer");
@@ -175,13 +179,13 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       remaining -= 1;
       if (remaining <= 0) {
         clearInterval(timerId);
-        logDebugLine(`objetivo cumplido (${item.work}s)`);
-        record({ exercise: item.slug, seconds: item.work });
+        logDebugLine(`objetivo cumplido (${work}s)`);
+        record({ exercise: item.slug, seconds: work });
         beep(880, 0.2);
         advance();
         return;
       }
-      logDebugLine(`restantes=${remaining}s de ${item.work}s`);
+      logDebugLine(`restantes=${remaining}s de ${work}s`);
       if (remaining <= 3) beep(660, 0.1);
       // Cuenta atrás dicha en voz alta cada segundo — igual que ya hacía
       // runTimerWithPosture() más abajo (mismo motivo: se pidió poder
