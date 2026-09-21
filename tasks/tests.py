@@ -6,7 +6,7 @@ from django.utils import timezone
 from django.urls import reverse
 
 from .models import (
-    Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, Task, TimerSession, WorkoutSession,
+    Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, Task, TimerSession, WarmupStatus, WorkoutSession,
 )
 from .utils import get_current_user
 
@@ -23,7 +23,7 @@ class CategoryModelTests(TestCase):
     def test_category_capabilities_study_has_timer(self):
         t = Task(category=Task.CATEGORY_STUDY)
         self.assertTrue(t.has_capability("timer"))
-        self.assertTrue(t.has_capability("pomodoro"))
+        self.assertTrue(t.has_capability("app_usage"))
         self.assertFalse(t.has_capability("pose_tracking"))
 
     def test_category_capabilities_sport_has_pose(self):
@@ -830,7 +830,7 @@ class PlanViewTests(TestCase):
     def test_add_headline_item(self):
         plan = self._create_plan()
         r = self.client.post(reverse("tasks:plan_item_create", args=[plan.pk]), {
-            "exercise": self.wp.slug, "progression": "double", "is_headline": "on",
+            "exercise": self.wp.slug, "progression": "double", "is_headline": "on", "sport_mode": "camera",
             "start_sets": 4, "start_reps": 6, "start_weight_kg": 0,
             "goal_sets": 4, "goal_reps": 12, "goal_weight_kg": 20,
             "rep_range_low": 6, "weight_increment_kg": 5, "sessions_per_step": 2,
@@ -845,7 +845,7 @@ class PlanViewTests(TestCase):
         other = Exercise.objects.create(slug="ot-v", name="Otro", mode=Exercise.MODE_POSE)
         for slug in (self.wp.slug, other.slug):
             self.client.post(reverse("tasks:plan_item_create", args=[plan.pk]), {
-                "exercise": slug, "progression": "reps", "is_headline": "on",
+                "exercise": slug, "progression": "reps", "is_headline": "on", "sport_mode": "camera",
                 "start_sets": 3, "start_reps": 8, "goal_reps": 12,
             })
         self.assertEqual(plan.items.filter(is_headline=True).count(), 1)
@@ -855,7 +855,7 @@ class PlanViewTests(TestCase):
         filas se cortaba antes y no se veía el final."""
         plan = self._create_plan()
         self.client.post(reverse("tasks:plan_item_create", args=[plan.pk]), {
-            "exercise": self.wp.slug, "progression": "double", "is_headline": "on",
+            "exercise": self.wp.slug, "progression": "double", "is_headline": "on", "sport_mode": "camera",
             "start_sets": 4, "start_reps": 6, "start_weight_kg": 0,
             "goal_sets": 4, "goal_reps": 12, "goal_weight_kg": 20,
             "rep_range_low": 6, "weight_increment_kg": 5, "sessions_per_step": 2,
@@ -875,8 +875,10 @@ class PlanViewTests(TestCase):
         self.client.post(reverse("tasks:plan_delete", args=[plan.pk]))
         plan.refresh_from_db()
         self.assertIsNotNone(plan.deleted_at)
-        html = self.client.get(reverse("tasks:plan_list")).content.decode()
-        self.assertNotIn("Ponerme en forma", html)
+        r = self.client.get(reverse("tasks:plan_list"))
+        # (no se mira el HTML: los mensajes flash de "guardado"/"eliminado"
+        # también llevan el nombre del plan)
+        self.assertEqual(r.context["plans"], [])
 
 
 class NotificationSeriesTests(TestCase):
@@ -945,6 +947,7 @@ class PlanTaskFlowTests(TestCase):
     """
 
     def setUp(self):
+        WarmupStatus.mark_done(get_current_user())   # si no, el play manda a /calentamiento/
         self.wp = Exercise.objects.create(
             slug="wp-f", name="Dominadas con peso", mode=Exercise.MODE_POSE,
         )
@@ -956,7 +959,7 @@ class PlanTaskFlowTests(TestCase):
         })
         plan = Plan.objects.get(name="Ponerme en forma")
         self.client.post(reverse("tasks:plan_item_create", args=[plan.pk]), {
-            "exercise": self.wp.slug, "progression": "double", "is_headline": "on",
+            "exercise": self.wp.slug, "progression": "double", "is_headline": "on", "sport_mode": "camera",
             "start_sets": 4, "start_reps": 6, "start_weight_kg": 0,
             "goal_sets": 4, "goal_reps": 12, "goal_weight_kg": 20,
             "rep_range_low": 6, "weight_increment_kg": 5, "sessions_per_step": 2,
@@ -1000,9 +1003,13 @@ class PlanTaskFlowTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(r.status_code, 200)
+        self.assertEqual(WorkoutSession.objects.filter(plan=plan).count(), 1)
+        # la tarea se cierra al pasar por el enfriamiento, no al guardar
+        task.refresh_from_db()
+        self.assertFalse(task.is_done)
+        self.client.post(reverse("tasks:task_cooldown", args=[task.pk]))
         task.refresh_from_db()
         self.assertTrue(task.is_done)
-        self.assertEqual(WorkoutSession.objects.filter(plan=plan).count(), 1)
 
     def test_pausing_the_plan_removes_its_pending_task(self):
         plan = self._plan_with_exercise()
@@ -1029,6 +1036,7 @@ class PostureCameraWorkoutTests(TestCase):
 
     def setUp(self):
         self.user = get_current_user()
+        WarmupStatus.mark_done(self.user)   # si no, task_workout manda a /calentamiento/
         self.task = Task.objects.create(title="Plancha", category=Task.CATEGORY_SPORT, user=self.user)
 
     def test_standalone_plank_renders_the_camera_workout_screen(self):
@@ -1264,8 +1272,10 @@ class MultiExerciseCompletionTests(TestCase):
         self.assertEqual(ws.exercise, "plank-c")   # no "ab-circuit"
         self.assertEqual(ws.plan, plan)
         self.assertFalse(ws.target_met)            # 15s de 90s (3x30) pedidos
-        # pero la tarea se completa igualmente: es una sesión con varios
-        # ejercicios en potencia, y aquí lo que cuenta es que entrenaste.
+        # pero la tarea se completa igualmente (al pasar por el
+        # enfriamiento): es una sesión con varios ejercicios en potencia,
+        # y aquí lo que cuenta es que entrenaste.
+        self.client.post(reverse("tasks:task_cooldown", args=[self.task.pk]))
         self.task.refresh_from_db()
         self.assertTrue(self.task.is_done)
 
@@ -1276,6 +1286,7 @@ class MultiExerciseCompletionTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(r.status_code, 200)
+        self.client.post(reverse("tasks:task_cooldown", args=[self.task.pk]))
         self.task.refresh_from_db()
         self.assertTrue(self.task.is_done)
         ws = WorkoutSession.objects.get(task=self.task)
@@ -1505,6 +1516,7 @@ class WebCircuitPlayAndSaveTests(TestCase):
         RoutineItem.objects.create(routine=self.routine, exercise=self.plank, order=0)
         RoutineItem.objects.create(routine=self.routine, exercise=self.crunch, order=1)
         self.task = Task.objects.create(title="Circuito", category=Task.CATEGORY_SPORT, user=self.user)
+        WarmupStatus.mark_done(self.user)   # si no, routine_play manda a /calentamiento/
 
     def test_items_json_carries_mode_and_counter_key(self):
         r = self.client.get(reverse("tasks:routine_play", args=[self.task.pk, self.routine.pk]))
@@ -1622,14 +1634,17 @@ class ListFilteringTests(TestCase):
         api = self.client.get("/api/tasks/").json()
         self.assertEqual(api["pending"], [])
 
-    def test_overdue_tasks_are_still_shown(self):
-        """Una tarea vencida sigue pendiente y debe verse: el filtro es
-        para el futuro, no para el pasado."""
-        Task.objects.create(
+    def test_overdue_tasks_are_auto_closed_not_pending(self):
+        """Toda tarea tiene hora límite (Task.save pone 23:59 si no hay):
+        una vencida se cierra sola como no hecha en vez de quedarse
+        pendiente."""
+        t = Task.objects.create(
             title="Atrasada", due_date=date.today() - timedelta(days=2), user=self.user,
         )
         api = self.client.get("/api/tasks/").json()
-        self.assertEqual([t["title"] for t in api["pending"]], ["Atrasada"])
+        self.assertEqual(api["pending"], [])
+        t.refresh_from_db()
+        self.assertTrue(t.is_done and t.expired)
 
     def test_tasks_without_date_are_always_shown(self):
         Task.objects.create(title="Cuando pueda", user=self.user)
@@ -2019,3 +2034,29 @@ class UdemyPlanTests(TestCase):
         self.assertEqual(head.watch_keyword, "Linux")
         task = Task.objects.get(series_id=plan.task_series_id)
         self.assertEqual(task.subcategory, Task.SUBCATEGORY_UDEMY)
+
+
+class DailyCompletionTests(TestCase):
+    """La barra de hoy/semana tiene que contar también las pendientes."""
+
+    def test_pendientes_cuentan_en_el_total(self):
+        u = get_current_user()
+        hoy = date.today()
+        a = Task.objects.create(title="A", due_date=hoy, user=u)
+        b = Task.objects.create(title="B", due_date=hoy, user=u)
+        Task.objects.create(title="C", due_date=hoy, user=u)
+        Task.objects.create(title="No fumar", due_date=hoy, category=Task.CATEGORY_AVOID, user=u)
+        a.mark_done()
+        b.mark_done()
+        d = Occurrence.daily_completion(u)
+        self.assertEqual((d["done"], d["total"], d["pct"]), (2, 4, 50))
+        w = Occurrence.weekly_completion(u)
+        self.assertEqual((w["done"], w["total"]), (2, 4))
+
+    def test_desmarcar_no_cuenta_doble(self):
+        u = get_current_user()
+        t = Task.objects.create(title="A", due_date=date.today(), user=u)
+        t.mark_done()
+        t.mark_not_done()
+        d = Occurrence.daily_completion(u)
+        self.assertEqual((d["done"], d["total"]), (0, 1))
