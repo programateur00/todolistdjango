@@ -239,19 +239,43 @@
             Pon uno de los tres — palabra clave de Udemy, vídeo o playlist de YouTube.
         </p>
 
-        <label class="field" id="study-source-udemy-field">
-            <span class="field__label">Curso de Udemy — palabra clave</span>
-            <input type="text" name="watch_keyword" value="{{ study_headline.watch_keyword|default:'' }}"
-                placeholder="Un trozo único del título del curso en Udemy, ej. \'Excel\'">
-            <details class="hint-details">
-                <summary>¿cómo lo detecta?</summary>
-                <span class="field__hint">
-                    La extensión de Chrome cuenta el tiempo con la pestaña en primer plano y
-                    detecta ella sola cuándo terminas el curso — el plan se cierra solo (con
-                    tu recompensa, si le pusiste una) al terminarlo.
+        <div class="field" id="study-source-udemy-field">
+            <label class="field">
+                <span class="field__label">Curso de Udemy — palabra clave</span>
+                <input type="text" name="watch_keyword" value="{{ study_headline.watch_keyword|default:'' }}"
+                    placeholder="Un trozo único del título del curso en Udemy, ej. \'Excel\'">
+                <details class="hint-details">
+                    <summary>¿cómo lo detecta?</summary>
+                    <span class="field__hint">
+                        La extensión de Chrome cuenta el tiempo con la pestaña en primer plano y
+                        detecta ella sola cuándo terminas el curso — el plan se cierra solo (con
+                        tu recompensa, si le pusiste una) al terminarlo.
+                    </span>
+                </details>
+            </label>
+            <fieldset class="field" id="watch-track-mode-field">
+                <legend class="field__label">¿Cómo se cuenta el tiempo?</legend>
+                <div class="repeat-options">
+                    <label class="repeat-option">
+                        <input type="radio" name="watch_track_mode" value="videos" class="watch-track-mode-radio"
+                            {% if not study_headline.pk or study_headline.watch_requires_audio %}checked{% endif %}>
+                        <span>Por vídeos vistos</span>
+                    </label>
+                    <label class="repeat-option">
+                        <input type="radio" name="watch_track_mode" value="time" class="watch-track-mode-radio"
+                            {% if study_headline.pk and not study_headline.watch_requires_audio %}checked{% endif %}>
+                        <span>Por tiempo en la página</span>
+                    </label>
+                </div>
+                <span class="field__hint" id="watch-track-mode-hint">
+                    Por vídeos vistos: solo cuenta mientras se oye la clase (para no contar el
+                    Q&amp;A o el temario sin ver nada). Por tiempo en la página: cuenta tanto
+                    vídeo como ejercicios con la pestaña en primer plano, sin exigir audio —
+                    pero para en cuanto te vas más de 5 minutos sin tocar ratón ni teclado, para
+                    que no valga dejar el curso abierto y no estar delante.
                 </span>
-            </details>
-        </label>
+            </fieldset>
+        </div>
         <label class="field" id="study-source-video-field">
             <span class="field__label">Vídeo de YouTube</span>
             <input type="text" name="youtube_video_id" value="{{ study_headline.youtube_video_id|default:'' }}"
@@ -390,6 +414,7 @@
     var studyPlaylistField = document.getElementById("study-source-playlist-field");
     var studyVideoCountField = document.getElementById("study-source-video-count-field");
     var watchKeywordInput = studyVideoFields.querySelector('input[name="watch_keyword"]');
+    var watchTrackModeRadios = studyVideoFields.querySelectorAll('input[name="watch_track_mode"]');
     var studyVideoInput = studyVideoFields.querySelector('input[name="youtube_video_id"]');
     var studyPlaylistInput = studyVideoFields.querySelector('input[name="youtube_playlist_id"]');
     var planTypeRadios = document.querySelectorAll(".plan-type-radio");
@@ -460,6 +485,9 @@
         var source = selectedValue(studySourceRadios) || "udemy";
         watchKeywordField.style.display = source === "udemy" ? "block" : "none";
         watchKeywordInput.disabled = source !== "udemy";
+        for (var k = 0; k < watchTrackModeRadios.length; k++) {
+            watchTrackModeRadios[k].disabled = source !== "udemy";
+        }
         studyVideoField.style.display = source === "video" ? "block" : "none";
         studyVideoInput.disabled = source !== "video";
         studyPlaylistField.style.display = source === "playlist" ? "block" : "none";

@@ -571,7 +571,12 @@
         }).then(function (handles) {
             var handle = handles[0];
             var key = pdfKey || ('reading-' + crypto.randomUUID());
-            return storeHandle(key, handle).then(function () { return handle.getFile(); });
+            // Se guarda el File ya leido, no el handle -- asi no hace falta
+            // volver a pedir permiso la proxima vez que se abra esta pagina
+            // (ver isFileHandle/boot mas abajo).
+            return handle.getFile().then(function (file) {
+                return storeHandle(key, file).then(function () { return file; });
+            });
         }).then(openFile).catch(function (err) {
             if (err && err.name !== 'AbortError') {
                 hint.textContent = 'No se pudo usar ese archivo (' + (err.name || err.message || err) + ').';
@@ -579,6 +584,12 @@
         });
     }
     pickBtn.addEventListener('click', pickFile);
+
+    // Distingue una entrada IndexedDB antigua (FileSystemFileHandle, de
+    // antes de este cambio) de un File/Blob guardado directamente.
+    function isFileHandle(entry) {
+        return !!entry && typeof entry.getFile === 'function' && typeof entry.requestPermission === 'function';
+    }
 
     function askPermissionThenOpen(handle) {
         hint.textContent = 'Hace falta tu permiso para abrir el PDF.';
@@ -598,7 +609,10 @@
                     return;
                 }
                 permissionPrompt.hidden = true;
-                handle.getFile().then(openFile).catch(function (err) {
+                handle.getFile().then(function (file) {
+                    storeHandle(pdfKey, file); // migra a Blob: no se volvera a pedir permiso
+                    openFile(file);
+                }).catch(function (err) {
                     hint.textContent = 'No se pudo abrir el archivo (' + (err.name || err.message || err) + ') — puede que se haya movido o borrado.';
                     reselectBtn.hidden = false;
                 });
@@ -612,14 +626,24 @@
 
     function boot() {
         if (!supportsLocal) { return; }
-        getStoredHandle(pdfKey).then(function (handle) {
-            if (!handle) {
+        getStoredHandle(pdfKey).then(function (entry) {
+            if (!entry) {
                 hint.textContent = 'No hay ningún PDF guardado en este navegador todavía.';
                 pickActions.hidden = false;
                 return;
             }
-            handle.getFile().then(openFile).catch(function () {
-                askPermissionThenOpen(handle);
+            if (!isFileHandle(entry)) {
+                // Ya es un File/Blob guardado directamente: no hace falta pedir permiso.
+                openFile(entry);
+                return;
+            }
+            // Entrada antigua (handle de antes de este cambio): pide permiso
+            // una ultima vez y migra a Blob para no volver a pedirlo.
+            entry.getFile().then(function (file) {
+                storeHandle(pdfKey, file);
+                openFile(file);
+            }).catch(function () {
+                askPermissionThenOpen(entry);
             });
         });
     }

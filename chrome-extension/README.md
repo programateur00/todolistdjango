@@ -7,11 +7,11 @@ la app móvil, con `source=pc_usage` en vez de `app_usage`. Hay dos
 tipos de pestaña trackeable, cada uno emparejado con un tipo de tarea:
 
 - **Udemy** — tarea de categoría Estudio, subtipo "Curso de Udemy".
-  Cuenta tiempo mientras la pestaña de udemy.com está sonando
-  (chrome.tabs.audible) — estar en el Q&A, las reseñas o el temario
-  del curso sin el vídeo reproduciéndose NO cuenta, solo se trackea
-  mientras se oye la clase. Hay dos formas de tener una tarea de
-  Udemy: **con palabra clave** (viene de un Plan) — cuenta solo ESE
+  Por defecto cuenta tiempo mientras la pestaña de udemy.com está
+  sonando (chrome.tabs.audible) — estar en el Q&A, las reseñas o el
+  temario del curso sin el vídeo reproduciéndose NO cuenta, solo se
+  trackea mientras se oye la clase. Hay dos formas de tener una tarea
+  de Udemy: **con palabra clave** (viene de un Plan) — cuenta solo ESE
   curso, y cada minuto comprueba si Udemy lo reporta al 100% para
   cerrar la tarea entera (no solo el día) en cuanto se termina; **sin
   palabra clave** (tarea suelta / freestyle) — hábito genérico, cuenta
@@ -19,6 +19,15 @@ tipos de pestaña trackeable, cada uno emparejado con un tipo de tarea:
   cierre automático. Si las dos existen a la vez, la palabra clave
   específica siempre gana sobre el hábito genérico, para que nunca se
   pisen ni sumen el mismo rato dos veces.
+
+  Un curso con **palabra clave** puede además marcarse como "casi sin
+  audio" (Task.watch_requires_audio=False, checkbox al editar el
+  objetivo del Plan — pensado para cursos sobre todo de ejercicios, sin
+  apenas vídeo hablado): ahí la exigencia deja de ser tab.audible y
+  pasa a ser la misma que usa Lectura de PDF, más abajo — sin
+  inactividad de ratón/teclado (chrome.idle, 5 min) — para poder seguir
+  contando aunque no suene nada, sin dejar de detectar si dejaste el
+  curso abierto en primer plano y te fuiste.
 - **Lectura de un PDF (modo Freestyle)** — tarea de categoría
   "Lectura". Si el título de la pestaña activa es un `.pdf` (local o
   de una web) y coincide con la palabra clave de la tarea, cuenta
@@ -89,10 +98,14 @@ falta el subtipo.
 
 - Si cambias de pestaña, minimizas la ventana, o pasas más de un
   minuto sin tocar ratón/teclado, esa sesión se cierra y se manda; al
-  volver, empieza una sesión nueva. (Para Udemy, el ratón/teclado no
-  cuenta si la pestaña está sonando — se asume que sigues viendo el
-  vídeo. Para un PDF no hay audio, así que ahí sí hace falta seguir
-  tocando algo de vez en cuando.)
+  volver, empieza una sesión nueva. (Para Udemy con audio exigido
+  —el valor por defecto— el ratón/teclado no cuenta si la pestaña está
+  sonando — se asume que sigues viendo el vídeo. Para un PDF, o para un
+  curso de Udemy marcado como "casi sin audio", no hay señal de sonido
+  en la que fiarse, así que ahí sí hace falta seguir tocando algo de vez
+  en cuando — si pasan 5 minutos sin tocar nada, chrome.idle lo detecta
+  y se para de contar, aunque la pestaña del curso se quede abierta y en
+  primer plano.)
 - El icono de la extensión (clic izquierdo) enseña qué se está
   contando ahora mismo, si algo.
 

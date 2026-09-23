@@ -16,8 +16,13 @@
  *   - Udemy (category="study", subcategory="udemy"): la pestaña es
  *     udemy.com Y ADEMÁS suena (chrome.tabs.audible) — estar en el
  *     Q&A, las reseñas o el temario del curso sin el vídeo reproduciéndose
- *     NO cuenta como estudiar, el audio es la única señal fiable desde
- *     fuera de la página de que la clase se está viendo de verdad.
+ *     NO cuenta como estudiar, el audio es la señal POR DEFECTO desde
+ *     fuera de la página de que la clase se está viendo de verdad. Un
+ *     curso puesto como "casi sin audio" (Task.watch_requires_audio=false,
+ *     pensado para cursos sobre todo de ejercicios) cambia esa exigencia
+ *     por la misma que usa Lectura más abajo: sin inactividad de
+ *     ratón/teclado (ver IDLE_DETECTION_SECONDS), en vez de requerir
+ *     sonido — ver la rama `udemy` de getActiveMatch().
  *     Además, mientras hay sesión, se comprueba cada minuto cuánto
  *     lleva el curso (ver checkCourseCompletion) — el % se manda siempre
  *     que se puede calcular, para la barra de la pantalla del plan, y si
@@ -187,26 +192,40 @@ async function getActiveMatch() {
     const pdf = !udemy && isPdfUrl(tab.url);
     if (!udemy && !pdf) return null;
 
+    // Qué tarea encaja se mira ANTES de decidir qué se exige para
+    // contar -- en Udemy la exigencia (audio o solo inactividad) depende
+    // de la propia tarea/curso (ver Task.watch_requires_audio), no es
+    // fija como en Lectura.
+    const tasks = await getCachedTasks();
+    const candidates = tasks.filter((t) => t.subcategory === (udemy ? "udemy" : "reading"));
+    const found = matchTask(candidates, tab.title);
+    if (!found) return null;
+
     if (udemy) {
-      // Estar en una pestaña de udemy.com no es lo mismo que estar
-      // viendo una clase — se puede estar leyendo el Q&A, las reseñas o
-      // el temario del curso sin que el vídeo esté sonando, y eso es
-      // contenido trivial, no estudiar. La única señal fiable desde
-      // fuera de la página de que la clase se está reproduciendo de
-      // verdad es que la pestaña suene, así que aquí NO basta con no
-      // estar inactivo: sin audio, no cuenta, aunque sigas ahí delante.
-      if (!tab.audible) return null;
+      // Por defecto (watch_requires_audio=true, o caché vieja sin el
+      // campo), la única señal fiable desde fuera de la página de que
+      // la clase se está reproduciendo de verdad es que la pestaña
+      // suene -- estar en el Q&A, las reseñas o el temario del curso
+      // sin el vídeo sonando es contenido trivial, no estudiar, y ahí
+      // NO basta con no estar inactivo. Un curso marcado como "casi sin
+      // audio" (watch_requires_audio=false, sobre todo ejercicios) usa
+      // en su lugar la misma señal que ya usa Lectura de PDF: sin
+      // inactividad de ratón/teclado -- es la única forma de detectar
+      // que se dejó el curso en primer plano sin nadie delante,
+      // haciendo trampa.
+      const requiresAudio = found.task.watch_requires_audio !== false;
+      if (requiresAudio) {
+        if (!tab.audible) return null;
+      } else {
+        const idleState = await chrome.idle.queryState(IDLE_DETECTION_SECONDS);
+        if (idleState !== "active") return null;
+      }
     } else {
       // Un PDF no suena nunca, así que aquí la única señal de "sigues
       // ahí" que hay es la inactividad de ratón/teclado de Chrome.
       const idleState = await chrome.idle.queryState(IDLE_DETECTION_SECONDS);
       if (idleState !== "active") return null;
     }
-
-    const tasks = await getCachedTasks();
-    const candidates = tasks.filter((t) => t.subcategory === (udemy ? "udemy" : "reading"));
-    const found = matchTask(candidates, tab.title);
-    if (!found) return null;
 
     return {
       task: found.task,
@@ -704,7 +723,10 @@ async function debugSnapshot() {
     idleState,
     tasksCount: tasks.length,
     tasksCacheAgeSeconds: tasksCacheAt ? Math.round((Date.now() - tasksCacheAt) / 1000) : null,
-    tasks: tasks.map((t) => ({ title: t.title, subcategory: t.subcategory, watch_keyword: t.watch_keyword })),
+    tasks: tasks.map((t) => ({
+      title: t.title, subcategory: t.subcategory, watch_keyword: t.watch_keyword,
+      watch_requires_audio: t.watch_requires_audio,
+    })),
     match: match ? { taskTitle: match.task.title, keyword: match.keyword } : null,
     currentSession: current
       ? { taskTitle: current.task.title, subcategory: current.task.subcategory, startedAt: current.startedAt }

@@ -20,7 +20,7 @@ import {
   angle,
   checkPlankPosture, checkSidePlankPosture, checkWallSitPosture,
   checkKneeHoldBarPosture, checkHandstandPosture, createLSitHoldChecker, createSupermanHoldChecker, checkArmCrossStretch, checkTricepsOverheadStretch,
-  checkSeatedHamstringStretch, checkStandingQuadStretch,
+  checkSeatedHamstringStretch, checkStandingQuadStretch, checkElephantStepsHold,
   speakOut, numeroEnPalabras, isVoiceEnabled,
 } from "./workout.js";
 // De dónde sale MediaPipe (versión + rutas a los ficheros locales)
@@ -107,7 +107,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   // postura en vez de contar repeticiones. Ver checkPlankPosture /
   // checkSidePlankPosture / checkWallSitPosture / checkKneeHoldBarPosture /
   // checkHandstandPosture más abajo.
-  const POSTURE_COUNTERS = new Set(["supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
+  const POSTURE_COUNTERS = new Set(["supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch", "elephantstepshold"]);
 
   // Estiramientos bilaterales cronometrados (armcrossstretch/
   // tricepsoverheadstretch: un brazo y luego el otro; seatedhamstringstretch/
@@ -266,6 +266,8 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         ? checkSeatedHamstringStretch
         : item.counter_key === "standingquadstretch"
         ? checkStandingQuadStretch
+        : item.counter_key === "elephantstepshold"
+        ? checkElephantStepsHold
         : checkPlankPosture;
 
     // "Al fallo" (item.work vacío/null -- PROG_FAILURE): sin objetivo de

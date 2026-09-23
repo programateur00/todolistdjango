@@ -107,6 +107,10 @@ def task_json(t):
         # Solo con subcategory="udemy": palabra clave para que la
         # extensión de Chrome sepa si la pestaña activa es de este curso.
         "watch_keyword": t.watch_keyword,
+        # Igual, solo con subcategory="udemy": si la extensión debe exigir
+        # audio (tab.audible, de siempre) o, en su lugar, solo ausencia de
+        # inactividad de ratón/teclado -- ver Task.watch_requires_audio.
+        "watch_requires_audio": t.watch_requires_audio,
         "youtube_video_id": t.youtube_video_id,
         "youtube_playlist_id": t.youtube_playlist_id,
         "target_video_count": t.target_video_count,
@@ -574,6 +578,39 @@ def task_mark_by_series(request, series_id, action):
         else:
             return JsonResponse({"ok": False, "error": "Acción desconocida"}, status=400)
     return JsonResponse({"ok": True, "task": task_json(task)})
+
+
+@api("GET")
+def notify_pending(request):
+    """
+    "¿Sigue pendiente esto?" — lo consulta el propio movil, en Java, justo
+    antes de ENSEÑAR un aviso local ya programado (ver AvoidPreCheckReceiver
+    en el proyecto de Android). Sin esto, cada movil solo sabe lo que TU
+    has marcado en ESE movil: si marcas la antitarea de hoy en el movil A,
+    el movil B (que programo su propio aviso local por su cuenta, sin
+    saber nada del A) la seguia preguntando igual a su hora, porque nunca
+    se entera de marcas hechas en otro sitio. Aqui se pregunta al servidor
+    -- que es el UNICO sitio que de verdad sabe si ya se resolvio, lo
+    hayas marcado desde el movil que sea -- en el momento justo antes de
+    sonar, y si ya no hace falta, el propio movil se cancela la
+    notificacion a si mismo sin enseñar nada.
+
+    admite ?series=<uuid> (antitareas y recordatorios "cada dia", que se
+    anclan a la SERIE porque la fila de hoy cambia de uuid cada dia -- ver
+    notifications.js) o ?task=<uuid> (tareas sueltas o con huecos, ancladas
+    a su propia fila). "Pendiente" es exactamente el mismo criterio que ya
+    usa task_mark_by_series: existe una fila sin resolver.
+    """
+    series_id = request.GET.get("series")
+    task_uuid = request.GET.get("task")
+    qs = tasks_qs().filter(is_done=False)
+    if series_id:
+        pending = qs.filter(series_id=series_id).exists()
+    elif task_uuid:
+        pending = qs.filter(uuid=task_uuid).exists()
+    else:
+        return JsonResponse({"ok": False, "error": "Falta series o task"}, status=400)
+    return JsonResponse({"pending": pending})
 
 
 @api("POST")

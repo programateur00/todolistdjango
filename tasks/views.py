@@ -1684,7 +1684,7 @@ def stats_delete_series(request, series_id):
 # ─────────────────────────────────────────────────────────────────────
 
 # Contadores que existen de verdad en workout.js.
-COUNTERS = {"superman", "lsit", "pullup", "dip", "pushup", "squat", "splitsquat", "crunch", "legraise", "situp", "doublecrunch", "scissor", "archerpullup", "inclinepushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "wristrotation", "hipforwardback"}
+COUNTERS = {"superman", "lsit", "elephantsteps", "burpee", "pullup", "dip", "pushup", "squat", "splitsquat", "crunch", "legraise", "highlegraise", "situp", "doublecrunch", "scissor", "archerpullup", "inclinepushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "wristrotation", "hipforwardback"}
 
 # Ejercicios "timed" (se aguantan, no se cuentan en repeticiones) que
 # workout.js sabe seguir con cámara comprobando la postura — plancha,
@@ -1692,7 +1692,7 @@ COUNTERS = {"superman", "lsit", "pullup", "dip", "pushup", "squat", "splitsquat"
 # task_workout: a estos, a diferencia del resto de "timed" (bicicleta…),
 # sí se les deja entrar en el entreno individual de una tarea con cámara
 # encendida, no solo dentro de un circuito.
-POSTURE_COUNTERS = {"supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"}
+POSTURE_COUNTERS = {"supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch", "elephantstepshold"}
 
 
 def _plans_qs():
@@ -2373,6 +2373,11 @@ def plan_form(request, pk=None):
                         item.youtube_video_id = request.POST.get("youtube_video_id", "").strip()[:255]
                         item.youtube_playlist_id = request.POST.get("youtube_playlist_id", "").strip()[:255]
                         item.watch_keyword = request.POST.get("watch_keyword", "").strip()[:120]
+                        # Solo tiene sentido con watch_keyword puesto (Curso de
+                        # Udemy) -- toggle "por vídeos vistos" (exige audio, de
+                        # siempre) vs "por tiempo en la página" (vídeo + ejercicios,
+                        # sin exigir audio, ver Task.watch_requires_audio).
+                        item.watch_requires_audio = request.POST.get("watch_track_mode") != "time"
                         # Igual que una tarea suelta de Estudio (ver
                         # _study_link_error): sin nada de esto puesto, el
                         # plan sale con una tarea diaria "Estudio simple"

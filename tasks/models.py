@@ -241,6 +241,21 @@ class Task(models.Model):
         help_text="Solo para 'Curso de Udemy': palabra o frase que debe aparecer en el "
                    "título de la pestaña de Udemy para contar el tiempo en esta tarea.",
     )
+    # Solo con subcategory=SUBCATEGORY_UDEMY: si el curso tiene poco
+    # vídeo con sonido continuo (más ejercicios que clases habladas),
+    # desactiva esto para que la extensión de Chrome cuente el tiempo
+    # con la pestaña en primer plano + sin inactividad de ratón/teclado
+    # (igual que ya hace con un PDF de Lectura, ver
+    # IDLE_DETECTION_SECONDS en chrome-extension/background.js), en vez
+    # de exigir que la pestaña esté sonando (tab.audible) como hace por
+    # defecto -- esa exigencia es lo que distingue "viendo la clase" de
+    # "en el Q&A/reseñas sin ver nada", pero un curso de solo-ejercicios
+    # casi nunca suena, así que con el valor por defecto no contaría
+    # nada. Solo se configura desde el objetivo de un Plan (ver
+    # PlanItem.watch_requires_audio y Plan._study_target_fields) -- un
+    # Udemy freestyle nunca lleva palabra clave (ver study_link_error
+    # más abajo), así que ahí esto no tiene efecto.
+    watch_requires_audio = models.BooleanField(default=True)
     # Se pone al llamar finish_recurring_series() — señal inequívoca de
     # "esto era un curso y Udemy lo reportó al 100%", distinta de
     # is_done/repeat=NONE (que también los ponen otras cosas, como una
@@ -2416,6 +2431,7 @@ class Plan(models.Model):
             "youtube_video_id": head.youtube_video_id,
             "youtube_playlist_id": head.youtube_playlist_id,
             "watch_keyword": head.watch_keyword,
+            "watch_requires_audio": head.watch_requires_audio,
             "target_minutes": head.target_minutes,
             "target_video_count": head.target_video_count,
             "playlist_start_index": None,
@@ -2608,6 +2624,7 @@ class Plan(models.Model):
             youtube_video_id="",
             youtube_playlist_id="",
             watch_keyword="",
+            watch_requires_audio=True,
             target_minutes=None,
             target_video_count=None,
             playlist_start_index=None,
@@ -2941,6 +2958,9 @@ class PlanItem(models.Model):
     # completa exactamente igual que una tarea suelta de Udemy — ver
     # Plan._study_target_fields() y Plan.auto_close_expired().
     watch_keyword = models.CharField(max_length=120, blank=True)
+    # Igual que Task.watch_requires_audio (mismo significado) -- se
+    # copia a la tarea diaria en Plan._study_target_fields().
+    watch_requires_audio = models.BooleanField(default=True)
     # Progreso del curso guardado EN el propio objetivo (lo manda la
     # extensión de Chrome desde la API de Udemy). No depende de que la
     # tarea diaria del plan exista/tenga la misma serie/palabra clave.

@@ -48,7 +48,9 @@ from tasks.utils import get_current_user
 #     atrás de 30s independientes, una por lado.
 # Los simétricos (jumping jacks, flexiones, tijera de brazos, rotación
 # de muñeca entrelazada, cadera adelante-atrás, rodillas altas, talón
-# al glúteo, medio giro de cuello) se quedan con una sola serie: ya
+# al glúteo, medio giro de cuello, elevación de pierna alta -- side-
+# agnostic, elige sola la pierna con mejor visibilidad cada frame, no
+# hay lado fijo que alternar) se quedan con una sola serie: ya
 # trabajan los dos lados a la vez o no tienen lado/sentido que alternar.
 ROUTINES = [
     {
@@ -85,6 +87,7 @@ ROUTINES = [
             ("jumping-jack", 1, 30),
             ("knee-raises", 1, 30),
             ("heel-kicks", 1, 30),
+            ("high-leg-raise", 1, 30),
             ("seated-hamstring-stretch", None, None),  # cronometrado, bilateral -- serie 1: una pierna
             ("seated-hamstring-stretch", None, None),  # cronometrado, bilateral -- serie 2: la otra pierna
             ("standing-quad-stretch", None, None),     # cronometrado, bilateral -- serie 1: una pierna

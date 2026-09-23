@@ -63,7 +63,12 @@ function renderDebug(snap) {
   lines.push(`Estado de inactividad (chrome.idle): ${snap.idleState}`);
   lines.push(`Tareas trackeables en caché: ${snap.tasksCount}${snap.tasksCacheAgeSeconds !== null ? ` (actualizada hace ${snap.tasksCacheAgeSeconds}s)` : " (nunca se ha cargado)"}`);
   if (snap.tasks.length) {
-    snap.tasks.forEach((t) => lines.push(`   · [${t.subcategory}] "${t.title}" — palabra clave: "${t.watch_keyword}"`));
+    snap.tasks.forEach((t) => {
+      const audioNote = t.subcategory === "udemy"
+        ? (t.watch_requires_audio === false ? " — sin exigir audio (idle)" : " — exige audio")
+        : "";
+      lines.push(`   · [${t.subcategory}] "${t.title}" — palabra clave: "${t.watch_keyword}"${audioNote}`);
+    });
   } else {
     lines.push('   (ninguna — revisa que la tarea sea de hoy: Estudio → "Curso de Udemy", o Enfoque → "Lectura", con palabra clave puesta)');
   }

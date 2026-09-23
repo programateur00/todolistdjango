@@ -20,6 +20,9 @@ urlpatterns = [
     path("tasks/<uuid:uuid>/started/", api.task_started, name="task_started"),
     path("tasks/<uuid:uuid>/mark/<str:action>/", api.task_mark, name="task_mark"),
     path("series/<uuid:series_id>/mark/<str:action>/", api.task_mark_by_series, name="task_mark_by_series"),
+    # Consulta ligera para el aviso nativo, justo antes de enseñarlo (ver
+    # AvoidPreCheckReceiver en el movil y notify_pending en api.py).
+    path("notify-pending/", api.notify_pending, name="notify_pending"),
 
     path("exercises/", api.exercise_list, name="exercise_list"),
     path("exercises/<slug:slug>/target/", api.exercise_target, name="exercise_target"),
