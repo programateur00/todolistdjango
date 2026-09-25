@@ -363,7 +363,13 @@
             reps: hayReps && !esFallo,
             seconds: hayTimed && !esFallo,
             'start-weight': pesoEx,
-            'weight-grows': pesoEx && p !== 'completion' && !hayTimed,
+            // Antes se ocultaba "Peso objetivo (kg)" si CUALQUIER ejercicio
+            // marcado era cronometrado (hayTimed) -- aunque ese ejercicio no
+            // tuviera nada que ver con el peso (ej: marcar handstand junto a
+            // dominadas con peso ocultaba el destino de las dominadas). Los
+            // ejercicios con peso (Exercise.WEIGHTED_SLUGS) nunca son de modo
+            // "timed", así que esa condición sobraba -- se quita.
+            'weight-grows': pesoEx && p !== 'completion',
             'rep-range': pesoEx && p === 'reps',
             goal: p !== 'completion',
             increment: p !== 'completion' && !esFallo,
