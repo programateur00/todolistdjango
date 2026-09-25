@@ -20,7 +20,7 @@ import {
   angle,
   checkPlankPosture, checkSidePlankPosture, checkWallSitPosture,
   checkKneeHoldBarPosture, checkHandstandPosture, createLSitHoldChecker, createSupermanHoldChecker, checkArmCrossStretch, checkTricepsOverheadStretch,
-  checkSeatedHamstringStretch, checkStandingQuadStretch, checkElephantStepsHold,
+  checkSeatedHamstringStretch, createStandingQuadStretchChecker, checkElephantStepsHold,
   speakOut, numeroEnPalabras, isVoiceEnabled,
 } from "./workout.js";
 // De dónde sale MediaPipe (versión + rutas a los ficheros locales)
@@ -127,6 +127,17 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     seatedhamstringstretch: "pierna",
     standingquadstretch: "pierna",
   };
+  // Rotación de codo (forearmrotation): mismo patrón "lado 1 de 2 / lado 2
+  // de 2" que los estiramientos de arriba, pero es un contador de repes por
+  // cámara (runCamera), no un aguante cronometrado (runTimerWithPosture) --
+  // aparte de STRETCH_SIDE_COUNTERS para no tocar isStretchFixed/
+  // POSTURE_COUNTERS, que no le corresponden. Badge/aviso añadidos dentro
+  // de runCamera() más abajo, reutilizando occurrenceInfo(). A petición de
+  // Alex (2026-09-25): antes un brazo y el otro compartían una sola
+  // pantalla con cambio de brazo a mitad (ver FOREARMROTATION_* en
+  // workout.js) -- ahora son dos pantallas seguidas, como los estiramientos.
+  const REP_SIDE_COUNTERS = new Set(["forearmrotation"]);
+  const REP_SIDE_LABEL = { forearmrotation: "brazo" };
   // Lado (izquierdo/derecho) detectado por cámara en la última vez que se
   // completó cada counter_key de STRETCH_SIDE_COUNTERS -- se reinicia en
   // begin() (nuevo circuito). Un solo mapa vale para las dos apariciones
@@ -139,7 +150,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
    *  sin más contexto. null si el ejercicio no es de este grupo o solo
    *  aparece una vez (nada que numerar). */
   function occurrenceInfo(item) {
-    if (!STRETCH_SIDE_COUNTERS.has(item.counter_key)) return null;
+    if (!STRETCH_SIDE_COUNTERS.has(item.counter_key) && !REP_SIDE_COUNTERS.has(item.counter_key)) return null;
     const siblings = sequence.filter((i) => i.counter_key === item.counter_key);
     if (siblings.length < 2) return null;
     return { occurrence: siblings.indexOf(item) + 1, total: siblings.length };
@@ -265,7 +276,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         : item.counter_key === "seatedhamstringstretch"
         ? checkSeatedHamstringStretch
         : item.counter_key === "standingquadstretch"
-        ? checkStandingQuadStretch
+        ? createStandingQuadStretchChecker()
         : item.counter_key === "elephantstepshold"
         ? checkElephantStepsHold
         : checkPlankPosture;
@@ -503,6 +514,8 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       item.target_source === "plan"
         ? `<span class="run-plan">plan «${esc(item.plan_name || "")}»</span>`
         : "";
+    const occ = occurrenceInfo(item);
+    const sideLabel = STRETCH_SIDE_LABEL[item.counter_key] || REP_SIDE_LABEL[item.counter_key] || "lado";
     playerHost.innerHTML = `
       <div id="workout-root" class="workout"
            data-save-url="local" data-cancel-url="#" data-exercise-slug="${esc(item.slug)}"
@@ -510,8 +523,15 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
            data-counter-key="${esc(item.counter_key || "pullup")}"
            data-voice-step="${item.voice_step || 1}">
         <p class="circuit__progress">${esc(progressLabel())}</p>
-        <h2 class="circuit__exercise-name">${esc(item.name)}</h2>
+        <h2 class="circuit__exercise-name">${esc(item.name)}${occ ? ` <span class="circuit__side-badge">(lado ${occ.occurrence} de ${occ.total})</span>` : ""}</h2>
         <p class="run-target">Objetivo: <strong>${objetivo}</strong> ${fuente}</p>
+        ${
+          occ
+            ? occ.occurrence > 1
+              ? `<p class="circuit__side-hint">🔁 Lado ${occ.occurrence} de ${occ.total} -- usa el ${sideLabel} contrario al de la vez anterior.</p>`
+              : `<p class="circuit__side-hint">Lado ${occ.occurrence} de ${occ.total} -- elige un ${sideLabel} para empezar; el siguiente será con el contrario.</p>`
+            : ""
+        }
         <div class="workout__camera">
           <video id="workout-video" playsinline muted class="workout__video"></video>
           <canvas id="workout-canvas" class="workout__canvas"></canvas>

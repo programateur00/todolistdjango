@@ -68,7 +68,13 @@ ROUTINES = [
             ("arm-scissors", 1, 30),
             ("arm-cross-stretch", None, None),         # cronometrado
             ("triceps-overhead-stretch", None, None),  # cronometrado
-            ("forearm-rotation-elbow-hold", 1, 30),
+            # A peticion de Alex (2026-09-25): igual que los
+            # estiramientos cronometrados de abajo -- DOS pantallas
+            # seguidas, una por brazo, en vez de una sola serie
+            # combinando los dos lados con cambio de brazo a mitad
+            # (ver REP_SIDE_COUNTERS en circuit.js/session-runner.js).
+            ("forearm-rotation-elbow-hold", 1, 30),  # brazo 1
+            ("forearm-rotation-elbow-hold", 1, 30),  # brazo 2
             ("wrist-rotation-interlaced", 1, 30),
             ("jumping-jack", 1, 30),
             ("push-up", 1, 10),
@@ -81,9 +87,9 @@ ROUTINES = [
         # con jumping jacks y rodillas altas como los dos últimos.
         "items": [
             ("hip-forward-back", 1, 30),          # simétrico (adelante-atrás con las dos caderas)
-            ("hip-lateral-mobility", 2, 30),      # bilateral: cadera izq. y dcha.
-            ("split-squat-warmup", 2, 30),        # bilateral: pierna izq. delante y dcha. delante
-            ("leg-rotation", 2, 30),              # bilateral: sentido horario y antihorario
+            ("hip-lateral-mobility", 1, 30),      # una sola serie de 30 (Alex, 2026-09-24)
+            ("split-squat-warmup", 1, 30),        # una sola serie de 30 (Alex, 2026-09-24)
+            ("leg-rotation", 1, 30),              # una sola serie de 30 (Alex, 2026-09-24)
             ("jumping-jack", 1, 30),
             ("knee-raises", 1, 30),
             ("heel-kicks", 1, 30),

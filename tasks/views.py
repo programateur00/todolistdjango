@@ -32,6 +32,20 @@ from urllib.parse import quote
 # cronometrados), específicos por subcategoría (tren superior/inferior).
 
 
+def _finish_redirect_url(task, closed_plan):
+    """
+    URL a la que ir justo después de guardar una sesión (task.mark_done()
+    ya se llamó, closed_plan es lo que devolvió). Si esa sesión acababa
+    de terminar el plan que la generó (ver Plan.close_if_finished), va a
+    la pantalla de cierre/celebración (plan_close) en vez de a la lista
+    de tareas de siempre -- para Deporte, Estudio y General por igual,
+    sea cual sea la vista que guardó la sesión.
+    """
+    if closed_plan:
+        return reverse("tasks:plan_close", args=[closed_plan.pk])
+    return reverse("tasks:task_list")
+
+
 def _task_warmup_subcategory(task):
     """
     Subcategoría a efectos de elegir circuito de calentamiento (ver
@@ -530,8 +544,9 @@ def reading_plan_delete(request, pk):
 
 @require_POST
 def task_mark_done(request, pk):
-    get_object_or_404(Task, pk=pk, user=get_current_user()).mark_done()
-    return redirect(reverse("tasks:task_list"))
+    task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    closed_plan = task.mark_done()
+    return redirect(_finish_redirect_url(task, closed_plan))
 
 
 @require_POST
@@ -809,9 +824,9 @@ def task_workout_save_manual(request, pk):
     # A diferencia del resto de Deporte, running no pasa por el
     # enfriamiento obligatorio: la sesión ya viene de un dato real
     # (distancia/tiempo, Health Connect...), no hace falta el vídeo.
-    task.mark_done()
+    closed_plan = task.mark_done()
     messages.success(request, "Sesión de running guardada: " + ", ".join(bits) + ".")
-    return redirect(reverse("tasks:task_list"))
+    return redirect(_finish_redirect_url(task, closed_plan))
 
 
 def task_warmup(request, pk):
@@ -864,9 +879,9 @@ def task_cooldown(request, pk):
     """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
     if request.method == "POST":
-        task.mark_done()
+        closed_plan = task.mark_done()
         messages.success(request, "Sesión completada.")
-        return redirect(reverse("tasks:task_list"))
+        return redirect(_finish_redirect_url(task, closed_plan))
     routine = _warmup_routine_for(task)
     routine_url = None
     create_routine_url = None
@@ -938,9 +953,9 @@ def task_cooldown_routine(request, pk, routine_pk):
     items = list(routine.items.select_related("exercise"))
     if not items:
         messages.error(request, "Este circuito todavía no tiene ejercicios.")
-        task.mark_done()
+        closed_plan = task.mark_done()
         messages.success(request, "Sesión completada.")
-        return redirect(reverse("tasks:task_list"))
+        return redirect(_finish_redirect_url(task, closed_plan))
     save_url = reverse("tasks:task_cooldown_routine_save", args=[task.pk, routine.pk])
     return render(request, "tasks/routine_play.html", {
         "task": task, "routine": routine, "items": items,
@@ -954,9 +969,9 @@ def task_cooldown_routine(request, pk, routine_pk):
 @require_POST
 def task_cooldown_routine_save(request, pk, routine_pk):
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
-    task.mark_done()
+    closed_plan = task.mark_done()
     messages.success(request, "Sesión completada.")
-    return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
+    return JsonResponse({"ok": True, "redirect_url": _finish_redirect_url(task, closed_plan)})
 
 
 # ------------------------------------------------------------- lectura / cronometro suelto
@@ -1016,13 +1031,14 @@ def task_focus_save(request, pk):
         target_minutes=task.target_minutes,
     )
 
+    closed_plan = None
     if ts.target_met:
-        task.mark_done()
+        closed_plan = task.mark_done()
 
     resumen = f"Sesión guardada: {minutes} min"
     resumen += "." if ts.target_met else f" — {ts.achievement_pct}% del objetivo. La tarea sigue pendiente."
     messages.success(request, resumen)
-    return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
+    return JsonResponse({"ok": True, "redirect_url": _finish_redirect_url(task, closed_plan)})
 
 
 # ------------------------------------------------------- plan de lectura
@@ -1178,12 +1194,22 @@ def task_reading_progress(request, pk):
         category=Task.CATEGORY_WORK, subcategory=Task.SUBCATEGORY_READING,
         reading_mode=Task.READING_MODE_PLAN,
     )
+    if request.content_type == "application/x-www-form-urlencoded":
+        # navigator.sendBeacon() del visor (task_reading.html), usado al
+        # cerrar/ocultar la pestaña para no perder un cambio de página
+        # que seguía esperando su debounce -- sendBeacon no permite poner
+        # cabeceras, así que ese aviso concreto llega como formulario
+        # (csrfmiddlewaretoken en el body, no en X-CSRFToken) en vez de
+        # JSON. CsrfViewMiddleware ya sabe leer el token de ahí.
+        raw_page = request.POST.get("page")
+    else:
+        try:
+            data = json.loads(request.body or b"{}")
+        except (json.JSONDecodeError, TypeError):
+            return JsonResponse({"ok": False, "error": "JSON inválido"}, status=400)
+        raw_page = data.get("page")
     try:
-        data = json.loads(request.body or b"{}")
-    except (json.JSONDecodeError, TypeError):
-        return JsonResponse({"ok": False, "error": "JSON inválido"}, status=400)
-    try:
-        page = int(data.get("page"))
+        page = int(raw_page)
     except (TypeError, ValueError):
         return JsonResponse({"ok": False, "error": "Falta 'page'"}, status=400)
 
@@ -1381,15 +1407,24 @@ def task_video_save(request, pk):
             messages.success(request, "Vídeo visto — tarea completada.")
             return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
 
-    task.mark_done(minutes_watched=minutes_watched)
+    closed_plan = task.mark_done(minutes_watched=minutes_watched)
     messages.success(request, "Vídeo visto — tarea completada.")
 
-    redirect_url = reverse("tasks:task_list")
+    quiz = None
     if plan and plan.plan_type == Plan.PLAN_TYPE_STUDY and plan.study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE:
         plan.mark_current_module_watched(count=videos_watched)
+        # El progreso del temario se acaba de actualizar -- si ESTE
+        # vídeo era el que completaba el curso, mark_done() de arriba
+        # todavía no lo sabía (se llamó antes de mark_current_module_watched);
+        # se vuelve a comprobar aquí ya con el dato al día.
+        if not closed_plan and plan.close_if_finished():
+            closed_plan = plan
         quiz = api.maybe_trigger_quiz(plan)
-        if quiz:
-            redirect_url = reverse("tasks:quiz_take", args=[quiz.uuid])
+
+    redirect_url = (
+        reverse("tasks:quiz_take", args=[quiz.uuid]) if quiz
+        else _finish_redirect_url(task, closed_plan)
+    )
     return JsonResponse({"ok": True, "redirect_url": redirect_url})
 
 

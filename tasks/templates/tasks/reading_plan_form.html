@@ -146,9 +146,14 @@
         }).then(function (handles) {
             var handle = handles[0];
             var key = keyInput.value || ('reading-' + crypto.randomUUID());
-            return storeHandle(key, handle).then(function () {
-                keyInput.value = key;
-                return handle.getFile();
+            // Se guarda el File ya leido, no el handle -- igual que en
+            // task_reading.html -- asi no hace falta pedir permiso nunca,
+            // ni siquiera la primera vez que se abra el visor.
+            return handle.getFile().then(function (file) {
+                return storeHandle(key, file).then(function () {
+                    keyInput.value = key;
+                    return file;
+                });
             });
         }).then(function (file) {
             pickStatus.textContent = 'Elegido: ' + file.name;

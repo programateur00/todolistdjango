@@ -45,6 +45,7 @@
             <button type="button" class="ghost-btn reading-toolbar__btn" id="reading-zoom-in" title="Acercar">+</button>
             <span id="reading-page-label" class="reading-toolbar__page">—</span>
             <span class="reading-toolbar__spacer"></span>
+            <button type="button" class="ghost-btn reading-toolbar__btn" id="reading-dark-toggle" title="Modo noche (invierte los colores de la página, no del sitio)" aria-pressed="false">🌙 Modo noche</button>
             <button type="button" class="ghost-btn reading-toolbar__btn" id="reading-fullscreen-btn" title="Pantalla completa">⛶ Pantalla completa</button>
         </div>
         <div class="reading-scroll" id="reading-scroll"></div>
@@ -90,6 +91,18 @@
     .reading-page canvas { display: block; width: 100%; height: 100%; }
     #reading-viewer:fullscreen { border-radius: 0; }
     #reading-viewer:fullscreen .reading-scroll { max-height: none; height: calc(100vh - 45px); }
+
+    /* Modo noche del propio PDF -- independiente del tema claro/oscuro
+       del sitio (ese ya existe, pero no toca el contenido del visor: una
+       página blanca sigue siendo blanca aunque el resto de la app esté
+       oscura). Invierte solo el canvas (el texto/il. del PDF, que pasa a
+       claro sobre fondo oscuro) y cambia el fondo de la página aparte --
+       si se invirtiera la página entera, la sombra también se
+       invertiría y se vería como un halo claro en vez de una sombra.
+       hue-rotate(180deg) evita que los colores queden con los tonos
+       cambiados (solo el brillo se invierte, el tono vuelve a su sitio). */
+    .reading-viewer--night .reading-page { background: #15120e; box-shadow: 0 2px 12px rgba(0,0,0,.6); }
+    .reading-viewer--night .reading-page canvas { filter: invert(1) hue-rotate(180deg); }
 </style>
 
 <script type="module">
@@ -103,6 +116,7 @@
     var zoomLabel = document.getElementById('reading-zoom-label');
     var pageLabel = document.getElementById('reading-page-label');
     var fullscreenBtn = document.getElementById('reading-fullscreen-btn');
+    var darkToggleBtn = document.getElementById('reading-dark-toggle');
     var pickActions = document.getElementById('reading-pick-actions');
     var pickBtn = document.getElementById('reading-pick-btn');
     var permissionPrompt = document.getElementById('reading-permission-prompt');
@@ -130,6 +144,7 @@
     var pdfDoc = null;
     var numPages = 0;
     var reportTimer = null;
+    var pendingPage = null; // última página pedida por reportPage() todavía sin confirmar guardada -- la usan flushReport()/beaconFlush()
     var finished = false;
 
     if (!supportsLocal) {
@@ -361,6 +376,23 @@
     zoomInBtn.addEventListener('click', function () { setZoom(zoomFactor * 1.15); });
     zoomOutBtn.addEventListener('click', function () { setZoom(zoomFactor / 1.15); });
 
+    // Modo noche del PDF -- guardado aparte del tema del sitio (que ya
+    // tiene su propia clave en localStorage, ver base.html) porque son
+    // dos cosas independientes: puedes querer el sitio en modo claro y
+    // el libro en modo noche, o al revés.
+    var NIGHT_MODE_KEY = 'libreta.readingNightMode';
+    function setNightMode(on) {
+        viewerEl.classList.toggle('reading-viewer--night', on);
+        darkToggleBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        darkToggleBtn.textContent = on ? '☀️ Modo día' : '🌙 Modo noche';
+    }
+    darkToggleBtn.addEventListener('click', function () {
+        var on = !viewerEl.classList.contains('reading-viewer--night');
+        setNightMode(on);
+        localStorage.setItem(NIGHT_MODE_KEY, on ? '1' : '0');
+    });
+    setNightMode(localStorage.getItem(NIGHT_MODE_KEY) === '1');
+
     fullscreenBtn.addEventListener('click', function () {
         if (document.fullscreenElement) {
             document.exitFullscreen();
@@ -511,24 +543,82 @@
         return data.finished;
     }
 
+    function sendProgress() {
+        // Envía de verdad el aviso pendiente (si lo hay) -- lo llaman el
+        // debounce normal de reportPage(), flushReport() (sin esperar al
+        // debounce) y beaconFlush() (al cerrar/ocultar la pestaña).
+        clearTimeout(reportTimer);
+        reportTimer = null;
+        if (pendingPage === null) return Promise.resolve();
+        var page = pendingPage;
+        pendingPage = null;
+        return fetch(progressUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            body: JSON.stringify({ page: page }),
+        }).then(function (r) { return r.json(); }).then(applyProgressResponse)
+          .catch(function () {
+              // Red intermitente: se reintenta en el próximo cambio de
+              // página -- pero si esa página no vuelve a cambiar (fin de
+              // la sesión), se perdería sin más, así que se deja
+              // pendiente otra vez para que un flush posterior
+              // (finishSessionBtn o beaconFlush) lo reintente.
+              pendingPage = page;
+          });
+    }
+
     function reportPage(n) {
         // Debounce corto: scrollear rápido por varias páginas no dispara
         // una petición por cada una, solo la última tras un momento quieto.
+        pendingPage = n;
         clearTimeout(reportTimer);
-        reportTimer = setTimeout(function () {
-            fetch(progressUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-                body: JSON.stringify({ page: n }),
-            }).then(function (r) { return r.json(); }).then(applyProgressResponse)
-              .catch(function () { /* red intermitente: se reintenta en el próximo cambio de página */ });
-        }, 400);
+        reportTimer = setTimeout(sendProgress, 400);
     }
+
+    // Fuerza el envío inmediato de un aviso pendiente, sin esperar al
+    // debounce -- imprescindible antes de "Terminar sesión de hoy": ese
+    // botón dispara mark_done()/_spawn_next() en el servidor, que toma
+    // una FOTO de reading_current_page en ese instante para generar la
+    // tarea de mañana. Sin este flush, si el último cambio de página
+    // seguía esperando su debounce de 400ms, la foto se quedaba con la
+    // página de ANTES de ese cambio -- y el aviso pendiente, cuando por
+    // fin llegaba ~400ms después, ya iba dirigido a la tarea de HOY (ya
+    // cerrada), no a la de mañana (que ya se había generado sin él).
+    // Este era el bug real detrás de "hoy me ha puesto en la misma
+    // página que ayer".
+    function flushReport() {
+        return sendProgress();
+    }
+
+    // Cerrar la pestaña, recargar, o mandarla a segundo plano (cambiar de
+    // pestaña/app, apagar la pantalla del móvil...) con un aviso todavía
+    // en su debounce tenía el mismo problema que el botón de arriba, pero
+    // sin ningún botón que lo arreglara: un fetch normal se puede
+    // cancelar a media petición al desaparecer la página, así que ese
+    // último cambio de página se perdía sin más. sendBeacon() sí
+    // sobrevive a la navegación fuera de la página (el navegador
+    // garantiza que la petición sale de verdad). No se le pueden poner
+    // cabeceras, así que el token CSRF va en el propio body en vez de en
+    // X-CSRFToken -- Django lo acepta igual ahí
+    // (request.POST['csrfmiddlewaretoken'], ver task_reading_progress).
+    function beaconFlush() {
+        clearTimeout(reportTimer);
+        reportTimer = null;
+        if (pendingPage === null || !navigator.sendBeacon) return;
+        var page = pendingPage;
+        pendingPage = null;
+        var body = 'csrfmiddlewaretoken=' + encodeURIComponent(csrfToken) + '&page=' + encodeURIComponent(page);
+        navigator.sendBeacon(progressUrl, new Blob([body], { type: 'application/x-www-form-urlencoded' }));
+    }
+    document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'hidden') beaconFlush();
+    });
+    window.addEventListener('pagehide', beaconFlush);
 
     markFinishedBtn.addEventListener('click', function () {
         markFinishedBtn.disabled = true;
         markFinishedBtn.textContent = 'Marcando…';
-        clearTimeout(reportTimer); // que no llegue después un reportPage con una página menor y pise el estado "finished"
+        clearTimeout(reportTimer); pendingPage = null; // que no llegue después un reportPage con una página menor y pise el estado "finished"
         fetch(progressUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
@@ -551,12 +641,32 @@
     finishSessionBtn.addEventListener('click', function () {
         finishSessionBtn.disabled = true;
         finishSessionBtn.textContent = 'Guardando…';
-        fetch(saveUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-            body: JSON.stringify({}),
-        }).then(function (r) { return r.json(); }).then(function (data) {
-            window.location.href = data.redirect_url || listUrl;
+        // Manda primero cualquier cambio de página que siga esperando su
+        // debounce -- ver flushReport() (esto es lo que arregla "hoy me
+        // ha puesto en la misma página que ayer").
+        flushReport().then(function () {
+            if (finished) {
+                // El flush de arriba resulta que YA ha cerrado el plan
+                // entero (la página pendiente era la última) --
+                // applyProgressResponse ya puso finished=true, enseñó el
+                // banner "¡Libro terminado!" y programó su propio
+                // redirect a los 1.8s. task_reading_save no tiene nada
+                // que hacer aquí (ver esa vista: con reading_completed_at
+                // ya puesto, no hace nada más que redirigir), y llamarla
+                // de todas formas navegaba de inmediato -- ese segundo
+                // redirect, casi instantáneo, se comía al primero y el
+                // banner de felicidades no llegaba a verse. Este era el
+                // bug real detrás de "no me salió ninguna pantalla de
+                // felicidades al terminar el libro".
+                return;
+            }
+            return fetch(saveUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                body: JSON.stringify({}),
+            }).then(function (r) { return r.json(); }).then(function (data) {
+                window.location.href = data.redirect_url || listUrl;
+            });
         }).catch(function () {
             finishSessionBtn.disabled = false;
             finishSessionBtn.textContent = 'Terminar sesión de hoy';
@@ -610,8 +720,10 @@
                 }
                 permissionPrompt.hidden = true;
                 handle.getFile().then(function (file) {
-                    storeHandle(pdfKey, file); // migra a Blob: no se volvera a pedir permiso
                     openFile(file);
+                    storeHandle(pdfKey, file).catch(function (err) { // migra a Blob: no se volvera a pedir permiso
+                        console.warn('No se pudo migrar el PDF a Blob, se volvera a pedir permiso manana:', err);
+                    });
                 }).catch(function (err) {
                     hint.textContent = 'No se pudo abrir el archivo (' + (err.name || err.message || err) + ') — puede que se haya movido o borrado.';
                     reselectBtn.hidden = false;
@@ -640,8 +752,15 @@
             // Entrada antigua (handle de antes de este cambio): pide permiso
             // una ultima vez y migra a Blob para no volver a pedirlo.
             entry.getFile().then(function (file) {
-                storeHandle(pdfKey, file);
+                // Se abre ya (no bloqueado por el guardado) y se intenta
+                // migrar a Blob por separado -- si esto falla (p.ej. se
+                // cierra la pestana antes de que termine la transaccion de
+                // IndexedDB), no pasa nada grave hoy, pero mañana volvera
+                // a pedir permiso porque seguira habiendo un handle.
                 openFile(file);
+                storeHandle(pdfKey, file).catch(function (err) {
+                    console.warn('No se pudo migrar el PDF a Blob, se volvera a pedir permiso manana:', err);
+                });
             }).catch(function () {
                 askPermissionThenOpen(entry);
             });

@@ -1350,6 +1350,20 @@ class Task(models.Model):
         self.save()
         self._record_occurrence(Occurrence.RESULT_DONE, minutes_watched=minutes_watched)
         self._spawn_next()
+        # Si esta tarea viene de un Plan (Deporte/Estudio/General) y
+        # esta sesión era justo la que lo terminaba (ver
+        # Plan.close_if_finished), se cierra AQUÍ, no en silencio en la
+        # próxima carga de la lista (ver Plan.auto_close_expired, que
+        # sigue existiendo como red de seguridad para cuando nadie pasó
+        # por aquí). Se devuelve el plan recién cerrado para que quien
+        # llamó pueda mandar a la pantalla de cierre/celebración
+        # (plan_close) en vez de a donde fuera a mandar normalmente —
+        # None si no venía de ningún plan o si esta sesión no lo
+        # terminaba todavía.
+        plan = self.plan
+        if plan and plan.close_if_finished():
+            return plan
+        return None
 
     def reopen(self, delete_sessions=False):
         """
@@ -2235,15 +2249,16 @@ class Plan(models.Model):
         pct = self.final_progress_pct if self.closed_at else self.progress_pct()
         return pct is not None and pct >= self.COMPLETION_THRESHOLD_PCT
 
-    @classmethod
-    def auto_close_expired(cls, user=None):
+    def _is_finished_now(self):
         """
-        Cierra solos los planes que ya han llegado a su fin.
-
-        Sin scheduler en este hosting, así que se comprueba de gorra
-        cada vez que se abre la lista de tareas — mismo criterio que
-        Task.expire_overdue(): barato, y no hace falta que nadie entre
-        a "planes" para que un ciclo vencido deje de generar tareas.
+        Criterio de "este plan ya ha llegado a su fin" — extraído de
+        auto_close_expired (que lo usa para el barrido silencioso en
+        cada carga de la lista) y reutilizado por close_if_finished
+        (que lo usa disparado al momento, justo al guardar la sesión
+        que lo termina). Mismo criterio en los dos sitios a propósito:
+        que el plan se cierre "ya" en vez de "en la próxima carga de la
+        lista" no debe cambiar CUÁNDO se considera terminado, solo
+        cuándo se nota.
 
         Deporte/General: "su fin" es que se cumplan las semanas
         (`ends_on`), como siempre. Estudio · Idiomas es distinto a
@@ -2264,40 +2279,107 @@ class Plan(models.Model):
         (sin seguimiento posible), sigue siendo un hábito que se repite
         y se cierra por semanas, como toda la vida.
         """
+        is_language = (
+            self.plan_type == self.PLAN_TYPE_STUDY and self.study_subtype == self.STUDY_SUBTYPE_LANGUAGE
+        )
+        head = self.headline if self.plan_type == self.PLAN_TYPE_STUDY else None
+        has_tracked_playlist = bool(
+            head and not is_language and head.youtube_playlist_id and head.playlist_videos_cache
+        )
+        has_udemy_course = bool(head and not is_language and head.watch_keyword)
+        if is_language:
+            progress = self.course_progress()
+            return progress["total"] > 0 and progress["pct"] >= 100
+        if has_tracked_playlist:
+            progress = self._study_playlist_progress(head)
+            return progress["total"] > 0 and progress["finished"]
+        if has_udemy_course:
+            # Igual que Idiomas/playlist: el fin es terminar el curso,
+            # no cumplir `weeks` — lo dice course_completed_at en la
+            # tarea vigente, puesto por finish_recurring_series() cuando
+            # la extensión de Chrome detecta el 100% en Udemy.
+            current_task = Task.objects.filter(series_id=self.task_series_id).order_by("-due_date").first()
+            return bool(current_task and current_task.course_completed_at)
         today = timezone.localtime(timezone.now()).date()
+        return today >= self.ends_on or self._all_items_reached_goal()
+
+    def _all_items_reached_goal(self):
+        """
+        True si TODOS los objetivos de este plan tienen un destino real
+        definido (ver PlanItem.sessions_to_goal) y ya lo han alcanzado
+        -- permite cerrar el plan antes de que se cumplan las semanas
+        cuando ya no queda "más camino" que subir en ninguno.
+
+        "Cumplimiento" (objetivo fijo) y "al fallo" sin peso objetivo
+        puesto (y cualquier progresión sin goal_* configurado, sea cual
+        sea su tipo) no tienen techo por diseño -- sessions_to_goal()
+        ya devuelve None para todos esos casos (mira "done" en cada
+        escalón, y esos nunca lo marcan), así que basta con usar ese
+        mismo método aquí para los cuatro tipos de progresión a la vez,
+        sin repetir el switch por tipo. Si el plan no tiene ningún
+        objetivo, o si aunque sea UNO no tiene techo, esto es False sin
+        más -- ese objetivo está pensado para repetirse todo el ciclo,
+        no tiene un "ya terminé" que detectar, así que el plan entero
+        se queda esperando a que se cumplan las semanas, como toda la
+        vida (llamado desde _is_finished_now, arriba).
+        """
+        items = list(self.items.all())
+        if not items:
+            return False
+        return all(
+            (remaining := item.sessions_to_goal()) is not None and remaining == 0
+            for item in items
+        )
+
+    def close_if_finished(self):
+        """
+        Si este plan ya ha llegado a su fin (ver _is_finished_now) y
+        todavía no estaba cerrado, lo cierra AQUÍ MISMO — misma foto de
+        progreso / closed_at / is_active / sync_task que el cierre
+        manual (ver la vista plan_close) o que el barrido en segundo
+        plano (auto_close_expired), solo que disparado en el instante
+        en que se guarda la sesión que lo termina en vez de quedar
+        cerrado en silencio hasta la próxima vez que se cargue la lista
+        de tareas. Lo llama Task.mark_done() con el plan de la tarea
+        que se acaba de marcar, y devuelve el plan a quien llamó para
+        que pueda mandar a la pantalla de cierre/celebración en vez de
+        a la lista de siempre.
+
+        Idempotente: si ya estaba cerrado, no hace nada y devuelve
+        False — así da igual que auto_close_expired lo vuelva a
+        comprobar más tarde para el resto de planes vencidos.
+        """
+        if self.closed_at:
+            return False
+        if not self._is_finished_now():
+            return False
+        self.final_progress_pct = self.progress_pct()
+        self.closed_at = timezone.now()
+        self.is_active = False
+        self.save(update_fields=["final_progress_pct", "closed_at", "is_active", "updated_at"])
+        self.sync_task()
+        return True
+
+    @classmethod
+    def auto_close_expired(cls, user=None):
+        """
+        Cierra solos los planes que ya han llegado a su fin (ver
+        close_if_finished / _is_finished_now para el criterio).
+
+        Sin scheduler en este hosting, así que se comprueba de gorra
+        cada vez que se abre la lista de tareas — mismo criterio que
+        Task.expire_overdue(): barato, y no hace falta que nadie entre
+        a "planes" para que un ciclo vencido deje de generar tareas.
+        Es la red de seguridad para cuando nadie ha pasado por
+        Task.mark_done() de la sesión que lo terminaba (por ejemplo, un
+        plan de Estudio · Idiomas cuyo temario se completó por otra vía)
+        — el caso normal ya se cierra al momento, ver close_if_finished.
+        """
         qs = cls.objects.filter(deleted_at__isnull=True, closed_at__isnull=True, is_active=True)
         if user is not None:
             qs = qs.filter(user=user)
         for plan in qs:
-            is_language = (
-                plan.plan_type == cls.PLAN_TYPE_STUDY and plan.study_subtype == cls.STUDY_SUBTYPE_LANGUAGE
-            )
-            head = plan.headline if plan.plan_type == cls.PLAN_TYPE_STUDY else None
-            has_tracked_playlist = bool(
-                head and not is_language and head.youtube_playlist_id and head.playlist_videos_cache
-            )
-            has_udemy_course = bool(head and not is_language and head.watch_keyword)
-            if is_language:
-                progress = plan.course_progress()
-                finished = progress["total"] > 0 and progress["pct"] >= 100
-            elif has_tracked_playlist:
-                progress = plan._study_playlist_progress(head)
-                finished = progress["total"] > 0 and progress["finished"]
-            elif has_udemy_course:
-                # Igual que Idiomas/playlist: el fin es terminar el
-                # curso, no cumplir `weeks` — lo dice course_completed_at
-                # en la tarea vigente, puesto por finish_recurring_series()
-                # cuando la extensión de Chrome detecta el 100% en Udemy.
-                current_task = Task.objects.filter(series_id=plan.task_series_id).order_by("-due_date").first()
-                finished = bool(current_task and current_task.course_completed_at)
-            else:
-                finished = today >= plan.ends_on
-            if finished:
-                plan.final_progress_pct = plan.progress_pct()
-                plan.closed_at = timezone.now()
-                plan.is_active = False
-                plan.save(update_fields=["final_progress_pct", "closed_at", "is_active", "updated_at"])
-                plan.sync_task()
+            plan.close_if_finished()
 
     def custom_days_list(self):
         if not self.custom_days:
