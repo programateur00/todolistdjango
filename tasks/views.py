@@ -2991,6 +2991,27 @@ def plan_item_bulk_form(request, plan_pk):
         gw = request.POST.get("goal_weight_kg")
         shared["goal_weight_kg"] = _float("goal_weight_kg", 0) if gw else None
 
+        # Los tres campos de peso (start_weight_kg/goal_weight_kg/
+        # weight_increment_kg) de `shared` vienen de un ÚNICO input
+        # compartido por todo el lote (el formulario lo enseña en
+        # cuanto HAY algún ejercicio con peso marcado, ver esPeso() en
+        # plan_item_bulk_form.html) -- pero no todos los ejercicios
+        # seleccionados tienen dónde poner ese peso: solo los de
+        # Exercise.WEIGHTED_SLUGS (dominadas/fondos/sentadillas CON
+        # peso) admiten lastre de verdad. Sin este segundo dict, ese
+        # mismo peso se colaba también en flexiones/handstand/dominadas
+        # normales solo por haber ido en el mismo lote (bug reportado:
+        # "todos los ejercicios salen con 5 kg, no solo los que
+        # llevan"). shared_no_weight es la misma configuración con los
+        # tres a su "sin peso" de siempre (mismos defaults que
+        # PlanItem.start_weight_kg/goal_weight_kg/weight_increment_kg).
+        shared_no_weight = {
+            **shared,
+            "start_weight_kg": 0.0,
+            "goal_weight_kg": None,
+            "weight_increment_kg": 2.5,
+        }
+
         # Compartido para los de running (distancia/ritmo) — progresión
         # forzada a PROG_DISTANCE, igual que hace plan_item_form con
         # es_running.
@@ -3024,7 +3045,12 @@ def plan_item_bulk_form(request, plan_pk):
         sin_destino = []
         for ex in selected:
             item = PlanItem(plan=plan, exercise=ex)
-            fields = run_shared if ex.mode == Exercise.MODE_DISTANCE else shared
+            if ex.mode == Exercise.MODE_DISTANCE:
+                fields = run_shared
+            elif ex.slug in Exercise.WEIGHTED_SLUGS:
+                fields = shared
+            else:
+                fields = shared_no_weight
             for k, v in fields.items():
                 setattr(item, k, v)
             if ex.mode == Exercise.MODE_DISTANCE and not item.goal_distance_km and not distance_flat:
