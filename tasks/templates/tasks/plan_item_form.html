@@ -274,41 +274,10 @@
             <span class="field__hint" id="goal-weight-hint"></span>
         </label>
 
-        <h2 class="section-title" data-when="goal-reps">Ritmo</h2>
-        <label class="field" data-when="goal-reps">
-            <span class="field__label">¿En cuántas semanas quieres llegar al destino?</span>
-            <div class="field-row">
-                <input type="number" name="_weeks_reps" id="weeks-reps" min="1" placeholder="Ej: 12" style="flex:1">
-                <button type="button" class="ghost-btn" id="calc-reps-btn">Calcular</button>
-            </div>
-            <span class="field__hint">
-                Con tus {{ sessions_per_week }} día{{ sessions_per_week|pluralize }} a la semana, calcula cuánto
-                subir cada escalón (o, en peso, cada cuántos ciclos añadir carga).
-            </span>
-        </label>
-        <div class="field-row" data-when="goal">
-            <label class="field">
-                <span class="field__label">Sesiones por escalón</span>
-                <input type="number" name="sessions_per_step" id="sessions-per-step-reps" min="1" value="{{ item.sessions_per_step|default:2 }}">
-            </label>
-            <label class="field" data-when="increment">
-                <span class="field__label">Sube de</span>
-               <input type="number" name="reps_increment" id="reps-increment" min="0.1" step="0.1" value="{{ item.reps_increment|default:1 }}">
-            </label>
-        </div>
-
-        <div class="field-row" data-when="weight-grows">
-            <label class="field" data-when="rep-range">
-                <span class="field__label">Vuelve a</span>
-                <input type="number" name="rep_range_low" id="rep-range-low" min="1" value="{{ item.rep_range_low|default:6 }}">
-                <span class="field__hint">Repeticiones a las que se baja al añadir peso.</span>
-            </label>
-            <label class="field">
-                <span class="field__label">Añade (kg)</span>
-                <input type="number" name="weight_increment_kg" id="weight-increment" min="0.5" step="0.5" value="{{ item.weight_increment_kg|default:2.5 }}">
-                <span class="field__hint">Cuánto se añade al llegar arriba (repeticiones en reps, series en al fallo).</span>
-            </label>
-        </div>
+        <span class="field__hint" data-when="goal">
+            Se reparte solo entre las semanas del plan, en línea recta desde el punto de
+            partida hasta el destino — no hace falta calcular cuánto subir cada vez.
+        </span>
 
         <label class="field" data-when="goal">
             <span class="field__label">Bajar escalón tras</span>
@@ -407,10 +376,7 @@
             seconds: timed && !esFallo,      // al fallo tampoco pide segundos fijos (aguantar al fallo)
             'start-weight': pesoEx,          // peso inicial: si el ejercicio lo usa, en cualquier progresión
             'weight-grows': pesoEx && p !== 'completion' && !timed,  // peso objetivo + incremento: solo si además progresa
-            'rep-range': pesoEx && p === 'reps',   // "vuelve a" solo tiene sentido subiendo reps con peso
             goal: p !== 'completion',        // cumplimiento no tiene destino
-            increment: p !== 'completion' && !esFallo,   // al fallo no sube reps, sube series directamente
-            'goal-reps': p !== 'completion' && !esFallo  // la calculadora de semanas es de reps/segundos, no aplica
         };
         document.querySelectorAll('[data-when]').forEach(function(el){
             var k = el.dataset.when;
@@ -467,40 +433,6 @@
         }
     });
 
-  document.getElementById('calc-reps-btn').addEventListener('click', function () {
-    var weeks = num('weeks-reps');
-    if (!weeks) { alert('Pon primero en cuántas semanas quieres llegar.'); return; }
-    var sesionesPorEscalon = num('sessions-per-step-reps') || 1;
-
-    // Reps con peso objetivo puesto (lo que antes era la progresión
-    // "doble" aparte): el eje que se calcula aquí es el peso, no las
-    // repeticiones (esas suben y bajan dentro del rango sin más). Sin
-    // peso objetivo puesto (ejercicio sin peso, o con peso pero fijo),
-    // cae al cálculo normal de repeticiones de más abajo.
-    if (esPeso() && prog() === 'reps' && (num('goal-weight') - num('start-weight')) > 0) {
-        var low = num('rep-range-low') || 6;
-        var top = num('goal-reps') || (low + 6);
-        var span = Math.max(1, top - low + 1);
-        var ciclos = Math.max(1, Math.round(escalones(weeks, sesionesPorEscalon) / span));
-        var dPeso = num('goal-weight') - num('start-weight');
-        document.getElementById('weight-increment').value = (dPeso / ciclos).toFixed(1);
-        return;
-    }
-
-    var timed = esCronometrado();
-    var startId = timed ? 'start-seconds' : 'start-reps';
-    var goalId  = timed ? 'goal-seconds' : 'goal-reps';
-    var pasos   = escalones(weeks, sesionesPorEscalon);
-    var delta   = num(goalId) - num(startId);
-
-    if (delta > 0) {
-        // ANTES: Math.max(1, Math.round(delta / pasos))
-        // DESPUÉS (1 decimal — coincide con lo que Django acepta)
-document.getElementById('reps-increment').value = Math.max(0.1, parseFloat((delta / pasos).toFixed(1)));
-    } else {
-        alert('Pon primero el destino (repeticiones o segundos), más arriba — sin eso no hay nada que calcular.');
-    }
-});
 })();
 </script>
 {% endif %}

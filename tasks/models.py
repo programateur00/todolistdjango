@@ -3087,6 +3087,18 @@ class PlanItem(models.Model):
         default=6,
         help_text="Solo en repeticiones con peso objetivo puesto: a cuántas repeticiones se vuelve al subir peso.",
     )
+    # reps_increment/weight_increment_kg/rep_range_low (arriba) son del
+    # modo antiguo -- un objetivo con weekly_linear=True ya no los usa,
+    # se quedan solo por compatibilidad con objetivos creados antes de
+    # esto. Ver weekly_linear más abajo y target_for_step.
+    weekly_linear = models.BooleanField(
+        default=False,
+        help_text="Reparte el objetivo linealmente entre las semanas del plan (de partida a "
+                  "destino, a partes iguales) en vez de subir por ciclos con incremento manual. "
+                  "Solo aplica a 'repeticiones' y 'al fallo'. Por defecto en objetivos nuevos "
+                  "(plan_item_form/plan_item_bulk_form); los antiguos se quedan en False para no "
+                  "cambiarles el objetivo de un día para otro.",
+    )
 
     # El toque de entrenador
     deload_after_failures = models.PositiveIntegerField(
@@ -3456,6 +3468,24 @@ class PlanItem(models.Model):
             return 1.0 if value >= ceiling else 0.0
         return min(1.0, max(0.0, (value - start) / (ceiling - start)))
 
+    def _weekly_fraction(self, step):
+        """
+        De 0 a 1: en qué punto del plan estás, para repartir el objetivo
+        linealmente entre las semanas (weekly_linear) en vez de por
+        ciclos con incremento manual.
+
+        Un escalón = una semana: sessions_per_step se pone igual a las
+        sesiones/semana del plan al crear el objetivo (plan_item_form /
+        plan_item_bulk_form), así que `step` (0 = primera semana) avanza
+        exactamente una vez por semana cumplida. En la ÚLTIMA semana
+        (step == weeks - 1) ya vale 1.0, así que el destino se alcanza
+        siempre en esa semana — sea cual sea la distancia entre inicio y
+        destino, sin necesidad de calcular "cuánto subir cada vez" a
+        mano, que es justo lo que pedía Alex ("matemática simple").
+        """
+        weeks = self.plan.weeks if self.plan_id and self.plan.weeks else 1
+        return min(1.0, (step + 1) / max(1, weeks))
+
     def target_for_step(self, step):
         """El objetivo en el escalón `step` (0 = el primero)."""
         if self.progression == self.PROG_COMPLETION:
@@ -3493,11 +3523,35 @@ class PlanItem(models.Model):
             # medir cuánto subir, así que se queda fijo en el inicial para
             # siempre (esto es lo que quiere quien no pone incremento de
             # peso — dominadas/fondos siempre con el mismo lastre, o sin
-            # peso ninguno). Con un peso objetivo puesto, sí se progresa:
-            # se completa un ciclo entero de series (start_sets→goal_sets)
-            # al peso actual y, al llegar arriba, se añade el peso y las
-            # series vuelven a empezar desde start_sets — así hasta llegar
-            # al peso objetivo.
+            # peso ninguno).
+            if self.weekly_linear:
+                # Reparto lineal por semanas del plan (ver weekly_linear):
+                # nada de ciclos ni de pedir "cada cuántas sesiones sube" o
+                # "cuánto añadir" a mano — un escalón = una semana
+                # (sessions_per_step se pone igual a las sesiones/semana
+                # del plan al crear el objetivo) y series y peso suben A
+                # LA VEZ, en línea recta desde el inicio hasta el destino,
+                # cada uno con el suyo (sin destino puesto, ese en
+                # concreto se queda fijo, igual que en el modo antiguo).
+                frac = self._weekly_fraction(step)
+                sets = self._sets_for_progress(frac)
+                weight = (
+                    self.start_weight_kg + frac * (self.goal_weight_kg - self.start_weight_kg)
+                    if self.goal_weight_kg is not None else self.start_weight_kg
+                )
+                sets_ok = self.goal_sets is None or sets >= self.goal_sets
+                weight_ok = self.goal_weight_kg is None or weight >= self.goal_weight_kg
+                done = bool(frac >= 1.0 and sets_ok and weight_ok and (self.goal_sets or self.goal_weight_kg is not None))
+                return {
+                    "sets": sets, "reps": None, "seconds": None,
+                    "weight_kg": round(weight, 1), "done": done,
+                    "distance_km": None, "pace_seconds_per_km": None,
+                }
+            # Modo antiguo (objetivos creados antes de weekly_linear): con
+            # un peso objetivo puesto, se completa un ciclo entero de
+            # series (start_sets→goal_sets) al peso actual y, al llegar
+            # arriba, se añade el peso y las series vuelven a empezar
+            # desde start_sets — así hasta llegar al peso objetivo.
             if self.goal_weight_kg is not None and self.weight_increment_kg:
                 total_steps = (
                     self.goal_sets - self.start_sets
@@ -3534,6 +3588,38 @@ class PlanItem(models.Model):
         # algo cronometrado — aguantar con peso no tiene esta mecánica de
         # rango de repeticiones, así que ahí el peso (si lo hay) va
         # siempre fijo.
+        if self.weekly_linear:
+            # Mismo reparto lineal por semanas que en PROG_FAILURE (ver
+            # el comentario de ahí) — reps/segundos y peso suben a la vez,
+            # en línea recta, cada uno con su propio destino.
+            frac = self._weekly_fraction(step)
+            if self.is_timed:
+                seconds = (
+                    round(self.start_seconds + frac * (self.goal_seconds - self.start_seconds))
+                    if self.goal_seconds else self.start_seconds
+                )
+                done = bool(self.goal_seconds and frac >= 1.0)
+                return {
+                    "sets": self._sets_for_progress(frac), "reps": None,
+                    "seconds": seconds, "weight_kg": self.start_weight_kg,
+                    "done": done,
+                    "distance_km": None, "pace_seconds_per_km": None,
+                }
+            reps = (
+                round(self.start_reps + frac * (self.goal_reps - self.start_reps))
+                if self.goal_reps else self.start_reps
+            )
+            weight = (
+                self.start_weight_kg + frac * (self.goal_weight_kg - self.start_weight_kg)
+                if self.goal_weight_kg is not None else self.start_weight_kg
+            )
+            done = bool(frac >= 1.0 and (self.goal_reps or self.goal_weight_kg is not None))
+            return {
+                "sets": self._sets_for_progress(frac), "reps": reps,
+                "seconds": None, "weight_kg": round(weight, 1), "done": done,
+                "distance_km": None, "pace_seconds_per_km": None,
+            }
+
         if self.is_timed:
             seconds = self.start_seconds + step * self.reps_increment
             ceiling = self.goal_seconds

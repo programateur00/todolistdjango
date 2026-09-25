@@ -31,7 +31,11 @@ apoyo, así que va como bloque aparte.
 
     {% if pack.sessions_to_next_step and not pack.target.done %}
     <p class="plan-item__step-hint">
+        {% if pack.item.weekly_linear %}
+        Llevas {{ pack.sessions_into_step }} de {{ pack.item.sessions_per_step }} sesiones para subir a la semana que viene
+        {% else %}
         Llevas {{ pack.sessions_into_step }} de {{ pack.item.sessions_per_step }} sesiones para subir al siguiente escalón
+        {% endif %}
     </p>
     {% endif %}
 
@@ -62,12 +66,18 @@ apoyo, así que va como bloque aparte.
 
     {% if not pack.item.is_flat %}
     <details class="plan-details">
+        {% if pack.item.weekly_linear %}
+        <summary>El camino completo ({{ pack.schedule|length }} semanas)</summary>
+        <table class="plan-table">
+            <thead><tr><th>Semana</th><th>Objetivo</th></tr></thead>
+        {% else %}
         <summary>El camino completo ({{ pack.schedule|length }} escalones)</summary>
         <table class="plan-table">
             <thead><tr><th>Escalón</th><th>Objetivo</th></tr></thead>
+        {% endif %}
             <tbody>
             {% for row in pack.schedule %}
-                {# forloop.counter0 es el índice del escalón; así se marca dónde estás. #}
+                {# forloop.counter0 es el índice del escalón/semana; así se marca dónde estás. #}
                 <tr class="{% if forloop.counter0 == pack.step %}plan-row--here{% endif %}">
                     <td>
                         {{ row.step }}

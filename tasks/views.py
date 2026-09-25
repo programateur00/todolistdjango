@@ -2828,10 +2828,13 @@ def plan_item_form(request, plan_pk, pk=None):
             item.distance_increment_km = _float("distance_increment_km", 0.5) or 0.5
             item.pace_decrement_seconds = _int("pace_decrement_seconds", 10) or 10
 
-        item.sessions_per_step = _int("sessions_per_step", 2) or 1
-        item.reps_increment = _int("reps_increment", 1) or 1
-        item.weight_increment_kg = _float("weight_increment_kg", 2.5) or 2.5
-        item.rep_range_low = _int("rep_range_low", 6) or 1
+        # Cómo avanza: ya no se pide a mano (ni "sesiones por escalón" ni
+        # "sube de X"/"añade X kg") -- se reparte solo, en línea recta,
+        # entre las semanas del plan (weekly_linear, ver PlanItem).
+        # sessions_per_step se pone igual a las sesiones/semana del plan
+        # para que un escalón sea exactamente una semana.
+        item.weekly_linear = True
+        item.sessions_per_step = max(1, len(plan.custom_days_list()))
         item.deload_after_failures = _int("deload_after_failures", 3)
         item.is_headline = bool(request.POST.get("is_headline"))
 
@@ -2972,6 +2975,10 @@ def plan_item_bulk_form(request, plan_pk):
         # campos de "objetivo" (reps Y segundos) se guardan siempre — el
         # que no aplique lo ignora is_timed/PROG_FAILURE al leerlo,
         # mismo criterio que ya usa el formulario de uno en uno.
+        # Cómo avanza: igual que en plan_item_form, ya no se pide "cada
+        # cuántas sesiones sube" ni "cuánto sube" a mano -- weekly_linear
+        # reparte en línea recta entre las semanas del plan, con
+        # sessions_per_step = sesiones/semana (un escalón = una semana).
         shared = dict(
             sport_mode=sport_mode,
             progression=prog,
@@ -2982,10 +2989,8 @@ def plan_item_bulk_form(request, plan_pk):
             goal_sets=_int("goal_sets", 0) or None,
             goal_reps=_int("goal_reps", 0) or None,
             goal_seconds=_int("goal_seconds", 0) or None,
-            sessions_per_step=_int("sessions_per_step", 2) or 1,
-            reps_increment=_int("reps_increment", 1) or 1,
-            weight_increment_kg=_float("weight_increment_kg", 2.5) or 2.5,
-            rep_range_low=_int("rep_range_low", 6) or 1,
+            weekly_linear=True,
+            sessions_per_step=max(1, len(plan.custom_days_list())),
             deload_after_failures=_int("deload_after_failures", 3),
         )
         gw = request.POST.get("goal_weight_kg")
