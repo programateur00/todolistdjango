@@ -19,11 +19,11 @@
     <a class="ghost-btn" href="{% url 'tasks:challenges_list' %}">🏆 Retos</a>
 </div>
 
-{% if plans %}
-<section class="task-section">
-    <h2 class="task-section__title">Progresión <span class="task-section__count">{{ plans|length }}</span></h2>
+{% for group in plan_groups %}
+<details class="done-details" open>
+    <summary class="done-summary">{{ group.label }} <span class="task-section__count">{{ group.items|length }}</span></summary>
     <ul class="plan-list">
-        {% for p in plans %}
+        {% for p in group.items %}
         <li class="plan-card {% if not p.plan.is_active %}plan-card--off{% endif %}">
             <a href="{% url 'tasks:plan_detail' p.plan.pk %}">
                 <div class="plan-card__row">
@@ -62,8 +62,8 @@
         </li>
         {% endfor %}
     </ul>
-</section>
-{% endif %}
+</details>
+{% endfor %}
 
 {% comment %}
 Lectura no es un Plan de verdad (vive aparte en Task.reading_mode=
@@ -73,8 +73,8 @@ que los demás -- se enseña en su propia sección, con lo suyo (ritmo, %
 leído) en vez de forzarlo en la tarjeta de Plan normal.
 {% endcomment %}
 {% if reading_plans %}
-<section class="task-section">
-    <h2 class="task-section__title">Lectura <span class="task-section__count">{{ reading_plans|length }}</span></h2>
+<details class="done-details" open>
+    <summary class="done-summary">Lectura <span class="task-section__count">{{ reading_plans|length }}</span></summary>
     <ul class="plan-list">
         {% for p in reading_plans %}
         <li class="plan-card">
@@ -105,21 +105,23 @@ leído) en vez de forzarlo en la tarjeta de Plan normal.
         </li>
         {% endfor %}
     </ul>
-</section>
+</details>
 {% endif %}
 
-{% if not plans and not reading_plans %}
+{% if not plan_groups and not reading_plans %}
 <p class="empty-state">
     Todavía no tienes planes. Un plan es un objetivo con progresión:
     «ponerme en forma», con una medida concreta que diga si vas llegando.
 </p>
 {% endif %}
 
-{% if closed_plans or closed_reading_plans %}
+{% if closed_plan_groups or closed_reading_plans %}
 <details class="done-details">
     <summary class="done-summary">Planes cerrados <span class="task-section__count">{{ closed_plans_count }}</span></summary>
+    {% for group in closed_plan_groups %}
+    <p class="plan-group-title">{{ group.label }} <span class="task-section__count">{{ group.items|length }}</span></p>
     <ul class="plan-list">
-        {% for p in closed_plans %}
+        {% for p in group.items %}
         <li class="plan-card plan-card--off">
             <a href="{% url 'tasks:plan_close' p.plan.pk %}">
                 <div class="plan-card__row">
@@ -143,6 +145,11 @@ leído) en vez de forzarlo en la tarjeta de Plan normal.
             </a>
         </li>
         {% endfor %}
+    </ul>
+    {% endfor %}
+    {% if closed_reading_plans %}
+    <p class="plan-group-title">Lectura <span class="task-section__count">{{ closed_reading_plans|length }}</span></p>
+    <ul class="plan-list">
         {% for p in closed_reading_plans %}
         <li class="plan-card plan-card--off">
             <a href="{% url 'tasks:task_reading' p.task.pk %}">
@@ -162,6 +169,7 @@ leído) en vez de forzarlo en la tarjeta de Plan normal.
         </li>
         {% endfor %}
     </ul>
+    {% endif %}
 </details>
 {% endif %}
 

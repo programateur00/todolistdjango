@@ -1735,20 +1735,40 @@ def _plans_qs():
 
 
 def plan_list(request):
-    """Los planes, con su medida principal y cuánto llevas."""
-    plans = []
+    """
+    Los planes, con su medida principal y cuánto llevas -- agrupados por
+    categoría (Deporte/Estudio/General, más Lectura aparte), cada grupo
+    en su propio desplegable (ver plan_list.html, mismo patrón <details>
+    sin JS que ya usaba "Planes cerrados"). Antes Deporte/Estudio/General
+    iban todos mezclados en una lista plana bajo "Progresión" sin
+    distinguirse por tipo -- pensado para cuando esto tenga muchos
+    usuarios con muchos planes a la vez (ver strive-producto), que no se
+    pierdan entre una lista larga sin ninguna separación.
+    """
+    by_type = {key: [] for key, _ in Plan.PLAN_TYPE_CHOICES}
     for p in _plans_qs().filter(closed_at__isnull=True):
         head = p.headline
-        plans.append({
+        by_type[p.plan_type].append({
             "plan": p,
             "headline": head,
             "target": head.current_target() if head else None,
             "remaining": head.sessions_to_goal() if head else None,
             "progress": p.progress_pct(),
         })
-    closed_plans = [
-        {"plan": p, "progress": p.final_progress_pct}
-        for p in _plans_qs().filter(closed_at__isnull=False).order_by("-closed_at")
+    # Un grupo por categoría, en el mismo orden que PLAN_TYPE_CHOICES --
+    # y solo si tiene algo dentro, para no enseñar un desplegable vacío
+    # de "Estudio" a quien nunca ha creado uno.
+    plan_groups = [
+        {"key": key, "label": label, "items": by_type[key]}
+        for key, label in Plan.PLAN_TYPE_CHOICES if by_type[key]
+    ]
+
+    closed_by_type = {key: [] for key, _ in Plan.PLAN_TYPE_CHOICES}
+    for p in _plans_qs().filter(closed_at__isnull=False).order_by("-closed_at"):
+        closed_by_type[p.plan_type].append({"plan": p, "progress": p.final_progress_pct})
+    closed_plan_groups = [
+        {"key": key, "label": label, "items": closed_by_type[key]}
+        for key, label in Plan.PLAN_TYPE_CHOICES if closed_by_type[key]
     ]
     # Lectura no es un Plan de verdad (vive aparte en Task.reading_mode=
     # 'plan', ver el comentario junto a ese campo en models.py) -- pero
@@ -1781,9 +1801,11 @@ def plan_list(request):
         for t in sorted((t for t in latest if t.reading_completed_at), key=lambda t: t.reading_completed_at, reverse=True)
     ]
     return render(request, "tasks/plan_list.html", {
-        "plans": plans, "closed_plans": closed_plans,
+        "plan_groups": plan_groups, "closed_plan_groups": closed_plan_groups,
         "reading_plans": reading_plans, "closed_reading_plans": closed_reading_plans,
-        "closed_plans_count": len(closed_plans) + len(closed_reading_plans),
+        "closed_plans_count": (
+            sum(len(g["items"]) for g in closed_plan_groups) + len(closed_reading_plans)
+        ),
     })
 
 

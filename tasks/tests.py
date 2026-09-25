@@ -877,8 +877,10 @@ class PlanViewTests(TestCase):
         self.assertIsNotNone(plan.deleted_at)
         r = self.client.get(reverse("tasks:plan_list"))
         # (no se mira el HTML: los mensajes flash de "guardado"/"eliminado"
-        # también llevan el nombre del plan)
-        self.assertEqual(r.context["plans"], [])
+        # también llevan el nombre del plan) -- desde que plan_list agrupa
+        # por categoría (ver esa vista), "plans" pasó a ser "plan_groups";
+        # sin ningún plan activo, la lista de grupos está vacía sin más.
+        self.assertEqual(r.context["plan_groups"], [])
 
 
 class NotificationSeriesTests(TestCase):

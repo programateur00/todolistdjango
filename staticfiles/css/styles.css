@@ -203,6 +203,25 @@ button { font-family:var(--font-b); cursor:pointer; }
    quedaba visible aunque el desplegable estuviera "cerrado". Se fuerza
    aquí explícitamente en vez de confiar en el comportamiento nativo. */
 .done-details:not([open]) > .task-list { display:none; }
+/* Mismo fix que el de arriba, pero para los desplegables de Planes
+   (activos por categoría, y "Planes cerrados"): .plan-list también
+   lleva display:flex, así que sin esto un plan cerrado se quedaba
+   visible en Safari/WebKit aunque el desplegable estuviera plegado
+   -- no se había notado antes porque "Planes cerrados" era el único
+   <details> que envolvía un .plan-list, y en la práctica casi nadie
+   lo abre para darse cuenta. Al añadir más <details> por categoría
+   (ver plan_list.html) se volvió más visible, así que se arregla aquí
+   de una vez para los dos casos.
+   .plan-group-title es la cabecera de cada sub-grupo (Deporte/Estudio/
+   General/Lectura) DENTRO de "Planes cerrados" -- no lleva su propio
+   <details>, solo separa visualmente sin añadir otro nivel de plegado
+   (un plan cerrado se consulta poco, no hace falta plegarlo dos veces). */
+.done-details:not([open]) > .plan-list,
+.done-details:not([open]) > .plan-group-title { display:none; }
+.plan-group-title { font-family:var(--font-d); font-size:12px; font-weight:600;
+  text-transform:uppercase; letter-spacing:.06em; color:var(--bone-faded);
+  margin:18px 0 8px; }
+.plan-group-title:first-of-type { margin-top:0; }
 .empty-state { color:var(--bone-faded); font-size:14px; padding:20px 4px; font-style:italic; }
 
 /* ── Por generar (previsión de repeticiones futuras) ──────────────────
