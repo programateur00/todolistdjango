@@ -20,8 +20,7 @@
 {% if plan.notes %}<p class="plan-notes">{{ plan.notes }}</p>{% endif %}
 
 {% if is_language %}
-{# Estudio · Idiomas no tiene PlanItem — el temario es CourseModule, así
-   que la medida del plan es el propio vídeo que toca hoy. #}
+{# Estudio · Idiomas no tiene PlanItem — el temario es CourseModule, así que la medida del plan es el propio vídeo que toca hoy. #}
 <section class="plan-head">
     <p class="plan-head__eyebrow">Curso de {{ plan.language_name }}</p>
     <h2 class="plan-head__name">
@@ -70,10 +69,7 @@
 {% else %}
 
 {% if progress is not None %}
-{# El % del plan es la media de own_progress_pct() de TODOS los objetivos
-   (Plan.progress_pct()) — va fuera de la tarjeta del destacado a propósito,
-   para que no parezca la barra de ESE ejercicio. is_headline solo decide
-   cuál se enseña arriba, no cuánto pesa en el %. #}
+{# Progreso del plan: media de own_progress_pct() de todos los objetivos (Plan.progress_pct()). #}
 <p class="field__hint">Todos los objetivos cuentan por igual: esto es la media de todos.</p>
 <div class="plan-bar" role="img" aria-label="Progreso del plan: {{ progress }}%">
     <div class="plan-bar__fill" style="width: {{ progress }}%"></div>
@@ -82,8 +78,7 @@
 {% endif %}
 
 {% if headline %}
-{# El destacado es solo el que se enseña arriba con más detalle — no el
-   que decide el % de arriba, ver el bloque anterior. #}
+{# El destacado solo se enseña arriba con más detalle, no decide el % (ver bloque anterior). #}
 <section class="plan-head">
     <p class="plan-head__eyebrow">Objetivo destacado</p>
     <h2 class="plan-head__name">{{ headline.item.display_name }}</h2>
@@ -122,7 +117,6 @@
 {% endif %}
 
 {% if supports %}
-<h2 class="section-title">Resto de objetivos</h2>
 {% for pack in supports %}
     {% include "tasks/_plan_item.html" with pack=pack plan=plan is_support=True is_first=forloop.first is_last=forloop.last %}
 {% endfor %}
