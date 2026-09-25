@@ -69,8 +69,21 @@
 
 {% else %}
 
+{% if progress is not None %}
+{# El % del plan es la media de own_progress_pct() de TODOS los objetivos
+   (Plan.progress_pct()) — va fuera de la tarjeta del destacado a propósito,
+   para que no parezca la barra de ESE ejercicio. is_headline solo decide
+   cuál se enseña arriba, no cuánto pesa en el %. #}
+<p class="field__hint">Todos los objetivos cuentan por igual: esto es la media de todos.</p>
+<div class="plan-bar" role="img" aria-label="Progreso del plan: {{ progress }}%">
+    <div class="plan-bar__fill" style="width: {{ progress }}%"></div>
+</div>
+<p class="plan-head__meta">{{ progress }}% del plan</p>
+{% endif %}
+
 {% if headline %}
-{# La medida principal: la prueba concreta de que vas hacia el objetivo. #}
+{# El destacado es solo el que se enseña arriba con más detalle — no el
+   que decide el % de arriba, ver el bloque anterior. #}
 <section class="plan-head">
     <p class="plan-head__eyebrow">Objetivo destacado</p>
     <h2 class="plan-head__name">{{ headline.item.display_name }}</h2>
@@ -100,14 +113,8 @@
     </p>
     {% endif %}
 
-    {% if progress is not None %}
-    <div class="plan-bar" role="img" aria-label="Progreso del plan: {{ progress }}%">
-        <div class="plan-bar__fill" style="width: {{ progress }}%"></div>
-    </div>
-    <p class="plan-head__meta">
-        {{ progress }}% del camino
-        {% if headline.remaining %}· faltan {{ headline.remaining }} sesiones cumplidas{% endif %}
-    </p>
+    {% if headline.remaining %}
+    <p class="plan-head__meta">faltan {{ headline.remaining }} sesiones cumplidas para este objetivo</p>
     {% endif %}
 </section>
 
@@ -116,7 +123,6 @@
 
 {% if supports %}
 <h2 class="section-title">Resto de objetivos</h2>
-<p class="field__hint">Todos cuentan por igual: el progreso del plan es la media de todos los objetivos.</p>
 {% for pack in supports %}
     {% include "tasks/_plan_item.html" with pack=pack plan=plan is_support=True is_first=forloop.first is_last=forloop.last %}
 {% endfor %}
