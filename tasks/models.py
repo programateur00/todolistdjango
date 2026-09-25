@@ -2644,6 +2644,32 @@ class Plan(models.Model):
         """
         return CourseQuiz.streak_stats(self.pk)
 
+    def _first_task_due_date(self):
+        """
+        La fecha de la PRIMERA tarea del plan (solo se usa al crearla,
+        una vez -- las siguientes las decide next_due_date() a partir de
+        esta).
+
+        ANTES: `max(started_on, hoy)` a secas -- si hoy no es uno de los
+        `custom_days_list()` marcados (p.ej. plan creado en sábado con
+        lunes/miércoles/viernes), la tarea salía igualmente HOY, un día
+        que ni siquiera está seleccionado. Reportado por Alex: "he creado
+        el plan hoy sábado y lo he puesto L-X-V, ¿por qué me sale hoy?".
+        Ahora se avanza hasta el primer día marcado a partir de ahí --
+        como mucho una semana entera de margen (7), así que si el plan
+        se crea el sábado con L-X-V, la primera tarea sale el lunes, no
+        el sábado.
+        """
+        candidate = max(self.started_on, timezone.localtime(timezone.now()).date())
+        marked_days = sorted(int(d) for d in self.custom_days_list())
+        if not marked_days:
+            return candidate
+        for offset in range(7):
+            day = candidate + timedelta(days=offset)
+            if day.weekday() in marked_days:
+                return day
+        return candidate
+
     def sync_task(self):
         """
         Crea o actualiza la tarea que representa este plan en la lista
@@ -2738,7 +2764,7 @@ class Plan(models.Model):
             task.save()
         else:
             task = Task.objects.create(
-                due_date=max(self.started_on, timezone.localtime(timezone.now()).date()),
+                due_date=self._first_task_due_date(),
                 **fields,
             )
             self.task_series_id = task.series_id
