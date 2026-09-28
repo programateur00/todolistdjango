@@ -303,6 +303,19 @@ def task_list(request):
     # rango "hoy" se comporta exactamente igual que antes.
     pending_tasks = Task.for_range(base_qs.filter(is_done=False), active_range)
 
+    # La minibarra "hoy" de un plan de lectura (ver task_list.html) lee
+    # reading_today_status directamente -- normalmente se refresca sola
+    # al abrir el visor (ver task_reading -> ensure_reading_day_goal),
+    # pero si se leyó "adelantado" (sesión extra, ver
+    # reading_session_ready) desde Planes sin pasar por aquí, esta lista
+    # seguiría enseñando el objetivo/página de partida viejos hasta la
+    # próxima vez que se abriera el visor de ESA tarea en concreto. Se
+    # refresca aquí también, igual que expire_overdue/sync_all_tasks más
+    # arriba -- barato: no hace nada (ni un save) si ya está al día.
+    for t in pending_tasks:
+        if t.reading_mode == Task.READING_MODE_PLAN:
+            t.ensure_reading_day_goal()
+
     # "Por generar": qué más se generaría de las tareas repetidas
     # durante el rango elegido (sin crear nada real todavía). No aplica
     # a "hoy" porque ahí no hay nada más que asomar más allá de hoy.
