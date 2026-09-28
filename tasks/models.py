@@ -7,6 +7,7 @@ from datetime import timedelta
 from django.conf import settings
 from django.db import models
 from django.db.models import Sum
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 # Formatos aceptados al pegar un vídeo de YouTube (RoutineItem.youtube_video_id):
@@ -1660,12 +1661,22 @@ class Task(models.Model):
         permanente: con una tarea diaria se iba acumulando una entrada
         por día hasta llenarla de ruido. El historial completo está en
         las estadísticas.
+
+        Antes, una tarea sin completed_at (dato atípico -- creada a mano,
+        por fixture, o de antes de que existiera el campo) se colaba
+        SIEMPRE, en el "hoy" de cualquier día para siempre, en vez de
+        irse igual que las demás -- así es como unas tareas de prueba de
+        un fin de semana se quedaban apareciendo como "hechas hoy"
+        indefinidamente. Con Coalesce, esa tarea cuenta por su
+        created_at (la mejor fecha que tenemos) y se va al día siguiente
+        igual que cualquier otra, en vez de tener un día distinto para
+        siempre.
         """
         today = timezone.localtime(timezone.now()).date()
         base = qs if qs is not None else cls.objects.all()
-        return base.filter(is_done=True).filter(
-            models.Q(completed_at__date=today) | models.Q(completed_at__isnull=True)
-        )
+        return base.filter(is_done=True).annotate(
+            _completed_bucket=Coalesce("completed_at", "created_at"),
+        ).filter(_completed_bucket__date=today)
 
     # ── Selector Hoy / Esta semana / Este mes / Todas (pantalla de Tareas) ──
     #
@@ -1735,11 +1746,15 @@ class Task(models.Model):
     def completed_in_range(cls, qs=None, range_key=RANGE_TODAY):
         """
         Hechas según el mismo selector, mirando hacia atrás por
-        completed_at. Una tarea sin completed_at (dato antiguo/atípico)
-        se sigue colando siempre, igual que hacía completed_today.
+        completed_at. Una tarea sin completed_at (dato antiguo/atípico,
+        o creada a mano sin pasar por mark_done()) cuenta por su
+        created_at en vez de colarse siempre en cualquier rango -- ver
+        completed_today, mismo criterio.
         """
         base = qs if qs is not None else cls.objects.all()
-        base = base.filter(is_done=True)
+        base = base.filter(is_done=True).annotate(
+            _completed_bucket=Coalesce("completed_at", "created_at"),
+        )
 
         today = timezone.localtime(timezone.now()).date()
         if range_key == cls.RANGE_ALL:
@@ -1752,9 +1767,7 @@ class Task(models.Model):
             start = end = today  # RANGE_TODAY
 
         if start is not None:
-            base = base.filter(
-                models.Q(completed_at__date__range=(start, end)) | models.Q(completed_at__isnull=True)
-            )
+            base = base.filter(_completed_bucket__date__range=(start, end))
         return base.order_by("-completed_at", "-created_at")
 
     # Cuántas fechas se enseñan sueltas antes de esconder el resto tras

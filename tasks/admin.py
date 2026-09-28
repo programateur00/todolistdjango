@@ -8,9 +8,13 @@ from .models import (
 
 @admin.register(Task)
 class TaskAdmin(admin.ModelAdmin):
+    # completed_at/created_at al final: sirven para encontrar restos de
+    # pruebas sueltos (is_done=True sin completed_at -- se ordenan/filtran
+    # por aquí para localizarlos y borrarlos a mano, ver
+    # Task.completed_today/completed_in_range).
     list_display = (
         "title", "user", "category", "is_avoid", "due_date", "due_time",
-        "repeat", "is_done", "is_important", "expired",
+        "repeat", "is_done", "is_important", "expired", "completed_at", "created_at",
     )
     list_filter = ("category", "is_done", "is_important", "expired", "repeat")
     search_fields = ("title", "notes")

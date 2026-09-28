@@ -2076,6 +2076,44 @@ class DailyCompletionTests(TestCase):
         self.assertEqual((d["done"], d["total"]), (1, 1))
 
 
+class CompletedListDoesNotLeakForeverTests(TestCase):
+    """
+    Una tarea hecha SIN completed_at (creada a mano, por fixture, o un
+    resto de pruebas) antes se colaba en el "Hoy" de CUALQUIER día para
+    siempre (ver completed_today/completed_in_range antes del fix) --
+    ahora cuenta por created_at, como cualquier otra, y se va al día
+    siguiente igual que las demás.
+    """
+
+    def _task_done_without_completed_at(self, user, created_on):
+        t = Task.objects.create(title="Suelto de prueba", is_done=True, user=user)
+        Task.objects.filter(pk=t.pk).update(
+            created_at=timezone.make_aware(
+                timezone.datetime.combine(created_on, time(12, 0))
+            ),
+            completed_at=None,
+        )
+        return Task.objects.get(pk=t.pk)
+
+    def test_no_aparece_en_hoy_si_se_creo_otro_dia(self):
+        u = get_current_user()
+        ayer = date.today() - timedelta(days=1)
+        self._task_done_without_completed_at(u, ayer)
+        self.assertEqual(Task.completed_today(Task.objects.filter(user=u)).count(), 0)
+        self.assertEqual(
+            Task.completed_in_range(Task.objects.filter(user=u), Task.RANGE_TODAY).count(), 0
+        )
+
+    def test_aparece_solo_el_dia_de_su_created_at(self):
+        u = get_current_user()
+        hoy = date.today()
+        self._task_done_without_completed_at(u, hoy)
+        self.assertEqual(Task.completed_today(Task.objects.filter(user=u)).count(), 1)
+        self.assertEqual(
+            Task.completed_in_range(Task.objects.filter(user=u), Task.RANGE_TODAY).count(), 1
+        )
+
+
 class WeeklyProjectionTests(TestCase):
     """
     El total semanal no puede depender de lo que ya se ha generado: una
