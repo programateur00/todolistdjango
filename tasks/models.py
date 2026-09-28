@@ -1102,10 +1102,17 @@ class Task(models.Model):
         (decisión con Alex: mejor dejar ver que vas por delante que
         recortar la barra como si el objetivo de hoy ya no sirviera).
 
-        None si esto no es un plan de lectura, o si esta instancia todavía
-        no tiene un objetivo de hoy calculado (ver ensure_reading_day_goal).
+        None si esto no es un plan de lectura, si esta instancia todavía
+        no tiene un objetivo de hoy calculado (ver ensure_reading_day_goal)
+        o si due_date todavía no ha llegado (ver reading_session_ready):
+        leer "adelantado" desde Planes antes de que toque es una sesión
+        extra -- cuenta para reading_plan_status (el % del libro entero),
+        pero no se representa en NINGÚN día concreto, ni ese día ni el que
+        sí toca cuando llegue (decisión con Alex, 2026-09-28).
         """
         if self.reading_mode != self.READING_MODE_PLAN:
+            return None
+        if not self.reading_session_ready:
             return None
         if self.reading_day_goal is None:
             return None
@@ -1157,20 +1164,31 @@ class Task(models.Model):
         ya lo deja puesto para el due_date de la instancia).
 
         Si NO es de hoy, se recalcula tomando el estado actual como
-        "inicio del día": esto cubre tanto una instancia "legacy" de
-        antes de que existieran estos campos (reading_day_baseline_date
-        es None) como, sobre todo, haber leído "adelantado" -- se puede
-        entrar al visor cualquier día desde Planes sin esperar a que
-        toque (ver reading_session_ready) -- lo que dejaba
-        reading_day_start_page fijado en un día y reading_current_page
-        siguiendo subiendo por lecturas de OTROS días, y en cuanto
-        llegaba el día que sí tocaba, esas páginas de más ya contaban
-        como si las hubiera leído entonces. Al recalcular aquí cada vez
-        que cambia el día de calendario, cada día -- toque o no -- parte
-        de página cero para SU objetivo, y los de más no se cuelan en el
-        de otro.
+        "inicio del día" -- pero SOLO si due_date ya ha llegado (ver
+        reading_session_ready): abrir el visor antes de que toque es una
+        sesión extra (ver reading_today_status), así que aquí no se toca
+        nada -- ni se enseña ni se guarda ningún "inicio del día" para
+        ese rato, precisamente para que esas páginas no queden fijadas
+        como punto de partida de NINGÚN día (ni ese, ni el que sí toque
+        cuando llegue). Antes esto se recalculaba fuera cual fuera el día,
+        y una lectura adelantada del finde se colaba como "ya
+        leído hoy" en cuanto llegaba el día real (decisión con Alex,
+        2026-09-28).
+
+        Una vez due_date sí ha llegado, se recalcula cada vez que cambia
+        el día de calendario respecto a la última vez (
+        reading_day_baseline_date) -- esto cubre tanto una instancia
+        "legacy" de antes de que existiera este campo (None) como ir
+        atrasado (se abrió ayer, sigue sin cerrarse, hoy toca recalcular
+        el ritmo) como, sobre todo, que entre el momento en que se generó
+        esta instancia (_spawn_next, con due_date todavía en el futuro)
+        y que de verdad tocara, hubiera sesiones extra que subieron
+        reading_current_page sin pasar por aquí -- de ahí que
+        _spawn_next YA NO fije reading_day_baseline_date, para que este
+        primer paso por aquí en el día real siempre recalcule desde la
+        página en la que estés de verdad, descontando lo leído de más.
         """
-        if self.reading_mode != self.READING_MODE_PLAN:
+        if self.reading_mode != self.READING_MODE_PLAN or not self.reading_session_ready:
             return
         today = timezone.localtime(timezone.now()).date()
         if self.reading_day_goal is not None and self.reading_day_baseline_date == today:
@@ -1354,9 +1372,20 @@ class Task(models.Model):
             # reading_today_status. reading_day_start_page es el punto de
             # partida: la página en la que se quedó HOY se convierte en
             # el "inicio del día" de mañana.
+            #
+            # reading_day_baseline_date NO se fija aquí (se deja en su
+            # default, None) a propósito -- a diferencia de start_page/
+            # goal, que son una estimación válida para cuando llegue
+            # next_date, ensure_reading_day_goal usa este campo para
+            # decidir si hace falta recalcular. Si se fijara ya a
+            # next_date, y entre hoy y next_date hubiera sesiones extra
+            # (ver reading_session_ready) que subieran reading_current_page,
+            # el primer open() del día real vería reading_day_baseline_date
+            # == hoy y se saltaría el recálculo -- las páginas de más se
+            # colarían como "ya leídas hoy". Dejándolo en None, ese primer
+            # open() del día real siempre recalcula de cero.
             reading_day_start_page=self.reading_current_page,
             reading_day_goal=self._reading_day_goal_for(next_date),
-            reading_day_baseline_date=next_date,
         )
 
     def _record_occurrence(self, result, auto_expired=False, minutes_watched=None):

@@ -1166,9 +1166,11 @@ def task_reading(request, pk):
         category=Task.CATEGORY_WORK, subcategory=Task.SUBCATEGORY_READING,
         reading_mode=Task.READING_MODE_PLAN,
     )
-    # Planes abiertos antes de que existiera el objetivo diario todavía no
-    # tienen reading_day_goal -- se rellena aquí mismo, la primera vez que
-    # se abre el visor con este campo vacío (ver ensure_reading_day_goal).
+    # Dos casos: planes abiertos antes de que existiera el objetivo
+    # diario (reading_day_goal todavía None) y, sobre todo, que haya
+    # cambiado el día de calendario desde la última vez que se fijó --
+    # ver ensure_reading_day_goal, que además no hace nada si due_date
+    # todavía no ha llegado (sesión extra, ver reading_session_ready).
     task.mark_started()
     task.ensure_reading_day_goal()
     return render(request, "tasks/task_reading.html", {
