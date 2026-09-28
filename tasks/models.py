@@ -163,6 +163,15 @@ class Task(models.Model):
     # nada (ver el intervalo de "catch-up" en task_reading.html).
     READING_SECONDS_PER_PAGE = 45
 
+    # Tope de segundos que un solo aviso del visor puede sumar al tiempo
+    # real de lectura (ver record_reading_page/_flush_reading_time). El
+    # hueco entre dos avisos es normalmente unos segundos/minutos (has
+    # pasado de página), pero puede ser de HORAS o DÍAS si cierras el PDF
+    # y sigues leyendo otro día -- sin este tope ese hueco se contaría
+    # como si hubieras estado leyendo sin parar todo ese tiempo. 10
+    # minutos es de sobra para una página lenta o una pausa corta real.
+    READING_TIME_GAP_CAP_SECONDS = 600
+
     # Subcategorías de "Estudio": de momento solo "Idiomas" — un curso con
     # vídeos organizados por nivel (ver Plan.STUDY_SUBTYPE_LANGUAGE y
     # CourseModule), en vez del hábito diario simple de siempre. En
@@ -469,6 +478,23 @@ class Task(models.Model):
         help_text="% guardado al terminar el plan: 100 si se llegó a tiempo o antes, "
                    "menos si se tardó de más — ver record_reading_page para la fórmula "
                    "exacta (plazo previsto ÷ tiempo real).",
+    )
+    reading_pending_seconds = models.PositiveIntegerField(
+        default=0,
+        help_text="Solo reading_mode='plan': tiempo real de lectura ya medido (ver "
+                   "record_reading_page) pero todavía sin volcar a un TimerSession — "
+                   "se vacía en _flush_reading_time (Terminar sesión de hoy, o al "
+                   "terminar el libro). Sin esto, el Plan de lectura no dejaba ningún "
+                   "minuto en ningún sitio y 'Tiempo acumulado' (tasks/time_stats.py) "
+                   "no tenía nada que sumar de Lectura salvo el cronómetro suelto.",
+    )
+    reading_time_anchor_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Solo reading_mode='plan': última vez que record_reading_page midió "
+                   "un hueco de tiempo real, aparte de reading_progress_at (que solo se "
+                   "mueve cuando la página avanza de verdad, y no sirve para esto: "
+                   "reutilizarlo recontaría el mismo hueco dos veces en un aviso que no "
+                   "avanza página) — se actualiza en CADA aviso, avance o no.",
     )
 
     # Objetivos que permiten que la tarea se marque sola al importar de
@@ -1249,6 +1275,14 @@ class Task(models.Model):
         Task.reading_plan_status para el ritmo mientras tanto, que es
         solo informativo y no afecta a esta cuenta).
 
+        De paso mide tiempo real de lectura (reading_pending_seconds,
+        con tope READING_TIME_GAP_CAP_SECONDS por aviso) para que
+        tasks.time_stats tenga algo que sumar en Lectura — antes de
+        esto el Plan de lectura no dejaba ningún minuto en ningún
+        sitio, solo página y fechas. Se vuelca a un TimerSession en
+        _flush_reading_time (Terminar sesión de hoy, o al terminar el
+        libro aquí mismo), no en cada aviso.
+
         Devuelve True si esta llamada ha terminado el libro.
         """
         if self.reading_mode != self.READING_MODE_PLAN:
@@ -1267,6 +1301,14 @@ class Task(models.Model):
             page = min(page, self.reading_current_page + max_advance)
         if self.reading_last_page:
             page = min(page, self.reading_last_page)
+        # Tiempo real: aparte de reading_progress_at (que solo se mueve
+        # si la página avanza de verdad, ver más abajo) -- este anclaje
+        # se mueve en CADA aviso, avance o no, para no recontar el mismo
+        # hueco dos veces en un aviso que no llega a mover la página.
+        if self.reading_time_anchor_at:
+            gap = max(0, (now - self.reading_time_anchor_at).total_seconds())
+            self.reading_pending_seconds += min(int(gap), self.READING_TIME_GAP_CAP_SECONDS)
+        self.reading_time_anchor_at = now
         today = timezone.localtime(now).date()
         if not self.reading_started_on:
             self.reading_started_on = today
@@ -1281,7 +1323,10 @@ class Task(models.Model):
             self.reading_progress_at = now
         self.reading_current_page = max(self.reading_current_page, page)
         finished = bool(self.reading_last_page) and self.reading_current_page >= self.reading_last_page
-        update_fields = ["reading_started_on", "reading_current_page", "reading_progress_at"]
+        update_fields = [
+            "reading_started_on", "reading_current_page", "reading_progress_at",
+            "reading_pending_seconds", "reading_time_anchor_at",
+        ]
         if finished and not self.reading_completed_at:
             dias_reales = max(1, (today - self.reading_started_on).days)
             semanas_reales = dias_reales / 7
@@ -1294,8 +1339,32 @@ class Task(models.Model):
             update_fields += ["reading_completed_at", "reading_final_pct", "repeat"]
         self.save(update_fields=update_fields)
         if finished:
+            self._flush_reading_time()
             self.mark_done()
         return finished
+
+    def _flush_reading_time(self):
+        """
+        Vuelca reading_pending_seconds a un TimerSession de verdad, para
+        que tasks.time_stats.time_totals() lo sume como cualquier otra
+        sesión de Lectura. La llaman task_reading_save ("Terminar sesión
+        de hoy") y record_reading_page al terminar el libro -- mismos
+        dos puntos de cierre que ya existían, no hace falta un tercero.
+
+        Menos de 1 minuto pendiente no crea ningún TimerSession (no
+        aportaría nada al total): se queda acumulado para la próxima
+        vez. No hace nada si no hay nada pendiente.
+        """
+        if self.reading_pending_seconds < 60:
+            return
+        minutes = self.reading_pending_seconds // 60
+        TimerSession.objects.create(
+            task=self, user=self.user, series_id=self.series_id,
+            subcategory=self.subcategory, source=TimerSession.SOURCE_MANUAL,
+            minutes=minutes,
+        )
+        self.reading_pending_seconds -= minutes * 60
+        self.save(update_fields=["reading_pending_seconds"])
 
     def _spawn_next(self):
         if self.repeat == self.REPEAT_NONE or not self.due_date:

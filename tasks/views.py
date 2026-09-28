@@ -1254,6 +1254,11 @@ def task_reading_save(request, pk):
     del progreso de página en sí, que ya se reporta aparte según se va
     leyendo: aquí solo se resuelve el día, como cualquier otra tarea de
     Enfoque.
+
+    También vuelca aquí el tiempo real de lectura acumulado en esta
+    sesión (ver Task._flush_reading_time) -- ANTES de mirar
+    reading_session_ready: el tiempo ya leído cuenta igual aunque vayas
+    adelantado y esta instancia concreta no se pueda cerrar todavía.
     """
     task = get_object_or_404(
         Task, pk=pk, user=get_current_user(),
@@ -1262,9 +1267,11 @@ def task_reading_save(request, pk):
     )
     if task.reading_completed_at:
         # El libro ya se terminó (task_reading_progress ya cerró el plan
-        # y marcó hecho) -- nada que guardar aquí, evita un mark_done()
-        # de más sobre una serie que ya está en REPEAT_NONE.
+        # y marcó hecho, volcando el tiempo pendiente de paso) -- nada
+        # que guardar aquí, evita un mark_done() de más sobre una serie
+        # que ya está en REPEAT_NONE.
         return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
+    task._flush_reading_time()
     if not task.reading_session_ready:
         # Se puede entrar al visor y seguir leyendo cualquier día (eso ya
         # se guarda aparte, en task_reading_progress) -- lo que no se deja

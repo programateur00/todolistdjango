@@ -7708,6 +7708,11 @@ class WorkoutSession {
     if (this.debugEl) {
       this.debugEl.textContent =
         `ángulo codo (${useLeft ? "izq" : "der"}): ${elbowAngle.toFixed(0)}° | caderas sobre hombro: ${(hipRise * 100).toFixed(0)}% tronco (mín ${(PIKE_MIN_HIP_RISE_FACTOR * 100).toFixed(0)}%) | ` +
+        `ángulo cuerpo: ${bodyAngle.toFixed(0)}° (máx ${PIKE_BODY_MAX_DEG}°) | manos/pies dy: ${(handsFeetDy * 100).toFixed(0)}% | estado: ${this.state ?? "esperando"} ` +
+        `(abajo ≤${PIKE_DOWN_ANGLE_DEG}°, arriba ≥${PIKE_UP_ANGLE_DEG}°)`;
+    }
+  }
+
   /**
    * Flexiones en pino (handstand push-up): mismo esqueleto que
    * processPikePushup (ángulo de codo con umbrales abajo/arriba, gate de
