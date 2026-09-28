@@ -29,11 +29,6 @@
         <span>Sin ritmo calculado todavía.</span>
         {% endif %}
     </div>
-    {% if scheduled_days %}
-    <p class="field__hint">
-        Toca: {{ scheduled_days|join:", " }}{% if not session_ready %} — esta sesión es del {{ task.due_date|date:"d \d\e F" }}, vas adelantado{% endif %}
-    </p>
-    {% endif %}
     <div class="stats-bar"><div class="stats-bar__done" id="reading-progress-bar" style="width:{{ status.pct|default:0 }}%"></div></div>
 
     {% if today_status %}
@@ -619,6 +614,19 @@
         if (document.visibilityState === 'hidden') beaconFlush();
     });
     window.addEventListener('pagehide', beaconFlush);
+
+    // Red de seguridad aparte de lo de arriba -- visibilitychange/pagehide
+    // cubren "cambiar de pestaña"/cerrar de forma limpia, pero un aviso
+    // puede quedarse pendiente por otros motivos (el navegador puede
+    // matar la pestaña en segundo plano sin darle tiempo a procesar el
+    // evento, el debounce de 400ms cae justo en mitad de un cambio de
+    // pestaña muy rápido...). En vez de depender solo de pillar el
+    // momento exacto de salida, esto reintenta cada pocos segundos
+    // mientras quede algo sin confirmar, así lo más que se puede perder
+    // es este margen, nunca toda la sesión.
+    setInterval(function () {
+        if (pendingPage !== null) sendProgress();
+    }, 5000);
 
     markFinishedBtn.addEventListener('click', function () {
         markFinishedBtn.disabled = true;

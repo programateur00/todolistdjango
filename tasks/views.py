@@ -1190,11 +1190,6 @@ def task_reading(request, pk):
         "task": task,
         "status": task.reading_plan_status,
         "today_status": task.reading_today_status,
-        # Para que "Terminar sesión de hoy" y el aviso de qué días toca
-        # se puedan pintar -- ver Task.reading_session_ready y
-        # task_reading_save (que es quien de verdad lo hace cumplir).
-        "session_ready": task.reading_session_ready,
-        "scheduled_days": task.custom_days_labels(),
     })
 
 

@@ -78,6 +78,11 @@ ROUTINES = [
             ("wrist-rotation-interlaced", 1, 30),
             ("jumping-jack", 1, 30),
             ("push-up", 1, 10),
+            # A peticion de Alex (2026-09-28): tras flexiones, aguantarse en la
+            # barra (dead hang, cronometrado -- usa el work/rest por defecto
+            # de la rutina, 30s) y dominada escapular (12 reps).
+            ("dead-hang", None, None),        # cronometrado, 30s (default_work_seconds)
+            ("scapular-pull", 1, 12),
         ],
     },
     {
