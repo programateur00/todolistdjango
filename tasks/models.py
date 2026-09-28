@@ -438,6 +438,20 @@ class Task(models.Model):
                    "(instancias de antes de que existiera este campo -- ver "
                    "ensure_reading_day_goal).",
     )
+    reading_day_baseline_date = models.DateField(
+        null=True, blank=True,
+        help_text="Solo reading_mode='plan': de qué día de calendario son "
+                   "reading_day_start_page/reading_day_goal ahora mismo -- se rellenaba "
+                   "asumiendo que solo se leía en el due_date de la instancia (ver "
+                   "_spawn_next), pero el visor se puede abrir cualquier día desde "
+                   "Planes (ver reading_session_ready). Sin este campo, leer 'adelantado' "
+                   "un día que no tocaba dejaba esas páginas contando para el objetivo "
+                   "del día que sí tocaba en cuanto llegaba. ensure_reading_day_goal "
+                   "compara esto con hoy en cada apertura del visor y, si no coincide, "
+                   "reinicia el punto de partida a la página actual -- cada día de "
+                   "calendario acaba con su propio tramo, se haya leído el día que tocaba "
+                   "o de más.",
+    )
     reading_started_on = models.DateField(
         null=True, blank=True,
         help_text="Solo reading_mode='plan': fecha en que se creó el plan — con "
@@ -1136,22 +1150,38 @@ class Task(models.Model):
 
     def ensure_reading_day_goal(self):
         """
-        Rellena reading_day_start_page/reading_day_goal si esta instancia
-        se creó antes de que existieran estos campos (planes ya abiertos
-        al desplegar esta función) -- toma el estado actual como "inicio
-        del día" a partir de ahora, la primera vez que se abre el visor.
-        No hace nada si ya hay un objetivo calculado (el camino normal,
-        ver _spawn_next, ya lo deja puesto) ni si faltan datos del plan.
+        Deja reading_day_start_page/reading_day_goal listos para HOY --
+        se llama cada vez que se abre el visor (ver task_reading). No
+        hace nada si ya hay un objetivo puesto Y es de hoy
+        (reading_day_baseline_date == hoy, el camino normal: _spawn_next
+        ya lo deja puesto para el due_date de la instancia).
+
+        Si NO es de hoy, se recalcula tomando el estado actual como
+        "inicio del día": esto cubre tanto una instancia "legacy" de
+        antes de que existieran estos campos (reading_day_baseline_date
+        es None) como, sobre todo, haber leído "adelantado" -- se puede
+        entrar al visor cualquier día desde Planes sin esperar a que
+        toque (ver reading_session_ready) -- lo que dejaba
+        reading_day_start_page fijado en un día y reading_current_page
+        siguiendo subiendo por lecturas de OTROS días, y en cuanto
+        llegaba el día que sí tocaba, esas páginas de más ya contaban
+        como si las hubiera leído entonces. Al recalcular aquí cada vez
+        que cambia el día de calendario, cada día -- toque o no -- parte
+        de página cero para SU objetivo, y los de más no se cuelan en el
+        de otro.
         """
-        if self.reading_mode != self.READING_MODE_PLAN or self.reading_day_goal is not None:
+        if self.reading_mode != self.READING_MODE_PLAN:
             return
         today = timezone.localtime(timezone.now()).date()
+        if self.reading_day_goal is not None and self.reading_day_baseline_date == today:
+            return
         goal = self._reading_day_goal_for(today)
         if goal is None:
             return
         self.reading_day_start_page = self.reading_current_page
         self.reading_day_goal = goal
-        self.save(update_fields=["reading_day_start_page", "reading_day_goal"])
+        self.reading_day_baseline_date = today
+        self.save(update_fields=["reading_day_start_page", "reading_day_goal", "reading_day_baseline_date"])
 
     def recompute_reading_day_goal(self):
         """
@@ -1326,6 +1356,7 @@ class Task(models.Model):
             # el "inicio del día" de mañana.
             reading_day_start_page=self.reading_current_page,
             reading_day_goal=self._reading_day_goal_for(next_date),
+            reading_day_baseline_date=next_date,
         )
 
     def _record_occurrence(self, result, auto_expired=False, minutes_watched=None):
