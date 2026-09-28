@@ -2062,3 +2062,62 @@ class DailyCompletionTests(TestCase):
         t.mark_not_done()
         d = Occurrence.daily_completion(u)
         self.assertEqual((d["done"], d["total"]), (0, 1))
+
+    def test_tarea_suelta_no_cuenta_doble_al_reintentar(self):
+        """Marcar/desmarcar/marcar una tarea SIN fecha (sí se apilan las
+        Occurrence, ver test_tasks_without_due_date_can_have_several_occurrences)
+        no debe contar como si fueran completados distintos."""
+        u = get_current_user()
+        t = Task.objects.create(title="Cuando pueda", user=u)
+        t.mark_done()
+        t.mark_not_done()
+        t.mark_done()
+        d = Occurrence.daily_completion(u)
+        self.assertEqual((d["done"], d["total"]), (1, 1))
+
+
+class WeeklyProjectionTests(TestCase):
+    """
+    El total semanal no puede depender de lo que ya se ha generado: una
+    tarea diaria solo genera la instancia de mañana cuando se resuelve
+    la de hoy (ver Task._spawn_next), así que el lunes por la mañana el
+    total subía día a día (10, 11, 13...) en vez de conocerse de
+    entrada. Ver Occurrence.weekly_completion / Task.project_pending_series.
+    """
+
+    MONDAY = date(2026, 9, 28)  # lunes real, ver next_due_date/custom_days
+
+    def test_weekly_total_known_upfront_for_daily_task(self):
+        u = get_current_user()
+        Task.objects.create(
+            title="Beber agua", due_date=self.MONDAY, repeat=Task.REPEAT_DAILY, user=u,
+        )
+        w = Occurrence.weekly_completion(u, reference_date=self.MONDAY)
+        self.assertEqual(w["total"], 7)
+
+    def test_weekly_total_stable_as_days_pass(self):
+        u = get_current_user()
+        t = Task.objects.create(
+            title="Beber agua", due_date=self.MONDAY, repeat=Task.REPEAT_DAILY, user=u,
+        )
+        total_monday = Occurrence.weekly_completion(u, reference_date=self.MONDAY)["total"]
+        t.mark_done()  # genera la instancia del martes
+        tuesday = self.MONDAY + timedelta(days=1)
+        w_tuesday = Occurrence.weekly_completion(u, reference_date=tuesday)
+        self.assertEqual(w_tuesday["total"], total_monday)
+        self.assertEqual(w_tuesday["done"], 1)
+
+    def test_weekly_total_for_custom_days(self):
+        u = get_current_user()
+        Task.objects.create(
+            title="Entrenar", due_date=self.MONDAY, repeat=Task.REPEAT_CUSTOM,
+            custom_days="0,2,4", user=u,  # lunes, miércoles, viernes
+        )
+        w = Occurrence.weekly_completion(u, reference_date=self.MONDAY)
+        self.assertEqual(w["total"], 3)
+
+    def test_weekly_total_ignores_non_repeating_tasks_beyond_their_day(self):
+        u = get_current_user()
+        Task.objects.create(title="Suelta", due_date=self.MONDAY, user=u)
+        w = Occurrence.weekly_completion(u, reference_date=self.MONDAY)
+        self.assertEqual(w["total"], 1)

@@ -1765,7 +1765,7 @@ class Task(models.Model):
     PROJECTION_MAX_ITER = 60
 
     @classmethod
-    def project_pending_series(cls, tasks, range_key):
+    def project_pending_series(cls, tasks, range_key, reference_date=None):
         """
         Sección "Por generar": para cada tarea repetida en `tasks`
         (normalmente pending_tasks ya filtradas), calcula qué más se
@@ -1778,8 +1778,14 @@ class Task(models.Model):
         "Todas" no tiene un límite de calendario en el que parar de
         contar — ahí, si la tarea sigue repitiéndose, se marca
         infinite=True en vez de intentar enumerar fechas para siempre.
+
+        `reference_date` permite fijar qué día se considera "hoy" (lo
+        usa Occurrence.weekly_completion, que a su vez acepta el suyo
+        para los tests) — sin esto, el total proyectado de una semana
+        simulada con una fecha de referencia distinta a la real quedaría
+        descuadrado con sus propios límites de semana.
         """
-        today = timezone.localtime(timezone.now()).date()
+        today = reference_date or timezone.localtime(timezone.now()).date()
         if range_key == cls.RANGE_WEEK:
             _, limit = cls._week_bounds(today)
         elif range_key == cls.RANGE_MONTH:
@@ -4713,6 +4719,20 @@ class Occurrence(models.Model):
         plan concreto) en vez del global — es lo que usa Plan.weekly_completion
         para la revisión semanal por objetivo, reutilizando exactamente
         el mismo cálculo.
+
+        El total NO se queda solo en lo que ya existe como Task/Occurrence:
+        una tarea repetida (diaria, cada 2 días, L-X-V...) solo genera la
+        SIGUIENTE instancia cuando se resuelve la anterior (ver
+        Task._spawn_next), así que el lunes por la mañana casi ninguna
+        instancia del resto de la semana existe todavía — antes eso hacía
+        que el total fuera subiendo día a día (10, luego 11, luego 13...)
+        en vez de conocerse de entrada. Se completa con
+        Task.project_pending_series (el mismo cálculo que ya usa "Por
+        generar" en el filtro de "Esta semana"), que para cada tarea
+        pendiente que se repite simula qué fechas más caerían dentro de
+        la semana SIN crear ninguna Task real — así el total cuenta lo
+        que toca por calendario desde el primer día, no lo que ya se ha
+        materializado.
         """
         today = reference_date or timezone.localtime(timezone.now()).date()
         week_start = today - timedelta(days=today.weekday())  # lunes
@@ -4735,6 +4755,15 @@ class Occurrence(models.Model):
         if series_id:
             pending = pending.filter(series_id=series_id)
         done, total = cls._count_done_total(occs, pending)
+
+        # Fechas de esta semana que aún no se han generado como Task real
+        # para series que se repiten y siguen pendientes (ver docstring).
+        projected = Task.project_pending_series(list(pending), Task.RANGE_WEEK, reference_date=today)
+        total += sum(
+            len(row["preview_dates"]) + row["extra_count"]
+            for row in projected if not row["infinite"]
+        )
+
         return {
             "week_start": week_start,
             "week_end": week_end,
@@ -4757,11 +4786,36 @@ class Occurrence(models.Model):
         Una tarea pendiente NO se cuenta dos veces: "Desmarcar" la deja
         pendiente pero guarda una Occurrence de "no hecha" para ese día,
         y ya cuenta ahí.
+
+        Con due_date, cada (series, día) ya es única por la restricción
+        de la tabla (ver Occurrence.Meta) — imposible que se apilen filas
+        de más ahí. SIN due_date (tareas sueltas), Task._record_occurrence
+        SÍ crea una fila nueva cada vez que se marca/desmarca, a
+        propósito (no hay día al que anclar un update_or_create) — pero
+        eso significa que marcar, desmarcar y volver a marcar una tarea
+        suelta en el mismo rango dejaba 2-3 filas contando por separado,
+        inflando "hechas" y "total" del mismo tirón aunque la tarea siga
+        siendo UNA sola. Aquí se dedupean por task_id quedándonos con el
+        resultado más reciente, igual que ya pasa gratis con due_date.
         """
-        occ_rows = list(occs.values_list("series_id", "due_date", "result", "task_id"))
-        done = sum(1 for r in occ_rows if r[2] == cls.RESULT_DONE)
-        seen_slots = {(r[0], r[1]) for r in occ_rows if r[1] is not None}
-        seen_tasks = {r[3] for r in occ_rows if r[3] is not None and r[2] != cls.RESULT_DONE}
+        occ_rows = list(
+            occs.order_by("recorded_at")
+            .values_list("series_id", "due_date", "result", "task_id")
+        )
+        dated_rows = [r for r in occ_rows if r[1] is not None]
+        # Última fila de cada task_id sin due_date (occ_rows viene
+        # ordenado por recorded_at, así que la última entrada gana).
+        latest_loose = {}
+        for series_id, due_date, result, task_id in occ_rows:
+            if due_date is None:
+                latest_loose[task_id] = result
+
+        done = sum(1 for r in dated_rows if r[2] == cls.RESULT_DONE)
+        done += sum(1 for result in latest_loose.values() if result == cls.RESULT_DONE)
+
+        seen_slots = {(r[0], r[1]) for r in dated_rows}
+        seen_tasks = {t_id for t_id, result in latest_loose.items() if result != cls.RESULT_DONE}
+
         extra = 0
         for t_id, t_series, t_due in pending.values_list("id", "series_id", "due_date"):
             if t_due is not None and (t_series, t_due) in seen_slots:
@@ -4769,7 +4823,7 @@ class Occurrence(models.Model):
             if t_due is None and t_id in seen_tasks:
                 continue
             extra += 1
-        return done, len(occ_rows) + extra
+        return done, len(dated_rows) + len(latest_loose) + extra
 
     @classmethod
     def daily_completion(cls, user, reference_date=None):
