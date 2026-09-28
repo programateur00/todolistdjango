@@ -29,6 +29,11 @@
         <span>Sin ritmo calculado todavía.</span>
         {% endif %}
     </div>
+    {% if scheduled_days %}
+    <p class="field__hint">
+        Toca: {{ scheduled_days|join:", " }}{% if not session_ready %} — esta sesión es del {{ task.due_date|date:"d \d\e F" }}, vas adelantado{% endif %}
+    </p>
+    {% endif %}
     <div class="stats-bar"><div class="stats-bar__done" id="reading-progress-bar" style="width:{{ status.pct|default:0 }}%"></div></div>
 
     {% if today_status %}
@@ -665,6 +670,16 @@
                 headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
                 body: JSON.stringify({}),
             }).then(function (r) { return r.json(); }).then(function (data) {
+                if (data.early) {
+                    // Vas adelantado -- el progreso de página ya se ha
+                    // guardado (flushReport, justo arriba), pero el día
+                    // no se cierra hasta que toque de verdad (ver
+                    // Task.reading_session_ready/task_reading_save).
+                    finishSessionBtn.disabled = false;
+                    finishSessionBtn.textContent = 'Terminar sesión de hoy';
+                    hint.textContent = data.message || 'Esta sesión todavía no toca.';
+                    return;
+                }
                 window.location.href = data.redirect_url || listUrl;
             });
         }).catch(function () {

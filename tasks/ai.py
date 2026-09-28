@@ -69,7 +69,7 @@ DEFAULT_TIMEOUT = 30
 # único que falta en muchas casas. El resto del catálogo (core, pierna,
 # running) es peso corporal / aire libre.
 _NEEDS_BAR_EQUIPMENT = {
-    "pullup", "wide-pullup", "chinup", "weighted-pullup", "jumping-pullup",
+    "pullup", "wide-pullup", "chinup", "weighted-pullup", "wide-weighted-pullup", "jumping-pullup",
     "dips", "weighted-dips", "l-sit", "l-sit-hold",
 }
 
@@ -85,11 +85,22 @@ _NEEDS_BAR_EQUIPMENT = {
 _PENDING_MOBILE_PORT = {"archer-pullup", "wall-sit"}
 
 # Bicicleta (bicycle-crunch) se excluye del todo del generador automático,
-# a petición de Alex: es tren inferior/core, nivel intermedio, y hace
+# a petición de Alex: es tren inferior/core, nivel principiante, y hace
 # básicamente el mismo trabajo que scissor-kick (piernas en tijera/pedaleo
 # tumbado) — con los dos en el mismo plan sobra uno. Se queda scissor-kick.
 # Sigue existiendo en el catálogo por si se crea un plan a mano.
-_EXCLUDED_FROM_AUTOGEN = {"bicycle-crunch"}
+#
+# Elephant steps (2026-09-28): mismo motivo que bicycle-crunch pero por
+# otra razón -- Alex aclaró que en la práctica es un estiramiento/
+# movilidad, no un ejercicio de fuerza de verdad (`Exercise.level` se
+# deja vacío para él, igual que calentamiento/running, ver
+# 0085_set_exercise_levels.py) -- sin esta exclusión colaba en
+# CUALQUIER nivel sin más criterio que quedar hueco bajo
+# `_FOCUSED_ZONE_MAX_ITEMS` (por no tener nivel, `_filter_catalog_by_level`
+# lo deja pasar siempre), en vez de no aparecer nunca como haría
+# calentamiento de verdad. Sigue existiendo en el catálogo por si se
+# crea un plan a mano, o para calentamiento como ya hay.
+_EXCLUDED_FROM_AUTOGEN = {"bicycle-crunch", "elephant-steps"}
 
 # Dificultad del MOVIMIENTO en sí — no confundir con el nivel del usuario
 # (`_EXERCISE_CATEGORY_DEFAULTS`, que ajusta series/reps/peso sobre un
@@ -102,51 +113,22 @@ _EXCLUDED_FROM_AUTOGEN = {"bicycle-crunch"}
 #
 # El filtro por dificultad (ver `_filter_catalog_by_level` /
 # `_select_sport_exercises`) es EN DURO para los tres niveles: si un
-# ejercicio no está en la lista filtrada, directamente no se puede elegir.
-_EXERCISE_DIFFICULTY = {
-    # Tren superiorp
-    "push-up": "beginner",
-    "jumping-pullup": "beginner",
-    "incline-push-up": "beginner",
-    # Pike push-ups (2026-09-20): flexión en V invertida, carga de hombro -- intermedio.
-    "pike-push-up": "intermediate",
-    "bench-dip": "beginner",
-    "dumbbell-curl": "beginner",
-    "chinup": "beginner",       # dominadas supinas — agarre más asistido por el bíceps
-    "dips": "intermediate",
-    "pullup": "intermediate",
-    "wide-pullup": "intermediate",  # dominadas anchas — mismo nivel que pullup, agarre más exigente
-    "weighted-pullup": "advanced",
-    "weighted-dips": "advanced",
-    "archer-pullup": "advanced",
-    # El pino exige equilibrio invertido y estabilidad de hombro, pero
-    # menos base de fuerza pura que dominadas/fondos lastrados o el
-    # archer pull-up -- bajado a intermedio (ajustado 2026-09, antes
-    # "advanced").
-    "handstand": "intermediate",
-    # L-sit en paralelas (2026-09-20): exige fuerza de core/flexores de
-    # cadera y de empuje de hombro/tríceps sostenida -- avanzado.
-    "l-sit": "advanced",
-    "l-sit-hold": "advanced",
-    # Tren inferior / core
-    "squat": "beginner",
-    "situp": "beginner",
-    "crunch": "beginner",
-    "plank": "beginner",
-    # Superman (2026-09-20): tumbado boca abajo, sin material -- principiante.
-    "superman": "beginner",
-    "superman-hold": "beginner",
-    "bicycle-crunch": "intermediate",
-    "leg-raise": "intermediate",
-    "side-plank": "intermediate",
-    "weighted-squat": "intermediate",
-    "split-squat": "intermediate",  # unilateral + equilibrio -> más exigente que la sentadilla a dos piernas, mismo nivel que sentadillas con peso
-    "wall-sit": "beginner",  # ajustado 2026-09, antes "intermediate"
-    "double-crunch": "advanced",
-    "scissor-kick": "advanced",
-    "kneehold-bar": "beginner",  # ajustado 2026-09, antes "advanced" -- cuando
-    # se añada L-sit bar (bastante más exigente) esa sí irá en advanced.
-}
+# ejercicio no tiene nivel puesto, directamente no se puede elegir salvo
+# que `fitness_level` no sea válido (ver más abajo).
+#
+# Vivía aquí como diccionario en duro (`_EXERCISE_DIFFICULTY`) hasta
+# 2026-09-28 — movido a `Exercise.level` (campo en la base de datos,
+# mismos 3 valores: beginner/intermediate/advanced) para tener una sola
+# fuente de verdad en vez de dos que se podían desincronizar (ya había
+# pasado: 6 ejercicios nuevos -- burpee, tuck-lever-bar, scapular-pull,
+# dead-hang, handstand-push-up, wide-weighted-pullup -- no estaban en
+# este diccionario y se colaban en CUALQUIER nivel sin querer, al no
+# tener entrada). Los valores de aquí se llevaron tal cual a la
+# migración de datos (0085_set_exercise_levels.py) salvo donde Alex pidió
+# explícitamente lo contrario (sentadillas/situp a intermedio,
+# split-squat/bicicleta a principiante -- los tres eran intermedio
+# aquí). El admin de Django es ahora el sitio para ajustar el nivel de
+# un ejercicio, no este archivo.
 _LEVEL_TIER_ORDER = ["beginner", "intermediate", "advanced"]
 
 
@@ -163,18 +145,13 @@ def _filter_catalog_by_level(catalog, fitness_level):
     esto deja pocos ejercicios, se queda así — mejor un plan corto y
     exacto al nivel pedido que uno más largo mezclando dificultades.
 
-    Sin nivel especificado: catálogo intacto. Los ejercicios sin
-    etiqueta en `_EXERCISE_DIFFICULTY` (running, que se mide distinto)
-    nunca se tocan aquí.
+    Sin nivel especificado: catálogo intacto. Los ejercicios sin nivel
+    puesto en `Exercise.level` (running, calentamiento/estiramientos)
+    nunca se tocan aquí -- pasan para cualquier `fitness_level`.
     """
     if fitness_level not in _LEVEL_TIER_ORDER:
         return catalog
-    result = []
-    for e in catalog:
-        tier = _EXERCISE_DIFFICULTY.get(e.slug)
-        if tier is None or tier == fitness_level:
-            result.append(e)
-    return result
+    return [e for e in catalog if not e.level or e.level == fitness_level]
 
 # Máximo de objetivos para un plan de UNA sola zona (tren superior o
 # inferior) — ver `_select_sport_exercises`. Cuerpo completo usa un tope
@@ -191,11 +168,10 @@ _FULL_BODY_MAX_ITEMS = 8
 # en vez de proponer un peso que nadie puede cargar.
 _DEFAULT_MAX_LOAD_KG = 20
 
-FITNESS_LEVEL_CHOICES = [
-    ("beginner", "Principiante"),
-    ("intermediate", "Intermedio"),
-    ("advanced", "Avanzado"),
-]
+# Mismos 3 valores que Exercise.LEVEL_CHOICES (ver el porqué de la
+# migración a la BD en el comentario de _LEVEL_TIER_ORDER, más arriba) --
+# referenciado en vez de repetido para que no se puedan desincronizar.
+FITNESS_LEVEL_CHOICES = Exercise.LEVEL_CHOICES
 
 FOCUS_AREA_CHOICES = [
     ("", "Cuerpo completo"),
@@ -465,6 +441,7 @@ _LOW_REP_STRENGTH_SLUGS = {"pullup", "wide-pullup", "chinup", "dips"}
 _WEIGHTED_SLUGS = Exercise.WEIGHTED_SLUGS
 _WEIGHTED_CATEGORY_BY_SLUG = {
     "weighted-pullup": "weighted_pull",
+    "wide-weighted-pullup": "weighted_pull",
     "weighted-dips": "weighted_pull",
     "weighted-squat": "weighted_legs",
 }

@@ -91,13 +91,20 @@ leído) en vez de forzarlo en la tarjeta de Plan normal.
                             <span class="plan-card__pill">Te faltan {{ p.status.days_left }} días</span>
                             {% endif %}
                             <span class="plan-card__pill">{{ p.status.pace_per_day }} pág./día</span>
+                            <span class="plan-card__pill">Toca: {{ p.task.custom_days_labels|join:", " }}</span>
+                            {% if not p.task.reading_session_ready %}
+                            <span class="plan-card__pill">Próxima: {{ p.task.due_date|date:"d M" }}</span>
+                            {% endif %}
                         </p>
                         <div class="plan-card__progress">
                             <div class="plan-bar"><div class="plan-bar__fill" style="width: {{ p.status.pct }}%"></div></div>
                             <span class="plan-card__pct">{{ p.status.pct }}%</span>
                         </div>
                         {% else %}
-                        <p class="plan-card__pills"><span class="plan-card__pill">Sin ritmo calculado todavía</span></p>
+                        <p class="plan-card__pills">
+                            <span class="plan-card__pill">Sin ritmo calculado todavía</span>
+                            <span class="plan-card__pill">Toca: {{ p.task.custom_days_labels|join:", " }}</span>
+                        </p>
                         {% endif %}
                     </span>
                 </div>

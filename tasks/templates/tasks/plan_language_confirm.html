@@ -30,7 +30,7 @@
 
     <label class="field">
         <span class="field__label">Hora</span>
-        <input type="time" name="due_time" value="{{ draft.due_time|default:'' }}" required>
+        <input type="time" name="due_time" value="{{ draft.due_time|default:'23:59' }}">
         <span class="field__hint">A esta hora avisa la app y, si sigue sin hacerse, se marca sola como no hecha.</span>
     </label>
 

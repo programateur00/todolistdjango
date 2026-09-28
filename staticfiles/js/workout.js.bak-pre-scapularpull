@@ -136,22 +136,6 @@ export async function exportDebugLogText({ lines, counterKey, statusEl, build = 
 // considerar que hay un cambio de estado real y no ruido de la cámara.
 const MOVE_FACTOR = 0.12;
 const LIFTOFF_FACTOR = 0.04; // primer indicio de movimiento real (para medir bien la duracion)
-// Dominadas escapulares (scapularpull): mismo colgado de la barra que
-// las dominadas normales, pero el movimiento es solo de omóplato
-// (deprimir/retraer la escápula tirando el cuerpo un poco hacia arriba
-// SIN doblar el codo) -- rango de movimiento mucho más pequeño que una
-// dominada real, nunca se acerca a la barra. Calibrado contra vídeo real
-// (scpular_pullups.mp4, 2026-09-27; vosk-model-small-es-0.42 + contact
-// sheets + simulación con pose real PoseLandmarker VIDEO ~10fps): el
-// HOMBRO (no la nariz -- más estable para este movimiento tan sutil, ver
-// processScapularPull) sube y baja de forma consistente ~0.18
-// anchos-de-hombro en dos tomas distintas del mismo vídeo (de espaldas y
-// de frente), muy por encima del ruido de tracking en quieto (~0.02-0.03
-// anchos-de-hombro). El umbral se deja bastante por debajo de ese máximo
-// real para no exigirle a cada usuario el mismo rango exacto que en este
-// vídeo de referencia.
-const SCAPULARPULL_MOVE_FACTOR = 0.07;
-const SCAPULARPULL_LIFTOFF_FACTOR = 0.03;
 const BAR_MARGIN_FACTOR = 0.25; // cuanto por debajo de la barra ya cuenta como "llegaste arriba"
 const BAR_OFFSET_FACTOR = 0.05; // empuja la linea de la barra hacia arriba respecto a la muñeca (~2cm en un adulto medio, ver nota abajo)
 const HANG_MARGIN_FACTOR = 0.08; // cuanto tienen que estar las munecas por encima de los hombros para considerar que estas colgado
@@ -254,7 +238,7 @@ const GROUND_STYLE_COUNTERS = new Set(["burpee", "elephantsteps", "mountainclimb
 // pie, salir del encuadre, agitar la mano) ya rompen la postura por sí
 // solas. Por eso plank/sideplank no viven en GROUND_STYLE_COUNTERS ni
 // comparten su lógica de cierre.
-const CAMERA_POSTURE_COUNTERS = new Set(["supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "tucklever", "deadhang", "handstand", "elephantstepshold", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
+const CAMERA_POSTURE_COUNTERS = new Set(["supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "tucklever", "handstand", "elephantstepshold", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
 // Calentamientos y estiramientos (Exercise.body_area="warmup": jumping
 // jacks, estiramiento cruzado de brazo…): pedido explicitamente no forzar
 // el descanso obligatorio (MIN_REST_MS) entre series/lados aqui - no tiene
@@ -870,20 +854,6 @@ const PIKE_DOWN_ANGLE_DEG = 115;              // codo doblado hasta aquí -> aba
 const PIKE_UP_ANGLE_DEG = 145;                // brazo otra vez estirado -> rep completa
 const PIKE_MIN_REP_SECONDS = 0.3;             // de empezar a bajar a estar arriba: menos es ruido
 const PIKE_BROKEN_STABLE_MS = 1000;           // fuera de la postura V tanto tiempo seguido = serie terminada (te levantas, te tumbas...)
-
-// Flexiones en pino (handstand push-up): mismo patrón de histéresis que
-// PUSHUP/PIKE -- ver 0083_add_handstand_pushup.py para el porqué exacto
-// de cada umbral (vídeo de referencia real, pose real simulada). El gate
-// de postura (invertido + brazos por debajo de la cadera) reutiliza
-// HANDSTAND_MARGIN_FACTOR/HANDSTAND_MIN_VISIBILITY, ya definidos para
-// checkHandstandPosture (el pino aguantado, isométrico) -- misma fórmula
-// exacta, aquí calculada en línea porque este contador necesita además
-// el ángulo de codo frame a frame, que checkHandstandPosture no expone.
-const HANDSTANDPUSHUP_ARM_GATE_DEG = 140;   // brazos estirados para armar (postura de partida real del vídeo: ~144-177° sostenido)
-const HANDSTANDPUSHUP_DOWN_ANGLE_DEG = 105; // codo doblado hasta aquí -> abajo (las dos reps reales bajaron a 51-70°, de sobra)
-const HANDSTANDPUSHUP_UP_ANGLE_DEG = 125;   // brazo otra vez estirado -> rep completa (permisivo: la 1ª rep real del vídeo solo recuperó ~143° antes de la siguiente bajada, no bloqueo total)
-const HANDSTANDPUSHUP_MIN_REP_SECONDS = 0.3;
-const HANDSTANDPUSHUP_BROKEN_STABLE_MS = 700; // fuera del pino tanto tiempo seguido = serie terminada (has bajado)
 
 // ── Fondos en banco (bench dip) ─────────────────────────────────────
 // A petición de Alex: variante de fondos donde, en vez de paralelas,
@@ -3000,115 +2970,6 @@ function checkKneeHoldBarHanging(lm) {
   }
   return { ok: true, visible: true };
 }
-
-// Dead Hang / "aguante en barra": ejercicio RE-AÑADIDO (se había quitado en
-// 0022_replace_dead_hang_with_handstand.py por el problema de fondo
-// documentado en ese commit -- ver comentario de checkHandstandPosture, más
-// abajo). Ahora resuelto con datos reales -- ver 0082_readd_dead_hang.py y
-// vídeo de referencia real (aguanteenbarra.mp4, 2026-09-27, "empieza de
-// cero, olvida todo lo anterior").
-//
-// El vídeo confirma que Alex hace el aguante doblando las rodillas HACIA
-// ARRIBA (no colgado con las piernas rectas, que es lo que hacía
-// indistinguible de "estar de pie estirando los brazos hacia la barra" en
-// los tres intentos ya descartados -- visibilidad de tobillo, proporción
-// espinilla/muslo, profundidad z, ver el historial de este archivo). Es la
-// MISMA postura, en esencia, que kneehold en barra -- así que aquí se
-// reutiliza la misma técnica que SÍ funciona ahí (cadera-rodilla en
-// vertical, normalizado por ancho de hombros, SIN tobillo -- ver
-// checkKneeHoldBarPosture, más arriba) en vez de repetir cualquiera de los
-// intentos fallidos.
-//
-// A diferencia de kneehold en barra (que solo exige la rodilla a la altura
-// de la cadera), aquí se pide TAMBIÉN que la CADERA se doble -- ángulo
-// hombro-cadera-rodilla, con angle() -- no solo la rodilla. Confirmado con
-// pose real (PoseLandmarker VIDEO, modelo vendorizado, ~10fps) sobre TODO
-// el vídeo: de pie sujetando la barra con los brazos estirados (sin
-// colgarte del todo, la "posición inicial" que explica al principio) el
-// ángulo de cadera medido nunca baja de ~153° (mínimo real: 152.7°),
-// aunque flexiones la rodilla sola al cambiar el peso de pie; colgado de
-// verdad, con las rodillas subidas, baja a 106-124° según el tramo (tres
-// tramos de aguante distintos en el mismo vídeo). Exigir las dos cosas a
-// la vez (rodilla arriba Y cadera doblada) deja mucho menos margen para
-// "fingir" el aguante de pie, con los pies en el suelo, que exigir solo
-// una de las dos por separado -- justo el fallo de raíz que tuvieron los
-// tres intentos anteriores.
-//
-// Dos umbrales (estricto para ARMAR / laxo ya aguantando), mismo patrón
-// que plancha/tucklever: la visibilidad de la rodilla se degrada segundo a
-// segundo durante el aguante real (medido en este vídeo: de ~0.6-0.9 al
-// armar a veces por debajo de 0.5 ya aguantando) sin que el cuerpo se
-// mueva -- un margen único y estricto cortaría aguantes reales en
-// fragmentos por el propio ruido de seguimiento que el ejercicio produce.
-const DEADHANG_MIN_VISIBILITY = 0.4;              // hombros/cadera/muñecas
-const DEADHANG_KNEE_MIN_VISIBILITY = 0.35;        // rodilla, al ARMAR
-const DEADHANG_KNEE_LOOSE_MIN_VISIBILITY = 0.15;  // rodilla, ya aguantando
-const DEADHANG_KNEE_HIP_MAX_GAP_FACTOR = 0.55;       // al ARMAR -- más laxo que kneehold en barra (0.4): aquí no hace falta llegar tan arriba, solo doblar claramente
-const DEADHANG_KNEE_HIP_LOOSE_GAP_FACTOR = 0.75;     // ya aguantando
-const DEADHANG_HIP_ANGLE_MAX_DEG = 145;           // al ARMAR -- de pie sujetando la barra, medido en vídeo real: nunca baja de ~153°
-const DEADHANG_HIP_ANGLE_LOOSE_MAX_DEG = 160;     // ya aguantando
-
-export function checkDeadHangPosture(lm, holding = false) {
-  const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
-  const lH = lm[L_HIP], rH = lm[R_HIP];
-  const lK = lm[L_KNEE], rK = lm[R_KNEE];
-  const lW = lm[L_WRIST], rW = lm[R_WRIST];
-
-  if ([lS, rS, lH, rH, lW, rW].some((p) => (p.visibility ?? 1) < DEADHANG_MIN_VISIBILITY)) {
-    return {
-      ok: false,
-      reason: "No se te ve entera/o. Ponte de frente a la cámara, algo alejada/o, para que se vea todo el cuerpo colgado, de las manos a las rodillas.",
-      debug: { fail: "vis" },
-    };
-  }
-
-  const shoulderMidY = (lS.y + rS.y) / 2;
-  const hipMidY = (lH.y + rH.y) / 2;
-  const kneeMidY = (lK.y + rK.y) / 2;
-  const wristMidY = (lW.y + rW.y) / 2;
-  const shoulderWidth = Math.hypot(lS.x - rS.x, lS.y - rS.y);
-
-  const debug = {
-    hanging: shoulderWidth ? (wristMidY < shoulderMidY - HANG_MARGIN_FACTOR * shoulderWidth ? "sí" : "no") : null,
-  };
-
-  if (!shoulderWidth || wristMidY >= shoulderMidY - HANG_MARGIN_FACTOR * shoulderWidth) {
-    return { ok: false, reason: "No pareces estar colgada/o de la barra — agárrate con los brazos estirados.", debug };
-  }
-
-  const kneeMinVis = holding ? DEADHANG_KNEE_LOOSE_MIN_VISIBILITY : DEADHANG_KNEE_MIN_VISIBILITY;
-  if ([lK, rK].some((p) => (p.visibility ?? 1) < kneeMinVis)) {
-    return { ok: false, reason: "Dobla más las rodillas, subiéndolas -- no se te ven bien.", debug: { ...debug, fail: "vis_rodilla" } };
-  }
-
-  // Y crece hacia abajo en la imagen: positivo = la rodilla queda por
-  // debajo de la cadera, negativo = ya está por encima -- mismo cálculo
-  // que kneehold en barra (ver checkKneeHoldBarPosture).
-  const kneeHipGap = (kneeMidY - hipMidY) / shoulderWidth;
-  const hipAngleL = angle(lS, lH, lK);
-  const hipAngleR = angle(rS, rH, rK);
-  const hipAngle =
-    hipAngleL !== null && hipAngleR !== null ? (hipAngleL + hipAngleR) / 2
-    : hipAngleL !== null ? hipAngleL
-    : hipAngleR;
-  debug.kneeHipGap = kneeHipGap.toFixed(2);
-  debug.hipAngle = hipAngle === null ? null : hipAngle.toFixed(0);
-
-  const gapMax = holding ? DEADHANG_KNEE_HIP_LOOSE_GAP_FACTOR : DEADHANG_KNEE_HIP_MAX_GAP_FACTOR;
-  const hipAngleMax = holding ? DEADHANG_HIP_ANGLE_LOOSE_MAX_DEG : DEADHANG_HIP_ANGLE_MAX_DEG;
-
-  if (kneeHipGap > gapMax || hipAngle === null || hipAngle > hipAngleMax) {
-    return { ok: false, reason: "Dobla más las rodillas y la cadera, subiéndolas hacia el pecho.", debug };
-  }
-  return { ok: true, debug };
-}
-// Igual que kneehold en barra/tuck lever: margen más largo que el resto
-// para el parpadeo/cierre (ver POSTURE_FLICKER_STABLE_MS/PLANK_INVALID_STABLE_MS)
-// -- más propenso a rachas de mal seguimiento de más de un frame suelto
-// con la rodilla muy flexionada y la visibilidad baja que ya trae el
-// propio ejercicio (ver comentario junto a DEADHANG_KNEE_MIN_VISIBILITY).
-const DEADHANG_FLICKER_STABLE_MS = 700;
-const DEADHANG_INVALID_STABLE_MS = 1800;
 
 // Pino (handstand): a diferencia de dead hang (ver historial de este
 // archivo más abajo — un caso especialmente difícil, con varios intentos
@@ -7708,134 +7569,8 @@ class WorkoutSession {
     if (this.debugEl) {
       this.debugEl.textContent =
         `ángulo codo (${useLeft ? "izq" : "der"}): ${elbowAngle.toFixed(0)}° | caderas sobre hombro: ${(hipRise * 100).toFixed(0)}% tronco (mín ${(PIKE_MIN_HIP_RISE_FACTOR * 100).toFixed(0)}%) | ` +
-  /**
-   * Flexiones en pino (handstand push-up): mismo esqueleto que
-   * processPikePushup (ángulo de codo con umbrales abajo/arriba, gate de
-   * brazos estirados para armar, cierre de serie al salir de la postura
-   * sostenido un rato) pero la postura de partida es el pino de verdad
-   * (invertida/o, cadera por encima de hombros, brazos aguantando el
-   * peso cerca del suelo) -- misma fórmula que checkHandstandPosture,
-   * calculada aquí en línea porque además hace falta el ángulo de codo
-   * frame a frame, que esa función no expone. Sin checkWaveGesture (a
-   * diferencia de processPushup/processPikePushup): con las dos manos
-   * aguantando el peso del cuerpo entero invertido no es seguro soltar
-   * una para saludar -- el cierre de serie es solo por bajar del pino,
-   * igual criterio que los ejercicios de barra (archerpullup/
-   * kneeholdbar/tucklever/deadhang). Ver 0083_add_handstand_pushup.py
-   * para el vídeo de referencia real y el porqué de cada umbral.
-   */
-  processHandstandPushup(lm, now) {
-    const lShoulder = lm[L_SHOULDER], rShoulder = lm[R_SHOULDER];
-    const lElbow = lm[L_ELBOW], rElbow = lm[R_ELBOW];
-    const lWrist = lm[L_WRIST], rWrist = lm[R_WRIST];
-    const lHip = lm[L_HIP], rHip = lm[R_HIP];
-
-    const vis = (
-      (lShoulder.visibility ?? 1) + (rShoulder.visibility ?? 1) +
-      (lElbow.visibility ?? 1) + (rElbow.visibility ?? 1) +
-      (lWrist.visibility ?? 1) + (rWrist.visibility ?? 1) +
-      (lHip.visibility ?? 1) + (rHip.visibility ?? 1)
-    ) / 8;
-
-    if (vis < HANDSTAND_MIN_VISIBILITY) {
-      this.announceStatus(
-        "No se te ve entera/o. Ponte de forma que se vean los hombros, los brazos y la cadera en el encuadre."
-      );
-      if (this.debugEl) this.debugEl.textContent = "buscando hombros, brazos y cadera…";
-      this.groundStableSince = null;
-      if (this.state !== null) {
-        if (this.offGroundSince === null) this.offGroundSince = now;
-        if (now - this.offGroundSince >= HANDSTANDPUSHUP_BROKEN_STABLE_MS) {
-          this.closeActiveSet();
-          return;
-        }
-      }
-      this.noteAbsence(now);
-      return;
-    }
-    this.outOfFrameSince = null;
-
-    const shoulderWidth = Math.hypot(lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y);
-    if (!shoulderWidth) return;
-    const margin = HANDSTAND_MARGIN_FACTOR * shoulderWidth;
-
-    const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
-    const elbowMidY = (lElbow.y + rElbow.y) / 2;
-    const wristMidY = (lWrist.y + rWrist.y) / 2;
-    const hipMidY = (lHip.y + rHip.y) / 2;
-
-    // Igual que checkHandstandPosture: invertida/o (cadera por encima de
-    // hombros, Y menor en la imagen) y brazos aguantando el peso cerca
-    // del suelo (codos y muñecas por debajo de la cadera).
-    const inverted = hipMidY < shoulderMidY - margin;
-    const armsBelowHip = elbowMidY > hipMidY + margin && wristMidY > hipMidY + margin;
-    const inPosition = inverted && armsBelowHip;
-
-    const elbowAngleL = angle(lShoulder, lElbow, lWrist);
-    const elbowAngleR = angle(rShoulder, rElbow, rWrist);
-    let elbowAngle = null;
-    if (elbowAngleL !== null && elbowAngleR !== null) elbowAngle = (elbowAngleL + elbowAngleR) / 2;
-    else if (elbowAngleL !== null) elbowAngle = elbowAngleL;
-    else if (elbowAngleR !== null) elbowAngle = elbowAngleR;
-    if (elbowAngle === null) return;
-
-    if (this.state !== null) {
-      // Ya armado: fuera del pino el frame se descarta (un tambaleo suelto no puede colarse como rep) y, si se
-      // sostiene, la serie se cierra sola.
-      if (!inPosition) {
-        if (this.offGroundSince === null) this.offGroundSince = now;
-        if (now - this.offGroundSince >= HANDSTANDPUSHUP_BROKEN_STABLE_MS) {
-          this.closeActiveSet();
-          return;
-        }
-        if (this.debugEl) {
-          this.debugEl.textContent =
-            `fuera del pino (invertido: ${inverted ? "sí" : "no"}, brazos abajo: ${armsBelowHip ? "sí" : "no"}) — se descarta este frame`;
-        }
-        return;
-      }
-      this.offGroundSince = null;
-    }
-
-    if (this.state === null) {
-      const armsStraight = elbowAngle >= HANDSTANDPUSHUP_ARM_GATE_DEG;
-      if (inPosition && armsStraight) {
-        if (this.groundStableSince === null) this.groundStableSince = now;
-        if (now - this.groundStableSince >= ON_GROUND_STABLE_MS) {
-          this.state = "top";
-          this.groundStableSince = null;
-          this.offGroundSince = null;
-          if (!this.startupVoiceGiven) {
-            this.startupVoiceGiven = true;
-            this.announceStatus(
-              "Te veo en el pino. ¡Listo! Dobla los codos para bajar y estira para volver a subir. Para " +
-              "terminar la serie, baja del pino.",
-              "startup_ready"
-            );
-          } else {
-            this.announceStatus("¡Listo! Puedes empezar.", "ready_to_go");
-          }
-        } else {
-          this.setStatus("Postura de pino vista… confirmando (no te muevas).");
-        }
-      } else {
-        this.groundStableSince = null;
-        this.setStatus("Ponte en el pino, con la cadera por encima de los hombros y los brazos estirados, para empezar.");
-      }
-    } else if (this.state === "top") {
-      if (elbowAngle <= HANDSTANDPUSHUP_DOWN_ANGLE_DEG) {
-        this.state = "bottom";
-        this.repStartTime = now;
-      }
-    } else if (elbowAngle >= HANDSTANDPUSHUP_UP_ANGLE_DEG) {
-      this.countRep((now - this.repStartTime) / 1000, now, "Flexión de pino", HANDSTANDPUSHUP_MIN_REP_SECONDS);
-      this.state = "top";
-    }
-
-    if (this.debugEl) {
-      this.debugEl.textContent =
-        `ángulo codo: ${elbowAngle.toFixed(0)}° | en el pino: ${inPosition ? "sí" : "no"} | estado: ${this.state ?? "esperando"} ` +
-        `(abajo ≤${HANDSTANDPUSHUP_DOWN_ANGLE_DEG}°, arriba ≥${HANDSTANDPUSHUP_UP_ANGLE_DEG}°)`;
+        `ángulo cuerpo: ${bodyAngle.toFixed(0)}° (máx ${PIKE_BODY_MAX_DEG}°) | manos/pies dy: ${(handsFeetDy * 100).toFixed(0)}% | estado: ${this.state ?? "esperando"} ` +
+        `(abajo ≤${PIKE_DOWN_ANGLE_DEG}°, arriba ≥${PIKE_UP_ANGLE_DEG}°)`;
     }
   }
 
@@ -11604,14 +11339,6 @@ class WorkoutSession {
         ? "Dobla las rodillas y súbelas hasta dejarlas más o menos a la altura de la cadera."
         : "Ve y agárrate a la barra, con los brazos estirados, de frente a la cámara y algo alejada/o (para que quepa el cuerpo entero).";
     }
-    // Dead Hang / aguante en barra: mismo paso 1 que kneehold en barra
-    // (colgarte de la barra) — ver checkDeadHangPosture para por qué el
-    // paso 2 pide también doblar la cadera, no solo la rodilla.
-    if (this.counterKey === "deadhang") {
-      return this.postureGroundConfirmed
-        ? "Dobla las rodillas y la cadera, subiéndolas hacia el pecho."
-        : "Ve y agárrate a la barra, con los brazos estirados, de frente a la cámara y algo alejada/o (para que quepa el cuerpo entero).";
-    }
     // Tuck lever en barra: mismo paso 1 que kneehold en barra (colgarte
     // de la barra), pero el paso 2 pide mucho más -- las piernas
     // dobladas tienen que subir por encima del hombro, cerca de la
@@ -11828,8 +11555,6 @@ class WorkoutSession {
           ? "Postura correcta. ¡Listo! Aguanta el estiramiento, con el pecho hacia las piernas y los brazos colgando. Para terminar una serie, ponte de pie del todo, sal del encuadre, o levanta un brazo y agita la mano."
           : this.counterKey === "kneeholdbar"
           ? "Postura correcta. ¡Listo! Aguanta con las rodillas arriba, sin balancearte. Para terminar una serie, suelta la barra o sal del encuadre."
-          : this.counterKey === "deadhang"
-          ? "Postura correcta. ¡Listo! Aguanta con las rodillas y la cadera dobladas, sin balancearte. Para terminar una serie, suelta la barra o sal del encuadre."
           : this.counterKey === "tucklever"
           ? "Postura correcta. ¡Listo! Aguanta con las piernas dobladas muy por encima de la cabeza, cerca de la barra, sin balancearte. Para terminar una serie, baja las piernas, suelta la barra o sal del encuadre."
           : this.counterKey === "handstand"
@@ -12046,7 +11771,6 @@ class WorkoutSession {
     // con la rodilla muy flexionada.
     const invalidStableMs =
       this.counterKey === "kneeholdbar" ? KNEEHOLDBAR_INVALID_STABLE_MS
-      : this.counterKey === "deadhang" ? DEADHANG_INVALID_STABLE_MS
       : this.counterKey === "tucklever" ? TUCKLEVER_INVALID_STABLE_MS
       : this.counterKey === "supermanhold" ? SUPERMANHOLD_INVALID_STABLE_MS
       : this.counterKey === "lsithold" ? LSITHOLD_INVALID_STABLE_MS
@@ -12217,13 +11941,12 @@ class WorkoutSession {
     }
 
     const isKneeHoldStep1 = this.counterKey === "kneeholdbar" && !this.postureGroundConfirmed;
-    const isDeadHangStep1 = this.counterKey === "deadhang" && !this.postureGroundConfirmed;
     const isTuckLeverStep1 = this.counterKey === "tucklever" && !this.postureGroundConfirmed;
     const isWallsitStep1 = this.counterKey === "wallsit" && !this.postureGroundConfirmed;
     const isElephantStepsStep1 = this.counterKey === "elephantstepshold" && !this.postureGroundConfirmed;
-    if (((this.counterKey === "plank" || this.counterKey === "sideplank") && !this.postureGroundConfirmed) || isKneeHoldStep1 || isDeadHangStep1 || isTuckLeverStep1 || isWallsitStep1 || isElephantStepsStep1) {
-      const flat = (isKneeHoldStep1 || isDeadHangStep1 || isTuckLeverStep1) ? checkKneeHoldBarHanging(lm) : (isWallsitStep1 || isElephantStepsStep1) ? checkStanding(lm) : checkLyingFlat(lm);
-      const stableMs = (isKneeHoldStep1 || isDeadHangStep1 || isTuckLeverStep1) ? HANG_STABLE_MS : (isWallsitStep1 || isElephantStepsStep1) ? WALLSIT_STANDING_STABLE_MS : ON_GROUND_STABLE_MS;
+    if (((this.counterKey === "plank" || this.counterKey === "sideplank") && !this.postureGroundConfirmed) || isKneeHoldStep1 || isTuckLeverStep1 || isWallsitStep1 || isElephantStepsStep1) {
+      const flat = (isKneeHoldStep1 || isTuckLeverStep1) ? checkKneeHoldBarHanging(lm) : (isWallsitStep1 || isElephantStepsStep1) ? checkStanding(lm) : checkLyingFlat(lm);
+      const stableMs = (isKneeHoldStep1 || isTuckLeverStep1) ? HANG_STABLE_MS : (isWallsitStep1 || isElephantStepsStep1) ? WALLSIT_STANDING_STABLE_MS : ON_GROUND_STABLE_MS;
       // Igual que dominadas (ver startupVoiceGiven junto a HANG_STABLE_MS,
       // más abajo): nada más verte aparecer en la cámara, aunque todavía
       // no estés colgada/o, un aviso por voz de qué hacer — antes esto se
@@ -12233,10 +11956,6 @@ class WorkoutSession {
         this.announceStatus("¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
       }
       if (isTuckLeverStep1 && flat.visible && !this.startupVoiceGiven) {
-        this.startupVoiceGiven = true;
-        this.announceStatus("¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
-      }
-      if (isDeadHangStep1 && flat.visible && !this.startupVoiceGiven) {
         this.startupVoiceGiven = true;
         this.announceStatus("¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
       }
@@ -12258,8 +11977,6 @@ class WorkoutSession {
           this.postureCandidateSince = null;
           const flipMessage = isKneeHoldStep1
             ? "¡Listo! Ya puedes subir las rodillas, doblándolas, hasta dejarlas más o menos a la altura de la cadera."
-            : isDeadHangStep1
-            ? "¡Listo! Ya puedes subir las rodillas y la cadera, doblándolas hacia el pecho."
             : isTuckLeverStep1
             ? "¡Listo! Ahora dobla las piernas y súbelas muy por encima de la cabeza, cerca de la barra, hasta dejarlas por encima de la altura del hombro."
             : isWallsitStep1
@@ -12274,8 +11991,6 @@ class WorkoutSession {
           // lo necesite, pero se pidió que la voz diga lo mínimo.
           const flipSpeech = isKneeHoldStep1
             ? "Listo. Sube las rodillas."
-            : isDeadHangStep1
-            ? "Listo. Sube las rodillas y la cadera."
             : isTuckLeverStep1
             ? "Listo. Sube las piernas por encima de la cabeza."
             : isWallsitStep1
@@ -12285,16 +12000,16 @@ class WorkoutSession {
             : this.counterKey === "sideplank"
             ? "Listo. De lado, en posición."
             : "Listo. Boca abajo, en posición.";
-          this.announceStatus(flipMessage, isKneeHoldStep1 ? "kneehold_ready" : isDeadHangStep1 ? "deadhang_ready" : isTuckLeverStep1 ? "tucklever_ready" : isWallsitStep1 ? "wallsit_ready" : isElephantStepsStep1 ? "elephantsteps_ready" : "plank_flip", flipSpeech);
+          this.announceStatus(flipMessage, isKneeHoldStep1 ? "kneehold_ready" : isTuckLeverStep1 ? "tucklever_ready" : isWallsitStep1 ? "wallsit_ready" : isElephantStepsStep1 ? "elephantsteps_ready" : "plank_flip", flipSpeech);
         } else {
-          this.setStatus((isKneeHoldStep1 || isDeadHangStep1 || isTuckLeverStep1) ? "Colgada/o… confirmando (no te muevas)" : (isWallsitStep1 || isElephantStepsStep1) ? "De pie… confirmando (no te muevas)" : "Tumbada/o… confirmando (no te muevas)");
+          this.setStatus((isKneeHoldStep1 || isTuckLeverStep1) ? "Colgada/o… confirmando (no te muevas)" : (isWallsitStep1 || isElephantStepsStep1) ? "De pie… confirmando (no te muevas)" : "Tumbada/o… confirmando (no te muevas)");
         }
       } else {
         this.postureGroundSince = null;
         this.setStatus(this.postureWaitingMessage());
       }
       if (this.debugEl) {
-        this.debugEl.textContent = (isKneeHoldStep1 || isDeadHangStep1 || isTuckLeverStep1)
+        this.debugEl.textContent = (isKneeHoldStep1 || isTuckLeverStep1)
           ? `paso 1 de 2: agarrada/o a la barra — ${flat.ok ? "sí, confirmando" : "todavía no"}`
           : (isWallsitStep1 || isElephantStepsStep1)
           ? `paso 1 de 2: de pie — ${flat.ok ? "sí, confirmando" : "todavía no"} | ` +
@@ -12307,8 +12022,6 @@ class WorkoutSession {
       this.logScissor(
         isKneeHoldStep1
           ? `[kneehold en barra, paso 1] ok=${flat.ok ? "sí" : "no"}`
-          : isDeadHangStep1
-          ? `[dead hang, paso 1] ok=${flat.ok ? "sí" : "no"}`
           : isTuckLeverStep1
           ? `[tuck lever en barra, paso 1] ok=${flat.ok ? "sí" : "no"}`
           : isWallsitStep1
@@ -12330,8 +12043,6 @@ class WorkoutSession {
         ? checkElephantStepsHold(lm)
         : this.counterKey === "kneeholdbar"
         ? checkKneeHoldBarPosture(lm)
-        : this.counterKey === "deadhang"
-        ? checkDeadHangPosture(lm, this.postureValidSince !== null)
         : this.counterKey === "tucklever"
         ? checkTuckLeverPosture(lm, this.postureValidSince !== null)
         : this.counterKey === "handstand"
@@ -12387,7 +12098,6 @@ class WorkoutSession {
     } else if (check.ok === this.postureCandidateOk) {
       const flickerStableMs =
         this.counterKey === "kneeholdbar" ? KNEEHOLDBAR_FLICKER_STABLE_MS
-        : this.counterKey === "deadhang" ? DEADHANG_FLICKER_STABLE_MS
         : this.counterKey === "tucklever" ? TUCKLEVER_FLICKER_STABLE_MS
         : this.counterKey === "handstand" ? HANDSTAND_FLICKER_STABLE_MS
         : this.counterKey === "standingquadstretch" ? STRETCH_QUAD_FLICKER_STABLE_MS
@@ -12415,8 +12125,6 @@ class WorkoutSession {
         ? "pasos de elefante"
         : this.counterKey === "kneeholdbar"
         ? "kneehold en barra"
-        : this.counterKey === "deadhang"
-        ? "dead hang"
         : this.counterKey === "tucklever"
         ? "tuck lever en barra"
         : this.counterKey === "handstand"
@@ -14173,198 +13881,6 @@ class WorkoutSession {
   }
 
   /**
-   * Dominadas escapulares (scapularpull): te cuelgas de la barra con los
-   * brazos totalmente estirados (misma comprobación de partida que las
-   * dominadas normales/de arquero -- armsUpNow/armsClearlyReleased) y,
-   * SIN doblar el codo, deprimes y retraes el omóplato para subir el
-   * cuerpo un poco y lo vuelves a bajar con control. A diferencia de
-   * processResult (dominadas normales) o processArcherPullup, aquí NO
-   * hay "llegar a la barra": el rango de movimiento real es mucho más
-   * pequeño (ver SCAPULARPULL_MOVE_FACTOR arriba, calibrado contra vídeo
-   * real) y el cuerpo nunca se acerca a la barra, así que una repetición
-   * es solo "subiste lo suficiente y volviste a bajar lo suficiente",
-   * sin comprobar la altura absoluta respecto a ella.
-   *
-   * Se sigue el HOMBRO (shoulderMidY), no la nariz: contra el vídeo de
-   * referencia fue la señal más consistente (mismo rango, ~0.18
-   * anchos-de-hombro, en dos tomas distintas del mismo vídeo -- de
-   * espaldas y de frente), menos afectada que la nariz por el propio
-   * movimiento de la cabeza al hablar/mirar alrededor.
-   */
-  processScapularPull(lm, now) {
-    const lShoulder = lm[L_SHOULDER];
-    const rShoulder = lm[R_SHOULDER];
-    const lElbow = lm[L_ELBOW];
-    const rElbow = lm[R_ELBOW];
-    const lWrist = lm[L_WRIST];
-    const rWrist = lm[R_WRIST];
-    const shoulderWidth = Math.hypot(lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y);
-    const shoulderMidYRaw = (lShoulder.y + rShoulder.y) / 2;
-    // 0 = arriba del todo del encuadre, 1 = abajo del todo -- seguimos el
-    // hombro, no la nariz (ver comentario de la función).
-    const y = shoulderMidYRaw;
-    const wristMidY = (lWrist.y + rWrist.y) / 2;
-    const elbowMidY = (lElbow.y + rElbow.y) / 2;
-    const wristVisible = ((lWrist.visibility ?? 1) + (rWrist.visibility ?? 1)) / 2 > 0.4;
-    const elbowVisible = ((lElbow.visibility ?? 1) + (rElbow.visibility ?? 1)) / 2 > 0.4;
-
-    const armsUpNow = wristVisible
-      ? wristMidY < shoulderMidYRaw - HANG_MARGIN_FACTOR * shoulderWidth
-      : elbowVisible && elbowMidY < shoulderMidYRaw - HANG_MARGIN_FACTOR * shoulderWidth;
-    const armsClearlyReleased = wristVisible
-      ? wristMidY > shoulderMidYRaw + RELEASE_MARGIN_FACTOR * shoulderWidth
-      : elbowVisible && elbowMidY > shoulderMidYRaw + RELEASE_MARGIN_FACTOR * shoulderWidth;
-
-    if (this.prepping) {
-      const waitedSeconds = Math.floor((now - this.prepStartTs) / 1000);
-      if ((wristVisible || elbowVisible) && !this.startupVoiceGiven) {
-        this.startupVoiceGiven = true;
-        this.announceStatus("¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
-      }
-
-      if (armsUpNow) {
-        if (this.hangStableSince === null) this.hangStableSince = now;
-        if (now - this.hangStableSince >= HANG_STABLE_MS) {
-          this.prepping = false;
-          this.calibrating = true;
-          this.calibrationStartTs = now;
-          this.calibrationSamples = [];
-        } else {
-          this.setStatus("Te veo colgado… confirmando (no te muevas)");
-        }
-      } else {
-        this.hangStableSince = null;
-        this.setStatus(
-          waitedSeconds < 8
-            ? "Ve a la barra y cuélgate con los brazos estirados…"
-            : `Esperando a verte colgado (llevas ${waitedSeconds}s)… comprueba que la cámara vea tus brazos y hombros enteros`
-        );
-      }
-      if (this.debugEl) {
-        this.debugEl.textContent = `brazos en alto: ${armsUpNow ? "sí" : "no"} | espera: ${waitedSeconds}s`;
-      }
-      return;
-    }
-
-    if (this.calibrating) {
-      if (!armsUpNow) {
-        this.prepping = true;
-        this.calibrating = false;
-        this.hangStableSince = null;
-        this.prepStartTs = now;
-        this.calibrationSamples = [];
-        return;
-      }
-      this.calibrationSamples.push({ y, shoulderWidth });
-      const elapsed = now - this.calibrationStartTs;
-      const remaining = Math.max(0, Math.ceil((CALIBRATION_MS - elapsed) / 1000));
-      this.setStatus(`Calibrando, quédate colgado y quieto… (${remaining || 1}s)`);
-      if (elapsed >= CALIBRATION_MS) {
-        const ys = this.calibrationSamples.map((s) => s.y).sort((a, b) => a - b);
-        const ws = this.calibrationSamples.map((s) => s.shoulderWidth).sort((a, b) => a - b);
-        this.shoulderWidth = ws[Math.floor(ws.length / 2)];
-        this.localBottomY = ys[Math.floor(ys.length / 2)];
-        this.localTopY = this.localBottomY;
-        this.calibrating = false;
-        this.repStartTime = now;
-        this.lastRepTime = now;
-        this.restAlerted = false;
-        this.updateSetDisplay();
-        this.logScissor(`[CALIBRADL] hombro_y=${this.localBottomY.toFixed(3)} hombros=${this.shoulderWidth.toFixed(3)}`);
-        if (this.setClosedAt === null || now - this.setClosedAt >= MIN_REST_MS) {
-          this.announceStatus(
-            "¡Listo! Empieza las dominadas escapulares: sin doblar el codo, baja los omóplatos para subir un poco el cuerpo y vuelve a bajar con control."
-          );
-        }
-      }
-      return;
-    }
-
-    if (!this.shoulderWidth) return;
-
-    const scaleChange = Math.abs(shoulderWidth - this.shoulderWidth) / this.shoulderWidth;
-    const scaleOk = scaleChange < SCALE_TOLERANCE;
-
-    if (!armsUpNow || !scaleOk) {
-      this.logScissor(
-        `[frame descartado] brazos_arriba=${armsUpNow} escala_ok=${scaleOk} cambio_escala=${scaleChange.toFixed(2)}(máx ${SCALE_TOLERANCE}) ` +
-        `estado=${this.state} reps_serie=${this.currentSetReps}`
-      );
-      if (!armsUpNow) {
-        this.localBottomY = null;
-        this.localTopY = null;
-        this.liftoffTime = null;
-      }
-
-      if (armsClearlyReleased) {
-        if (this.armsDownSince === null) this.armsDownSince = now;
-        if (now - this.armsDownSince >= ARMS_DOWN_STABLE_MS && this.currentSetReps > 0) {
-          const closedReps = this.currentSetReps;
-          this.armsDownSince = null;
-          this.pendingHangReminder = true;
-          this.announceSetComplete(`Serie de ${closedReps}`, "");
-          this.restVoiceQuiet = true;
-          this.beginPrep();
-          return;
-        }
-      } else {
-        this.armsDownSince = null;
-      }
-
-      if (this.debugEl) {
-        this.debugEl.textContent = !armsUpNow
-          ? "esperando a que agarres la barra (brazos en alto)…"
-          : "distancia a la cámara cambió demasiado, recalibra si sigue así";
-      }
-      return;
-    }
-
-    this.armsDownSince = null;
-
-    const moveThresh = SCAPULARPULL_MOVE_FACTOR * this.shoulderWidth;
-
-    if (this.state === "down") {
-      if (this.localBottomY === null || y > this.localBottomY) {
-        this.localBottomY = y;
-        this.liftoffTime = null;
-      }
-      const risenFromBottom = this.localBottomY - y;
-
-      if (this.liftoffTime === null && risenFromBottom > SCAPULARPULL_LIFTOFF_FACTOR * this.shoulderWidth) {
-        this.liftoffTime = now;
-      }
-
-      if (risenFromBottom > moveThresh) {
-        this.state = "up";
-        this.localTopY = y;
-        this.repStartTime = this.liftoffTime ?? now;
-      }
-    } else {
-      if (this.localTopY === null || y < this.localTopY) {
-        this.localTopY = y;
-      }
-      const fallenFromTop = y - this.localTopY;
-      if (fallenFromTop > moveThresh) {
-        this.logScissor(`[REP intentada] duración=${((now - this.repStartTime) / 1000).toFixed(2)}s`);
-        this.countRep((now - this.repStartTime) / 1000, now, "Dominada escapular");
-        this.state = "down";
-        this.localBottomY = y;
-      }
-    }
-
-    if (this.debugEl) {
-      this.debugEl.textContent =
-        `estado: ${this.state} | hombro_y: ${y.toFixed(3)} | ref abajo: ${this.localBottomY === null ? "-" : this.localBottomY.toFixed(3)} ` +
-        `| ref arriba: ${this.localTopY === null ? "-" : this.localTopY.toFixed(3)} | umbral: ${moveThresh.toFixed(3)} (${SCAPULARPULL_MOVE_FACTOR})`;
-    }
-    this.logScissor(
-      `estado=${this.state} hombro_y=${y.toFixed(3)} hombros=${shoulderWidth.toFixed(3)} ` +
-      `abajo_ref=${this.localBottomY === null ? "-" : this.localBottomY.toFixed(3)} arriba_ref=${this.localTopY === null ? "-" : this.localTopY.toFixed(3)} ` +
-      `despegue=${this.liftoffTime === null ? "no" : "sí"}`
-    );
-  }
-
-  /**
    * Curl de bíceps con mancuernas: cámara DE PERFIL, igual que
    * flexiones/fondos/sentadillas — ver el bloque CURL_* más arriba
    * (SEGUNDA VERSIÓN, con el porqué del cambio desde la primera versión
@@ -14743,10 +14259,6 @@ class WorkoutSession {
       this.processPikePushup(lm, now);
       return;
     }
-    if (this.counterKey === "handstandpushup") {
-      this.processHandstandPushup(lm, now);
-      return;
-    }
     if (this.counterKey === "benchdip") {
       this.processBenchDip(lm, now);
       return;
@@ -14865,10 +14377,6 @@ class WorkoutSession {
     }
     if (this.counterKey === "archerpullup") {
       this.processArcherPullup(lm, now);
-      return;
-    }
-    if (this.counterKey === "scapularpull") {
-      this.processScapularPull(lm, now);
       return;
     }
     if (this.counterKey === "dumbbellcurl") {

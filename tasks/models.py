@@ -1110,6 +1110,30 @@ class Task(models.Model):
             "bar_pct": min(100, pct),  # para el ancho de la barra -- que no se salga del hueco
         }
 
+    @property
+    def reading_session_ready(self):
+        """
+        Si esta instancia de un plan de lectura YA se puede cerrar con
+        "Terminar sesión de hoy" -- solo el día que toca (custom_days) o
+        si se quedó atrasada, nunca uno futuro.
+
+        Antes no había ningún tope aquí: el visor se puede abrir
+        cualquier día desde "Planes" (esa es la gracia -- se puede leer
+        cuando se quiera, sin esperar a que la tarea "toque" para
+        entrar), pero cerrar la sesión de una instancia con due_date
+        futuro hacía avanzar la serie igual que si hubiera tocado de
+        verdad (ver _spawn_next) -- "adelantar" una lectura del finde así
+        se comía el día real de la semana siguiente, que aparecía ya
+        hecho (completado en el pasado) sin que nadie lo hubiera hecho
+        ese día. Esto NO afecta a poder seguir pasando páginas
+        (record_reading_page/task_reading_progress) ni a abrir el visor
+        (task_reading) ningún día -- solo a cerrar el día con este botón.
+        """
+        if self.reading_mode != self.READING_MODE_PLAN or not self.due_date:
+            return True
+        today = timezone.localtime(timezone.now()).date()
+        return self.due_date <= today
+
     def ensure_reading_day_goal(self):
         """
         Rellena reading_day_start_page/reading_day_goal si esta instancia
@@ -1853,6 +1877,25 @@ class Exercise(models.Model):
         (MODE_DISTANCE, "Distancia (cardio)"),
     ]
 
+    # Nivel para generar planes de deporte automáticamente (pedido por
+    # Alex, 2026-09-28). Solo 3 niveles a propósito, sin intermedios
+    # como "principiante-intermedio" -- si un ejercicio está a caballo,
+    # se fuerza a uno de los tres. Vacío ("", el default) para los dos
+    # casos que quedan FUERA de este sistema: calentamiento/estiramientos
+    # (body_area="warmup", más "elephant-steps" en lower_body -- se
+    # siguen usando como calentamiento antes de la tarea, o sueltos, pero
+    # no entran en la selección por nivel) y running (tiene su propio
+    # sistema de nivel vía el plan -- no tocado aquí a propósito).
+    LEVEL_BEGINNER = "beginner"
+    LEVEL_INTERMEDIATE = "intermediate"
+    LEVEL_ADVANCED = "advanced"
+
+    LEVEL_CHOICES = [
+        (LEVEL_BEGINNER, "Principiante"),
+        (LEVEL_INTERMEDIATE, "Intermedio"),
+        (LEVEL_ADVANCED, "Avanzado"),
+    ]
+
     # Variantes del catálogo que llevan peso añadido (lastre, chaleco...)
     # — son muy pocas frente al resto del catálogo (peso corporal), así
     # que en vez de un campo en la base de datos (con su migración) para
@@ -1861,7 +1904,7 @@ class Exercise(models.Model):
     # solo enseñen los campos de peso cuando el ejercicio elegido de
     # verdad lo usa, en vez de para todo el catálogo. Si se añade un
     # ejercicio con peso nuevo al catálogo, su slug va aquí.
-    WEIGHTED_SLUGS = {"weighted-pullup", "weighted-dips", "weighted-squat"}
+    WEIGHTED_SLUGS = {"weighted-pullup", "wide-weighted-pullup", "weighted-dips", "weighted-squat"}
 
     name = models.CharField(max_length=64)
     slug = models.SlugField(max_length=64, unique=True)
@@ -1877,6 +1920,11 @@ class Exercise(models.Model):
     counter_key = models.CharField(
         max_length=32, blank=True,
         help_text="Qué contador de workout.js usar (solo aplica si mode='pose'). Ej: 'pullup'.",
+    )
+    level = models.CharField(
+        max_length=12, choices=LEVEL_CHOICES, blank=True, db_index=True,
+        help_text="Para generar planes de deporte automáticamente por nivel. Vacío = calentamiento/"
+                   "estiramientos (no entran en la selección por nivel) o running (nivel propio, no aplica).",
     )
     config = models.JSONField(
         default=dict, blank=True,

@@ -19,7 +19,7 @@ import {
   NOSE, L_SHOULDER, R_SHOULDER, L_HIP, R_HIP, L_ANKLE, R_ANKLE, L_WRIST, R_WRIST,
   angle,
   checkPlankPosture, checkSidePlankPosture, checkWallSitPosture,
-  checkKneeHoldBarPosture, checkHandstandPosture, createLSitHoldChecker, createSupermanHoldChecker, checkArmCrossStretch, checkTricepsOverheadStretch,
+  checkKneeHoldBarPosture, checkDeadHangPosture, checkTuckLeverPosture, checkHandstandPosture, createLSitHoldChecker, createSupermanHoldChecker, checkArmCrossStretch, checkTricepsOverheadStretch,
   checkSeatedHamstringStretch, createStandingQuadStretchChecker, checkElephantStepsHold,
   speakOut, numeroEnPalabras, isVoiceEnabled,
 } from "./workout.js";
@@ -107,7 +107,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   // postura en vez de contar repeticiones. Ver checkPlankPosture /
   // checkSidePlankPosture / checkWallSitPosture / checkKneeHoldBarPosture /
   // checkHandstandPosture más abajo.
-  const POSTURE_COUNTERS = new Set(["supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch", "elephantstepshold"]);
+  const POSTURE_COUNTERS = new Set(["supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "tucklever", "deadhang", "handstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch", "elephantstepshold"]);
 
   // Estiramientos bilaterales cronometrados (armcrossstretch/
   // tricepsoverheadstretch: un brazo y luego el otro; seatedhamstringstretch/
@@ -263,6 +263,10 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         ? checkWallSitPosture
         : item.counter_key === "kneeholdbar"
         ? checkKneeHoldBarPosture
+        : item.counter_key === "deadhang"
+        ? checkDeadHangPosture
+        : item.counter_key === "tucklever"
+        ? checkTuckLeverPosture
         : item.counter_key === "handstand"
         ? checkHandstandPosture
         : item.counter_key === "supermanhold"

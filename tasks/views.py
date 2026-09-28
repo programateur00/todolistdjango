@@ -1175,6 +1175,11 @@ def task_reading(request, pk):
         "task": task,
         "status": task.reading_plan_status,
         "today_status": task.reading_today_status,
+        # Para que "Terminar sesión de hoy" y el aviso de qué días toca
+        # se puedan pintar -- ver Task.reading_session_ready y
+        # task_reading_save (que es quien de verdad lo hace cumplir).
+        "session_ready": task.reading_session_ready,
+        "scheduled_days": task.custom_days_labels(),
     })
 
 
@@ -1250,6 +1255,23 @@ def task_reading_save(request, pk):
         # y marcó hecho) -- nada que guardar aquí, evita un mark_done()
         # de más sobre una serie que ya está en REPEAT_NONE.
         return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
+    if not task.reading_session_ready:
+        # Se puede entrar al visor y seguir leyendo cualquier día (eso ya
+        # se guarda aparte, en task_reading_progress) -- lo que no se deja
+        # es CERRAR una instancia futura antes de que toque, porque eso
+        # hacía avanzar la serie entera y el día real que tocaba llegaba
+        # ya "hecho" de antemano (ver Task.reading_session_ready). Se
+        # responde ok=True (no ha fallado nada, el progreso de página ya
+        # está guardado) con early=True para que el visor avise en vez de
+        # redirigir como si hubiera cerrado el día.
+        return JsonResponse({
+            "ok": True, "early": True,
+            "message": (
+                f"Vas adelantado — esta sesión es del "
+                f"{task.due_date.strftime('%d/%m')}. Tu progreso de página ya "
+                "está guardado; se completará sola ese día."
+            ),
+        })
     task.mark_done()
     messages.success(request, "Sesión de lectura guardada.")
     return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
@@ -1719,7 +1741,7 @@ def stats_delete_series(request, series_id):
 # ─────────────────────────────────────────────────────────────────────
 
 # Contadores que existen de verdad en workout.js.
-COUNTERS = {"superman", "lsit", "elephantsteps", "burpee", "pullup", "dip", "pushup", "squat", "splitsquat", "crunch", "legraise", "highlegraise", "situp", "doublecrunch", "scissor", "archerpullup", "inclinepushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "wristrotation", "hipforwardback"}
+COUNTERS = {"superman", "lsit", "elephantsteps", "burpee", "pullup", "dip", "pushup", "squat", "splitsquat", "crunch", "legraise", "highlegraise", "situp", "doublecrunch", "scissor", "archerpullup", "inclinepushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "wristrotation", "hipforwardback", "scapularpull", "handstandpushup"}
 
 # Ejercicios "timed" (se aguantan, no se cuentan en repeticiones) que
 # workout.js sabe seguir con cámara comprobando la postura — plancha,
@@ -1727,7 +1749,7 @@ COUNTERS = {"superman", "lsit", "elephantsteps", "burpee", "pullup", "dip", "pus
 # task_workout: a estos, a diferencia del resto de "timed" (bicicleta…),
 # sí se les deja entrar en el entreno individual de una tarea con cámara
 # encendida, no solo dentro de un circuito.
-POSTURE_COUNTERS = {"supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch", "elephantstepshold"}
+POSTURE_COUNTERS = {"supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "tucklever", "deadhang", "handstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch", "elephantstepshold"}
 
 
 def _plans_qs():
@@ -2196,15 +2218,9 @@ def plan_ai_form(request):
             messages.error(request, "El borrador ha caducado — genera el plan otra vez.")
             return redirect(reverse("tasks:plan_ai_create"))
 
-        # Igual que en la creación manual: sin hora no hay a qué hora
-        # avisar ni cuándo cerrar el día solo (ver Task.expire_overdue).
-        # Es una decisión del usuario, no algo que la generación
-        # automática pueda adivinar — así que se pide aquí, en la vista
-        # previa, antes de guardar nada.
-        due_time = request.POST.get("due_time") or None
-        if not due_time:
-            messages.error(request, "Ponle una hora — la notificación y el cierre automático del día la necesitan.")
-            return render(request, "tasks/plan_ai_preview.html", {"draft": draft})
+        # Igual que en la tarea suelta (ver task_form/task_create): sin
+        # hora puesta no se bloquea, se asume 23:59.
+        due_time = request.POST.get("due_time") or "23:59"
 
         plan_data = {
             "name": request.POST.get("name", "").strip(),
@@ -2284,17 +2300,12 @@ def plan_form(request, pk=None):
 
     if request.method == "POST":
         name = request.POST.get("name", "").strip()
-        due_time = request.POST.get("due_time") or None
+        # Igual que en la tarea suelta (ver task_form/task_create): sin
+        # hora puesta no se bloquea el guardado, se asume 23:59 — la
+        # tarea del plan hereda esta hora en Plan.sync_task().
+        due_time = request.POST.get("due_time") or "23:59"
         if not name:
             messages.error(request, "Ponle un nombre al plan.")
-        elif not due_time:
-            # Igual que en la tarea suelta: sin hora no hay a qué hora
-            # avisar ni cuándo cerrar el día solo (ver Task.expire_overdue
-            # — la tarea del plan hereda esta hora en Plan.sync_task()).
-            messages.error(
-                request,
-                "Ponle una hora — la notificación y el cierre automático del día la necesitan.",
-            )
         else:
             if plan is None:
                 plan = Plan(user=get_current_user())
@@ -2552,10 +2563,9 @@ def plan_language_confirm(request):
         return redirect(reverse("tasks:plan_create"))
 
     if request.method == "POST":
-        due_time = request.POST.get("due_time") or draft.get("due_time")
-        if not due_time:
-            messages.error(request, "Ponle una hora — la notificación y el cierre automático del día la necesitan.")
-            return render(request, "tasks/plan_language_confirm.html", {"draft": draft})
+        # Igual que en la tarea suelta (ver task_form/task_create): sin
+        # hora puesta no se bloquea, se asume 23:59.
+        due_time = request.POST.get("due_time") or draft.get("due_time") or "23:59"
 
         # Se expande el catálogo elegido (vídeo a vídeo, vía YouTube)
         # solo ahora que el usuario confirma de verdad — así no se gasta

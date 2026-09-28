@@ -377,7 +377,7 @@
 
     <label class="field" id="due-time-field">
         <span class="field__label">Hora</span>
-        <input type="time" name="due_time" id="due-time-input" value="{{ plan.due_time|time:'H:i'|default:'' }}" required>
+        <input type="time" name="due_time" id="due-time-input" value="{{ plan.due_time|time:'H:i'|default:'23:59' }}">
         <span class="field__hint">A esta hora avisa la app y, si sigue sin hacerse, se marca sola como no hecha.</span>
     </label>
 
