@@ -6,8 +6,8 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.db import models
-from django.db.models import Sum
-from django.db.models.functions import Coalesce
+from django.db.models import Case, DateField, F, Sum, When
+from django.db.models.functions import Coalesce, TruncDate
 from django.utils import timezone
 
 # Formatos aceptados al pegar un vídeo de YouTube (RoutineItem.youtube_video_id):
@@ -1722,6 +1722,25 @@ class Task(models.Model):
         )
 
     @classmethod
+    def _with_completed_day(cls, qs):
+        """
+        Día al que pertenece una tarea hecha en la lista de Hechas.
+
+        Normalmente es el de completed_at (o created_at si falta). Pero
+        una tarea CADUCADA sola a las 23:59 recibe completed_at = 00:00 del
+        día siguiente (ver mark_expired), y así aparecía en la lista de
+        Hechas de mañana. Para esas se usa su due_date, que es el día al
+        que de verdad pertenecen.
+        """
+        return qs.annotate(
+            _completed_day=Case(
+                When(expired=True, due_date__isnull=False, then=F("due_date")),
+                default=TruncDate(Coalesce("completed_at", "created_at")),
+                output_field=DateField(),
+            ),
+        )
+
+    @classmethod
     def completed_today(cls, qs=None):
         """
         Lo cerrado hoy.
@@ -1743,9 +1762,9 @@ class Task(models.Model):
         """
         today = timezone.localtime(timezone.now()).date()
         base = qs if qs is not None else cls.objects.all()
-        return base.filter(is_done=True).annotate(
-            _completed_bucket=Coalesce("completed_at", "created_at"),
-        ).filter(_completed_bucket__date=today)
+        return cls._with_completed_day(
+            base.filter(is_done=True)
+        ).filter(_completed_day=today)
 
     # ── Selector Hoy / Esta semana / Este mes / Todas (pantalla de Tareas) ──
     #
@@ -1821,9 +1840,7 @@ class Task(models.Model):
         completed_today, mismo criterio.
         """
         base = qs if qs is not None else cls.objects.all()
-        base = base.filter(is_done=True).annotate(
-            _completed_bucket=Coalesce("completed_at", "created_at"),
-        )
+        base = cls._with_completed_day(base.filter(is_done=True))
 
         today = timezone.localtime(timezone.now()).date()
         if range_key == cls.RANGE_ALL:
@@ -1836,7 +1853,7 @@ class Task(models.Model):
             start = end = today  # RANGE_TODAY
 
         if start is not None:
-            base = base.filter(_completed_bucket__date__range=(start, end))
+            base = base.filter(_completed_day__range=(start, end))
         return base.order_by("-completed_at", "-created_at")
 
     # Cuántas fechas se enseñan sueltas antes de esconder el resto tras

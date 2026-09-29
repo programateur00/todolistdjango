@@ -69,9 +69,13 @@ class RoutineAdmin(admin.ModelAdmin):
 class WorkoutSessionAdmin(admin.ModelAdmin):
     list_display = (
         "exercise", "user", "routine", "total_reps", "total_sets", "added_weight_kg",
-        "distance_km", "steps", "recorded_at",
+        "distance_km", "steps", "session_duration_seconds", "avg_rep_seconds",
+        "source", "task", "series_id", "deleted_at", "recorded_at",
     )
-    list_filter = ("exercise",)
+    list_filter = ("exercise", "source")
+    date_hierarchy = "recorded_at"
+    ordering = ("-recorded_at",)
+    search_fields = ("series_id", "external_id")
     list_per_page = 50
 
 
