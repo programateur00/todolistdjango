@@ -789,6 +789,65 @@ class PlanHeadlineTests(TestCase):
         self.assertEqual(list(self.plan.support_items), [sup])
         self.assertNotIn(head, self.plan.support_items)
 
+    def test_weighted_exercises_go_first_within_their_family(self):
+        """Dominadas, dominadas con peso, fondos, fondos con peso ->
+        dominadas con peso, dominadas, fondos con peso, fondos."""
+        def ex(slug, name):
+            return Exercise.objects.get_or_create(
+                slug=slug, defaults=dict(name=name, mode="pose", counter_key=slug),
+            )[0]
+        made = {}
+        for slug, name in [
+            ("pullup", "Dominadas"), ("weighted-pullup", "Dominadas con peso"),
+            ("dips", "Fondos"), ("weighted-dips", "Fondos con peso"),
+        ]:
+            made[slug] = PlanItem.objects.create(
+                plan=self.plan, exercise=ex(slug, name),
+                progression=PlanItem.PROG_FAILURE, order=len(made),
+            )
+        got = [i.exercise.slug for i in self.plan.ordered_items()]
+        self.assertEqual(got, ["weighted-pullup", "pullup", "weighted-dips", "dips"])
+        self.assertEqual(
+            [i["slug"] for i in self.plan.session_items()],
+            ["weighted-pullup", "pullup", "weighted-dips", "dips"],
+        )
+
+    def test_no_star_exercise_order_is_only_order_field(self):
+        """Ya no hay ejercicio "estrella": aunque is_headline esté a True,
+        manda solo `order` -- así el primero se puede bajar."""
+        a = PlanItem.objects.create(
+            plan=self.plan, exercise=self.plank, progression=PlanItem.PROG_REPS,
+            start_seconds=30, goal_seconds=90, reps_increment=5, order=0,
+        )
+        b = PlanItem.objects.create(
+            plan=self.plan, exercise=self.wp, is_headline=True,
+            progression=PlanItem.PROG_DOUBLE, start_sets=4, start_weight_kg=0,
+            goal_sets=4, goal_reps=12, goal_weight_kg=20,
+            rep_range_low=6, weight_increment_kg=5, order=1,
+        )
+        self.assertEqual(list(self.plan.items.all()), [a, b])
+
+    def test_new_item_goes_to_the_end(self):
+        """Un objetivo nuevo (order por defecto) no se cuela en 2º sitio
+        por empatar con el 0 de un plan ya renumerado."""
+        a = self._headline()   # order=0
+        b = self._support()    # order=1
+        c = PlanItem.objects.create(
+            plan=self.plan, exercise=self.plank, progression=PlanItem.PROG_REPS,
+            start_seconds=30, goal_seconds=90, reps_increment=5,
+        )
+        self.assertEqual(list(self.plan.items.all()), [a, b, c])
+
+    def test_first_exercise_can_be_moved_down(self):
+        a = self._headline()
+        b = self._support()
+        resp = self.client.post(
+            reverse("tasks:plan_item_move", args=[self.plan.pk, a.pk]),
+            {"direction": "down"},
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(list(self.plan.items.all()), [b, a])
+
     def test_falls_back_to_first_when_none_marked(self):
         """Sin marcar ninguna, la pantalla debe seguir teniendo algo que
         destacar en vez de quedarse vacía."""
@@ -827,7 +886,9 @@ class PlanViewTests(TestCase):
         self.assertTrue(plan.is_active)
         self.assertEqual(plan.user, self.user)
 
-    def test_add_headline_item(self):
+    def test_add_item_ignores_star_flag(self):
+        """Ya no hay ejercicio "estrella": aunque llegue is_headline en el
+        POST (formulario viejo en caché), no se marca nada."""
         plan = self._create_plan()
         r = self.client.post(reverse("tasks:plan_item_create", args=[plan.pk]), {
             "exercise": self.wp.slug, "progression": "double", "is_headline": "on", "sport_mode": "camera",
@@ -837,10 +898,10 @@ class PlanViewTests(TestCase):
         })
         self.assertEqual(r.status_code, 302)
         item = plan.items.get()
-        self.assertTrue(item.is_headline)
+        self.assertFalse(item.is_headline)
         self.assertEqual(item.goal_weight_kg, 20)
 
-    def test_only_one_headline_allowed(self):
+    def test_no_item_is_marked_as_headline(self):
         plan = self._create_plan()
         other = Exercise.objects.create(slug="ot-v", name="Otro", mode=Exercise.MODE_POSE)
         for slug in (self.wp.slug, other.slug):
@@ -848,7 +909,9 @@ class PlanViewTests(TestCase):
                 "exercise": slug, "progression": "reps", "is_headline": "on", "sport_mode": "camera",
                 "start_sets": 3, "start_reps": 8, "goal_reps": 12,
             })
-        self.assertEqual(plan.items.filter(is_headline=True).count(), 1)
+        self.assertEqual(plan.items.filter(is_headline=True).count(), 0)
+        # y salen en el orden en que se añadieron
+        self.assertEqual([i.exercise.slug for i in plan.items.all()], [self.wp.slug, other.slug])
 
     def test_detail_shows_path_to_the_goal(self):
         """La tabla tiene que llegar al destino: con un número fijo de
@@ -861,7 +924,7 @@ class PlanViewTests(TestCase):
             "rep_range_low": 6, "weight_increment_kg": 5, "sessions_per_step": 2,
         })
         html = self.client.get(reverse("tasks:plan_detail", args=[plan.pk])).content.decode()
-        self.assertIn("Medida del plan", html)
+        self.assertIn("El camino completo", html)
         self.assertIn("con 20 kg", html)     # el destino aparece
         self.assertIn("destino", html)
 

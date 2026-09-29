@@ -21,7 +21,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v2+wristrotation-v2+standingquadstretch-v1+hipforwardback-v3+frontpos-v1+cindy-v2+lsithold-flow-v10+superman-v2+pikepushup-v1+mountainclimber-v1+elephantsteps-v1+burpee-v1+forearmrotation-v3+wristrotation-v3+hiplateral-v6+hipforwardback-v4+standingquadstretch-v2";
+const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v2+standingquadstretch-v1+hipforwardback-v3+frontpos-v1+cindy-v2+lsithold-flow-v10+superman-v2+pikepushup-v1+mountainclimber-v1+elephantsteps-v1+burpee-v1+forearmrotation-v3+hiplateral-v6+hipforwardback-v4+standingquadstretch-v2";
 
 // Token del registro de depuración remoto (ver settings.DEBUG_LOG_TOKEN
 // en el backend) -- exportScissorLog() lo manda junto al registro para
@@ -206,6 +206,11 @@ const HANG_STABLE_MS = 500;   // cuanto tiempo seguido con los brazos en alto pa
 const ARMS_DOWN_STABLE_MS = 400; // cuanto tiempo seguido con los brazos abajo para dar la serie por terminada (evita falsos positivos por un frame ruidoso)
 const CALIBRATION_MS = 1200;  // tiempo colgado quieto que se usa como referencia
 const REST_ALERT_SECONDS = 90;
+// Aviso de descanso largo: si pasan estos segundos desde que se cerró la
+// última serie y todavía no has empezado la siguiente (ni reps ni postura
+// mantenida), tickRestTimer() avisa "llevas 3 minutos de descanso" y lo
+// repite cada vez que se cumple otro múltiplo (6 min, 9 min…).
+const LONG_REST_ALERT_SECONDS = 180;
 // Descanso obligatorio entre series: mientras no haya pasado esto desde
 // que se cerró la serie anterior, countRep()/notePostureOk() no cuentan
 // nada aunque vuelvas a colocarte y te muevas antes de tiempo — antes
@@ -241,7 +246,7 @@ const OUT_OF_FRAME_STABLE_MS = 1200;
 // les aplica el cierre por salir del encuadre de arriba, y también el
 // cierre por ponerte de pie en el caso de los abdominales tumbado (ver
 // ON_GROUND_STABLE_MS más abajo).
-const GROUND_STYLE_COUNTERS = new Set(["burpee", "elephantsteps", "mountainclimber", "superman", "lsit", "pushupfront", "squatfront", "squat", "splitsquat", "crunch", "legraise", "highlegraise", "situp", "scissor", "doublecrunch", "pushup", "dip", "inclinepushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "wristrotation", "hipforwardback"]);
+const GROUND_STYLE_COUNTERS = new Set(["burpee", "elephantsteps", "mountainclimber", "superman", "lsit", "pushupfront", "squatfront", "squat", "splitsquat", "crunch", "legraise", "highlegraise", "situp", "scissor", "doublecrunch", "pushup", "dip", "inclinepushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "hipforwardback"]);
 // Plancha / plancha lateral: a diferencia del resto de GROUND_STYLE_COUNTERS
 // (que cuentan repeticiones), aquí se cuenta TIEMPO aguantando la postura
 // — el cierre de serie no es "te has puesto de pie o has salido del
@@ -264,7 +269,7 @@ const CAMERA_POSTURE_COUNTERS = new Set(["supermanhold", "lsithold", "plank", "s
 // Ejercicios de cabeza (inclinacion y giro): al llegar a target_reps pasan SIEMPRE al siguiente ejercicio del circuito,
 // aunque el plan aun tenga target_sets > 1 (pedido por Alex: "no me cambia automaticamente en cuanto he hecho 30").
 const SINGLE_GOAL_AUTO_ADVANCE_COUNTERS = new Set(["necklateral", "neckturn"]);
-const NO_REST_COUNTERS = new Set(["pushupfront", "squatfront", "jumpingjack", "armcrossstretch", "tricepsoverheadstretch", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "highlegraise", "seatedhamstringstretch", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "wristrotation", "standingquadstretch", "hipforwardback"]);
+const NO_REST_COUNTERS = new Set(["pushupfront", "squatfront", "jumpingjack", "armcrossstretch", "tricepsoverheadstretch", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "highlegraise", "seatedhamstringstretch", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "standingquadstretch", "hipforwardback"]);
 
 // --- Contadores DE FRENTE (Cindy workout) -- primera versión, sin probar en cámara real (2026-09-19) ---
 // pushupfront: flexiones tumbado boca abajo MIRANDO a la cámara (móvil delante, a la altura del suelo o en
@@ -1627,79 +1632,6 @@ const FOREARMROTATION_MIN_REP_SECONDS = 0.4; // un vaiven (salida + vuelta) por 
 const FOREARMROTATION_STILL_MS = 3000; // sin agarre valido en ningun brazo ni movimiento de verdad durante esto: se interpreta que has terminado y se cierra la serie sola (mismo patron que ARMSCISSORS_STILL_MS/ARMCIRCLES_STILL_MS)
 const FOREARMROTATION_OUT_OF_FRAME_MS = 3000; // mismo motivo que ARMCIRCLES_OUT_OF_FRAME_MS: girando de verdad el antebrazo tambien baja la confianza de MediaPipe por motion blur, no solo al salirte del encuadre
 
-// WRISTROTATION_*: rotación de muñecas -- de pie o sentada/o, de frente
-// a la cámara, con los codos doblados y pegados al cuerpo, los
-// antebrazos levantados a la altura del pecho, y las DOS muñecas
-// (separadas, sin tocarse) girando cada una en su propio círculo
-// alrededor de su propio codo. Rediseñado 2026-09-22 a partir de un
-// vídeo de referencia que subió Alex -- la versión anterior
-// (2026-09-04/08) exigía manos juntas con los dedos entrelazados
-// formando un único círculo; Alex confirmó explícitamente (tres
-// preguntas directas) que quiere cada muñeca detectada por separado
-// (no juntas), que la rotación sigue siendo un círculo trazado por la
-// mano (no solo un giro de palma arriba/abajo), y que la posición
-// inicial es codos pegados al cuerpo con antebrazos a la altura del
-// pecho -- eso es justo lo que se ve en el tramo del vídeo con
-// desenfoque de movimiento real (codo fijo cerca del tronco, mano
-// subiendo con la palma hacia delante y bajando girando, en ciclos de
-// ~1 segundo). El audio del vídeo no se pudo transcribir con
-// fiabilidad (modelo de voz pequeño, sala con eco), así que esto se
-// basa en el vídeo fotograma a fotograma más esas tres confirmaciones
-// explícitas, no en la explicación hablada completa.
-//
-// Mecánicamente esto es mucho más parecido a processForearmRotation
-// (más arriba) que a la versión anterior de este mismo ejercicio: ahí
-// SÍ hay un punto anatómico real para anclar el círculo -- el codo,
-// que se mantiene más o menos fijo pegado al cuerpo mientras la
-// muñeca gira alrededor de él -- así que se reutiliza el mismo
-// mecanismo (ángulo del vector codo->muñeca, wrapAngleDelta acumulado
-// hasta ±2π = una vuelta, sin bloqueo de sentido -- mismo motivo que
-// el resto de la familia: un vaivén de lado a lado nunca completa una
-// vuelta entera alrededor del codo, así que ya se distingue de un
-// círculo de verdad sin lógica aparte). La diferencia con
-// FOREARMROTATION_* es que aquí NO hace falta ningún "agarre" de la
-// otra mano -- las dos manos están libres y giran a la vez -- así que
-// la postura a sostener antes de armar el contador no es un agarre
-// sino la propia posición inicial: codo pegado al tronco (poco
-// desplazado en horizontal respecto al hombro) y algo doblado (nunca
-// del todo estirado, para no confundirse con círculos de brazos), con
-// la muñeca a la altura del pecho (ni colgando junto a la cadera ni
-// levantada por encima de la cabeza). Una vez armado no se vuelve a
-// exigir esa postura de referencia en cada fotograma -- igual que el
-// resto de la familia, la postura solo hace falta para EMPEZAR: el
-// círculo en sí sube y baja de altura según su propio ángulo, eso es
-// precisamente girar.
-//
-// Las dos muñecas llevan cada una su propio acumulado (independiente,
-// con su propio codo como ancla) -- una repetición solo cuenta cuando
-// LAS DOS han completado su propia vuelta completa desde la última
-// repetición contada (se usa el MÍNIMO de las dos, nunca la media: al
-// ser un giro simétrico especular, un giro "hacia fuera" con las dos
-// manos a la vez tiene signo opuesto en cada lado por pura geometría
-// de imagen -- promediar los ángulos con signo los cancelaría en vez
-// de sumarlos). Esto es justo "cada muñeca por separado": no basta con
-// que gire una sola mano.
-//
-// Primera versión, umbrales sin calibrar todavía con un test en
-// cámara real -- mismo patrón que el resto de la familia, pendiente de
-// ajustar con logs 📋 reales (sobre todo en móvil, que es donde más
-// falla el resto de ejercicios de esta familia).
-const WRISTROTATION_MIN_VISIBILITY = 0.3; // visibilidad media de hombros+codos+muñecas exigida para fiarse del frame ya armado -- BAJADA de 0.4 a 0.3 (v3, 2026-09-24): girando las muñecas la confianza de MediaPipe cae por desenfoque de movimiento y la media bajaba de 0.4 en pleno giro, tirando fotogramas buenos
-const WRISTROTATION_SIDE_MIN_VISIBILITY = 0.3; // v3: visibilidad (codo+muñeca) de UN lado para considerar que ese lado se está siguiendo de verdad -- si un lado no se ve, ya no bloquea la repetición del otro (antes exigía las DOS muñecas completando una vuelta cada una)
-const WRISTROTATION_PARTNER_MIN_FRACTION = 0.5; // v3: cuando los dos lados se ven, la muñeca que más gira completa la vuelta y la otra tiene que haber hecho al menos esta fracción de vuelta -- suficiente para descartar rascarse/mover una sola mano, sin exigir que las dos sean perfectas (antes: las dos vueltas completas, cualquier fallo de tracking en una las tiraba todas)
-const WRISTROTATION_NO_HIPS_TORSO_FACTOR = 1.6; // v3: si no se ven las caderas (móvil apoyado, encuadre de cintura para arriba, sentada/o), el tronco se estima como esto de veces el ancho de hombros -- antes sin caderas visibles NO ARMABA nunca
-const WRISTROTATION_ELBOW_TUCK_MAX_FACTOR = 0.9; // desplazamiento horizontal del codo respecto a SU hombro, a lo sumo esto de veces el ancho de hombros, para considerar el codo "pegado al cuerpo" -- solo se exige para ARMAR (posición inicial), no durante el giro ya activo
-const WRISTROTATION_ELBOW_MAX_STRAIGHT_DEG = 165; // ángulo de codo (hombro-codo-muñeca) por encima de esto se considera brazo estirado -- para armar hace falta el codo doblado de verdad (si no, esto sería círculos de brazos, no de muñecas); una vez armado no se vuelve a comprobar
-const WRISTROTATION_WRIST_HEIGHT_MIN_FACTOR = -0.6; // la muñeca, para armar, no puede estar más arriba que esto por encima del hombro (proporción al tronco hombro-cadera) -- margen generoso hacia arriba, para no rechazar a quien la levanta un poco más que "justo pecho"
-const WRISTROTATION_WRIST_HEIGHT_MAX_FACTOR = 0.9; // ...ni más abajo que esto por debajo del hombro (mismo tronco como referencia) -- deja la zona de pecho/boca del estómago, coherente con "antebrazos a la altura del pecho" visto en el vídeo, con margen para no exigir una postura perfecta
-const WRISTROTATION_READY_STABLE_MS = 300; // posición inicial (codos pegados y doblados, muñecas a la altura del pecho) sostenida esto en LOS DOS lados a la vez antes de armar el contador (mismo espíritu que ARMCIRCLES_ARM_STABLE_MS/FOREARMROTATION_STABLE_MS, algo más generoso porque aquí hay más condiciones que cumplir a la vez que en esos)
-const WRISTROTATION_MIN_REACH_FACTOR = 0.25; // la muñeca de CADA lado tiene que estar al menos esto de veces el ancho de hombros lejos de SU PROPIO codo para fiarse de su ángulo -- mismo valor y motivo que FOREARMROTATION_MIN_REACH_FACTOR (aquí el "radio" también es el antebrazo)
-const WRISTROTATION_MIN_ANGULAR_DELTA = 0.02; // radianes por fotograma por debajo de esto se consideran ruido de tracking, no giro de verdad (mismo umbral que el resto de la familia)
-const WRISTROTATION_MAX_SINGLE_FRAME_DELTA = 2.4; // radianes (~137°) por fotograma: un salto puntual mayor que esto se descarta como fallo de tracking, no giro real (mismo valor que el resto de la familia)
-const WRISTROTATION_STILL_MS = 2500; // sin progreso angular de verdad en NINGÚN lado durante esto: se interpreta que has terminado y se cierra la serie sola (mismo valor que la versión anterior -- un giro de muñecas es rápido, como un brazo, no lento como un cuello)
-const WRISTROTATION_OUT_OF_FRAME_MS = 3000; // mismo motivo que el resto de la familia: girando de verdad las muñecas también baja la confianza de MediaPipe por motion blur, no solo al salirte del encuadre
-const WRISTROTATION_MIN_REP_SECONDS = 0.4; // una vuelta completa por debajo de esto es un salto de ángulo mal calculado (ruido), no un círculo de verdad hecho a mano (mismo valor que FOREARMROTATION_MIN_REP_SECONDS; el tramo de giro real del vídeo de referencia ronda ~1s por vuelta, bastante por encima de este suelo)
-
 // Ángulo2 - ángulo1 normalizado a (-π, π] — necesario porque un ángulo
 // que pasa de 179° a -179° en un frame ha girado solo 2°, no casi 360°
 // (ver processArmCircles).
@@ -1805,6 +1737,16 @@ const LEG_RAISE_TOUCHDOWN_ANGLE_DEG = 172;
 // doble-crunch), que no tienen evidencia de este problema -- no se
 // toca el valor compartido para no afectarles sin datos.
 const LEG_RAISE_OFF_GROUND_STABLE_MS = 900;
+
+// Cierre por inactividad (crunch y elevación de piernas): con la serie ya
+// empezada (al menos 1 rep contada), si te quedas tumbado abajo sin
+// hacer ninguna repetición durante esto, se da la serie por terminada y
+// empieza el descanso (mismo cierre que levantarte o agitar la mano, ver
+// closeActiveSet). Después, la siguiente rep ya es una serie nueva.
+// 8s: punto medio de los 5-10s pedidos -- una rep lenta o una pausa para
+// coger aire no llega a esto.
+const CRUNCH_IDLE_CLOSE_MS = 8000;
+const LEG_RAISE_IDLE_CLOSE_MS = 8000;
 
 // Elevación de pierna alta (estiramiento dinámico -- ver processHighLegRaise
 // más abajo para el detalle de cada umbral). Mismo ángulo de cadera
@@ -2169,6 +2111,34 @@ const PLANK_FEET_MIN_VISIBILITY = 0.3;         // armar
 const PLANK_FEET_LOOSE_MIN_VISIBILITY = 0.15;  // ya aguantando (margen ante parpadeos)
 const PLANK_FEET_FRAME_MARGIN = 0.02;          // el tobillo debe caer dentro de [margen, 1-margen] en la imagen
 const PLANK_LOW_INCLINE_GRACE_MS = 4000;
+// 2026-09-30 (registro real 📋 id 38, plancha): Alex se tumbo con la
+// barriga y la cadera EN EL SUELO, los pies en el suelo, los codos
+// doblados y los hombros y la cabeza levantados (postura de "esfinge" o
+// cobra baja) y la plancha la daba por buena todo el rato. Ninguna de las
+// medidas de arriba lo distingue de una plancha de verdad: la linea
+// hombro-cadera-tobillo sale casi recta en las dos, el hombro queda por
+// encima del tobillo (incline), el codo por debajo del hombro y la
+// inclinacion pasa de PLANK_MIN_TILT_DEG por tener el pecho levantado.
+// Ademas incline/elbowDrop se dividen entre el ancho de hombros en la
+// imagen, minusculo de perfil, asi que cualquier pequeno movimiento los
+// dispara. Lo que SI cambia de una a otra es la altura de la CADERA y la
+// RODILLA sobre el suelo: en la plancha el cuerpo entero va alzado
+// (cadera y rodilla en el aire, en linea con hombro y tobillo); en la
+// esfinge la cadera y las piernas estan apoyadas en el suelo y solo se
+// levanta el pecho. Se mide con alturas VERTICALES (no dependen de la
+// proporcion de la imagen, vertical u horizontal), tomando como suelo la
+// altura del codo (antebrazo apoyado):
+//   bodyRaise = media(altura cadera, altura rodilla) / altura del hombro
+// Con modelo fisico (hombro ~34cm, codo ~4cm, cadera ~20cm, rodilla ~15cm
+// sobre el suelo): plancha ~0.5, esfinge ~0.13, cadera 10cm mas baja de lo
+// recto ~0.3. Umbral estricto 0.32 para EMPEZAR, 0.24 ya aguantando (la
+// deriva de MediaPipe en una plancha larga no debe cortarla). Si el
+// hombro no esta al menos PLANK_MIN_SHOULDER_CLEAR por encima del codo
+// (0.02 de la altura de la imagen), no hay antebrazo apoyando el cuerpo:
+// tumbado del todo, y la proporcion no significa nada.
+const PLANK_MIN_SHOULDER_CLEAR = 0.02;
+const PLANK_MIN_BODY_RAISE = 0.32;
+const PLANK_LOOSE_MIN_BODY_RAISE = 0.24;
 // Ya aguantando, los brazos/codos no deben cortar por un pequeno vaiven
 // (en perfil shoulderWidth es minusculo y estas medidas se disparan).
 const PLANK_LOOSE_ARMS_DOWN_MARGIN = 0.6;
@@ -2380,6 +2350,12 @@ export function checkPlankPosture(lm, holding = false) {
   const incline = (ankle.y - shoulder.y) / shoulderWidth;
   const elbowDrop = (elbow.y - shoulder.y) / shoulderWidth;
   const tilt = tiltFromHorizontal(shoulder, ankle);
+  // Alturas verticales sobre el "suelo" (= altura del codo, antebrazo
+  // apoyado) -- ver PLANK_MIN_BODY_RAISE. y crece hacia ABAJO en la imagen.
+  const shoulderClear = elbow.y - shoulder.y;
+  const bodyRaise = shoulderClear > PLANK_MIN_SHOULDER_CLEAR
+    ? (((elbow.y - hip.y) + (elbow.y - knee.y)) / 2) / shoulderClear
+    : null;
   const debug = {
     tilt: tilt === null ? null : tilt.toFixed(0),
     lineAngle: lineAngle === null ? null : lineAngle.toFixed(0),
@@ -2388,6 +2364,8 @@ export function checkPlankPosture(lm, holding = false) {
     armsDown: armsDown.toFixed(2),
     incline: incline.toFixed(2),
     elbowDrop: elbowDrop.toFixed(2),
+    shoulderClear: shoulderClear.toFixed(3),
+    bodyRaise: bodyRaise === null ? null : bodyRaise.toFixed(2),
   };
 
   // Pies dentro de la imagen y con visibilidad minima (ver la nota junto
@@ -2467,6 +2445,14 @@ export function checkPlankPosture(lm, holding = false) {
   }
   if (elbowDrop < (holding ? PLANK_LOOSE_ELBOW_BELOW_SHOULDER_MARGIN : PLANK_ELBOW_BELOW_SHOULDER_MARGIN)) {
     return { ok: false, reason: "Ponte boca abajo, apoyada/o en los antebrazos, con los codos doblados justo debajo de los hombros.", debug };
+  }
+  // Cuerpo alzado de verdad, no solo el pecho (esfinge/cobra con la cadera
+  // en el suelo) -- ver PLANK_MIN_BODY_RAISE.
+  if (bodyRaise === null) {
+    return { ok: false, reason: "Ponte boca abajo, apoyada/o en los antebrazos, con los codos doblados justo debajo de los hombros.", debug };
+  }
+  if (bodyRaise < (holding ? PLANK_LOOSE_MIN_BODY_RAISE : PLANK_MIN_BODY_RAISE)) {
+    return { ok: false, reason: "Sube las caderas: el cuerpo entero tiene que quedar alzado del suelo, apoyado en los antebrazos y los pies, no tumbado.", debug };
   }
   // lowIncline: paso solo por el margen laxo de incline (ver PLANK_LOW_INCLINE_GRACE_MS).
   return { ok: true, debug, lowIncline: incline < PLANK_MIN_INCLINE_FACTOR || tiltTooFlat };
@@ -4642,6 +4628,14 @@ class WorkoutSession {
     // Sin esto (o si no viene ninguno) simplemente no hay aviso.
     this.targetSets = root.dataset.targetSets ? parseInt(root.dataset.targetSets, 10) : null;
     this.targetReps = root.dataset.targetReps ? parseInt(root.dataset.targetReps, 10) : null;
+    // Reps de cada serie en la última sesión de este objetivo "al fallo"
+    // (Plan.session_items() -> last_sets): sin objetivo de reps, es el
+    // número que tener delante para esforzarse un poco más. Solo aviso.
+    try {
+      this.lastSets = root.dataset.lastSets ? JSON.parse(root.dataset.lastSets) : null;
+    } catch {
+      this.lastSets = null;
+    }
     // Reps EXACTAS (reto Cindy): ni una más ni una menos por serie.
     this.exactReps = root.dataset.exactReps ? parseInt(root.dataset.exactReps, 10) : null;
     // Contrarreloj (Cindy): armado y calibración más cortos, para no perder reps al empezar.
@@ -4683,6 +4677,16 @@ class WorkoutSession {
     // Qué contador usar. Lo decide el ejercicio (counter_key en el
     // catálogo), no la pantalla.
     this.counterKey = root.dataset.counterKey || "pullup";
+    // Círculos de brazos en DOS pantallas (2026-09-29, a petición de Alex): el
+    // circuito (session-runner.js/circuit.js) pone data-circle-direction=
+    // "forward"|"backward" según la aparición del ejercicio (1ª = hacia
+    // delante, 2ª = hacia atrás). Con sentido fijado, esta pantalla SOLO
+    // cuenta ese sentido y pasa sola al siguiente ejercicio al llegar al
+    // objetivo. Sin el atributo (uso suelto) se conserva el modo antiguo de
+    // una sola serie con cambio de sentido dentro.
+    this.armCircleLockedPhase = (root.dataset.circleDirection === "forward" || root.dataset.circleDirection === "backward")
+      ? root.dataset.circleDirection : null;
+    this.armCircleWrongWay = 0;
     // Cada cuantas reps habla la voz para ESTE ejercicio (ver
     // DEFAULT_VOICE_STEP y speakRep mas abajo) -- viene del catalogo
     // (Exercise.voice_step) via data-voice-step; si no llega nada (NaN,
@@ -4718,6 +4722,7 @@ class WorkoutSession {
       },
     };
     this.goalBannerEl = el("workout-goal-banner");
+    this.lastHintEl = el("workout-last-hint");
     this.repsEl = el("workout-reps");
     this.setsEl = el("workout-sets");
     this.timerEl = el("workout-timer");
@@ -4829,6 +4834,7 @@ class WorkoutSession {
     this.reps = 0;
     this.repDurations = [];
     this.sets = [];              // series ya cerradas: [{reps, durations}, ...]
+    this.updateLastHint();
     this.currentSetReps = 0;     // reps de la serie en curso
     this.currentSetDurations = [];
     this.localBottomY = null;  // y (0-1) del punto mas bajo visto en la fase actual
@@ -5010,13 +5016,6 @@ class WorkoutSession {
     this.forearmRotationLastActivityAt = null;    // rotacion de brazo (codo sujeto): performance.now() del ultimo agarre armado/repeticion contada/cambio de brazo/movimiento real -- para cerrar la serie sola si pasan FOREARMROTATION_STILL_MS sin nada
     this.forearmRotationRepStartTime = null;      // rotacion de brazo (codo sujeto): performance.now() de cuando empezo la vuelta en curso, para el filtro de ruido FOREARMROTATION_MIN_REP_SECONDS
     this.forearmRotationLastCountedSide = null;   // rotacion de brazo (codo sujeto): "left" | "right" -- lado de la ULTIMA repeticion contada, para avisar por voz solo cuando el brazo activo cambia de verdad (mismo mecanismo que legRotationLastCountedSide); se resetea a null en cada serie nueva
-    this.wristRotationReadyStableSince = null;    // rotación de muñecas (rediseño 2026-09-22): desde cuándo llevas la posición inicial (codos pegados y doblados, muñecas a la altura del pecho) en LOS DOS lados a la vez seguido, sin armar aún (ver WRISTROTATION_READY_STABLE_MS)
-    this.wristRotationPrevAngleL = null;           // rotación de muñecas: último ángulo local (radianes) del vector codo->muñeca IZQUIERDO, para calcular el delta del frame de ese lado (ver WRISTROTATION_* y processWristRotation)
-    this.wristRotationPrevAngleR = null;           // rotación de muñecas: idem, lado DERECHO
-    this.wristRotationAccumL = 0;                  // rotación de muñecas: ángulo acumulado (con signo) de la muñeca IZQUIERDA desde la última vuelta completa contada -- una repetición solo cuenta cuando LAS DOS (izquierda y derecha) llegan a ±2π, en cualquier sentido cada una (ver el bloque WRISTROTATION_* de más arriba sobre por qué no se promedian)
-    this.wristRotationAccumR = 0;                  // rotación de muñecas: idem, lado DERECHO
-    this.wristRotationLastActivityAt = null;       // rotación de muñecas: performance.now() del último frame con giro de verdad en cualquiera de los dos lados/repetición contada -- para cerrar la serie sola si pasan WRISTROTATION_STILL_MS sin nada
-    this.wristRotationRepStartTime = null;         // rotación de muñecas: performance.now() de cuándo empezó la vuelta en curso, para el filtro de ruido WRISTROTATION_MIN_REP_SECONDS
 
     this.sessionStart = null;
     this.lastRepTime = null;
@@ -5049,7 +5048,19 @@ class WorkoutSession {
     // (tickRestTimer). Mientras esté a true, el texto en pantalla se
     // sigue actualizando como siempre — solo la voz se calla.
     this.restVoiceQuiet = false;
+    // Mientras performance.now() < restPauseUntil el bucle de cámara NO
+    // ejecuta la detección (ver loop()): durante el descanso obligatorio
+    // no se procesa ni un frame, así que no hay "sin persona fiable",
+    // ni "todavía en descanso, quedan N s", ni falsos positivos, y se
+    // ahorra batería. Se arma al cerrar una serie con descanso real
+    // (announceSetComplete) y se quita por tiempo (loop) o cuando
+    // tickRestTimer da el aviso de "descanso acabado". null = detección
+    // normal. La cámara (stream) NO se apaga, solo se salta la inferencia
+    // -- reabrirla cuesta ~1s y puede fallar si otra app la ha cogido.
+    this.restPauseUntil = null;
     this.restAlertsTriggered = 0;
+    this.longRestAlertLevel = 0; // cuántos múltiplos de LONG_REST_ALERT_SECONDS ya se han avisado para el setClosedAt actual
+    this.longRestAlertClosedAt = null; // setClosedAt al que corresponde longRestAlertLevel (cambia al cerrar otra serie -> nivel a 0)
     this.lastSpokenStatusAt = null; // performance.now() del último aviso de estado hablado, sea cual sea el tipo (ver announceStatus)
     // Antes había un único "lastSpokenStatusKey" compartido por TODOS los
     // tipos de aviso: en cuanto sonaba un aviso de un tipo distinto (p.ej.
@@ -5201,6 +5212,9 @@ class WorkoutSession {
     // queda solo en "Serie de N terminada. <cómo seguir>", sin nada de
     // descanso.
     const skipsRest = NO_REST_COUNTERS.has(this.counterKey);
+    // Descanso real (no calentamiento/estiramiento, no reto de reps
+    // exactas): la detección se pausa hasta que acabe (ver restPauseUntil).
+    if (!skipsRest && !this.exactReps) this.restPauseUntil = performance.now() + MIN_REST_MS;
     const restNoteFull = skipsRest ? "" : `Descanso obligatorio: mínimo ${Math.round(MIN_REST_MS / 1000)} segundos. `;
     const restNoteShort = skipsRest ? "" : `Descanso. Quedan ${Math.round(MIN_REST_MS / 1000)} segundos. `;
     const fullText = `${prefix} terminada. ${restNoteFull}${waitingMessage}`;
@@ -5563,8 +5577,9 @@ class WorkoutSession {
       this.armCirclePrevAngleL = null;
       this.armCirclePrevAngleR = null;
       this.armCircleAccum = 0;
-      this.armCirclePhase = null;
+      this.armCirclePhase = this.armCircleLockedPhase;
       this.armCirclePhaseReps = 0;
+      this.armCircleWrongWay = 0;
       this.armCircleArmStableSince = null;
       this.armCircleLastProgressAt = null;
       this.armCircleRepStartTime = null;
@@ -5765,22 +5780,6 @@ class WorkoutSession {
       this.forearmRotationRepStartTime = null;
       this.forearmRotationLastCountedSide = null;
       this.setStatus("Agarra el codo de un brazo con la otra mano, cerca del cuerpo, para empezar.");
-    } else if (this.counterKey === "wristrotation") {
-      // Tampoco hay nada que calibrar: los umbrales son proporcionales
-      // al ancho de hombros y al tronco, no a la distancia a la
-      // cámara. Solo hace falta esperar a verte en la posición inicial
-      // (codos pegados y doblados, antebrazos a la altura del pecho,
-      // manos separadas), para no arrancar a mitad de un giro.
-      this.prepping = false;
-      this.state = null;
-      this.wristRotationReadyStableSince = null;
-      this.wristRotationPrevAngleL = null;
-      this.wristRotationPrevAngleR = null;
-      this.wristRotationAccumL = 0;
-      this.wristRotationAccumR = 0;
-      this.wristRotationLastActivityAt = null;
-      this.wristRotationRepStartTime = null;
-      this.setStatus("Codos pegados al cuerpo y doblados, antebrazos a la altura del pecho, manos separadas, para empezar.");
     } else if (this.counterKey === "hipforwardback") {
       // Tampoco hay nada que calibrar de la distancia a la cámara: los
       // umbrales son proporcionales a la longitud de la pierna del lado
@@ -6149,11 +6148,43 @@ class WorkoutSession {
 
   updateSetDisplay() {
     if (this.setsEl) this.setsEl.textContent = String(this.sets.length + 1);
+    this.updateLastHint();
+  }
+
+  /** "Serie 2: la última vez hiciste 9" -- para objetivos al fallo con
+   *  historial (this.lastSets). Se repinta cada vez que cambia la serie
+   *  en curso (updateSetDisplay) y una vez al arrancar. */
+  updateLastHint() {
+    const hint = this.lastHintEl;
+    if (!hint) return;
+    const last = this.lastSets;
+    if (!Array.isArray(last) || !last.length) {
+      hint.hidden = true;
+      return;
+    }
+    const i = this.sets.length; // serie en curso, base 0
+    const reps = (n) => `${n} ${n === 1 ? "repetición" : "repeticiones"}`;
+    hint.textContent = i < last.length
+      ? `Serie ${i + 1}: la última vez hiciste ${reps(last[i])}`
+      : `Serie ${i + 1}: la última vez hiciste ${last.length} ${last.length === 1 ? "serie" : "series"}, esta es extra`;
+    hint.hidden = false;
   }
 
   loop() {
     if (!this.running) return;
     const now = performance.now();
+    if (this.restPauseUntil !== null) {
+      if (now < this.restPauseUntil) {
+        // Descanso: sin detección, sin esqueleto dibujado, sin avisos.
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        if (this.debugEl) {
+          this.debugEl.textContent = `descanso — detección en pausa (quedan ${Math.ceil((this.restPauseUntil - now) / 1000)}s)`;
+        }
+        requestAnimationFrame(() => this.loop());
+        return;
+      }
+      this.restPauseUntil = null; // se acabó el descanso: se reanuda la detección
+    }
     const detectStart = performance.now();
     const result = this.poseLandmarker.detectForVideo(this.video, now);
     this.perfFrameTimes.push(performance.now() - detectStart);
@@ -6392,6 +6423,14 @@ class WorkoutSession {
     this.currentSetReps += 1;
     this.currentSetDurations.push(d);
     this.lastRepTime = now;
+    // Círculos de brazos: el total por sentido se suma AQUÍ, antes de
+    // comprobar el objetivo más abajo. Antes se sumaba en processArmCircles
+    // DESPUÉS de countRep, así que el objetivo (30) no se detectaba hasta la
+    // rep 31 -- por eso "no pasaba solo" al siguiente ejercicio.
+    if (this.counterKey === "armcircles") {
+      if (this.armCirclePhase === "forward") this.armCircleForwardTotal += 1;
+      else if (this.armCirclePhase === "backward") this.armCircleBackwardTotal += 1;
+    }
     this.restAlerted = false;
     // Repetición de verdad contada: se acabó el descanso (si lo había),
     // vuelve la voz.
@@ -6437,14 +6476,16 @@ class WorkoutSession {
     // target_sets=1 dispararía el mensaje de "sesión cumplida" en cuanto
     // sumaran 30 entre los dos sentidos, no 30 de cada uno.
     if (this.counterKey === "armcircles" && this.targetSets && this.targetReps && !this.targetAnnounced &&
-        this.armCircleForwardTotal >= this.targetReps && this.armCircleBackwardTotal >= this.targetReps) {
+        (this.armCircleLockedPhase
+          ? (this.armCircleLockedPhase === "forward" ? this.armCircleForwardTotal : this.armCircleBackwardTotal) >= this.targetReps
+          : (this.armCircleForwardTotal >= this.targetReps && this.armCircleBackwardTotal >= this.targetReps))) {
       this.targetAnnounced = true;
       if (this.voiceEnabled) speakOut("Has llegado al objetivo de series y repeticiones de este ejercicio. Puedes seguir si quieres, o terminar la sesión.", { flush: false });
       if (this.goalBannerEl) {
         this.goalBannerEl.hidden = false;
-        this.goalBannerEl.textContent = `🎯 ¡Has llegado al objetivo de series y repeticiones de este ejercicio! (${this.targetReps} de cada sentido) Puedes seguir si quieres, o terminar la sesión.`;
+        this.goalBannerEl.textContent = `🎯 ¡Has llegado al objetivo de series y repeticiones de este ejercicio! (${this.armCircleLockedPhase ? `${this.targetReps} ${this.armCircleLockedPhase === "forward" ? "hacia delante" : "hacia atrás"}` : `${this.targetReps} de cada sentido`}) Puedes seguir si quieres, o terminar la sesión.`;
       }
-      this.setStatus(`¡${label} ${this.currentSetReps} de esta serie! (${duration.toFixed(1)}s) — 🎯 ¡Objetivo de series y repeticiones cumplido (${this.targetReps} de cada sentido)!`);
+      this.setStatus(`¡${label} ${this.currentSetReps} de esta serie! (${duration.toFixed(1)}s) — 🎯 ¡Objetivo de series y repeticiones cumplido (${this.armCircleLockedPhase ? this.targetReps : `${this.targetReps} de cada sentido`})!`);
       try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
         [0, 0.14].forEach((t, i) => {
@@ -8795,7 +8836,9 @@ class WorkoutSession {
     if (!this.startupVoiceGiven) {
       this.startupVoiceGiven = true;
       this.announceStatus(
-        "Hombros y muñecas a la vista. ¡Listo! Levanta los dos brazos a los lados, a la altura de los hombros, y empieza a girarlos. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
+        this.armCircleLockedPhase
+          ? `Hombros y muñecas a la vista. ¡Listo! Levanta los dos brazos a los lados, a la altura de los hombros, y gíralos ${this.armCircleLockedPhase === "forward" ? "hacia delante" : "hacia atrás"}. Al llegar al objetivo pasa solo al siguiente.`
+          : "Hombros y muñecas a la vista. ¡Listo! Levanta los dos brazos a los lados, a la altura de los hombros, y empieza a girarlos. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
         "startup_ready"
       );
     }
@@ -8832,8 +8875,9 @@ class WorkoutSession {
           this.armCirclePrevAngleL = Math.atan2(-(lWrist.y - lShoulder.y), lWrist.x - lShoulder.x);
           this.armCirclePrevAngleR = Math.atan2(-(rWrist.y - rShoulder.y), -(rWrist.x - rShoulder.x));
           this.armCircleAccum = 0;
-          this.armCirclePhase = null;
+          this.armCirclePhase = this.armCircleLockedPhase;
           this.armCirclePhaseReps = 0;
+          this.armCircleWrongWay = 0;
           this.armCircleDidPhaseSwitch = false;
           this.armCircleLastProgressAt = now;
           this.armCircleRepStartTime = now;
@@ -8871,7 +8915,7 @@ class WorkoutSession {
     // "muchas veces no las cuenta").
     if (this.armCircleLastProgressAt !== null && now - this.armCircleLastProgressAt >= ARMCIRCLES_STILL_MS) {
       this.closeActiveSet();
-      this.armCirclePhase = null;
+      this.armCirclePhase = this.armCircleLockedPhase;
       this.armCirclePhaseReps = 0;
       this.armCircleAccum = 0;
       this.armCirclePrevAngleL = null;
@@ -8945,6 +8989,31 @@ class WorkoutSession {
 
     this.armCircleAccum += avgDelta;
 
+    if (this.armCircleLockedPhase) {
+      // Sentido fijado por la pantalla (ver el constructor): un giro en el
+      // sentido contrario NO acumula "deuda" que luego haya que deshacer
+      // antes de que cuente la siguiente vuelta buena (eso era lo que hacía
+      // que se saltaran reps justo tras cambiar de sentido) -- el
+      // acumulado nunca baja de 0 en el sentido pedido. Si giras al revés
+      // una vuelta entera se avisa una vez, sin contar nada.
+      const lockSign = this.armCircleLockedPhase === "forward" ? -1 : 1; // forward = ángulo decreciente
+      if (this.armCircleAccum * lockSign < 0) this.armCircleAccum = 0;
+      if (Math.abs(avgDelta) >= ARMCIRCLES_MIN_ANGULAR_DELTA) {
+        if (avgDelta * lockSign < 0) {
+          this.armCircleWrongWay += Math.abs(avgDelta);
+          if (this.armCircleWrongWay >= 2 * Math.PI) {
+            this.armCircleWrongWay = 0;
+            this.announceStatus(
+              `Este ejercicio es ${this.armCircleLockedPhase === "forward" ? "hacia delante" : "hacia atrás"}. Gira los brazos en ese sentido.`,
+              "armcircles_wrong_way"
+            );
+          }
+        } else {
+          this.armCircleWrongWay = 0;
+        }
+      }
+    }
+
     if (Math.abs(this.armCircleAccum) >= 2 * Math.PI) {
       // Vuelta completa: el signo del acumulado dice el sentido (ver la
       // convención documentada junto a las constantes ARMCIRCLES_* —
@@ -9007,8 +9076,6 @@ class WorkoutSession {
           // sesión, no solo en la serie actual (armCirclePhaseReps se
           // resetea en cada cambio de sentido; esto no).
           this.armCirclePhaseReps += 1;
-          if (this.armCirclePhase === "forward") this.armCircleForwardTotal += 1;
-          else this.armCircleBackwardTotal += 1;
         }
       }
       // Se descuenta una vuelta completa del acumulado, no se resetea a
@@ -9020,7 +9087,7 @@ class WorkoutSession {
 
     if (this.debugEl) {
       this.debugEl.textContent =
-        `sentido pedido: ${this.armCirclePhase === null ? "(por detectar)" : (this.armCirclePhase === "forward" ? "adelante" : "atrás")} (${this.armCirclePhaseReps}) | ` +
+        `${this.armCircleLockedPhase ? "sentido FIJO" : "sentido"} pedido: ${this.armCirclePhase === null ? "(por detectar)" : (this.armCirclePhase === "forward" ? "adelante" : "atrás")} (${this.armCirclePhaseReps}) | ` +
         `acumulado: ${Math.round(this.armCircleAccum * 180 / Math.PI)}° | ` +
         `delta_izq: ${validL ? (deltaL * 180 / Math.PI).toFixed(1) : "—"}°/f | delta_der: ${validR ? (deltaR * 180 / Math.PI).toFixed(1) : "—"}°/f | ` +
         `reach_izq=${reachL.toFixed(2)}${reachOkL ? "" : "✗"} reach_der=${reachR.toFixed(2)}${reachOkR ? "" : "✗"} | ` +
@@ -11288,200 +11355,6 @@ class WorkoutSession {
   }
 
   /**
-   * Rotación de muñecas -- de pie o sentada/o, de frente a la cámara,
-   * codos doblados y pegados al cuerpo, antebrazos levantados a la
-   * altura del pecho, manos SEPARADAS (sin tocarse) girando cada una
-   * en su propio círculo alrededor de su propio codo (ver el bloque
-   * WRISTROTATION_* de más arriba para la geometría completa, el
-   * porqué de cada umbral, y el razonamiento sobre por qué esto ya
-   * distingue "dar vueltas" de "ir de un lado a otro" sin lógica
-   * aparte -- rediseño 2026-09-22 a partir de un vídeo de referencia,
-   * primera versión, pendiente de calibrar con un test en cámara
-   * real, sobre todo en móvil).
-   *
-   * Mismo mecanismo que processForearmRotation por lado (ángulo del
-   * vector codo->muñeca, wrapAngleDelta acumulado hasta ±2π = una
-   * vuelta, sin bloqueo de sentido), pero SIN agarre -- las dos manos
-   * giran a la vez, cada una con su propio acumulado independiente.
-   * Antes de armar hace falta sostener la posición inicial (codo
-   * pegado y doblado, muñeca a la altura del pecho) en LOS DOS lados a
-   * la vez durante WRISTROTATION_READY_STABLE_MS; una vez armado ya no
-   * se vuelve a comprobar esa postura, solo la visibilidad y que el
-   * antebrazo tenga radio suficiente para fiarse del ángulo (igual que
-   * el resto de la familia).
-   */
-  processWristRotation(lm, now) {
-    const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
-    const lE = lm[L_ELBOW], rE = lm[R_ELBOW];
-    const lW = lm[L_WRIST], rW = lm[R_WRIST];
-
-    const vis = (
-      (lS.visibility ?? 1) + (rS.visibility ?? 1) +
-      (lE.visibility ?? 1) + (rE.visibility ?? 1) +
-      (lW.visibility ?? 1) + (rW.visibility ?? 1)
-    ) / 6;
-
-    if (vis < WRISTROTATION_MIN_VISIBILITY) {
-      this.announceStatus("No se te ven bien los hombros, los codos y las muñecas. Ponte de frente a la cámara, con los brazos en el encuadre.");
-      if (this.debugEl) this.debugEl.textContent = "buscando hombros, codos y muñecas de frente…";
-      this.noteAbsence(now, WRISTROTATION_OUT_OF_FRAME_MS);
-      return;
-    }
-    this.outOfFrameSince = null;
-
-    const shoulderWidth = Math.hypot(lS.x - rS.x, lS.y - rS.y);
-    if (!shoulderWidth) return;
-
-    if (this.state === null) {
-      if (!this.startupVoiceGiven) {
-        this.startupVoiceGiven = true;
-        this.announceStatus(
-          "Hombros, codos y muñecas a la vista. ¡Listo! Dobla los codos pegados al cuerpo, sube los antebrazos a la altura del pecho, con las manos separadas, y empieza a girar las muñecas en círculo. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
-          "startup_ready"
-        );
-      }
-
-      const lH = lm[L_HIP], rH = lm[R_HIP];
-      const hipVis = ((lH.visibility ?? 1) + (rH.visibility ?? 1)) / 2;
-      const shoulderMidY = (lS.y + rS.y) / 2;
-      // v3: sin caderas visibles el tronco se estima a partir del ancho de hombros (ver WRISTROTATION_NO_HIPS_TORSO_FACTOR)
-      const torsoHeight = hipVis >= 0.3
-        ? Math.hypot((lS.x + rS.x) / 2 - (lH.x + rH.x) / 2, shoulderMidY - (lH.y + rH.y) / 2)
-        : WRISTROTATION_NO_HIPS_TORSO_FACTOR * shoulderWidth;
-
-      const sideReady = (shoulder, elbow, wrist) => {
-        const elbowTuckOk = Math.abs(elbow.x - shoulder.x) <= WRISTROTATION_ELBOW_TUCK_MAX_FACTOR * shoulderWidth;
-        const elbowAngleDeg = angle(shoulder, elbow, wrist);
-        const elbowBentOk = elbowAngleDeg !== null && elbowAngleDeg <= WRISTROTATION_ELBOW_MAX_STRAIGHT_DEG;
-        const wristHeightRel = torsoHeight ? (wrist.y - shoulderMidY) / torsoHeight : 0;
-        const wristHeightOk = wristHeightRel >= WRISTROTATION_WRIST_HEIGHT_MIN_FACTOR && wristHeightRel <= WRISTROTATION_WRIST_HEIGHT_MAX_FACTOR;
-        return elbowTuckOk && elbowBentOk && wristHeightOk;
-      };
-
-      const leftReady = torsoHeight > 0 && sideReady(lS, lE, lW);
-      const rightReady = torsoHeight > 0 && sideReady(rS, rE, rW);
-      const ready = leftReady && rightReady;
-
-      if (ready) {
-        if (this.wristRotationReadyStableSince === null) this.wristRotationReadyStableSince = now;
-        if (now - this.wristRotationReadyStableSince >= WRISTROTATION_READY_STABLE_MS) {
-          this.state = "active";
-          this.wristRotationReadyStableSince = null;
-          this.wristRotationPrevAngleL = null;
-          this.wristRotationPrevAngleR = null;
-          this.wristRotationAccumL = 0;
-          this.wristRotationAccumR = 0;
-          this.wristRotationLastActivityAt = now;
-          this.wristRotationRepStartTime = now;
-          this.announceStatus("¡Listo! Empieza a girar las muñecas.", "ready_to_go");
-        } else {
-          this.setStatus("Posición inicial… confirmando (no te muevas)");
-        }
-      } else {
-        this.wristRotationReadyStableSince = null;
-        this.setStatus("Codos pegados al cuerpo y doblados, antebrazos a la altura del pecho, manos separadas, para empezar.");
-      }
-      if (this.debugEl) {
-        this.debugEl.textContent = `esperando posición inicial… izq_ok=${leftReady} der_ok=${rightReady}`;
-      }
-      return;
-    }
-
-    // state === "active": sin giro de verdad en NINGÚN lado durante
-    // WRISTROTATION_STILL_MS seguidos, se interpreta que has terminado
-    // (mismo patrón que ARMCIRCLES_STILL_MS/FOREARMROTATION_STILL_MS).
-    if (this.wristRotationLastActivityAt !== null && now - this.wristRotationLastActivityAt >= WRISTROTATION_STILL_MS) {
-      this.closeActiveSet();
-      this.wristRotationPrevAngleL = null;
-      this.wristRotationPrevAngleR = null;
-      this.wristRotationAccumL = 0;
-      this.wristRotationAccumR = 0;
-      this.wristRotationRepStartTime = null;
-      return;
-    }
-
-    const sideDelta = (elbow, wrist, prevAngleKey) => {
-      const reach = Math.hypot(wrist.x - elbow.x, wrist.y - elbow.y);
-      const reachOk = reach > WRISTROTATION_MIN_REACH_FACTOR * shoulderWidth;
-      const angleNow = Math.atan2(-(wrist.y - elbow.y), wrist.x - elbow.x);
-      let delta = 0;
-      if (this[prevAngleKey] === null) {
-        this[prevAngleKey] = angleNow;
-      } else if (reachOk) {
-        const d = wrapAngleDelta(angleNow - this[prevAngleKey]);
-        if (Math.abs(d) <= WRISTROTATION_MAX_SINGLE_FRAME_DELTA) {
-          delta = d;
-          this[prevAngleKey] = angleNow;
-        }
-        // Salto mayor que WRISTROTATION_MAX_SINGLE_FRAME_DELTA en un
-        // fotograma: se descarta como fallo puntual de tracking (mismo
-        // motivo que en el resto de la familia), sin actualizar el
-        // ángulo previo, para no perder del todo el giro real de este
-        // fotograma.
-      } else {
-        // Antebrazo demasiado pegado al codo para fiarse del ángulo
-        // (radio casi cero): se actualiza igualmente el ángulo previo,
-        // para no generar un salto falso cuando vuelva a extenderse.
-        this[prevAngleKey] = angleNow;
-      }
-      return delta;
-    };
-
-    const deltaL = sideDelta(lE, lW, "wristRotationPrevAngleL");
-    const deltaR = sideDelta(rE, rW, "wristRotationPrevAngleR");
-
-    if (Math.abs(deltaL) >= WRISTROTATION_MIN_ANGULAR_DELTA || Math.abs(deltaR) >= WRISTROTATION_MIN_ANGULAR_DELTA) {
-      this.wristRotationLastActivityAt = now;
-    }
-
-    // Tope de +-1.5 vueltas (v3): si solo gira una mano, su acumulado no
-    // puede crecer sin limite y disparar varias repeticiones de golpe en
-    // cuanto la otra haga media vuelta.
-    const ACCUM_CAP = 3 * Math.PI;
-    this.wristRotationAccumL = Math.max(-ACCUM_CAP, Math.min(ACCUM_CAP, this.wristRotationAccumL + deltaL));
-    this.wristRotationAccumR = Math.max(-ACCUM_CAP, Math.min(ACCUM_CAP, this.wristRotationAccumR + deltaR));
-
-    // Una repetición solo cuenta cuando LAS DOS muñecas han completado
-    // su propia vuelta (mínimo de las dos, ver el bloque WRISTROTATION_*
-    // de más arriba sobre por qué no se promedian los ángulos con
-    // signo) -- "cada muñeca por separado", tal y como confirmó Alex.
-    // v3 (2026-09-24): antes una repetición exigía que LAS DOS muñecas
-    // completaran cada una una vuelta entera (el mínimo de las dos) -- si
-    // una sola se veía mal un momento (desenfoque, tapada por el brazo),
-    // no contaba nada. Ahora: la que más gira completa la vuelta y la otra
-    // solo tiene que llevar media (WRISTROTATION_PARTNER_MIN_FRACTION);
-    // si un lado no se sigue (visibilidad baja), basta con el otro.
-    const absL = Math.abs(this.wristRotationAccumL);
-    const absR = Math.abs(this.wristRotationAccumR);
-    const leftTracked = ((lE.visibility ?? 1) + (lW.visibility ?? 1)) / 2 >= WRISTROTATION_SIDE_MIN_VISIBILITY;
-    const rightTracked = ((rE.visibility ?? 1) + (rW.visibility ?? 1)) / 2 >= WRISTROTATION_SIDE_MIN_VISIBILITY;
-    let lapDone = false;
-    if (leftTracked && rightTracked) {
-      lapDone = Math.max(absL, absR) >= 2 * Math.PI && Math.min(absL, absR) >= 2 * Math.PI * WRISTROTATION_PARTNER_MIN_FRACTION;
-    } else if (leftTracked) {
-      lapDone = absL >= 2 * Math.PI;
-    } else if (rightTracked) {
-      lapDone = absR >= 2 * Math.PI;
-    }
-    if (lapDone) {
-      const seconds = (now - this.wristRotationRepStartTime) / 1000;
-      if (this.countRep(seconds, now, "Círculo completo de muñecas", WRISTROTATION_MIN_REP_SECONDS)) {
-        this.wristRotationLastActivityAt = now;
-      }
-      const consumeLap = (v) => v - Math.sign(v) * Math.min(Math.abs(v), 2 * Math.PI);
-      this.wristRotationAccumL = consumeLap(this.wristRotationAccumL);
-      this.wristRotationAccumR = consumeLap(this.wristRotationAccumR);
-      this.wristRotationRepStartTime = now;
-    }
-
-    if (this.debugEl) {
-      this.debugEl.textContent =
-        `muñecas girando (cada una por su cuenta) | izq: ${Math.round(Math.abs(this.wristRotationAccumL) * 180 / Math.PI)}°/360° | der: ${Math.round(Math.abs(this.wristRotationAccumR) * 180 / Math.PI)}°/360° | ` +
-        `quieto desde hace: ${this.wristRotationLastActivityAt ? Math.round(now - this.wristRotationLastActivityAt) + "ms" : "-"}`;
-    }
-  }
-
-  /**
    * Mensaje de "vuelve a colocarte" propio de cada ejercicio de este
    * grupo (sentadillas y los tres abdominales tumbado) — usado tanto al
    * esperar la primera vez como al reabrir tras cerrar una serie.
@@ -11546,8 +11419,6 @@ class WorkoutSession {
         return "Ponte de pie, de frente a la cámara, con las dos piernas apoyadas, para empezar.";
       case "forearmrotation":
         return "Agarra el codo de un brazo con la otra mano, cerca del cuerpo, para empezar.";
-      case "wristrotation":
-        return "Codos pegados al cuerpo y doblados, antebrazos a la altura del pecho, manos separadas, para empezar.";
       case "splitsquat":
         return "Ponte en posición: de perfil, una pierna delante y otra detrás.";
       default:
@@ -11699,6 +11570,7 @@ class WorkoutSession {
    */
   closeActiveSet() {
     this.state = null;
+    this.idleSince = null;
     this.groundStableSince = null;
     this.offGroundSince = null;
     this.situpArmInvalidSince = null;
@@ -11728,13 +11600,21 @@ class WorkoutSession {
       // Mismo aviso/sonido que el de countRep(), una sola vez por sesión
       // (this.targetAnnounced) y ANTES de announceSetComplete para que
       // se oiga primero "objetivo cumplido" y después "serie terminada".
+      // 2026-09-30, a peticion de Alex: dentro de un plan/circuito
+      // (window.__workoutSubmit existe) al cerrar la ULTIMA serie prescrita
+      // se pasa solo al descanso/siguiente ejercicio, sin pulsar
+      // "Siguiente". Fuera de un circuito solo avisa, como siempre.
+      let failureAutoAdvance = false;
       if (this.targetSets && !this.targetReps && !this.targetAnnounced &&
           this.sets.length >= this.targetSets) {
         this.targetAnnounced = true;
-        if (this.voiceEnabled) speakOut("Has llegado al objetivo de las series de esta sesión. Puedes seguir si quieres, o pasar al siguiente ejercicio.", { flush: false });
+        failureAutoAdvance = typeof window.__workoutSubmit === "function";
+        if (this.voiceEnabled) speakOut(failureAutoAdvance ? "Objetivo de series cumplido. Siguiente ejercicio." : "Has llegado al objetivo de las series de esta sesión. Puedes seguir si quieres, o pasar al siguiente ejercicio.", { flush: false });
         if (this.goalBannerEl) {
           this.goalBannerEl.hidden = false;
-          this.goalBannerEl.textContent = "🎯 ¡Has llegado al objetivo de las series de esta sesión! Puedes seguir si quieres, o pasar al siguiente ejercicio.";
+          this.goalBannerEl.textContent = failureAutoAdvance
+            ? "🎯 ¡Objetivo de series cumplido! Pasando al siguiente ejercicio…"
+            : "🎯 ¡Has llegado al objetivo de las series de esta sesión! Puedes seguir si quieres, o pasar al siguiente ejercicio.";
         }
         try {
           const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -11749,6 +11629,11 @@ class WorkoutSession {
             osc.stop(ctx.currentTime + t + 0.13);
           });
         } catch (e) { /* si el navegador bloquea audio, no pasa nada */ }
+      }
+      if (failureAutoAdvance) {
+        this.setStatus(`Serie de ${closedReps} terminada. 🎯 Objetivo de series cumplido: pasando al siguiente ejercicio…`);
+        setTimeout(() => { if (this.finishBtn && !this.finishBtn.disabled) this.finish(); }, 700);
+        return;
       }
       // El aviso de descanso obligatorio SÍ tiene que oírse — por eso va
       // antes de silenciar la voz (restVoiceQuiet), no después.
@@ -12119,13 +12004,20 @@ class WorkoutSession {
       // el número de SERIES, y solo se sabe si se ha cumplido al cerrar
       // una serie de verdad, aquí. Mismo mecanismo que closeActiveSet()
       // para el caso equivalente en reps.
+      // 2026-09-30, a peticion de Alex: igual que en closeActiveSet() --
+      // dentro de un plan/circuito, al cerrar la ultima serie prescrita
+      // se pasa solo al siguiente ejercicio.
+      let failureAutoAdvance = false;
       if (this.targetSets && !this.targetSeconds && !this.targetAnnounced &&
           this.sets.length >= this.targetSets) {
         this.targetAnnounced = true;
-        if (this.voiceEnabled) speakOut("Has llegado al objetivo de las series de esta sesión. Puedes seguir si quieres, o pasar al siguiente ejercicio.", { flush: false });
+        failureAutoAdvance = typeof window.__workoutSubmit === "function";
+        if (this.voiceEnabled) speakOut(failureAutoAdvance ? "Objetivo de series cumplido. Siguiente ejercicio." : "Has llegado al objetivo de las series de esta sesión. Puedes seguir si quieres, o pasar al siguiente ejercicio.", { flush: false });
         if (this.goalBannerEl) {
           this.goalBannerEl.hidden = false;
-          this.goalBannerEl.textContent = "🎯 ¡Has llegado al objetivo de las series de esta sesión! Puedes seguir si quieres, o pasar al siguiente ejercicio.";
+          this.goalBannerEl.textContent = failureAutoAdvance
+            ? "🎯 ¡Objetivo de series cumplido! Pasando al siguiente ejercicio…"
+            : "🎯 ¡Has llegado al objetivo de las series de esta sesión! Puedes seguir si quieres, o pasar al siguiente ejercicio.";
         }
         try {
           const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -12140,6 +12032,11 @@ class WorkoutSession {
             osc.stop(ctx.currentTime + t + 0.13);
           });
         } catch (e) { /* si el navegador bloquea audio, no pasa nada */ }
+      }
+      if (failureAutoAdvance) {
+        this.setStatus(`Serie de ${formatHoldSeconds(held)} terminada. 🎯 Objetivo de series cumplido: pasando al siguiente ejercicio…`);
+        setTimeout(() => { if (this.finishBtn && !this.finishBtn.disabled) this.finish(); }, 700);
+        return;
       }
       this.announceSetComplete(`Serie de ${formatHoldSeconds(held)}`, waitingMessage);
       this.restVoiceQuiet = true;
@@ -12532,6 +12429,31 @@ class WorkoutSession {
   }
 
   /**
+   * Cierre por inactividad para ejercicios tumbados (crunch, elevación de
+   * piernas). Solo con la serie empezada (currentSetReps > 0) y estando
+   * "abajo" (this.state === "down"): estar arriba a mitad de una rep, o
+   * moverte fuera del suelo, cuenta como actividad y reinicia el reloj.
+   * Devuelve true si ha cerrado la serie (el llamador debe hacer return).
+   */
+  checkIdleSetClose(now, idleMs, moving = false) {
+    if (moving || this.currentSetReps === 0 || this.state !== "down") {
+      this.idleSince = null;
+      return false;
+    }
+    if (this.idleSince == null) {
+      this.idleSince = now;
+      return false;
+    }
+    if (now - this.idleSince >= idleMs) {
+      this.idleSince = null;
+      this.logScissor(`[inactividad ${Math.round(idleMs / 1000)}s sin repeticiones] cerrando serie`);
+      this.closeActiveSet();
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Crunch: cuenta cuánto sube el HOMBRO por encima de la CADERA (que
    * se queda fija en el suelo y sirve de referencia de escala junto al
    * muslo). Ver el bloque de comentarios junto a CRUNCH_UP_FACTOR más
@@ -12569,6 +12491,7 @@ class WorkoutSession {
       this.announceStatus("No se te ven bien el hombro, la cadera y la rodilla. Ponte de perfil a la cámara, tumbado boca arriba.");
       if (this.debugEl) this.debugEl.textContent = "buscando hombro, cadera y rodilla de perfil…";
       this.groundStableSince = null;
+      this.idleSince = null;
       this.noteAbsence(now);
       return;
     }
@@ -12653,6 +12576,8 @@ class WorkoutSession {
       this.offGroundSince = null;
     }
 
+    if (this.checkIdleSetClose(now, CRUNCH_IDLE_CLOSE_MS, !onGround)) return;
+
     if (this.state === "down") {
       const armSettled = this.crunchArmedAt === null || (now - this.crunchArmedAt) >= CRUNCH_ARM_SETTLE_MS;
       if (lift >= CRUNCH_UP_FACTOR && armSettled) {
@@ -12707,6 +12632,7 @@ class WorkoutSession {
       if (this.debugEl) this.debugEl.textContent = "buscando hombro, cadera, rodilla y tobillo de perfil…";
       this.legRaiseSide = null;
       this.groundStableSince = null;
+      this.idleSince = null;
       this.noteAbsence(now);
       return;
     }
@@ -12787,6 +12713,8 @@ class WorkoutSession {
     // pie, colando una repetición que no era -- justo mientras
     // offGroundSince ya estaba contando para cerrar la serie, pero el
     // ciclo falso se completaba antes de llegar a los 900ms.
+    if (this.checkIdleSetClose(now, LEG_RAISE_IDLE_CLOSE_MS, !onGround)) return;
+
     if (onGround) {
       if (this.state === "down") {
         if (hipAngle <= LEG_RAISE_UP_ANGLE_DEG) {
@@ -14820,10 +14748,6 @@ class WorkoutSession {
       this.processForearmRotation(lm, now);
       return;
     }
-    if (this.counterKey === "wristrotation") {
-      this.processWristRotation(lm, now);
-      return;
-    }
     if (this.counterKey === "hipforwardback") {
       this.processHipForwardBack(lm, now);
       return;
@@ -15136,6 +15060,8 @@ class WorkoutSession {
     const now = performance.now();
     this.timerEl.textContent = this.formatTime((now - this.sessionStart) / 1000);
 
+    this.checkLongRestAlert(now);
+
     if (this.lastRepTime === null) return;
     const restSeconds = (now - this.lastRepTime) / 1000;
     this.restEl.textContent = this.formatTime(restSeconds);
@@ -15146,6 +15072,7 @@ class WorkoutSession {
       // Han pasado los 1:30 de descanso: a partir de aquí la voz ya
       // puede volver a hablar (este mismo aviso incluido).
       this.restVoiceQuiet = false;
+      this.restPauseUntil = null; // la detección se reanuda junto con el aviso
       beep();
       if (this.pendingHangReminder) {
         this.pendingHangReminder = false;
@@ -15155,6 +15082,31 @@ class WorkoutSession {
       }
       this.beginPrep();
     }
+  }
+
+  /**
+   * Aviso de descanso largo: han pasado LONG_REST_ALERT_SECONDS (3 min)
+   * desde que se cerró la última serie y no has empezado otra (ni una
+   * rep contada ni una postura mantenida en curso). Se repite en cada
+   * múltiplo (6, 9 min…). Se mide desde setClosedAt (no desde
+   * lastRepTime, que se reinicia al recalibrar tras el aviso de los 90s).
+   * No aplica a NO_REST_COUNTERS (no tienen descanso entre series).
+   */
+  checkLongRestAlert(now) {
+    if (this.setClosedAt === null || NO_REST_COUNTERS.has(this.counterKey)) return;
+    if (this.longRestAlertClosedAt !== this.setClosedAt) {
+      this.longRestAlertClosedAt = this.setClosedAt;
+      this.longRestAlertLevel = 0;
+    }
+    if (this.currentSetReps > 0 || this.postureValidSince !== null) return; // ya has empezado la serie
+    const level = Math.floor((now - this.setClosedAt) / (LONG_REST_ALERT_SECONDS * 1000));
+    if (level < 1 || level <= this.longRestAlertLevel) return;
+    this.longRestAlertLevel = level;
+    this.restVoiceQuiet = false;
+    beep();
+    const minutes = Math.round((level * LONG_REST_ALERT_SECONDS) / 60);
+    const text = `⏰ Llevas ${minutes} minutos de descanso. ¡Cuando quieras, empieza la serie!`;
+    this.announceStatus(text, `long-rest-${level}`, `Llevas ${minutes} minutos de descanso. Cuando quieras, empieza la serie.`);
   }
 
   formatTime(totalSeconds) {

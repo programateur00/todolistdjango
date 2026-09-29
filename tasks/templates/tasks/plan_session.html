@@ -24,7 +24,7 @@
         <ul class="run-preview">
             {% for i in items %}
             <li>
-                <span>{{ i.name }}{% if i.is_headline %} ★{% endif %}</span>
+                <span>{{ i.name }}</span>
                 <span>
                     {% if i.target_reps %}{{ i.target_sets }} × {{ i.target_reps }}{% else %}{{ i.target_sets }} × {{ i.work }}s{% endif %}
                     {% if i.target_weight_kg %}· {{ i.target_weight_kg|floatformat:"-1" }} kg{% endif %}

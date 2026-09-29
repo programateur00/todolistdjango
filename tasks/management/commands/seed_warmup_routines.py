@@ -42,7 +42,7 @@ from tasks.utils import get_current_user
 #     pasar al siguiente ejercicio (cambias de lado/sentido entre
 #     serie y serie, eso lo decides tú, no lo fuerza el contador).
 #   - Ejercicios cronometrados (timed: brazo cruzado, tríceps por
-#     detrás, isquios sentado, cuádriceps de pie): no existen "series"
+#     detrás, cuádriceps de pie): no existen "series"
 #     para un timed (RoutineItem no las usa en ese modo), así que el
 #     mismo slug aparece DOS VECES seguidas en la lista -- dos cuentas
 #     atrás de 30s independientes, una por lado.
@@ -64,7 +64,12 @@ ROUTINES = [
             # aparece una sola vez). Flexiones se quedan en 10.
             ("neck-lateral-mobility", 1, 30),  # oreja al hombro
             ("neck-turn-side", 1, 30),         # el "no" con la cabeza
-            ("arm-circles", 1, 30),
+            # A peticion de Alex (2026-09-29): DOS pantallas seguidas, la 1a
+            # hacia delante y la 2a hacia atras (sentido fijado por aparicion,
+            # ver DIRECTION_COUNTERS en session-runner.js/circuit.js), 30 cada
+            # una, y cada una pasa sola a la siguiente al llegar a 30.
+            ("arm-circles", 1, 30),  # sentido 1: hacia delante
+            ("arm-circles", 1, 30),  # sentido 2: hacia atras
             ("arm-scissors", 1, 30),
             ("arm-cross-stretch", None, None),         # cronometrado
             ("triceps-overhead-stretch", None, None),  # cronometrado
@@ -75,7 +80,6 @@ ROUTINES = [
             # (ver REP_SIDE_COUNTERS en circuit.js/session-runner.js).
             ("forearm-rotation-elbow-hold", 1, 30),  # brazo 1
             ("forearm-rotation-elbow-hold", 1, 30),  # brazo 2
-            ("wrist-rotation-interlaced", 1, 30),
             ("jumping-jack", 1, 30),
             ("push-up", 1, 10),
             # A peticion de Alex (2026-09-28): tras flexiones, aguantarse en la
@@ -93,14 +97,16 @@ ROUTINES = [
         "items": [
             ("hip-forward-back", 1, 30),          # simétrico (adelante-atrás con las dos caderas)
             ("hip-lateral-mobility", 1, 30),      # una sola serie de 30 (Alex, 2026-09-24)
-            ("split-squat-warmup", 1, 30),        # una sola serie de 30 (Alex, 2026-09-24)
+            ("split-squat-warmup", 1, 15),        # una sola serie de 15 (Alex, 2026-09-30; antes 30)
             ("leg-rotation", 1, 30),              # una sola serie de 30 (Alex, 2026-09-24)
             ("jumping-jack", 1, 30),
             ("knee-raises", 1, 30),
             ("heel-kicks", 1, 30),
             ("high-leg-raise", 1, 30),
-            ("seated-hamstring-stretch", None, None),  # cronometrado, bilateral -- serie 1: una pierna
-            ("seated-hamstring-stretch", None, None),  # cronometrado, bilateral -- serie 2: la otra pierna
+            # A peticion de Alex (2026-09-30): elephant steps (aguante) en
+            # lugar del estiramiento de isquios sentado. Cronometrado y
+            # simetrico (las dos piernas a la vez) -- una sola pantalla.
+            ("elephant-steps-hold", None, None),       # cronometrado, simetrico
             ("standing-quad-stretch", None, None),     # cronometrado, bilateral -- serie 1: una pierna
             ("standing-quad-stretch", None, None),     # cronometrado, bilateral -- serie 2: la otra pierna
         ],

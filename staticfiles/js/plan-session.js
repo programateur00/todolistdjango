@@ -113,6 +113,8 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   function runCurrent() {
     const item = current();
     if (!item) return finish();
+    // Dice el nombre del ejercicio al empezar (tren superior o inferior).
+    if (isVoiceEnabled()) speakOut(item.name, { flush: true });
     if (item.mode === "pose") runCamera(item);
     else if (POSTURE_COUNTERS.has(item.counter_key)) runTimerWithPosture(item);
     else runTimer(item);
@@ -405,7 +407,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 
       if (isFailure) {
         timerEl.textContent = fmt(elapsed);
-        logDebugLine("al fallo (cuenta libre), postura ok");
+        logDebugLine(`al fallo (cuenta libre), postura ok ${lastPostureDebug}`);
         if (isVoiceEnabled() && elapsed % 5 === 0 && elapsed !== lastSpokenNumber) {
           lastSpokenNumber = elapsed;
           speakOut(numeroEnPalabras(elapsed));
@@ -416,7 +418,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       if (!goalReached && elapsed < item.work) {
         const remaining = item.work - elapsed;
         timerEl.textContent = fmt(remaining);
-        logDebugLine(`restantes=${remaining}s de ${item.work}s, postura ok`);
+        logDebugLine(`restantes=${remaining}s de ${item.work}s, postura ok ${lastPostureDebug}`);
         if (remaining <= 3) beep(660, 0.1);
         // Cada 5 segundos, no cada uno - ver nota junto a runTimer() más
         // arriba.
@@ -464,17 +466,19 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       : `${item.target_sets} series al fallo`;
     const fuente =
       item.target_source === "plan"
-        ? `<span class="run-plan">plan «${esc(item.plan_name || "")}» ${item.is_headline ? "★" : ""}</span>`
+        ? `<span class="run-plan">plan «${esc(item.plan_name || "")}»</span>`
         : "";
     playerHost.innerHTML = `
       <div id="workout-root" class="workout"
            data-save-url="local" data-cancel-url="#" data-exercise-slug="${esc(item.slug)}"
            data-target-sets="${item.target_sets || ""}" data-target-reps="${item.target_reps || ""}"
+           data-last-sets="${!item.target_reps && item.last_sets ? esc(JSON.stringify(item.last_sets)) : ""}"
            data-counter-key="${esc(item.counter_key || "pullup")}"
            data-voice-step="${item.voice_step || 1}">
         <p class="circuit__progress">${esc(progressLabel())}</p>
         <h2 class="circuit__exercise-name">${esc(item.name)}</h2>
         <p class="run-target">Objetivo: <strong>${objetivo}</strong> ${fuente}</p>
+        <p id="workout-last-hint" class="circuit__side-hint run-last-hint" hidden></p>
         <div class="workout__camera">
           <video id="workout-video" playsinline muted class="workout__video"></video>
           <canvas id="workout-canvas" class="workout__canvas"></canvas>
@@ -509,6 +513,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         exercise: item.slug,
         reps: payload.total_reps || 0,
         sets: payload.total_sets || 0,
+        set_reps: (payload.sets || []).map((s) => s.reps || 0).filter((r) => r > 0),
         seconds: payload.session_duration_seconds || 0,
       });
       beep(880, 0.2);

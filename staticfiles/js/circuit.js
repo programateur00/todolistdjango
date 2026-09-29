@@ -138,6 +138,12 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   // workout.js) -- ahora son dos pantallas seguidas, como los estiramientos.
   const REP_SIDE_COUNTERS = new Set(["forearmrotation"]);
   const REP_SIDE_LABEL = { forearmrotation: "brazo" };
+  // Círculos de brazos (2026-09-29, a petición de Alex): DOS pantallas seguidas
+  // (arm-circles listado 2 veces en seed_warmup_routines.py), la 1ª hacia
+  // delante y la 2ª hacia atrás; el sentido se fija por aparición (impar =
+  // hacia delante, par = hacia atrás) y viaja a workout.js en
+  // data-circle-direction. Sin segunda aparición no hay sentido fijo.
+  const DIRECTION_COUNTERS = new Set(["armcircles"]);
   // Lado (izquierdo/derecho) detectado por cámara en la última vez que se
   // completó cada counter_key de STRETCH_SIDE_COUNTERS -- se reinicia en
   // begin() (nuevo circuito). Un solo mapa vale para las dos apariciones
@@ -150,7 +156,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
    *  sin más contexto. null si el ejercicio no es de este grupo o solo
    *  aparece una vez (nada que numerar). */
   function occurrenceInfo(item) {
-    if (!STRETCH_SIDE_COUNTERS.has(item.counter_key) && !REP_SIDE_COUNTERS.has(item.counter_key)) return null;
+    if (!STRETCH_SIDE_COUNTERS.has(item.counter_key) && !REP_SIDE_COUNTERS.has(item.counter_key) && !DIRECTION_COUNTERS.has(item.counter_key)) return null;
     const siblings = sequence.filter((i) => i.counter_key === item.counter_key);
     if (siblings.length < 2) return null;
     return { occurrence: siblings.indexOf(item) + 1, total: siblings.length };
@@ -511,7 +517,12 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   async function runCamera(item) {
     // "Al fallo" (PROG_FAILURE): sin target_reps, no hay número que pedir
     // -- ver el mismo caso en runTimer/runTimerWithPosture.
-    const objetivo = item.target_reps
+    const circleOcc = item.counter_key === "armcircles" ? occurrenceInfo(item) : null;
+    const circleDir = circleOcc ? (circleOcc.occurrence % 2 === 1 ? "forward" : "backward") : "";
+    const circleDirLabel = circleDir === "forward" ? "hacia delante" : "hacia atrás";
+    const objetivo = circleDir && item.target_reps
+      ? `${item.target_reps} ${circleDirLabel}`
+      : item.target_reps
       ? `${item.target_sets} × ${item.target_reps}`
       : `${item.target_sets} series al fallo`;
     const fuente =
@@ -525,12 +536,15 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
            data-save-url="local" data-cancel-url="#" data-exercise-slug="${esc(item.slug)}"
            data-target-sets="${item.target_sets || ""}" data-target-reps="${item.target_reps || ""}"
            data-counter-key="${esc(item.counter_key || "pullup")}"
+           data-circle-direction="${circleDir}"
            data-voice-step="${item.voice_step || 1}">
         <p class="circuit__progress">${esc(progressLabel())}</p>
-        <h2 class="circuit__exercise-name">${esc(item.name)}${occ ? ` <span class="circuit__side-badge">(lado ${occ.occurrence} de ${occ.total})</span>` : ""}</h2>
+        <h2 class="circuit__exercise-name">${esc(item.name)}${circleDir ? ` <span class="circuit__side-badge">(${circleDirLabel})</span>` : occ ? ` <span class="circuit__side-badge">(lado ${occ.occurrence} de ${occ.total})</span>` : ""}</h2>
         <p class="run-target">Objetivo: <strong>${objetivo}</strong> ${fuente}</p>
         ${
-          occ
+          circleDir
+            ? `<p class="circuit__side-hint">Sentido ${circleOcc.occurrence} de ${circleOcc.total}: gira los dos brazos ${circleDirLabel}. Al llegar al objetivo pasa solo al siguiente.</p>`
+            : occ
             ? occ.occurrence > 1
               ? `<p class="circuit__side-hint">🔁 Lado ${occ.occurrence} de ${occ.total} -- usa el ${sideLabel} contrario al de la vez anterior.</p>`
               : `<p class="circuit__side-hint">Lado ${occ.occurrence} de ${occ.total} -- elige un ${sideLabel} para empezar; el siguiente será con el contrario.</p>`

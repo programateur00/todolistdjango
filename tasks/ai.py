@@ -331,8 +331,8 @@ def _select_sport_exercises(fitness_level, focus_area, no_bar_equipment, selecte
     a la meta de peso, eso lo hace `apply_pacing`).
 
     Devuelve la lista de ejercicios en el orden en que deben entrar en
-    el plan (el primero es el candidato natural a `is_headline`, salvo
-    en running — ver `build_sport_plan_draft`). Lanza `PlanAIError` si
+    el plan (ese es el orden inicial del plan; luego se puede
+    reordenar a mano — ya no hay ejercicio "estrella"). Lanza `PlanAIError` si
     no hay ningún ejercicio disponible para lo pedido (equipamiento,
     nivel o foco imposibles con el catálogo actual, o ningún ejercicio
     marcado a mano que siga disponible).

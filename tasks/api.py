@@ -1432,7 +1432,7 @@ def plan_json(p, detail=False):
         "quiz_every_n_videos": p.quiz_every_n_videos,
     }
     if detail:
-        data["items"] = [_item(i) for i in p.items.select_related("exercise")]
+        data["items"] = [_item(i) for i in p.ordered_items()]
         # Mismo criterio que la web (ver plan_detail en views.py): sin
         # destino y con el objetivo fijo (running "sin progresión", o
         # cualquier progresión sin meta puesta), una fila basta — 60
@@ -1730,8 +1730,6 @@ def _apply_plan_item_fields(item, plan, data):
     # nada que ver con lo que la persona ya podía hacer el primer día.
     item.rep_range_low = _int("rep_range_low", item.start_reps) or 1
     item.deload_after_failures = _int("deload_after_failures", 3)
-    if "is_headline" in data:
-        item.is_headline = bool(data["is_headline"])
 
     # Obligatorio de verdad: sin esto, un objetivo se podía guardar
     # "vacío" y al pulsar play la app no sabía qué pantalla enseñar.
@@ -1905,14 +1903,6 @@ def build_plan_draft(
         item_fields = ai.default_item_fields(exercise, fitness_level, weeks, sessions_per_week)
         item_fields["exercise"] = exercise.slug
         item_fields["sport_mode"] = PlanItem.SPORT_MODE_CIRCUIT
-        # La medida principal: en un plan de running siempre es el propio
-        # running (progresión de distancia/ritmo); en cualquier otro foco,
-        # el primer ejercicio de la lista (ya viene en el orden pensado
-        # para eso, ver `ai._select_sport_exercises`).
-        item_fields["is_headline"] = (
-            exercise.mode == Exercise.MODE_DISTANCE if focus_area == Task.SUBCATEGORY_RUNNING
-            else idx == 0
-        )
         ai.apply_pacing(
             item_fields, exercise=exercise, sessions_per_week=sessions_per_week,
             max_load_kg=max_load_kg,
@@ -1926,7 +1916,6 @@ def build_plan_draft(
             "fields": item_fields,
             "preview": {
                 "display_name": draft_item.display_name,
-                "is_headline": bool(draft_item.is_headline),
                 "progression": draft_item.progression,
                 "is_timed": bool(exercise.mode == Exercise.MODE_TIMED),
                 "is_running": bool(exercise.mode == Exercise.MODE_DISTANCE),
@@ -1934,18 +1923,6 @@ def build_plan_draft(
                 "weekly": draft_item.weekly_schedule(weeks, sessions_per_week),
             },
         })
-
-    # Exactamente una medida principal — por si el candidato a headline se
-    # descartó por error de validación, se decide aquí en vez de dejarlo
-    # sin ninguna (o con varias).
-    headline_idxs = [i for i, it in enumerate(items_out) if it["fields"].get("is_headline")]
-    if items_out and not headline_idxs:
-        items_out[0]["fields"]["is_headline"] = True
-        items_out[0]["preview"]["is_headline"] = True
-    elif len(headline_idxs) > 1:
-        for i in headline_idxs[1:]:
-            items_out[i]["fields"]["is_headline"] = False
-            items_out[i]["preview"]["is_headline"] = False
 
     if not items_out:
         return None, (
@@ -2512,6 +2489,18 @@ def plan_session(request, uuid, plan_uuid):
     })
 
 
+def _set_reps_to_sets(raw):
+    """[12, 10, 9] (reps de cada serie, lo manda el reproductor) ->
+    [{"reps": 12}, ...] en el formato de WorkoutSession.sets. Descarta
+    lo que no sean enteros positivos razonables; sin datos, []."""
+    if not isinstance(raw, list):
+        return []
+    return [
+        {"reps": int(r)} for r in raw[:50]
+        if isinstance(r, (int, float)) and not isinstance(r, bool) and 0 < r <= 1000
+    ]
+
+
 @api("POST")
 def plan_session_save(request, uuid, plan_uuid):
     """Guarda la sesión del plan: una entrada por ejercicio, con el
@@ -2539,6 +2528,7 @@ def plan_session_save(request, uuid, plan_uuid):
         created.append(WorkoutSession.objects.create(
             task=task, user=_user(), plan=plan, series_id=task.series_id,
             exercise=slug,
+            sets=_set_reps_to_sets(b.get("set_reps")),
             total_reps=_num(b, "reps"), total_sets=_num(b, "sets"),
             session_duration_seconds=_num(b, "seconds"),
             target_sets=t.get("sets"), target_reps=t.get("reps"),

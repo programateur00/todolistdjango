@@ -2070,6 +2070,17 @@ class Exercise(models.Model):
     # verdad lo usa, en vez de para todo el catálogo. Si se añade un
     # ejercicio con peso nuevo al catálogo, su slug va aquí.
     WEIGHTED_SLUGS = {"weighted-pullup", "wide-weighted-pullup", "weighted-dips", "weighted-squat"}
+    # Cada ejercicio con peso -> su versión sin peso. Define las "familias"
+    # que usa weighted_first() para ordenar la sesión: con peso primero,
+    # dentro de su familia (dominadas con peso antes que dominadas, etc.).
+    # Si se añade un ejercicio con peso nuevo, su slug va aquí Y en
+    # WEIGHTED_SLUGS.
+    WEIGHTED_BASE = {
+        "weighted-pullup": "pullup",
+        "wide-weighted-pullup": "wide-pullup",
+        "weighted-dips": "dips",
+        "weighted-squat": "squat",
+    }
 
     name = models.CharField(max_length=64)
     slug = models.SlugField(max_length=64, unique=True)
@@ -2283,6 +2294,41 @@ class RoutineItem(models.Model):
             "session_index": None,
             "sessions_to_goal": None,
         }
+
+
+def weighted_first(items):
+    """
+    Reordena objetivos de un plan: el ejercicio CON peso va antes que su
+    versión normal (dominadas con peso -> dominadas, fondos con peso ->
+    fondos...), llegando fresco al trabajo pesado y dejando el de peso
+    corporal para cuando ya hay fatiga.
+
+    "Por tipo": las familias siguen el orden en que aparece por primera
+    vez cualquiera de sus miembros en la lista de entrada (o sea, el orden
+    en que se fueron añadiendo o movieron a mano). Dominadas, dominadas
+    con peso, fondos, fondos con peso -> dominadas con peso, dominadas,
+    fondos con peso, fondos. Solo se intercambia DENTRO de cada familia;
+    el resto (y los objetivos sin ejercicio) conservan su sitio. La
+    ordenación es estable: dos objetivos del mismo ejercicio no se cruzan.
+    """
+    items = list(items)
+
+    def slug_of(it):
+        return it.exercise.slug if it.exercise_id and it.exercise else None
+
+    def family(it):
+        slug = slug_of(it)
+        if slug is None:
+            return ("item", it.pk)          # sin ejercicio: familia propia
+        return ("ex", Exercise.WEIGHTED_BASE.get(slug, slug))
+
+    rank = {}
+    for it in items:
+        rank.setdefault(family(it), len(rank))
+    return sorted(
+        items,
+        key=lambda it: (rank[family(it)], 0 if slug_of(it) in Exercise.WEIGHTED_BASE else 1),
+    )
 
 
 class Plan(models.Model):
@@ -3025,19 +3071,28 @@ class Plan(models.Model):
             series_id=self.task_series_id, is_done=False, expired=False,
         ).first()
 
+    def ordered_items(self):
+        """
+        Los objetivos del plan en el orden en que se entrenan: el de
+        PlanItem.order de siempre, pero con cada ejercicio con peso antes
+        que su versión normal (ver weighted_first).
+        """
+        return weighted_first(self.items.select_related("exercise"))
+
     def session_items(self):
         """
         Los ejercicios de la sesión de hoy, en el formato que espera el
         reproductor. Sale del plan directamente: no hace falta circuito.
         """
         items = []
-        for it in self.items.select_related("exercise"):
+        for it in self.ordered_items():
             if not it.exercise:
                 continue          # los objetivos de tarea no se "entrenan"
             if it.exercise.mode == Exercise.MODE_DISTANCE:
                 continue          # running no se "juega" en el circuito — se importa
             t = it.current_target()
             items.append({
+                "last_sets": it.last_session_set_reps(),
                 "slug": it.exercise.slug,
                 "name": it.display_name,
                 "mode": it.exercise.mode,
@@ -3076,17 +3131,17 @@ class Plan(models.Model):
         él: llegar a 4x12 con 20 kg. Esa es la medida principal; el resto
         de ejercicios son el camino.
 
-        Si no se ha marcado ninguna, se toma la primera por orden, para
-        que la pantalla siempre tenga algo que destacar.
+        Ya no hay una "estrella" que se marque a mano: es simplemente la
+        primera por orden (en Estudio, la única).
         """
-        return self.items.filter(is_headline=True).first() or self.items.first()
+        return self.items.first()
 
     @property
     def support_items(self):
         """Los ejercicios que te llevan al objetivo, sin ser la medida."""
         head = self.headline
-        qs = self.items.all()
-        return qs.exclude(pk=head.pk) if head else qs
+        items = self.ordered_items()
+        return [i for i in items if i.pk != head.pk] if head else items
 
     def progress_pct(self):
         """
@@ -3101,9 +3156,8 @@ class Plan(models.Model):
         nada a nivel de plan — reportado por Alex como "una tontería":
         si añades varios ejercicios a la vez, los varios deberían
         decidir el plan, no solo el que se marcó como principal.
-        `is_headline` sigue existiendo (decide cuál sale destacado
-        arriba del todo y con qué orden — ver Meta.ordering — pero ya
-        no decide el % en solitario).
+        (Ya no existe ejercicio "estrella" en los planes de Deporte:
+        todos cuentan igual y se ordenan libremente.)
 
         Cada objetivo aporta su propio `own_progress_pct()` (ver ahí el
         detalle de cumplimiento vs. escalones) y aquí se promedian todos
@@ -3366,9 +3420,21 @@ class PlanItem(models.Model):
         # a mano — y una vez que sí lo hacen, "order" ya no tiene
         # empates entre ellos (plan_item_move los renumera 0,1,2...) así
         # que "pk" deja de intervenir.
-        ordering = ["-is_headline", "order", "pk"]
+        # Ya NO hay ejercicio "estrella" que se cuele el primero: el orden
+        # es solo `order` (lo que se ve en pantalla y lo que sigue la
+        # sesión), así se puede subir/bajar cualquier ejercicio.
+        ordering = ["order", "pk"]
 
     def save(self, *args, **kwargs):
+        # Un objetivo nuevo se pone al final del plan. Sin esto todos
+        # nacían con order=0 y, una vez renumerados los demás (0,1,2...),
+        # el nuevo se colaba en segunda posición por el empate con el 0.
+        # Solo actúa si order=0 choca con uno que ya existe (así un order
+        # puesto a mano, o el primer objetivo del plan, no se toca).
+        if self._state.adding and not self.order and self.plan_id:
+            siblings = PlanItem.objects.filter(plan_id=self.plan_id)
+            if siblings.filter(order=0).exists():
+                self.order = siblings.aggregate(m=models.Max("order"))["m"] + 1
         # Mismo trato que Task: si pegas la URL entera, se limpia sola a
         # la hora de guardar. Sin esto, un objetivo de Estudio guardaría
         # la URL completa en vez del id, aunque la tarea que genera el
@@ -3430,8 +3496,7 @@ class PlanItem(models.Model):
         self.save(update_fields=["playlist_videos_cache", "playlist_synced_at"])
 
     def __str__(self):
-        marca = " ★" if self.is_headline else ""
-        return f"{self.plan.name}: {self.display_name}{marca}"
+        return f"{self.plan.name}: {self.display_name}"
 
     @property
     def display_name(self):
@@ -3597,6 +3662,42 @@ class PlanItem(models.Model):
     def session_count(self):
         """Sesiones que cuentan para el objetivo (días, si es de distancia)."""
         return len(self.distance_days()) if self.is_distance else self._sessions().count()
+
+    def last_session_set_reps(self):
+        """
+        Repeticiones de CADA serie en la última sesión guardada de este
+        objetivo, p. ej. [12, 10, 9] -- solo para objetivos "al fallo" de
+        ejercicios con repeticiones. Sirve para enseñar al empezar cada
+        serie "la última vez hiciste X" y tener un número que superar,
+        ya que sin objetivo de reps no hay otra referencia.
+
+        None si no aplica o si no hay ninguna sesión anterior con las
+        reps por serie guardadas (las sesiones previas a este campo solo
+        tienen el total, no se puede inventar el reparto).
+        """
+        if self.progression != self.PROG_FAILURE or not self.exercise_id:
+            return None
+        if self.exercise.mode == Exercise.MODE_DISTANCE:
+            return None
+        # Se mira en Python (no con .exclude(sets=[])) porque comparar un
+        # JSONField con una lista vacía no se comporta igual en todos los
+        # motores de BD; con las últimas sesiones basta.
+        recent = (
+            WorkoutSession.objects
+            .filter(
+                plan=self.plan, exercise=self.exercise.slug,
+                user=self.plan.user, deleted_at__isnull=True,
+            )
+            .order_by("-recorded_at")[:10]
+        )
+        for ws in recent:
+            reps = [
+                int(s["reps"]) for s in (ws.sets or [])
+                if isinstance(s, dict) and isinstance(s.get("reps"), (int, float)) and s["reps"] > 0
+            ]
+            if reps:
+                return reps
+        return None
 
     def successes_and_streak(self):
         """

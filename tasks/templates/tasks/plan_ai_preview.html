@@ -53,10 +53,7 @@
     {% for it in draft.items %}
     <section class="plan-item">
         <header class="plan-item__head">
-            <h3>
-                {{ it.preview.exercise_name }}
-                {% if it.preview.is_headline %} ★{% endif %}
-            </h3>
+            <h3>{{ it.preview.exercise_name }}</h3>
             <span class="plan-item__prog">
                 {% if it.preview.is_running %}distancia{% elif it.preview.progression == 'double' %}doble progresión{% elif it.preview.progression == 'completion' %}cumplimiento{% else %}repeticiones{% endif %}
             </span>
@@ -65,11 +62,6 @@
         <label class="field">
             <span class="field__label">Cómo llamarlo (opcional)</span>
             <input type="text" name="items-{{ forloop.counter0 }}-label" maxlength="80" value="{{ it.fields.label|default:'' }}">
-        </label>
-
-        <label class="field field--inline">
-            <input type="checkbox" name="items-{{ forloop.counter0 }}-is_headline" {% if it.preview.is_headline %}checked{% endif %}>
-            <span class="field__label">Destacarlo arriba del todo</span>
         </label>
 
         {% if it.preview.is_running %}

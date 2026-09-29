@@ -1758,7 +1758,7 @@ def stats_delete_series(request, series_id):
 # ─────────────────────────────────────────────────────────────────────
 
 # Contadores que existen de verdad en workout.js.
-COUNTERS = {"superman", "lsit", "elephantsteps", "burpee", "pullup", "dip", "pushup", "squat", "splitsquat", "crunch", "legraise", "highlegraise", "situp", "doublecrunch", "scissor", "archerpullup", "inclinepushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "wristrotation", "hipforwardback", "scapularpull", "handstandpushup"}
+COUNTERS = {"superman", "lsit", "elephantsteps", "burpee", "pullup", "dip", "pushup", "squat", "splitsquat", "crunch", "legraise", "highlegraise", "situp", "doublecrunch", "scissor", "archerpullup", "inclinepushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "hipforwardback", "scapularpull", "handstandpushup"}
 
 # Ejercicios "timed" (se aguantan, no se cuentan en repeticiones) que
 # workout.js sabe seguir con cámara comprobando la postura — plancha,
@@ -1974,11 +1974,18 @@ def plan_detail(request, pk):
     is_study_general = plan.plan_type == Plan.PLAN_TYPE_STUDY and not is_language
     course_progress = plan.course_progress() if is_language else None
 
-    head = plan.headline
+    if plan.plan_type == Plan.PLAN_TYPE_SPORT:
+        # Deporte: sin ejercicio "estrella" -- todos en la misma lista,
+        # cada uno con sus flechas para subir/bajar.
+        head = None
+        supports = [_pack(i) for i in plan.ordered_items()]
+    else:
+        head = plan.headline
+        supports = [_pack(i) for i in plan.support_items]
     return render(request, "tasks/plan_detail.html", {
         "plan": plan,
         "headline": _pack(head) if head else None,
-        "supports": [_pack(i) for i in plan.support_items],
+        "supports": supports,
         "progress": plan.progress_pct(),
         "is_language": is_language,
         "is_study_general": is_study_general,
@@ -2190,7 +2197,6 @@ def plan_ai_form(request):
             # rep_range_low...) y solo pisa los que la vista previa deja
             # tocar — igual que hace "confirmar" al guardar de verdad.
             item_fields = dict(item["fields"])
-            item_fields["is_headline"] = bool(request.POST.get(prefix + "is_headline"))
             for key in (
                 "label", "start_sets", "start_reps", "start_seconds", "start_weight_kg",
                 "goal_reps", "goal_seconds", "goal_weight_kg", "start_distance_km",
@@ -2217,7 +2223,6 @@ def plan_ai_form(request):
                 continue  # se deja el objetivo tal como estaba antes de tocarlo
 
             item["fields"] = item_fields
-            item["preview"]["is_headline"] = bool(item_fields.get("is_headline"))
             item["preview"]["progression"] = draft_item.progression
             item["preview"]["weekly"] = draft_item.weekly_schedule(weeks, sessions_per_week)
 
@@ -2264,7 +2269,6 @@ def plan_ai_form(request):
             # resto (ejercicio, modo, incrementos ya calculados a partir
             # de las tablas por nivel...) se queda tal como lo propuso la
             # generación automática.
-            item_data["is_headline"] = bool(request.POST.get(prefix + "is_headline"))
             for key in (
                 "label", "start_sets", "start_reps", "start_seconds", "start_weight_kg",
                 "goal_reps", "goal_seconds", "goal_weight_kg", "start_distance_km",
@@ -2282,8 +2286,6 @@ def plan_ai_form(request):
             if item_error:
                 continue  # se descarta en vez de tirar el plan entero
             plan_item.save()
-            if plan_item.is_headline:
-                plan.items.exclude(pk=plan_item.pk).update(is_headline=False)
 
         plan.sync_task()
         request.session.pop("plan_ai_draft", None)
@@ -2863,7 +2865,6 @@ def plan_item_form(request, plan_pk, pk=None):
         item.weekly_linear = True
         item.sessions_per_step = max(1, len(plan.custom_days_list()))
         item.deload_after_failures = _int("deload_after_failures", 3)
-        item.is_headline = bool(request.POST.get("is_headline"))
 
         # Obligatorio de verdad: sin esto, un objetivo se puede guardar
         # "vacío" y al pulsar play la app no sabe qué pantalla enseñar
@@ -2889,10 +2890,6 @@ def plan_item_form(request, plan_pk, pk=None):
             })
 
         item.save()
-
-        # Solo puede haber una medida principal.
-        if item.is_headline:
-            plan.items.exclude(pk=item.pk).update(is_headline=False)
 
         plan.sync_task()
         messages.success(request, "Objetivo guardado.")
@@ -3126,13 +3123,12 @@ def plan_item_move(request, plan_pk, pk):
     Sube o baja un puesto un ejercicio de apoyo en el orden de la
     sesión — `Plan.session_items()` recorre `plan.items` (ordenados por
     PlanItem.order) para decidir en qué orden salen hoy los ejercicios
-    en el circuito de cámara. La medida principal no se toca aquí:
-    siempre va primero (Meta.ordering = ["-is_headline", "order"]), así
-    que solo tiene sentido reordenar el resto.
+    en el circuito de cámara. Todos los ejercicios se pueden mover, sin
+    excepción (ya no hay uno "estrella" fijo arriba).
 
     Casi todos los PlanItem nacen con order=0 (hasta ahora no había
     ningún sitio para cambiarlo), así que el primer movimiento en un
-    plan renumera TODO el camino en su orden actual (0, 1, 2...) antes
+    plan renumera TODOS los ejercicios en su orden actual (0, 1, 2...) antes
     de intercambiar — si no, "subir" algo con order=0 no tendría con
     qué intercambiar.
     """
@@ -3142,7 +3138,7 @@ def plan_item_move(request, plan_pk, pk):
     if direction not in ("up", "down"):
         return redirect(reverse("tasks:plan_detail", args=[plan.pk]))
 
-    supports = list(plan.support_items)
+    supports = list(plan.ordered_items())
     for i, it in enumerate(supports):
         if it.order != i:
             it.order = i
@@ -3215,6 +3211,10 @@ def plan_session_save(request, pk, plan_pk):
         WorkoutSession.objects.create(
             task=task, user=get_current_user(), plan=plan, series_id=task.series_id,
             exercise=slug,
+            sets=[
+                {"reps": int(r)} for r in (b.get("set_reps") if isinstance(b.get("set_reps"), list) else [])[:50]
+                if isinstance(r, (int, float)) and not isinstance(r, bool) and 0 < r <= 1000
+            ],
             total_reps=num("reps"), total_sets=num("sets"),
             session_duration_seconds=num("seconds"),
             target_sets=t.get("sets"), target_reps=t.get("reps"),
