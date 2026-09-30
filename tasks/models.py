@@ -3131,10 +3131,22 @@ class Plan(models.Model):
         él: llegar a 4x12 con 20 kg. Esa es la medida principal; el resto
         de ejercicios son el camino.
 
-        Ya no hay una "estrella" que se marque a mano: es simplemente la
-        primera por orden (en Estudio, la única).
+        Ya no hay una "estrella" que se marque a mano: es la primera por
+        orden (en Estudio, la única) -- SALVO que el plan tenga un objetivo
+        de andar/correr (distancia): ese manda siempre, esté en la
+        posición que esté. De él salen la distancia y el ritmo que se
+        copian a la tarea diaria (ver _running_target_fields); si dejara
+        de ser el "principal" por reordenar objetivos, la tarea se quedaría
+        sin objetivo y dejaría de autocompletarse al importar de Health
+        Connect.
         """
-        return self.items.first()
+        items = list(self.items.select_related("exercise"))
+        if not items:
+            return None
+        for it in items:
+            if it.exercise_id and it.exercise.mode == Exercise.MODE_DISTANCE:
+                return it
+        return items[0]
 
     @property
     def support_items(self):
@@ -3636,8 +3648,18 @@ class PlanItem(models.Model):
         by_day = {}
         for s in self._sessions():
             by_day.setdefault(timezone.localtime(s.recorded_at).date(), []).append(s)
+        # Solo cuentan los días en que el plan pide algo (p.ej. lunes a
+        # viernes). Health Connect manda TODO lo que el móvil detecta, también
+        # un paseo suelto del sábado; sin este filtro ese día salía en el plan
+        # como una sesión fallada (0,1 km de 10) y hundía la racha, a pesar de
+        # que ese día no toca nada.
+        plan_days = set()
+        if self.plan_id and self.plan.repeat == "custom":
+            plan_days = {int(d) for d in self.plan.custom_days_list()}
         rows = []
         for day in sorted(by_day):
+            if plan_days and day.weekday() not in plan_days:
+                continue
             ss = by_day[day]
             dist = sum(s.distance_km or 0 for s in ss)
             secs = sum((s.session_duration_seconds or 0) for s in ss if s.distance_km)
