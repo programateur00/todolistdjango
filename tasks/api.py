@@ -37,6 +37,7 @@ from . import ai
 from .models import (
     CourseModule, CoursePlaylist, CourseQuiz, DebugLog, Exercise, Occurrence, Plan, PlanItem,
     Routine, RoutineItem, SavedVideo, Task, TimerSession, WarmupStatus, WorkoutSession,
+    day_average_pace,
 )
 from .utils import get_current_user, read_mobile_release, resolve_plan_target as _plan_context
 from .youtube_search import YouTubeSearchError, get_videos_details, list_playlist_items
@@ -1249,11 +1250,8 @@ def running_import(request, uuid):
             # el día entero se hizo despacio.
             total_distance = sum(s.distance_km for s in de_hoy if s.distance_km)
             if max_pace is not None and total_distance:
-                segundos_con_duracion = sum(
-                    s.session_duration_seconds for s in de_hoy
-                    if s.distance_km and s.session_duration_seconds
-                )
-                if segundos_con_duracion and (segundos_con_duracion / total_distance) > max_pace:
+                ritmo_hoy = day_average_pace(de_hoy)
+                if ritmo_hoy is not None and ritmo_hoy > max_pace:
                     total_distance = 0.0
 
     if min_steps is not None and total_steps >= min_steps:

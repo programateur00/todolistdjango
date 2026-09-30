@@ -31,6 +31,43 @@ CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
 CEFR_LEVEL_CHOICES = [(lvl, lvl) for lvl in CEFR_LEVELS]
 
 
+# Por encima de este ritmo (segundos por km; 1200 = 20:00/km, unos 3 km/h) una
+# sesión no es andar de verdad: son paradas, esperas, o el Detector de
+# Actividad contando un rato casi quieto como sesión aparte.
+MOVING_MAX_SECONDS_PER_KM = 1200
+
+
+def day_average_pace(sessions):
+    """
+    Ritmo medio del día en segundos por km, o None si no se puede saber
+    (ninguna sesión con distancia Y duración).
+
+    Es la regla ÚNICA de "¿llegó al ritmo pedido?": la usan
+    Task.auto_progress, api.running_import y PlanItem.distance_days, para que
+    barra, tarea y plan no puedan discrepar.
+
+    Solo se cronometran las sesiones en las que de verdad se andaba
+    (<= MOVING_MAX_SECONDS_PER_KM): el Detector de Actividad trocea un
+    paseo en una sesión grande y decenas de fragmentos de pocos metros en
+    mucho tiempo (paradas). Con esos fragmentos dentro, 9,4 km a 12:53/km
+    más 0,7 km "a 53:00/km" salían como 15:31/km de media y el día no
+    contaba aunque el paseo real fuera más rápido que lo pedido. La
+    distancia de esos fragmentos SÍ suma al total del día (la andaste);
+    solo no entran a calcular el ritmo. Si TODAS las sesiones son más lentas
+    que ese límite, se usan todas (andar a 25:00/km sigue sin cumplir).
+    """
+    timed = [
+        (s.distance_km, s.session_duration_seconds)
+        for s in sessions
+        if s.distance_km and s.session_duration_seconds
+    ]
+    if not timed:
+        return None
+    moving = [(km, sec) for km, sec in timed if sec / km <= MOVING_MAX_SECONDS_PER_KM]
+    use = moving or timed
+    return sum(sec for _, sec in use) / sum(km for km, _ in use)
+
+
 class Task(models.Model):
     REPEAT_NONE = "none"
     REPEAT_DAILY = "daily"
@@ -739,11 +776,8 @@ class Task(models.Model):
             # cronometrar, así que no entran en el cálculo del ritmo,
             # pero sí suman a la distancia una vez el ritmo ya cuadra.
             if max_pace is not None and km_hoy:
-                segundos_hoy = sum(
-                    ws.session_duration_seconds for ws in sesiones_hoy
-                    if ws.distance_km and ws.session_duration_seconds
-                )
-                if segundos_hoy and (segundos_hoy / km_hoy) > max_pace:
+                ritmo_hoy = day_average_pace(sesiones_hoy)
+                if ritmo_hoy is not None and ritmo_hoy > max_pace:
                     km_hoy = 0.0
             pct = min(100, round(100 * km_hoy / self.target_distance_km))
             return {
@@ -3662,13 +3696,14 @@ class PlanItem(models.Model):
                 continue
             ss = by_day[day]
             dist = sum(s.distance_km or 0 for s in ss)
-            secs = sum((s.session_duration_seconds or 0) for s in ss if s.distance_km)
             tgt = next((s for s in reversed(ss) if s.target_distance_km), None)
             if tgt:
                 pct = round(100 * dist / tgt.target_distance_km)
-                pace = (secs / dist) if dist and secs else None
+                pace = day_average_pace(ss)
                 tp = tgt.target_pace_seconds_per_km
-                if tp and (pace is None or pace > tp):
+                # Ritmo desconocido (sesión sin duración) NO es incumplirlo:
+                # mismo criterio que running_import y Task.auto_progress.
+                if tp and pace is not None and pace > tp:
                     pct = 0
             else:
                 pct = max(((s.achievement_pct or 0) for s in ss), default=0)
