@@ -107,6 +107,10 @@ def task_json(t):
         # Solo con subcategory="udemy": palabra clave para que la
         # extensión de Chrome sepa si la pestaña activa es de este curso.
         "watch_keyword": t.watch_keyword,
+        # "freestyle" | "plan" (solo Lectura). Un plan con PDF elegido lo
+        # controla su propio visor, NO la extensión de Chrome -- ver
+        # fetchTasksFromServer en chrome-extension/background.js.
+        "reading_mode": t.reading_mode,
         # Igual, solo con subcategory="udemy": si la extensión debe exigir
         # audio (tab.audible, de siempre) o, en su lugar, solo ausencia de
         # inactividad de ratón/teclado -- ver Task.watch_requires_audio.
@@ -907,6 +911,16 @@ def focus_save(request, uuid):
     """
     t = get_object_or_404(tasks_qs(), uuid=uuid)
     data = body(request)
+
+    # Un Plan de lectura con PDF (visor propio) NO se completa por tiempo
+    # de la extensión de Chrome: lo cierra el visor ("Terminar sesión de
+    # hoy" o llegar a la última página), y el visor ya guarda su propio
+    # tiempo. La extensión pide TODAS las tareas de Lectura pendientes y
+    # con cualquier .pdf en primer plano (aunque sea otro documento) le
+    # mandaba minutos al plan, que al no tener target_minutes se cerraba
+    # sola con la primera sesión.
+    if t.reading_mode == Task.READING_MODE_PLAN:
+        return JsonResponse({"ok": True, "ignored": True, "task": task_json(t)})
 
     minutes = max(0, int(data.get("minutes", 0)))
     source = data.get("source") if data.get("source") in dict(TimerSession.SOURCE_CHOICES) else TimerSession.SOURCE_MANUAL

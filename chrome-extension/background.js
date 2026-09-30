@@ -89,7 +89,13 @@ async function fetchTasksFromServer(cfg) {
   // tambien se deja pasar. matchTask() es quien decide, mas abajo, que
   // una palabra clave especifica (normalmente de un Plan) gana siempre
   // sobre el habito generico si las dos encajan a la vez.
-  return pending.filter((t) => t.subcategory === "udemy" || t.subcategory === "reading");
+  // Un Plan de lectura con PDF elegido (reading_mode "plan") lo controla
+  // SU visor dentro de la app -- la extensión no lo vigila ni le manda
+  // minutos, aunque haya otro PDF cualquiera en primer plano. Solo el
+  // Freestyle (y Udemy) pasan por aquí.
+  return pending.filter(
+    (t) => (t.subcategory === "udemy" || t.subcategory === "reading") && t.reading_mode !== "plan"
+  );
 }
 
 async function refreshTasksCache() {
