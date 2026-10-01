@@ -21,7 +21,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v2+standingquadstretch-v1+hipforwardback-v3+frontpos-v1+cindy-v2+lsithold-flow-v10+superman-v2+pikepushup-v1+mountainclimber-v1+elephantsteps-v1+burpee-v1+forearmrotation-v3+hiplateral-v6+hipforwardback-v4+standingquadstretch-v2+pikepushup-v2";
+const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v2+standingquadstretch-v1+hipforwardback-v3+frontpos-v1+cindy-v2+lsithold-flow-v10+superman-v2+pikepushup-v1+mountainclimber-v1+elephantsteps-v1+burpee-v1+forearmrotation-v3+hiplateral-v6+hipforwardback-v4+standingquadstretch-v2";
 
 // Token del registro de depuración remoto (ver settings.DEBUG_LOG_TOKEN
 // en el backend) -- exportScissorLog() lo manda junto al registro para
@@ -875,16 +875,6 @@ const PIKE_DOWN_ANGLE_DEG = 115;              // codo doblado hasta aquí -> aba
 const PIKE_UP_ANGLE_DEG = 145;                // brazo otra vez estirado -> rep completa
 const PIKE_MIN_REP_SECONDS = 0.3;             // de empezar a bajar a estar arriba: menos es ruido
 const PIKE_BROKEN_STABLE_MS = 1000;           // fuera de la postura V tanto tiempo seguido = serie terminada (te levantas, te tumbas...)
-// v2 (2026-10-01): reportado -- tras la 1ª repetición la serie se cerraba sola ("una repetición por serie").
-// Sin registro útil del momento exacto (el buffer se llenó de líneas de descanso), así que se blindan TODAS las
-// formas de cierre accidental: (1) el gesto de mano usa ahora la escala de perfil (ver processPikePushup);
-// (2) una vez armado el gate de la V es LAXO (solo cierra si de verdad te levantas o te tumbas, como plank/tuck lever:
-// estricto para armar, laxo aguantando); (3) abajo del todo -- donde MediaPipe peor ve cabeza/hombros/cadera en una V --
-// hace falta mucho más tiempo fuera de la V para cerrar. Si aun así se cierra, el registro 📋 ahora lo dice con motivo y cifras.
-const PIKE_ARMED_MIN_HIP_RISE_FACTOR = 0.10;          // ya armado: caderas sobre hombro, mínimo (de pie da <0, tumbado/plancha ~0)
-const PIKE_ARMED_BODY_MAX_DEG = 165;                  // ya armado: hombro-cadera-tobillo máximo (de pie/plancha ~175-180°)
-const PIKE_ARMED_HANDS_FEET_MAX_DY_FACTOR = 1.6;      // ya armado: |muñeca.y - tobillo.y| / tronco máximo
-const PIKE_BROKEN_BOTTOM_STABLE_MS = 2500;            // estando abajo (state "bottom"): tiempo fuera de la V para cerrar la serie
 
 // Flexiones en pino (handstand push-up): mismo patrón de histéresis que
 // PUSHUP/PIKE -- ver 0083_add_handstand_pushup.py para el porqué exacto
@@ -3106,25 +3096,25 @@ export function checkDeadHangPosture(lm, holding = false) {
 const DEADHANG_FLICKER_STABLE_MS = 700;
 const DEADHANG_INVALID_STABLE_MS = 1800;
 
-// Pino (handstand): el cuerpo entero queda INVERTIDO, y el orden de arriba
-// abajo en la imagen es siempre el mismo: pies/rodillas, cadera, hombros,
-// codos y, en lo más bajo, las manos en el suelo.
+// Pino (handstand): a diferencia de dead hang (ver historial de este
+// archivo más abajo — un caso especialmente difícil, con varios intentos
+// descartados, porque "colgarte" y "estar de pie estirando los brazos"
+// se ven casi igual para MediaPipe), un pino no tiene ese problema de
+// raíz: el cuerpo entero queda INVERTIDO, con la cadera por encima de
+// los hombros en la imagen — algo que ninguna postura normal (de pie,
+// agachada/o, o incluso tocándose los pies) puede producir. Esa única
+// señal ya distingue un pino de cualquier otra cosa sin ambigüedad, así
+// que no hace falta ningún truco de suavizado ni de referencia personal
+// como los que sí hicieron falta en dead hang.
 //
-// BUG corregido (2026-10-01): antes solo se pedía "cadera por encima de
-// los hombros" + "brazos por debajo de la cadera". Pero una flexión hacia
-// delante de pie (elephant steps, tocarse los pies, de frente a la
-// cámara) cumple justo eso -- al agacharte el tronco, los hombros caen por
-// debajo de la cadera y los brazos cuelgan hacia el suelo -- y se contaba
-// como pino válido. Lo que NUNCA puede hacer una flexión de pie es poner
-// las PIERNAS por encima de la cadera: ahí está la señal que separa un
-// pino de cualquier otra postura (de pie, flexión hacia delante, perro
-// boca abajo/pica, etc.). Por eso ahora también se exige que tobillos
-// (o, si van doblados, rodillas) queden claramente por encima de la
-// cadera, y que se VEAN las piernas -- si no se ven, no se puede
-// distinguir un pino de agacharte sin piernas en el encuadre, así que no
-// se da por válido (antes no se pedía a propósito, para no fallar con los
-// pies fuera de plano; ahora se prefiere avisar de que hay que encuadrar
-// los pies antes que dejar pasar una flexión de pie como pino).
+// Solo dos condiciones, tal y como se pidió: la cadera por encima de
+// los hombros (cuerpo invertido) y los codos/muñecas por debajo de la
+// cadera (los brazos aguantando el peso cerca del suelo, no estirados
+// hacia arriba). No se exige nada de las piernas — ni que estén rectas
+// ni que se vean siquiera — porque en un pino real los pies suelen
+// salirse del encuadre (sobre todo con apoyo en la pared, muy cerca de
+// esta), y exigir visibilidad ahí solo generaría fallos falsos por
+// encuadre, no por mala postura.
 //
 // Sin paso 1 de confirmación (a diferencia de plancha/kneehold/dead
 // hang): con una señal tan clara no hace falta pedir una postura
@@ -3136,25 +3126,12 @@ const DEADHANG_INVALID_STABLE_MS = 1800;
 // pared, así que la postura del cuerpo que se mide es la misma se apoye
 // o no — no hace falta ninguna lógica aparte para cada caso.
 const HANDSTAND_MIN_VISIBILITY = 0.35; // algo más laxo que el resto: bocabajo, MediaPipe pierde algo de confianza y no debe tumbar la cuenta por eso
-// Piernas: visibilidad mínima para fiarse de rodillas/tobillos. Algo más
-// laxa que la del tronco (en un pino real los pies suelen quedar en el
-// borde del encuadre), pero lo bastante alta para que un punto
-// inventado por MediaPipe fuera de plano no dé por buena una postura.
-const HANDSTAND_LEG_MIN_VISIBILITY = 0.3;
 // Margen relativo al ancho de hombros, igual que HANG_MARGIN_FACTOR en
 // dead hang/kneehold — pequeño a propósito, para que baste con estar
 // claramente invertida/o o con los brazos claramente abajo, sin exigir
 // una separación exagerada que sea fácil de perder por el balanceo
 // normal de un pino.
 const HANDSTAND_MARGIN_FACTOR = 0.08;
-// Cuánto por encima de la cadera tienen que quedar las piernas, también
-// en anchos de hombro. En un pino real los pies quedan ~2 anchos de
-// hombro por encima de la cadera (pierna entera), así que 0.6 deja mucho
-// margen; las rodillas piden menos (0.3) por si las piernas van dobladas
-// (pino con las piernas recogidas). Una flexión de pie nunca llega ni a 0
-// (tobillos y rodillas siempre por DEBAJO de la cadera).
-const HANDSTAND_ANKLE_ABOVE_HIP_FACTOR = 0.6;
-const HANDSTAND_KNEE_ABOVE_HIP_FACTOR = 0.3;
 
 export function checkHandstandPosture(lm) {
   const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
@@ -3165,7 +3142,7 @@ export function checkHandstandPosture(lm) {
   if ([lS, rS, lE, rE, lW, rW, lH, rH].some((p) => (p.visibility ?? 1) < HANDSTAND_MIN_VISIBILITY)) {
     return {
       ok: false,
-      reason: "No se te ve entera/o. Ponte de forma que se vean las manos, los brazos, la cadera y los pies en el encuadre.",
+      reason: "No se te ve entera/o. Ponte de forma que se vean las manos, los brazos y la cadera en el encuadre.",
       debug: { fail: "vis" },
     };
   }
@@ -3181,18 +3158,8 @@ export function checkHandstandPosture(lm) {
   const wristMidY = (lW.y + rW.y) / 2;
   const hipMidY = (lH.y + rH.y) / 2;
 
-  // Y medio de los puntos de pierna (rodillas o tobillos) que se ven con
-  // confianza suficiente; null si no se ve ninguno.
-  const legMidY = (a, b) => {
-    const seen = [a, b].filter((p) => p && (p.visibility ?? 1) >= HANDSTAND_LEG_MIN_VISIBILITY);
-    return seen.length ? seen.reduce((sum, p) => sum + p.y, 0) / seen.length : null;
-  };
-  const ankleMidY = legMidY(lm[L_ANKLE], lm[R_ANKLE]);
-  const kneeMidY = legMidY(lm[L_KNEE], lm[R_KNEE]);
-
   const debug = {
     invertido: hipMidY < shoulderMidY - margin ? "sí" : "no",
-    piernasArriba: "?",
   };
 
   // Y crece hacia abajo en la imagen: la cadera tiene que quedar POR
@@ -3201,34 +3168,10 @@ export function checkHandstandPosture(lm) {
     return { ok: false, reason: "Todavía no pareces estar en el pino — sube la cadera por encima de los hombros.", debug };
   }
 
-  // Piernas: tienen que verse, y los tobillos (o las rodillas, si van
-  // dobladas) tienen que quedar POR ENCIMA de la cadera. Esto es lo que
-  // distingue un pino de una flexión hacia delante de pie (elephant
-  // steps…), que también deja los hombros por debajo de la cadera.
-  if (ankleMidY === null && kneeMidY === null) {
-    debug.piernasArriba = "no se ven";
-    return {
-      ok: false,
-      reason: "No se te ven las piernas. Aléjate o inclina la cámara para que se vean los pies en el encuadre.",
-      debug,
-    };
-  }
-  const ankleUp = ankleMidY !== null && ankleMidY < hipMidY - HANDSTAND_ANKLE_ABOVE_HIP_FACTOR * shoulderWidth;
-  const kneeUp = kneeMidY !== null && kneeMidY < hipMidY - HANDSTAND_KNEE_ABOVE_HIP_FACTOR * shoulderWidth;
-  debug.piernasArriba = ankleUp || kneeUp ? "sí" : "no";
-  if (!ankleUp && !kneeUp) {
-    return {
-      ok: false,
-      reason: "Sube las piernas: tienes que estar boca abajo, con las manos en el suelo y los pies por encima de la cadera.",
-      debug,
-    };
-  }
-
   // Brazos por debajo de la cintura: codos y muñecas por debajo de la
-  // cadera en la imagen (Y mayor), y las muñecas además por debajo de
-  // los hombros, como pide el ejercicio — manos en el suelo aguantando
-  // el peso, no estiradas hacia arriba.
-  if (elbowMidY <= hipMidY + margin || wristMidY <= hipMidY + margin || wristMidY <= shoulderMidY + margin) {
+  // cadera en la imagen (Y mayor), como pide el ejercicio — manos en el
+  // suelo aguantando el peso, no estiradas hacia arriba.
+  if (elbowMidY <= hipMidY + margin || wristMidY <= hipMidY + margin) {
     return { ok: false, reason: "Lleva los brazos hacia el suelo, por debajo de la cadera.", debug };
   }
 
@@ -5142,9 +5085,6 @@ class WorkoutSession {
     // segunda ya la sabes, así que solo se dice "Serie de N terminada." a
     // secas, sin repetir la misma explicación en cada serie.
     this.setsCompletedVoiceCount = 0;
-    // Última serie (base 0) para la que ya se dijo "la última vez hiciste N"
-    // -- ver maybeAnnounceLastTime().
-    this.lastTimeSpokenForSet = -1;
 
     this.finishBtn.addEventListener("click", () => this.finish());
     this.cancelBtn.addEventListener("click", () => {
@@ -6234,32 +6174,6 @@ class WorkoutSession {
     hint.hidden = false;
   }
 
-  /**
-   * Dice POR VOZ, al empezar cada serie, cuántas repeticiones hiciste en
-   * esa misma serie la última vez que tocó este ejercicio ("Serie 2. La
-   * última vez hiciste 3 repeticiones en esta serie."). Una sola vez por
-   * serie (lastTimeSpokenForSet). Se llama cada frame desde processResult:
-   * la serie 1 sale nada más arrancar; las siguientes, cuando acaba el
-   * descanso (restVoiceQuiet vuelve a false) y después del "cómo
-   * colocarte" pendiente (pendingRestEndMessage), para no pisarlo.
-   */
-  maybeAnnounceLastTime() {
-    const last = this.lastSets;
-    if (!Array.isArray(last) || !last.length) return;
-    const i = this.sets.length; // serie en curso, base 0
-    if (this.lastTimeSpokenForSet === i) return;
-    if (this.restVoiceQuiet) return;          // todavía en pleno descanso
-    if (this.pendingRestEndMessage) return;   // primero "cómo colocarte"
-    this.lastTimeSpokenForSet = i;
-    if (this.currentSetReps > 0) return;      // serie ya empezada: no interrumpir
-    if (!this.voiceEnabled) return;
-    const reps = (n) => `${n} ${n === 1 ? "repetición" : "repeticiones"}`;
-    const text = i < last.length
-      ? `Serie ${i + 1}. La última vez hiciste ${reps(last[i])} en esta serie.`
-      : `Serie ${i + 1}, extra. La última vez hiciste ${last.length} ${last.length === 1 ? "serie" : "series"}.`;
-    this.speak(text, { flush: false });
-  }
-
   loop() {
     if (!this.running) return;
     const now = performance.now();
@@ -6267,15 +6181,8 @@ class WorkoutSession {
       if (now < this.restPauseUntil) {
         // Descanso: sin detección, sin esqueleto dibujado, sin avisos.
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        // Una línea por SEGUNDO, no por frame: a ~60 líneas/s el descanso llenaba el buffer del registro 📋
-        // (scissorLogMax) y se perdía justo lo anterior, la serie que se quería diagnosticar (2026-10-01).
         if (this.debugEl) {
-          const restLeft = Math.ceil((this.restPauseUntil - now) / 1000);
-          const restKey = `${this.restPauseUntil}:${restLeft}`;
-          if (restKey !== this._restLogKey) {
-            this._restLogKey = restKey;
-            this.debugEl.textContent = `descanso — detección en pausa (quedan ${restLeft}s)`;
-          }
+          this.debugEl.textContent = `descanso — detección en pausa (quedan ${Math.ceil((this.restPauseUntil - now) / 1000)}s)`;
         }
         requestAnimationFrame(() => this.loop());
         return;
@@ -7728,14 +7635,10 @@ class WorkoutSession {
    * durante PIKE_BROKEN_STABLE_MS, agitar la mano o salir de encuadre cierra la serie.
    */
   processPikePushup(lm, now) {
-    // Escala de perfil (cadera-rodilla), igual que crunch/legraise: de perfil shoulderWidth ~ 0 y el margen del gesto
-    // (0.25 x escala) quedaba en pocos píxeles -- el temblor de la muñeca bastaba para "agitar la mano" solo.
-    if (this.state !== null && this.checkWaveGesture(lm, now, this.profileGestureScale(lm))) {
-      this.logScissor("[gesto de mano detectado] cerrando serie (pike push-up)");
+    if (this.state !== null && this.checkWaveGesture(lm, now)) {
       this.closeActiveSet();
       return;
     }
-    const brokenMs = this.state === "bottom" ? PIKE_BROKEN_BOTTOM_STABLE_MS : PIKE_BROKEN_STABLE_MS;
 
     const lShoulder = lm[L_SHOULDER], rShoulder = lm[R_SHOULDER];
     const lElbow = lm[L_ELBOW], rElbow = lm[R_ELBOW];
@@ -7764,8 +7667,7 @@ class WorkoutSession {
       this.groundStableSince = null;
       if (this.state !== null) {
         if (this.offGroundSince === null) this.offGroundSince = now;
-        if (now - this.offGroundSince >= brokenMs) {
-          this.logScissor(`[visibilidad baja ${Math.round(now - this.offGroundSince)}ms, estado=${this.state}] vis=${vis.toFixed(2)} (mín ${PUSHUP_MIN_VISIBILITY}) — cerrando serie (pike push-up)`);
+        if (now - this.offGroundSince >= PIKE_BROKEN_STABLE_MS) {
           this.closeActiveSet();
           return;
         }
@@ -7793,32 +7695,22 @@ class WorkoutSession {
     const bodyBent = bodyAngle <= PIKE_BODY_MAX_DEG;
     const handsOnFloor = handsFeetDy <= PIKE_HANDS_FEET_MAX_DY_FACTOR;
     const inPosition = hipsHigh && bodyBent && handsOnFloor;
-    // Ya armado el gate es laxo (ver PIKE_ARMED_*): armar sigue exigiendo la V de verdad (inPosition), mantener la serie no.
-    const stillInV =
-      hipRise >= PIKE_ARMED_MIN_HIP_RISE_FACTOR &&
-      bodyAngle <= PIKE_ARMED_BODY_MAX_DEG &&
-      handsFeetDy <= PIKE_ARMED_HANDS_FEET_MAX_DY_FACTOR;
 
     this.pushupSide = useLeft ? "left" : "right";
 
     if (this.state !== null) {
       // Ya armado: fuera de la V el frame se descarta (un gesto suelto no puede colarse como rep) y, si se
       // sostiene, la serie se cierra sola.
-      if (!stillInV) {
+      if (!inPosition) {
         if (this.offGroundSince === null) this.offGroundSince = now;
-        if (now - this.offGroundSince >= brokenMs) {
-          this.logScissor(
-            `[fuera de la V ${Math.round(now - this.offGroundSince)}ms, estado=${this.state}] cerrando serie (pike push-up) — ` +
-            `caderas sobre hombro ${(hipRise * 100).toFixed(0)}% (mín ${(PIKE_ARMED_MIN_HIP_RISE_FACTOR * 100).toFixed(0)}%), ` +
-            `ángulo cuerpo ${bodyAngle.toFixed(0)}° (máx ${PIKE_ARMED_BODY_MAX_DEG}°), manos/pies dy ${(handsFeetDy * 100).toFixed(0)}% (máx ${(PIKE_ARMED_HANDS_FEET_MAX_DY_FACTOR * 100).toFixed(0)}%)`
-          );
+        if (now - this.offGroundSince >= PIKE_BROKEN_STABLE_MS) {
           this.closeActiveSet();
           return;
         }
         if (this.debugEl) {
           this.debugEl.textContent =
-            `fuera de la V (caderas sobre hombro: ${(hipRise * 100).toFixed(0)}% tronco, mín ${(PIKE_ARMED_MIN_HIP_RISE_FACTOR * 100).toFixed(0)}% · ` +
-            `ángulo cuerpo: ${bodyAngle.toFixed(0)}°, máx ${PIKE_ARMED_BODY_MAX_DEG}° · manos/pies dy: ${(handsFeetDy * 100).toFixed(0)}%, máx ${(PIKE_ARMED_HANDS_FEET_MAX_DY_FACTOR * 100).toFixed(0)}%) — se descarta este frame`;
+            `fuera de la V (caderas sobre hombro: ${(hipRise * 100).toFixed(0)}% tronco, mín ${(PIKE_MIN_HIP_RISE_FACTOR * 100).toFixed(0)}% · ` +
+            `ángulo cuerpo: ${bodyAngle.toFixed(0)}°, máx ${PIKE_BODY_MAX_DEG}° · manos/pies en suelo: ${handsOnFloor ? "sí" : "no"}) — se descarta este frame`;
         }
         return;
       }
@@ -11629,7 +11521,7 @@ class WorkoutSession {
       return "Ponte de pie junto a las paralelas, de perfil, un momento; luego súbete con los brazos estirados y sube las piernas rectas hasta la altura de la cadera (forma de L).";
     }
     if (this.counterKey === "handstand") {
-      return "Ponte en un pino (con o sin apoyo en la pared), boca abajo: manos en el suelo, brazos por debajo de la cadera y pies por encima de ella. Coloca la cámara para que se vean las manos y los pies en el encuadre.";
+      return "Sube a un pino (con o sin apoyo en la pared) hasta que la cadera quede por encima de los hombros y los brazos por debajo de la cadera, aguantando el peso cerca del suelo.";
     }
     // Estiramiento cruzado de brazo: paso 1 pide standby; paso 2, si ya
     // se sabe qué brazo se estiró la vez anterior (stretchLastSide),
@@ -14774,7 +14666,6 @@ class WorkoutSession {
 
   processResult(result, now) {
     this.maybeAnnounceRestEnd(now);
-    this.maybeAnnounceLastTime();
     const hasPose = !!(result.landmarks && result.landmarks.length);
     const personCheck = hasPose ? this.checkRealPerson(result.landmarks[0], now) : null;
     if (!hasPose || !personCheck.ok) {

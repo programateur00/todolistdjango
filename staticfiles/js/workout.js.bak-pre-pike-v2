@@ -21,7 +21,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v2+standingquadstretch-v1+hipforwardback-v3+frontpos-v1+cindy-v2+lsithold-flow-v10+superman-v2+pikepushup-v1+mountainclimber-v1+elephantsteps-v1+burpee-v1+forearmrotation-v3+hiplateral-v6+hipforwardback-v4+standingquadstretch-v2+pikepushup-v2";
+const WORKOUT_JS_BUILD = "2026-09-09-voicestep-per-exercise+arm-cross-v8+voice5s+armcircles-v6+necklateral-v3+armscissors-v2+legrotation-v4+kneeraises-v1+heelkicks-v10+seatedhamstring-v4+hiplateral-v5+neckcircles-v1+neckhalfturn-v2+forearmrotation-v2+standingquadstretch-v1+hipforwardback-v3+frontpos-v1+cindy-v2+lsithold-flow-v10+superman-v2+pikepushup-v1+mountainclimber-v1+elephantsteps-v1+burpee-v1+forearmrotation-v3+hiplateral-v6+hipforwardback-v4+standingquadstretch-v2";
 
 // Token del registro de depuración remoto (ver settings.DEBUG_LOG_TOKEN
 // en el backend) -- exportScissorLog() lo manda junto al registro para
@@ -875,16 +875,6 @@ const PIKE_DOWN_ANGLE_DEG = 115;              // codo doblado hasta aquí -> aba
 const PIKE_UP_ANGLE_DEG = 145;                // brazo otra vez estirado -> rep completa
 const PIKE_MIN_REP_SECONDS = 0.3;             // de empezar a bajar a estar arriba: menos es ruido
 const PIKE_BROKEN_STABLE_MS = 1000;           // fuera de la postura V tanto tiempo seguido = serie terminada (te levantas, te tumbas...)
-// v2 (2026-10-01): reportado -- tras la 1ª repetición la serie se cerraba sola ("una repetición por serie").
-// Sin registro útil del momento exacto (el buffer se llenó de líneas de descanso), así que se blindan TODAS las
-// formas de cierre accidental: (1) el gesto de mano usa ahora la escala de perfil (ver processPikePushup);
-// (2) una vez armado el gate de la V es LAXO (solo cierra si de verdad te levantas o te tumbas, como plank/tuck lever:
-// estricto para armar, laxo aguantando); (3) abajo del todo -- donde MediaPipe peor ve cabeza/hombros/cadera en una V --
-// hace falta mucho más tiempo fuera de la V para cerrar. Si aun así se cierra, el registro 📋 ahora lo dice con motivo y cifras.
-const PIKE_ARMED_MIN_HIP_RISE_FACTOR = 0.10;          // ya armado: caderas sobre hombro, mínimo (de pie da <0, tumbado/plancha ~0)
-const PIKE_ARMED_BODY_MAX_DEG = 165;                  // ya armado: hombro-cadera-tobillo máximo (de pie/plancha ~175-180°)
-const PIKE_ARMED_HANDS_FEET_MAX_DY_FACTOR = 1.6;      // ya armado: |muñeca.y - tobillo.y| / tronco máximo
-const PIKE_BROKEN_BOTTOM_STABLE_MS = 2500;            // estando abajo (state "bottom"): tiempo fuera de la V para cerrar la serie
 
 // Flexiones en pino (handstand push-up): mismo patrón de histéresis que
 // PUSHUP/PIKE -- ver 0083_add_handstand_pushup.py para el porqué exacto
@@ -6267,15 +6257,8 @@ class WorkoutSession {
       if (now < this.restPauseUntil) {
         // Descanso: sin detección, sin esqueleto dibujado, sin avisos.
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        // Una línea por SEGUNDO, no por frame: a ~60 líneas/s el descanso llenaba el buffer del registro 📋
-        // (scissorLogMax) y se perdía justo lo anterior, la serie que se quería diagnosticar (2026-10-01).
         if (this.debugEl) {
-          const restLeft = Math.ceil((this.restPauseUntil - now) / 1000);
-          const restKey = `${this.restPauseUntil}:${restLeft}`;
-          if (restKey !== this._restLogKey) {
-            this._restLogKey = restKey;
-            this.debugEl.textContent = `descanso — detección en pausa (quedan ${restLeft}s)`;
-          }
+          this.debugEl.textContent = `descanso — detección en pausa (quedan ${Math.ceil((this.restPauseUntil - now) / 1000)}s)`;
         }
         requestAnimationFrame(() => this.loop());
         return;
@@ -7728,14 +7711,10 @@ class WorkoutSession {
    * durante PIKE_BROKEN_STABLE_MS, agitar la mano o salir de encuadre cierra la serie.
    */
   processPikePushup(lm, now) {
-    // Escala de perfil (cadera-rodilla), igual que crunch/legraise: de perfil shoulderWidth ~ 0 y el margen del gesto
-    // (0.25 x escala) quedaba en pocos píxeles -- el temblor de la muñeca bastaba para "agitar la mano" solo.
-    if (this.state !== null && this.checkWaveGesture(lm, now, this.profileGestureScale(lm))) {
-      this.logScissor("[gesto de mano detectado] cerrando serie (pike push-up)");
+    if (this.state !== null && this.checkWaveGesture(lm, now)) {
       this.closeActiveSet();
       return;
     }
-    const brokenMs = this.state === "bottom" ? PIKE_BROKEN_BOTTOM_STABLE_MS : PIKE_BROKEN_STABLE_MS;
 
     const lShoulder = lm[L_SHOULDER], rShoulder = lm[R_SHOULDER];
     const lElbow = lm[L_ELBOW], rElbow = lm[R_ELBOW];
@@ -7764,8 +7743,7 @@ class WorkoutSession {
       this.groundStableSince = null;
       if (this.state !== null) {
         if (this.offGroundSince === null) this.offGroundSince = now;
-        if (now - this.offGroundSince >= brokenMs) {
-          this.logScissor(`[visibilidad baja ${Math.round(now - this.offGroundSince)}ms, estado=${this.state}] vis=${vis.toFixed(2)} (mín ${PUSHUP_MIN_VISIBILITY}) — cerrando serie (pike push-up)`);
+        if (now - this.offGroundSince >= PIKE_BROKEN_STABLE_MS) {
           this.closeActiveSet();
           return;
         }
@@ -7793,32 +7771,22 @@ class WorkoutSession {
     const bodyBent = bodyAngle <= PIKE_BODY_MAX_DEG;
     const handsOnFloor = handsFeetDy <= PIKE_HANDS_FEET_MAX_DY_FACTOR;
     const inPosition = hipsHigh && bodyBent && handsOnFloor;
-    // Ya armado el gate es laxo (ver PIKE_ARMED_*): armar sigue exigiendo la V de verdad (inPosition), mantener la serie no.
-    const stillInV =
-      hipRise >= PIKE_ARMED_MIN_HIP_RISE_FACTOR &&
-      bodyAngle <= PIKE_ARMED_BODY_MAX_DEG &&
-      handsFeetDy <= PIKE_ARMED_HANDS_FEET_MAX_DY_FACTOR;
 
     this.pushupSide = useLeft ? "left" : "right";
 
     if (this.state !== null) {
       // Ya armado: fuera de la V el frame se descarta (un gesto suelto no puede colarse como rep) y, si se
       // sostiene, la serie se cierra sola.
-      if (!stillInV) {
+      if (!inPosition) {
         if (this.offGroundSince === null) this.offGroundSince = now;
-        if (now - this.offGroundSince >= brokenMs) {
-          this.logScissor(
-            `[fuera de la V ${Math.round(now - this.offGroundSince)}ms, estado=${this.state}] cerrando serie (pike push-up) — ` +
-            `caderas sobre hombro ${(hipRise * 100).toFixed(0)}% (mín ${(PIKE_ARMED_MIN_HIP_RISE_FACTOR * 100).toFixed(0)}%), ` +
-            `ángulo cuerpo ${bodyAngle.toFixed(0)}° (máx ${PIKE_ARMED_BODY_MAX_DEG}°), manos/pies dy ${(handsFeetDy * 100).toFixed(0)}% (máx ${(PIKE_ARMED_HANDS_FEET_MAX_DY_FACTOR * 100).toFixed(0)}%)`
-          );
+        if (now - this.offGroundSince >= PIKE_BROKEN_STABLE_MS) {
           this.closeActiveSet();
           return;
         }
         if (this.debugEl) {
           this.debugEl.textContent =
-            `fuera de la V (caderas sobre hombro: ${(hipRise * 100).toFixed(0)}% tronco, mín ${(PIKE_ARMED_MIN_HIP_RISE_FACTOR * 100).toFixed(0)}% · ` +
-            `ángulo cuerpo: ${bodyAngle.toFixed(0)}°, máx ${PIKE_ARMED_BODY_MAX_DEG}° · manos/pies dy: ${(handsFeetDy * 100).toFixed(0)}%, máx ${(PIKE_ARMED_HANDS_FEET_MAX_DY_FACTOR * 100).toFixed(0)}%) — se descarta este frame`;
+            `fuera de la V (caderas sobre hombro: ${(hipRise * 100).toFixed(0)}% tronco, mín ${(PIKE_MIN_HIP_RISE_FACTOR * 100).toFixed(0)}% · ` +
+            `ángulo cuerpo: ${bodyAngle.toFixed(0)}°, máx ${PIKE_BODY_MAX_DEG}° · manos/pies en suelo: ${handsOnFloor ? "sí" : "no"}) — se descarta este frame`;
         }
         return;
       }

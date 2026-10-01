@@ -91,14 +91,36 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   let paused = false;
   let workoutSession = null;
 
+  // Series del ejercicio CRONOMETRADO en curso (2026-10-01, a petición de
+  // Alex; mismo comportamiento que session-runner.js en la app móvil):
+  // antes un aguante de plan (plancha, pino, silla en pared...) era UNA
+  // sola cuenta sin importar target_sets -- "3 series al fallo" hacía una
+  // y pasaba al siguiente. Ahora se repite target_sets veces con descanso
+  // entre series, igual que los de repeticiones (workout.js).
+  // SET_REST_SECONDS = REST_ALERT_SECONDS de workout.js. Solo items con
+  // target_source === "plan".
+  const SET_REST_SECONDS = 90;
+  // "Al fallo" con cámara: la serie se da por terminada sola cuando la
+  // postura lleva FAILURE_POSTURE_LOST_SECONDS seguidos rota, siempre que
+  // antes se hubieran aguantado FAILURE_MIN_HOLD_SECONDS.
+  const FAILURE_POSTURE_LOST_SECONDS = 3;
+  const FAILURE_MIN_HOLD_SECONDS = 2;
+  let setsTotal = 1;
+  let setNo = 1;
+  let setsDone = 0;
+  let heldTotal = 0;
+
   function current() {
     return sequence[index];
   }
   function hasNext() {
     return index < sequence.length - 1;
   }
-  function progressLabel() {
+  function progressBase() {
     return `Ejercicio ${index + 1} de ${sequence.length}`;
+  }
+  function progressLabel() {
+    return setsTotal > 1 ? `${progressBase()} · Serie ${setNo} de ${setsTotal}` : progressBase();
   }
   function record(entry) {
     breakdown.push(entry);
@@ -110,14 +132,95 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 
   const STRETCH_FIXED_COUNTERS = new Set(["armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
 
+  /** Series que tiene que hacer un ejercicio CRONOMETRADO (aguante o
+   *  cuenta atrás). 1 = como siempre (una sola cuenta). Los de cámara
+   *  (mode "pose") llevan sus series dentro de workout.js. */
+  function plannedSets(item) {
+    if (item.target_source !== "plan" || item.mode === "pose") return 1;
+    if (STRETCH_FIXED_COUNTERS.has(item.counter_key)) return 1;
+    return Math.max(1, parseInt(item.target_sets, 10) || 1);
+  }
+
   function runCurrent() {
     const item = current();
     if (!item) return finish();
+    setsTotal = plannedSets(item);
+    setNo = 1;
+    setsDone = 0;
+    heldTotal = 0;
     // Dice el nombre del ejercicio al empezar (tren superior o inferior).
-    if (isVoiceEnabled()) speakOut(item.name, { flush: true });
+    if (isVoiceEnabled()) {
+      speakOut(setsTotal > 1 ? `Ahora toca ${item.name}. Serie 1 de ${setsTotal}` : `Ahora toca ${item.name}`, { flush: true });
+    }
+    runSet(item);
+  }
+
+  /** Arranca UNA serie (o el ejercicio entero, si solo tiene una). */
+  function runSet(item) {
     if (item.mode === "pose") runCamera(item);
     else if (POSTURE_COUNTERS.has(item.counter_key)) runTimerWithPosture(item);
     else runTimer(item);
+  }
+
+  // -------------------------------------------- series de un cronometrado
+
+  /** Cierra UNA serie cronometrada con `seconds` aguantados. Si quedan
+   *  series por hacer, descanso (SET_REST_SECONDS) y la siguiente; si era
+   *  la última (o `skipExercise`), guarda el ejercicio entero -- segundos
+   *  totales y series hechas -- y pasa solo al siguiente. */
+  function finishTimedSet(item, seconds, { skipExercise = false, recordEmpty = false } = {}) {
+    clearInterval(timerId);
+    if (seconds > 0) {
+      heldTotal += seconds;
+      setsDone += 1;
+    }
+    if (!skipExercise && setNo < setsTotal) {
+      const done = setNo;
+      setNo += 1;
+      runSetRest(item, done);
+      return;
+    }
+    recordTimed(item, recordEmpty);
+    advance();
+  }
+
+  /** "Terminar sesión antes" a mitad de un cronometrado: guarda lo que
+   *  llevara y cierra todo. */
+  function quitTimed(item, seconds, recordEmpty = false) {
+    if (seconds > 0) {
+      heldTotal += seconds;
+      setsDone += 1;
+    }
+    recordTimed(item, recordEmpty);
+    finish();
+  }
+
+  function recordTimed(item, recordEmpty = false) {
+    if (heldTotal <= 0 && !recordEmpty) return;
+    const entry = { exercise: item.slug, seconds: heldTotal };
+    // "sets" solo en ejercicios de plan (el % de los "al fallo" se mide en
+    // series hechas).
+    if (item.target_source === "plan") entry.sets = setsDone;
+    record(entry);
+  }
+
+  /** Descanso ENTRE series del mismo ejercicio (el de entre ejercicios
+   *  sigue siendo item.rest, ver advance()). */
+  function runSetRest(item, doneNo) {
+    if (isVoiceEnabled()) speakOut(`Serie ${doneNo} de ${setsTotal} terminada. Descanso.`, { flush: true });
+    runRest(SET_REST_SECONDS, {
+      nextItem: item,
+      progress: `${progressBase()} · Serie ${doneNo} de ${setsTotal} hecha`,
+      nextLabel: `Siguiente: serie ${setNo} de ${setsTotal} — ${item.name}`,
+      onDone: () => {
+        if (isVoiceEnabled()) speakOut(`Serie ${setNo} de ${setsTotal}`, { flush: true });
+        runSet(item);
+      },
+      onSkipExercise: () => {
+        recordTimed(item);
+        advance();
+      },
+    });
   }
 
   // -------------------------------------------------------- cronómetro
@@ -131,6 +234,8 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     // Estiramientos con cronómetro: 30 s fijos, y al cumplirse pasa solo al siguiente.
     const work = STRETCH_FIXED_COUNTERS.has(item.counter_key) ? 30 : item.work;
     const isFailure = !work;
+    // ¿Quedan series después de esta? (ver plannedSets)
+    const moreSets = setNo < setsTotal;
     playerHost.innerHTML = `
       <div class="circuit">
         <p class="circuit__progress">${esc(progressLabel())}</p>
@@ -141,8 +246,11 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         <p class="circuit__next">${hasNext() ? `Siguiente: ${esc(sequence[index + 1].name)}` : "¡Último!"}</p>
         <div class="circuit__controls">
           <button type="button" class="workout__btn workout__btn--ghost" id="run-pause">Pausar</button>
-          <button type="button" class="workout__btn workout__btn--primary" id="run-skip">${hasNext() ? "Siguiente ▸" : "Terminar"}</button>
+          <button type="button" class="workout__btn workout__btn--primary" id="run-skip">${
+            moreSets && isFailure ? "Serie hecha ▸" : hasNext() ? "Siguiente ▸" : "Terminar"
+          }</button>
         </div>
+        ${moreSets && isFailure ? `<button type="button" class="workout__btn workout__btn--ghost" id="run-skip-exercise">Saltar ejercicio ▸</button>` : ""}
         <button type="button" class="workout__btn workout__btn--subtle" id="run-quit">Terminar sesión antes</button>
         <button type="button" class="workout__btn workout__btn--ghost" id="run-debug-export">📋 Enviar registro de depuración</button>
         <p id="run-debug-export-status" class="workout__debug"></p>
@@ -182,9 +290,10 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       if (remaining <= 0) {
         clearInterval(timerId);
         logDebugLine(`objetivo cumplido (${work}s)`);
-        record({ exercise: item.slug, seconds: work });
         beep(880, 0.2);
-        advance();
+        // Con varias series: descanso y la siguiente; con una (o la
+        // última): guarda y pasa solo al siguiente ejercicio.
+        finishTimedSet(item, work);
         return;
       }
       logDebugLine(`restantes=${remaining}s de ${work}s`);
@@ -208,16 +317,21 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       pauseBtn.textContent = paused ? "Reanudar" : "Pausar";
       logDebugLine(paused ? "pausado" : "reanudado");
     });
+    // Al fallo: el botón principal cierra ESTA serie (y con ella el
+    // ejercicio si era la última). Con objetivo de segundos: sigue siendo
+    // "saltar el ejercicio" entero, como siempre.
     document.getElementById("run-skip").addEventListener("click", () => {
       clearInterval(timerId);
-      if (elapsed > 0) record({ exercise: item.slug, seconds: elapsed });
-      advance();
+      finishTimedSet(item, elapsed, { skipExercise: !isFailure });
+    });
+    document.getElementById("run-skip-exercise")?.addEventListener("click", () => {
+      clearInterval(timerId);
+      finishTimedSet(item, elapsed, { skipExercise: true });
     });
     document.getElementById("run-quit").addEventListener("click", () => {
       if (!confirm("¿Terminar la sesión ahora? Se guarda lo hecho hasta aquí.")) return;
       clearInterval(timerId);
-      if (elapsed > 0) record({ exercise: item.slug, seconds: elapsed });
-      finish();
+      quitTimed(item, elapsed);
     });
     document.getElementById("run-debug-export").addEventListener("click", () => {
       exportDebugLogText({
@@ -260,6 +374,9 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     // principal para avanzar está disponible desde ya (como en runCamera),
     // no escondido detrás de un objetivo que aquí no existe.
     const isFailure = !item.work;
+    // Series (ver plannedSets/SET_REST_SECONDS): ¿esta no es la última?
+    const moreSets = setNo < setsTotal;
+    const multiSets = setsTotal > 1;
 
     playerHost.innerHTML = `
       <div class="circuit">
@@ -276,15 +393,18 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         <p class="circuit__next">${hasNext() ? `Siguiente: ${esc(sequence[index + 1].name)}` : "¡Último!"}</p>
         <div class="circuit__controls">
           <button type="button" class="workout__btn ${isFailure ? "workout__btn--primary" : "workout__btn--ghost"}" id="run-skip">${
-            isFailure ? (hasNext() ? "Siguiente ▸" : "Terminar") : "Saltar ▸"
+            isFailure ? (moreSets ? "Serie hecha ▸" : hasNext() ? "Siguiente ▸" : "Terminar") : "Saltar ▸"
           }</button>
         </div>
+        ${isFailure && moreSets ? `<button type="button" class="workout__btn workout__btn--ghost" id="run-skip-exercise">Saltar ejercicio ▸</button>` : ""}
         <button type="button" class="workout__btn workout__btn--subtle" id="run-quit">Terminar sesión antes</button>
         <button type="button" class="workout__btn workout__btn--ghost" id="run-debug-export">📋 Enviar registro de depuración</button>
         <p id="run-debug-export-status" class="workout__debug"></p>
         <p class="workout__note">${
           isFailure
-            ? "Aguanta hasta que ya no puedas y pulsa Siguiente/Terminar."
+            ? `Aguanta hasta que ya no puedas: la serie se cierra sola si pierdes la postura unos segundos (o pulsa ${moreSets ? "«Serie hecha»" : "Siguiente/Terminar"}).${moreSets ? ` Después, descanso de ${SET_REST_SECONDS} s.` : hasNext() ? " Al terminar pasa solo al siguiente ejercicio." : ""}`
+            : multiSets
+            ? `Serie ${setNo} de ${setsTotal}: al llegar a 0 ${moreSets ? `descansas ${SET_REST_SECONDS} s y sigue la siguiente serie` : "pasa solo al siguiente ejercicio"}. La cuenta atrás se pausa sola mientras la postura no sea correcta.`
             : "La cuenta atrás se pausa sola mientras la postura no sea correcta. Si sigues después del objetivo, sigue sumando por encima del 100%."
         }</p>
       </div>`;
@@ -321,20 +441,27 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       if (poseLandmarker) poseLandmarker.close();
     }
 
-    function finishThis(secondsHeld) {
+    // Para la cámara; el guardado y el paso a descanso/siguiente los hace
+    // finishTimedSet (ver "series de un cronometrado").
+    function stopThis() {
       clearInterval(timerId);
       stopCamera();
-      record({ exercise: item.slug, seconds: secondsHeld });
     }
 
+    // Al fallo: el botón principal cierra ESTA serie. Con objetivo de
+    // segundos: "Saltar"/"Siguiente" salta el ejercicio entero, como antes.
     skipBtn.addEventListener("click", () => {
-      finishThis(elapsed);
-      advance();
+      stopThis();
+      finishTimedSet(item, elapsed, { skipExercise: !isFailure, recordEmpty: true });
+    });
+    document.getElementById("run-skip-exercise")?.addEventListener("click", () => {
+      stopThis();
+      finishTimedSet(item, elapsed, { skipExercise: true, recordEmpty: true });
     });
     document.getElementById("run-quit").addEventListener("click", () => {
       if (!confirm("¿Terminar la sesión ahora? Se guarda lo hecho hasta aquí.")) return;
-      finishThis(elapsed);
-      finish();
+      stopThis();
+      quitTimed(item, elapsed, true);
     });
     document.getElementById("run-debug-export").addEventListener("click", () => {
       exportDebugLogText({
@@ -356,10 +483,22 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       statusEl.textContent = "No se pudo acceder a la cámara — revisa los permisos del navegador. La cuenta atrás sigue sin comprobar la postura.";
       postureOk = true; // sin cámara, no bloquea el ejercicio — degrada a cronómetro normal
     }
+    // Si mientras cargaba la cámara se pulsó "Serie hecha"/"Saltar"
+    // (stopThis ya puso running=false y se pintó otra pantalla), esta
+    // ejecución quedó obsoleta: se suelta la cámara y no se arranca nada --
+    // si siguiera, pisaría el temporizador de la pantalla nueva.
+    if (!running) {
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+      return;
+    }
 
     if (stream) {
       video.srcObject = stream;
       await video.play();
+      if (!running) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
       canvas.width = video.videoWidth || 640;
       canvas.height = video.videoHeight || 480;
 
@@ -374,6 +513,12 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         statusEl.textContent = "No se pudo cargar el seguimiento de postura. La cuenta atrás sigue sin comprobarla.";
         postureOk = true;
         console.error(err);
+      }
+      if (!running) {
+        // Obsoleta mientras cargaba el modelo (ver arriba).
+        if (poseLandmarker) poseLandmarker.close();
+        stream.getTracks().forEach((t) => t.stop());
+        return;
       }
 
       if (poseLandmarker) {
@@ -398,11 +543,23 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     }
 
     clearInterval(timerId);
+    let lostSeconds = 0; // segundos seguidos con la postura rota (solo para cerrar una serie al fallo)
     timerId = setInterval(() => {
       if (!postureOk) {
+        lostSeconds += 1;
         logDebugLine(`pausado (postura no válida: ${lastPostureReason || "?"}) ${lastPostureDebug}`);
+        // Al fallo no hay objetivo que dé la serie por cumplida: como en
+        // los ejercicios de repeticiones, se cierra sola cuando ya no
+        // aguantas la postura (tras haber aguantado algo).
+        if (isFailure && elapsed >= FAILURE_MIN_HOLD_SECONDS && lostSeconds >= FAILURE_POSTURE_LOST_SECONDS) {
+          logDebugLine(`serie al fallo cerrada: postura rota ${lostSeconds}s tras ${elapsed}s`);
+          stopThis();
+          beep(880, 0.2);
+          finishTimedSet(item, elapsed, { recordEmpty: true });
+        }
         return; // pausado mientras la postura no sea válida
       }
+      lostSeconds = 0;
       elapsed += 1;
 
       if (isFailure) {
@@ -430,6 +587,15 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       }
 
       if (!goalReached) {
+        if (multiSets) {
+          // Objetivo cumplido con varias series: descanso y la siguiente
+          // (o, la última, pasa sola al siguiente ejercicio).
+          logDebugLine(`objetivo cumplido (${item.work}s), serie ${setNo} de ${setsTotal}`);
+          beep(880, 0.2);
+          stopThis();
+          finishTimedSet(item, item.work, { recordEmpty: true });
+          return;
+        }
         goalReached = true;
         lastSpokenNumber = 0;
         logDebugLine(`objetivo cumplido (${item.work}s)`);
@@ -472,7 +638,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       <div id="workout-root" class="workout"
            data-save-url="local" data-cancel-url="#" data-exercise-slug="${esc(item.slug)}"
            data-target-sets="${item.target_sets || ""}" data-target-reps="${item.target_reps || ""}"
-           data-last-sets="${!item.target_reps && item.last_sets ? esc(JSON.stringify(item.last_sets)) : ""}"
+           data-last-sets="${item.last_sets ? esc(JSON.stringify(item.last_sets)) : ""}"
            data-counter-key="${esc(item.counter_key || "pullup")}"
            data-voice-step="${item.voice_step || 1}">
         <p class="circuit__progress">${esc(progressLabel())}</p>
@@ -543,24 +709,35 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     const item = current();
     index += 1;
     if (index >= sequence.length) return finish();
+    // Las series del ejercicio que acaba de cerrarse no pintan en la
+    // pantalla de descanso del siguiente (ver progressLabel).
+    setsTotal = 1;
+    setNo = 1;
     const rest = item?.rest ?? 0;
     if (rest > 0) runRest(rest);
     else runCurrent();
   }
 
-  function runRest(seconds) {
-    const next = current();
+  /** @param {number} seconds
+   *  @param {{nextItem?:object, progress?:string, nextLabel?:string,
+   *           onDone?:Function, onSkipExercise?:Function}} opts  por
+   *   defecto, el descanso de entre ejercicios (siguiente = current() y
+   *   luego runCurrent); runSetRest lo usa para el de entre series. */
+  function runRest(seconds, opts = {}) {
+    const next = opts.nextItem || current();
+    const onDone = opts.onDone || (() => runCurrent());
     playerHost.innerHTML = `
       <div class="circuit">
-        <p class="circuit__progress">${esc(progressLabel())}</p>
+        <p class="circuit__progress">${esc(opts.progress || progressLabel())}</p>
         <div class="circuit__icon circuit__icon--next">${iconFor(next.slug)}</div>
         <h2 class="circuit__exercise-name">Descanso</h2>
         <p class="circuit__phase circuit__phase--rest">Descanso</p>
         <div class="circuit__timer" id="run-timer">${fmt(seconds)}</div>
-        <p class="circuit__next">Siguiente: ${esc(next.name)}</p>
+        <p class="circuit__next">${esc(opts.nextLabel || `Siguiente: ${next.name}`)}</p>
         <div class="circuit__controls">
           <button type="button" class="workout__btn workout__btn--ghost" id="run-skip-rest">Saltar descanso ▸</button>
         </div>
+        ${opts.onSkipExercise ? `<button type="button" class="workout__btn workout__btn--ghost" id="run-skip-exercise-rest">Saltar ejercicio ▸</button>` : ""}
       </div>`;
 
     let remaining = seconds;
@@ -571,7 +748,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       if (remaining <= 0) {
         clearInterval(timerId);
         beep(880, 0.2);
-        runCurrent();
+        onDone();
         return;
       }
       if (remaining <= 3) beep(660, 0.1);
@@ -580,7 +757,11 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 
     document.getElementById("run-skip-rest").addEventListener("click", () => {
       clearInterval(timerId);
-      runCurrent();
+      onDone();
+    });
+    document.getElementById("run-skip-exercise-rest")?.addEventListener("click", () => {
+      clearInterval(timerId);
+      opts.onSkipExercise();
     });
   }
 
@@ -600,7 +781,11 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
           ${breakdown
             .map((b) => {
               const item = sequence.find((i) => i.slug === b.exercise);
-              const detail = b.reps ? `${b.reps} reps en ${b.sets} serie(s)` : `${b.seconds}s`;
+              const detail = b.reps
+                ? `${b.reps} reps en ${b.sets} serie(s)`
+                : b.sets > 1
+                ? `${b.seconds}s en ${b.sets} series`
+                : `${b.seconds}s`;
               // Porcentaje conseguido sobre el objetivo, si lo había. Para
               // reps es sobre el volumen total (sets × reps); para
               // cronometrados (plancha, plancha lateral…) es sobre el
@@ -614,7 +799,14 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
                 const clase = logro >= 100 ? "run-pct--full" : "run-pct--partial";
                 pct = `<span class="run-pct ${clase}">${logro}%</span>`;
               } else if (item?.work && b.seconds) {
-                const logro = Math.round((100 * b.seconds) / item.work);
+                // Con series (plan): total aguantado contra series × segundos.
+                const series = item.target_source === "plan" ? Math.max(1, item.target_sets || 1) : 1;
+                const logro = Math.round((100 * b.seconds) / (item.work * series));
+                const clase = logro >= 100 ? "run-pct--full" : "run-pct--partial";
+                pct = `<span class="run-pct ${clase}">${logro}%</span>`;
+              } else if (item?.target_source === "plan" && !item.work && !item.target_reps && item.target_sets && b.sets) {
+                // Al fallo: el % son series hechas sobre las pedidas (igual que el backend).
+                const logro = Math.round((100 * b.sets) / item.target_sets);
                 const clase = logro >= 100 ? "run-pct--full" : "run-pct--partial";
                 pct = `<span class="run-pct ${clase}">${logro}%</span>`;
               }

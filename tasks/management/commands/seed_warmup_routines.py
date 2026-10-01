@@ -68,11 +68,21 @@ ROUTINES = [
             # hacia delante y la 2a hacia atras (sentido fijado por aparicion,
             # ver DIRECTION_COUNTERS en session-runner.js/circuit.js), 30 cada
             # una, y cada una pasa sola a la siguiente al llegar a 30.
-            ("arm-circles", 1, 30),  # sentido 1: hacia delante
-            ("arm-circles", 1, 30),  # sentido 2: hacia atras
+            # A peticion de Alex (2026-10-01): es UN solo ejercicio, hecho DOS
+            # veces ("vez 1 de 2" / "vez 2 de 2", como los demas bilaterales) --
+            # no dos ejercicios distintos. Por dentro la 1a vez cuenta hacia
+            # delante y la 2a hacia atras (ver DIRECTION_COUNTERS), pero en
+            # pantalla se presenta solo como el mismo ejercicio repetido.
+            ("arm-circles", 1, 30),  # vez 1 de 2
+            ("arm-circles", 1, 30),  # vez 2 de 2
             ("arm-scissors", 1, 30),
-            ("arm-cross-stretch", None, None),         # cronometrado
-            ("triceps-overhead-stretch", None, None),  # cronometrado
+            # A peticion de Alex (2026-10-01): los dos estiramientos son
+            # bilaterales -- DOS pantallas cronometradas seguidas cada uno,
+            # una por brazo (antes solo salia una y solo se podia hacer un lado).
+            ("arm-cross-stretch", None, None),         # cronometrado, brazo 1
+            ("arm-cross-stretch", None, None),         # cronometrado, brazo 2
+            ("triceps-overhead-stretch", None, None),  # cronometrado, brazo 1
+            ("triceps-overhead-stretch", None, None),  # cronometrado, brazo 2
             # A peticion de Alex (2026-09-25): igual que los
             # estiramientos cronometrados de abajo -- DOS pantallas
             # seguidas, una por brazo, en vez de una sola serie

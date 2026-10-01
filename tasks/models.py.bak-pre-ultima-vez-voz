@@ -3723,16 +3723,16 @@ class PlanItem(models.Model):
     def last_session_set_reps(self):
         """
         Repeticiones de CADA serie en la última sesión guardada de este
-        objetivo, p. ej. [12, 10, 9] -- para cualquier objetivo de un
-        ejercicio con repeticiones (con o sin reps objetivo, al fallo o
-        no). Sirve para decir por voz (y enseñar) al empezar cada serie
-        "la última vez hiciste X en esta serie", serie por serie.
+        objetivo, p. ej. [12, 10, 9] -- solo para objetivos "al fallo" de
+        ejercicios con repeticiones. Sirve para enseñar al empezar cada
+        serie "la última vez hiciste X" y tener un número que superar,
+        ya que sin objetivo de reps no hay otra referencia.
 
         None si no aplica o si no hay ninguna sesión anterior con las
         reps por serie guardadas (las sesiones previas a este campo solo
         tienen el total, no se puede inventar el reparto).
         """
-        if not self.exercise_id:
+        if self.progression != self.PROG_FAILURE or not self.exercise_id:
             return None
         if self.exercise.mode == Exercise.MODE_DISTANCE:
             return None
