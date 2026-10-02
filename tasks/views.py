@@ -16,7 +16,7 @@ from . import ai, api
 from . import time_stats
 from .models import (
     CourseQuiz, Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, SavedVideo, Task,
-    TimerSession, WarmupStatus, WorkoutSession,
+    TimerSession, WarmupStatus, WorkoutSession, last_set_reps,
 )
 from .utils import get_current_user, read_mobile_release, resolve_plan_target
 from urllib.parse import quote
@@ -679,9 +679,13 @@ def task_workout(request, pk):
         resolve_plan_target(exercise.slug) if task.plan
         else {"plan": None, "target_sets": None, "target_reps": None, "target_seconds": None}
     )
+    # Reps de cada serie la última vez que hiciste este ejercicio (también
+    # en entreno suelto, sin plan) -- "Serie 2: la última vez hiciste 10".
+    last_sets = last_set_reps(get_current_user(), exercise.slug, plan=target["plan"])
     return render(request, "tasks/task_workout.html", {
         "task": task, "exercise": exercise,
         "target": target,
+        "last_sets_json": json.dumps(last_sets) if last_sets else "",
     })
 
 

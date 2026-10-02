@@ -2031,25 +2031,24 @@ export function distanceToSegment(p, a, b) {
 // + cuerpo en línea recta + los brazos apoyados. Es una aproximación
 // razonable, no una detección exacta de hacia dónde miras.
 // 2026-09-24: 148 -> 125. Alex pidio no ser tan estricto: cadera algo alta o baja ("meter el culo", subir/bajar un poco) sigue siendo plancha.
-const PLANK_LINE_MIN_DEG = 115;      // 2026-10-01: 125 -> 115 (plancha no contaba nada: demasiadas comprobaciones estrictas para armar)      // hombro-cadera-tobillo casi recto — algo de margen para cadera/hombros que no salen perfectos por el ruido de la cámara
+const PLANK_LINE_MIN_DEG = 125;      // hombro-cadera-tobillo casi recto — algo de margen para cadera/hombros que no salen perfectos por el ruido de la cámara
 // Cadera-rodilla-tobillo casi recto — la pierna no puede estar doblada.
 // Distingue la plancha de verdad de estar sentada/o con la rodilla
 // doblada hacia un lado (delante del portátil, por ejemplo), postura
 // que sin este chequeo podía colarse como plancha válida — ver el
 // porqué junto a checkPlankPosture.
 // 2026-09-24: 150 -> 140 (misma razon). Una rodilla de ~90-120 (sentada) sigue rechazandose.
-const PLANK_KNEE_GLITCH_MAX_DEG = 45;
-const PLANK_KNEE_MIN_DEG = 125;       // 2026-10-01: 140 -> 125
-const PLANK_ARMS_DOWN_MARGIN = 0.3; // 2026-10-01: 0.05 -> 0.3 (muneca de perfil muy ruidosa): la muneca debe quedar a la altura del hombro o por debajo // las muñecas deben quedar a la altura del hombro o por debajo
+const PLANK_KNEE_MIN_DEG = 140;
+const PLANK_ARMS_DOWN_MARGIN = 0.05; // las muñecas deben quedar a la altura del hombro o por debajo
 // Un codo doblado, apoyado en el suelo justo debajo del hombro, en vez
 // de un brazo estirado — ver el porqué junto a checkPlankPosture.
-const PLANK_ELBOW_BELOW_SHOULDER_MARGIN = 0.1; // 2026-10-01 (registro 41): 0.35 -> 0.1
+const PLANK_ELBOW_BELOW_SHOULDER_MARGIN = 0.35;
 // El cuerpo tiene que estar CLARAMENTE alzado del suelo — el hombro
 // bastante más arriba en la imagen que el tobillo (los pies se quedan
 // apoyados, pero el resto del cuerpo sube, apoyado solo en los
 // antebrazos) — ver el porqué junto a checkPlankPosture.
-const PLANK_MIN_INCLINE_FACTOR = -1.2; // 2026-10-01 (registro 41): 0.35 -> -1.2: en el registro real incline sale -0.9..0.2 en plancha correcta (camara baja/pies mas altos que hombros); no distingue nada. Tumbado/esfinge lo cortan shoulderClear + bodyRaise
-const PLANK_MIN_VISIBILITY = 0.3;   // 2026-10-01: 0.4 -> 0.3
+const PLANK_MIN_INCLINE_FACTOR = 0.35;
+const PLANK_MIN_VISIBILITY = 0.4;
 // Orientación del cuerpo en la imagen (0°=horizontal, 90°=vertical). De
 // pie y de perfil, hombro-cadera-tobillo también forma una línea recta,
 // y hombro claramente por encima del tobillo (incline) y codo por
@@ -2058,7 +2057,7 @@ const PLANK_MIN_VISIBILITY = 0.3;   // 2026-10-01: 0.4 -> 0.3
 // estirado"). Una plancha real tiene la línea hombro-tobillo casi
 // horizontal (~10-25°); de pie sale ~90°. Tope holgado para no romper
 // planchas con cadera algo alta.
-const PLANK_MAX_TILT_DEG = 45;         // 2026-10-01: 40 -> 45 (de pie sale ~90, sigue rechazandose de sobra)
+const PLANK_MAX_TILT_DEG = 40;
 
 // Aguante de plancha real (video de referencia de Alex, plank.mp4,
 // ~52s de aguante correcto de perfil, analizado fotograma a fotograma
@@ -2117,11 +2116,10 @@ const PLANK_LOOSE_INCLINE_FACTOR = -1.2;
 // de imagen), asi que incline>=0.35 lo pasa hasta un cuerpo tumbado plano
 // (tilt 0-2 en el registro real). El tilt en grados no depende de esa
 // escala: plancha real ~10-25, tumbado 0-2.
-const PLANK_MIN_TILT_DEG = 0;        // 2026-10-01 (registro 41): 5 -> 0: el registro real da tilt 2-12 en plancha correcta; el 'tumbado' lo cortan shoulderClear + bodyRaise
-const PLANK_FEET_MIN_VISIBILITY = 0.2;         // armar (2026-10-01: 0.3 -> 0.2)
-const PLANK_FEET_LOOSE_MIN_VISIBILITY = 0.1;   // ya aguantando (margen ante parpadeos) (2026-10-01: 0.15 -> 0.1)
-// 2026-10-01 (registro 41): 0.02 -> -0.25: el registro real rechazaba con ankleVis .83-.92 (tobillo extrapolado un poco fuera de la imagen, pies cortados por el borde). Los pies realmente fuera de imagen se siguen cortando por visibilidad y porque una x muy fuera de imagen (mas de 25%) no se acepta.
-const PLANK_FEET_FRAME_MARGIN = -0.25;          // el tobillo debe caer dentro de [margen, 1-margen] en la imagen
+const PLANK_MIN_TILT_DEG = 5;
+const PLANK_FEET_MIN_VISIBILITY = 0.3;         // armar
+const PLANK_FEET_LOOSE_MIN_VISIBILITY = 0.15;  // ya aguantando (margen ante parpadeos)
+const PLANK_FEET_FRAME_MARGIN = 0.02;          // el tobillo debe caer dentro de [margen, 1-margen] en la imagen
 const PLANK_LOW_INCLINE_GRACE_MS = 4000;
 // 2026-09-30 (registro real 📋 id 38, plancha): Alex se tumbo con la
 // barriga y la cadera EN EL SUELO, los pies en el suelo, los codos
@@ -2148,14 +2146,13 @@ const PLANK_LOW_INCLINE_GRACE_MS = 4000;
 // hombro no esta al menos PLANK_MIN_SHOULDER_CLEAR por encima del codo
 // (0.02 de la altura de la imagen), no hay antebrazo apoyando el cuerpo:
 // tumbado del todo, y la proporcion no significa nada.
-const PLANK_MIN_SHOULDER_CLEAR = 0.02;  // sin cambios (2026-10-01: se probo bajarlo y dejaba pasar el cuerpo tumbado)
-// 2026-10-01: bodyRaise 0.32/0.24 -> 0.22/0.15. Sigue rechazando la esfinge (~0.13) pero deja pasar una plancha con la cadera algo baja (~0.3) y el ruido de MediaPipe.
-const PLANK_MIN_BODY_RAISE = 0.22;
-const PLANK_LOOSE_MIN_BODY_RAISE = 0.15;
+const PLANK_MIN_SHOULDER_CLEAR = 0.02;
+const PLANK_MIN_BODY_RAISE = 0.32;
+const PLANK_LOOSE_MIN_BODY_RAISE = 0.24;
 // Ya aguantando, los brazos/codos no deben cortar por un pequeno vaiven
 // (en perfil shoulderWidth es minusculo y estas medidas se disparan).
 const PLANK_LOOSE_ARMS_DOWN_MARGIN = 0.6;
-const PLANK_LOOSE_ELBOW_BELOW_SHOULDER_MARGIN = -0.2; // 2026-10-01: 0.0 -> -0.2
+const PLANK_LOOSE_ELBOW_BELOW_SHOULDER_MARGIN = 0.0;
 // Margen antes de cerrar la serie por postura rota, solo plancha normal
 // (antes 800ms, PLANK_INVALID_STABLE_MS): un vaiven arriba/abajo o un
 // parpadeo de seguimiento no debe partir el aguante.
@@ -2247,8 +2244,8 @@ const SIDEPLANK_DOWN_SWITCH_MARGIN_FACTOR = 0.15;
 // más abajo por qué eso ya no se exige), sin ningún paso previo que
 // guiara cómo colocarse. Ahora sigue el mismo patrón que la plancha
 // normal.
-const LYING_FLAT_MIN_DEG = 135;      // 2026-10-01: 155 -> 135 (paso 1 de plancha/plancha lateral: con 155 una plancha con la cadera algo alta/baja nunca pasaba)
-const LYING_FLAT_MIN_VISIBILITY = 0.3; // 2026-10-01: 0.4 -> 0.3
+const LYING_FLAT_MIN_DEG = 155;
+const LYING_FLAT_MIN_VISIBILITY = 0.4;
 // De perfil de verdad, el cuerpo entero (del hombro al tobillo) ocupa
 // un buen tramo de la imagen — bastante más que el ancho de hombros.
 // Si en vez de eso apuntas el cuerpo HACIA la cámara (los pies "mirando
@@ -2259,7 +2256,7 @@ const LYING_FLAT_MIN_VISIBILITY = 0.3; // 2026-10-01: 0.4 -> 0.3
 // hace falta comprobar también que el cuerpo se vea realmente
 // extendido de lado. Se usa tanto para el paso 1 (tumbarte del todo)
 // como para la plancha en sí (ver checkPlankPosture).
-const MIN_BODY_LENGTH_FACTOR = 1.8; // tramo hombro-tobillo en la imagen, en proporción al ancho de hombros
+const MIN_BODY_LENGTH_FACTOR = 2.2; // tramo hombro-tobillo en la imagen, en proporción al ancho de hombros
 
 export function checkLyingFlat(lm) {
   const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
@@ -2392,7 +2389,6 @@ export function checkPlankPosture(lm, holding = false) {
     ankle.y >= PLANK_FEET_FRAME_MARGIN && ankle.y <= 1 - PLANK_FEET_FRAME_MARGIN;
   debug.ankleVis = ankleVis.toFixed(2);
   debug.ankleY = ankle.y.toFixed(2);
-  debug.ankleX = ankle.x.toFixed(2);
   if (!ankleInFrame || ankleVis < feetMinVis) {
     return { ok: false, reason: "No se te ven los pies. Colócate de perfil con el cuerpo entero, pies incluidos, dentro del encuadre.", debug };
   }
@@ -2402,9 +2398,7 @@ export function checkPlankPosture(lm, holding = false) {
     return { ok: false, reason: "Cadera desalineada — mantén el cuerpo en línea recta, de los hombros a los tobillos.", debug };
   }
   const kneeMinDeg = holding ? PLANK_LOOSE_KNEE_MIN_DEG : PLANK_KNEE_MIN_DEG;
-  // 2026-10-01 (registro 41): con la plancha bien puesta (linea 163-180, pies visibles .9) el registro real dio kneeAngle 1-23 en ~15 frames seguidos: la rodilla estaba mal localizada
-  // (cuerpo tumbado de perfil, piernas juntas), no doblada. Una rodilla doblada de verdad (sentada/arrodillada) sale ~45-125. Por debajo de PLANK_KNEE_GLITCH_MAX_DEG se ignora.
-  if (kneeAngle === null || (kneeAngle >= PLANK_KNEE_GLITCH_MAX_DEG && kneeAngle < kneeMinDeg)) {
+  if (kneeAngle === null || kneeAngle < kneeMinDeg) {
     return { ok: false, reason: "Estira las piernas del todo — la rodilla no puede quedar doblada en la plancha.", debug };
   }
   if (tilt === null || tilt > PLANK_MAX_TILT_DEG) {
@@ -2464,11 +2458,6 @@ export function checkPlankPosture(lm, holding = false) {
   }
   // Cuerpo alzado de verdad, no solo el pecho (esfinge/cobra con la cadera
   // en el suelo) -- ver PLANK_MIN_BODY_RAISE.
-  // 2026-10-01 (registro 41): ya aguantando, shoulderClear ~0 un instante (registro real: -0.001/-0.002 entre frames buenos) no corta: pasa como 'margen laxo' con la gracia de PLANK_LOW_INCLINE_GRACE_MS; tumbarte de verdad dura mas y si corta.
-  const raiseUnknown = bodyRaise === null;
-  if (raiseUnknown && holding) {
-    return { ok: true, debug, lowIncline: true };
-  }
   if (bodyRaise === null) {
     return { ok: false, reason: "Ponte boca abajo, apoyada/o en los antebrazos, con los codos doblados justo debajo de los hombros.", debug };
   }
@@ -2476,7 +2465,7 @@ export function checkPlankPosture(lm, holding = false) {
     return { ok: false, reason: "Sube las caderas: el cuerpo entero tiene que quedar alzado del suelo, apoyado en los antebrazos y los pies, no tumbado.", debug };
   }
   // lowIncline: paso solo por el margen laxo de incline (ver PLANK_LOW_INCLINE_GRACE_MS).
-  return { ok: true, debug, lowIncline: tiltTooFlat };
+  return { ok: true, debug, lowIncline: incline < PLANK_MIN_INCLINE_FACTOR || tiltTooFlat };
 }
 
 /**
@@ -12275,12 +12264,7 @@ class WorkoutSession {
     const isWallsitStep1 = this.counterKey === "wallsit" && !this.postureGroundConfirmed;
     const isElephantStepsStep1 = this.counterKey === "elephantstepshold" && !this.postureGroundConfirmed;
     if (((this.counterKey === "plank" || this.counterKey === "sideplank") && !this.postureGroundConfirmed) || isKneeHoldStep1 || isDeadHangStep1 || isTuckLeverStep1 || isWallsitStep1 || isElephantStepsStep1) {
-      const flat = (isKneeHoldStep1 || isDeadHangStep1 || isTuckLeverStep1) ? checkKneeHoldBarHanging(lm) : (isWallsitStep1 || isElephantStepsStep1) ? checkStanding(lm) : (() => {
-        // 2026-10-01: una plancha ya valida tambien vale como paso 1 (si ya estas en plancha no hace falta tumbarse antes)
-        const lf = checkLyingFlat(lm);
-        if (!lf.ok && this.counterKey === "plank" && checkPlankPosture(lm, false).ok) return { ...lf, ok: true, reason: null };
-        return lf;
-      })();
+      const flat = (isKneeHoldStep1 || isDeadHangStep1 || isTuckLeverStep1) ? checkKneeHoldBarHanging(lm) : (isWallsitStep1 || isElephantStepsStep1) ? checkStanding(lm) : checkLyingFlat(lm);
       const stableMs = (isKneeHoldStep1 || isDeadHangStep1 || isTuckLeverStep1) ? HANG_STABLE_MS : (isWallsitStep1 || isElephantStepsStep1) ? WALLSIT_STANDING_STABLE_MS : ON_GROUND_STABLE_MS;
       // Igual que dominadas (ver startupVoiceGiven junto a HANG_STABLE_MS,
       // más abajo): nada más verte aparecer en la cámara, aunque todavía

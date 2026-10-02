@@ -2222,3 +2222,55 @@ class WeeklyProjectionTests(TestCase):
         Task.objects.create(title="Suelta", due_date=self.MONDAY, user=u)
         w = Occurrence.weekly_completion(u, reference_date=self.MONDAY)
         self.assertEqual(w["total"], 1)
+
+
+class LastSetRepsTests(TestCase):
+    """"Serie 2: la última vez hiciste 7" -- historial de reps por serie,
+    también en entrenos sueltos (sin plan) y cayendo a lo hecho en otro
+    sitio cuando el plan aún no tiene nada de ese ejercicio."""
+
+    def setUp(self):
+        from .models import Exercise, Plan, PlanItem, Routine, WorkoutSession, last_set_reps
+        self.last_set_reps = last_set_reps
+        self.WS, self.Routine = WorkoutSession, Routine
+        self.user = get_current_user()
+        self.ex, _ = Exercise.objects.get_or_create(
+            slug="pullup", defaults=dict(name="Dominadas", mode="pose", counter_key="pullup"),
+        )
+        self.plan = Plan.objects.create(name="P", user=self.user)
+        self.item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.ex, progression=PlanItem.PROG_FAILURE, start_sets=3, order=0,
+        )
+
+    def _ws(self, reps, **kw):
+        return self.WS.objects.create(
+            user=self.user, exercise="pullup", total_reps=sum(reps),
+            sets=[{"reps": r} for r in reps], **kw,
+        )
+
+    def test_none_without_history(self):
+        self.assertIsNone(self.last_set_reps(self.user, "pullup"))
+        self.assertIsNone(self.item.last_session_set_reps())
+
+    def test_loose_session_without_plan_counts(self):
+        self._ws([9, 6])
+        self.assertEqual(self.last_set_reps(self.user, "pullup"), [9, 6])
+
+    def test_same_plan_wins_over_other_places(self):
+        self._ws([5, 5, 5], plan=self.plan)
+        self._ws([9, 6])  # más reciente, pero suelta
+        self.assertEqual(self.item.last_session_set_reps(), [5, 5, 5])
+
+    def test_plan_without_history_falls_back_to_last_time_anywhere(self):
+        self._ws([9, 6])
+        self.assertEqual(self.item.last_session_set_reps(), [9, 6])
+
+    def test_routine_sessions_do_not_count_in_fallback(self):
+        self._ws([9, 6])
+        self._ws([3], routine=self.Routine.objects.create(name="warm", user=self.user))
+        self.assertEqual(self.item.last_session_set_reps(), [9, 6])
+
+    def test_api_exercise_target_returns_last_sets(self):
+        self._ws([9, 6])
+        data = self.client.get("/api/exercises/pullup/target/").json()
+        self.assertEqual(data["last_sets"], [9, 6])

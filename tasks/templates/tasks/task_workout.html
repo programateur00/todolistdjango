@@ -20,6 +20,7 @@
      data-target-sets="{{ target.target_sets|default:'' }}"
      data-target-reps="{{ target.target_reps|default:'' }}"
      data-target-seconds="{{ target.target_seconds|default:'' }}"
+     data-last-sets="{{ last_sets_json }}"
      class="workout">
     {% csrf_token %}
 
@@ -29,6 +30,7 @@
     </div>
 
     <p id="workout-goal-banner" class="workout__goal-banner" hidden></p>
+    <p id="workout-last-hint" class="circuit__side-hint run-last-hint" hidden></p>
     <button type="button" id="workout-debug-export" class="workout__btn workout__btn--ghost">
         📋 Copiar registro de depuración
     </button>

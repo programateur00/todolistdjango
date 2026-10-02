@@ -37,7 +37,7 @@ from . import ai
 from .models import (
     CourseModule, CoursePlaylist, CourseQuiz, DebugLog, Exercise, Occurrence, Plan, PlanItem,
     Routine, RoutineItem, SavedVideo, Task, TimerSession, WarmupStatus, WorkoutSession,
-    day_average_pace,
+    day_average_pace, last_set_reps,
 )
 from .utils import get_current_user, read_mobile_release, resolve_plan_target as _plan_context
 from .youtube_search import YouTubeSearchError, get_videos_details, list_playlist_items
@@ -293,6 +293,11 @@ def exercise_target(request, slug):
         "target_reps": ctx["target_reps"],
         "target_seconds": ctx["target_seconds"],
         "plan_name": ctx["plan"].name if ctx["plan"] else None,
+        # Reps de cada serie la última vez que se hizo este ejercicio
+        # ([12, 10, 9]) -- para "Serie 2: la última vez hiciste 10". Va
+        # siempre, también en entrenos sueltos sin plan (a diferencia del
+        # objetivo, esto es historial tuyo, no de ningún plan).
+        "last_sets": last_set_reps(_user(), slug, plan=ctx["plan"]),
     })
 
 

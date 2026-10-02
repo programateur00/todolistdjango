@@ -3731,30 +3731,16 @@ class PlanItem(models.Model):
         None si no aplica o si no hay ninguna sesión anterior con las
         reps por serie guardadas (las sesiones previas a este campo solo
         tienen el total, no se puede inventar el reparto).
+
+        Ver last_set_reps(): primero se mira lo hecho dentro de este mismo
+        plan y, si ahí no hay nada, la última vez que se hizo el ejercicio
+        en cualquier sitio (entreno suelto, otro plan).
         """
         if not self.exercise_id:
             return None
         if self.exercise.mode == Exercise.MODE_DISTANCE:
             return None
-        # Se mira en Python (no con .exclude(sets=[])) porque comparar un
-        # JSONField con una lista vacía no se comporta igual en todos los
-        # motores de BD; con las últimas sesiones basta.
-        recent = (
-            WorkoutSession.objects
-            .filter(
-                plan=self.plan, exercise=self.exercise.slug,
-                user=self.plan.user, deleted_at__isnull=True,
-            )
-            .order_by("-recorded_at")[:10]
-        )
-        for ws in recent:
-            reps = [
-                int(s["reps"]) for s in (ws.sets or [])
-                if isinstance(s, dict) and isinstance(s.get("reps"), (int, float)) and s["reps"] > 0
-            ]
-            if reps:
-                return reps
-        return None
+        return last_set_reps(self.plan.user, self.exercise.slug, plan=self.plan)
 
     def successes_and_streak(self):
         """
@@ -4416,6 +4402,45 @@ class WorkoutSession(models.Model):
         if self.distance_km is not None:
             return f"{self.exercise_name} — {self.distance_km}km ({self.recorded_at:%Y-%m-%d %H:%M})"
         return f"{self.exercise_name} — {self.total_reps} reps ({self.recorded_at:%Y-%m-%d %H:%M})"
+
+
+def last_set_reps(user, exercise_slug, plan=None):
+    """
+    Reps de cada serie la última vez que `user` hizo `exercise_slug`
+    ([12, 10, 9]), o None si no hay ninguna sesión con las reps por serie
+    guardadas. Alimenta el aviso "Serie 2: la última vez hiciste 10".
+
+    Primero se mira dentro de `plan` (si se pasa): es la comparación más
+    justa. Si el plan aún no tiene nada de ese ejercicio -- o es un
+    entreno suelto, sin plan -- se usa la última vez que se hizo en
+    cualquier sitio, salvo dentro de un circuito/calentamiento (routine),
+    donde las reps son de rutina y no de entrenamiento de verdad.
+    """
+    if not user or not exercise_slug:
+        return None
+
+    def _first_with_reps(qs):
+        # En Python (no con .exclude(sets=[])): comparar un JSONField con
+        # una lista vacía no se comporta igual en todos los motores de BD;
+        # con las últimas sesiones basta.
+        for ws in qs.order_by("-recorded_at")[:10]:
+            reps = [
+                int(s["reps"]) for s in (ws.sets or [])
+                if isinstance(s, dict) and isinstance(s.get("reps"), (int, float)) and s["reps"] > 0
+            ]
+            if reps:
+                return reps
+        return None
+
+    base = WorkoutSession.objects.filter(
+        exercise=exercise_slug, user=user, deleted_at__isnull=True,
+    )
+    if plan is not None:
+        found = _first_with_reps(base.filter(plan=plan))
+        if found:
+            return found
+    return _first_with_reps(base.filter(routine__isnull=True))
+
 
 
 class TimerSession(models.Model):
