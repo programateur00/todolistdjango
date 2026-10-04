@@ -36,6 +36,12 @@ CEFR_LEVEL_CHOICES = [(lvl, lvl) for lvl in CEFR_LEVELS]
 # Actividad contando un rato casi quieto como sesión aparte.
 MOVING_MAX_SECONDS_PER_KM = 1200
 
+# Valor especial de PlanItem.start_pace_seconds_per_km (60:00/km): "cualquier
+# ritmo". El plan solo pide los km y no comprueba velocidad alguna: el objetivo
+# sale con pace_seconds_per_km=None, que es "sin ritmo mínimo" en toda la cadena
+# (Task.max_pace_seconds_per_km, running_import, day_average_pace).
+ANY_PACE_SECONDS = 3600
+
 
 def day_average_pace(sessions):
     """
@@ -3883,13 +3889,18 @@ class PlanItem(models.Model):
             distance = self.start_distance_km + step * self.distance_increment_km
             if self.goal_distance_km:
                 distance = min(distance, self.goal_distance_km)
-            pace = self.start_pace_seconds_per_km - step * self.pace_decrement_seconds
-            if self.goal_pace_seconds_per_km:
-                # Un ritmo MENOR es más rápido — "llegar" es no bajar de ahí.
-                pace = max(pace, self.goal_pace_seconds_per_km)
+            # "Cualquier ritmo": solo cuentan los km, sin límite de velocidad.
+            any_pace = (self.start_pace_seconds_per_km or 0) >= ANY_PACE_SECONDS
+            if any_pace:
+                pace = None
+            else:
+                pace = self.start_pace_seconds_per_km - step * self.pace_decrement_seconds
+                if self.goal_pace_seconds_per_km:
+                    # Un ritmo MENOR es más rápido — "llegar" es no bajar de ahí.
+                    pace = max(pace, self.goal_pace_seconds_per_km)
             done = bool(
                 self.goal_distance_km and distance >= self.goal_distance_km
-                and self.goal_pace_seconds_per_km and pace <= self.goal_pace_seconds_per_km
+                and (any_pace or (self.goal_pace_seconds_per_km and pace <= self.goal_pace_seconds_per_km))
             )
             return {
                 "sets": None, "reps": None, "seconds": None, "weight_kg": None,

@@ -152,6 +152,7 @@
             <label class="field">
                 <span class="field__label">A qué ritmo</span>
                 <select name="start_pace_seconds_per_km" id="start-pace">
+                    <option value="3600" {% if item.start_pace_seconds_per_km == 3600 %}selected{% endif %}>Cualquier ritmo (solo cuentan los km)</option>
                     {% for seconds, label in pace_presets %}
                     <option value="{{ seconds }}" {% if item.start_pace_seconds_per_km == seconds %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
@@ -394,6 +395,17 @@
     document.getElementById('distance-flat').addEventListener('change', actualizar);
     actualizar();
 
+    // "Cualquier ritmo" al empezar: solo cuentan los km, así que el ritmo
+    // de destino no pinta nada (se vacía y se desactiva para que no se envíe).
+    function sincronizarRitmoLibre() {
+        var libre = parseInt(document.getElementById('start-pace').value, 10) >= 3600;
+        var gp = document.getElementById('goal-pace');
+        if (libre) gp.value = '';
+        gp.disabled = libre;
+    }
+    document.getElementById('start-pace').addEventListener('change', sincronizarRitmoLibre);
+    sincronizarRitmoLibre();
+
     // ---------------------------------------------- calculadora de ritmo
     // "¿En cuántas semanas?" en vez de "¿cuánto subir cada escalón?" —
     // la segunda pregunta es la que de verdad importa, pero la primera
@@ -416,7 +428,7 @@
         if (!weeks) { alert('Pon primero en cuántas semanas quieres llegar.'); return; }
         var pasos = escalones(weeks, num('sessions-per-step-distance') || 1);
         var dDist = num('goal-distance') - num('start-distance');
-        var dPace = num('start-pace') - num('goal-pace');
+        var dPace = num('start-pace') >= 3600 ? 0 : num('start-pace') - num('goal-pace');
         var cambiado = false;
         if (dDist > 0) { document.getElementById('distance-increment').value = (dDist / pasos).toFixed(2); cambiado = true; }
         if (dPace > 0) { document.getElementById('pace-decrement').value = Math.max(1, Math.round(dPace / pasos)); cambiado = true; }
