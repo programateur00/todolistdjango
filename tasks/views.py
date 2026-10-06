@@ -1712,6 +1712,45 @@ def stats_list(request):
     })
 
 
+def _stats_chart_points(occurrences, limit=60):
+    """
+    Un punto por día de la tarea, en orden cronológico, para la gráfica de
+    stats_detail: {"label": "06/10", "pct": 0-100, "done": bool}.
+
+    Hecha = 100%. Un día sin hacer cuenta 0%, salvo que caducara con
+    sesiones de entreno/temporizador a medias: ahí cuenta lo que se llegó
+    a hacer (75% del objetivo = 75). No hay campo nuevo: se calcula con
+    las ocurrencias y sesiones que ya se guardan.
+    """
+    occs = list(occurrences)[::-1][-limit:]  # occurrences viene de más nuevo a más viejo
+    task_ids = {o.task_id for o in occs if o.task_id}
+    best = {}
+    if task_ids:
+        sessions = list(WorkoutSession.objects.filter(task_id__in=task_ids)) + list(
+            TimerSession.objects.filter(task_id__in=task_ids)
+        )
+        for sess in sessions:
+            pct = sess.achievement_pct
+            if pct is not None:
+                best[sess.task_id] = max(best.get(sess.task_id, 0), pct)
+    points = []
+    for o in occs:
+        if o.result == Occurrence.RESULT_DONE:
+            pct = 100
+        elif o.auto_expired and o.task_id in best:
+            pct = max(0, min(99, best[o.task_id]))
+        else:
+            pct = 0
+        day = o.due_date or timezone.localtime(o.recorded_at).date()
+        points.append({
+            "label": day.strftime("%d/%m"),
+            "date": day.isoformat(),
+            "pct": pct,
+            "done": o.result == Occurrence.RESULT_DONE,
+        })
+    return points
+
+
 def stats_detail(request, series_id):
     occurrences = Occurrence.objects.filter(
         series_id=series_id, user=get_current_user()
@@ -1726,8 +1765,10 @@ def stats_detail(request, series_id):
     total = done_count + not_done_count
     success_rate = round((done_count / total) * 100) if total else 0
     streaks = Occurrence.streak_stats(series_id)
+    chart_points = _stats_chart_points(occurrences)
 
     return render(request, "tasks/stats_detail.html", {
+        "chart_points": chart_points,
         "title": title,
         "series_id": series_id,
         "occurrences": occurrences,

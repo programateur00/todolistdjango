@@ -39,8 +39,24 @@
 </div>
 
 <section class="task-section">
-    <h2 class="task-section__title">Historial</h2>
-    <ul class="history-list">
+    <div class="history-head">
+        <h2 class="task-section__title">Historial</h2>
+        <div class="view-toggle" role="group" aria-label="Cómo ver el historial">
+            <button type="button" class="view-toggle__btn is-active" data-hist-view="list" aria-pressed="true">☰ Lista</button>
+            <button type="button" class="view-toggle__btn" data-hist-view="chart" aria-pressed="false">📈 Gráfica</button>
+        </div>
+    </div>
+
+    <div id="hist-chart" hidden>
+        <div class="view-toggle view-toggle--small" role="group" aria-label="Tipo de gráfica">
+            <button type="button" class="view-toggle__btn is-active" data-chart-type="line" aria-pressed="true">Línea</button>
+            <button type="button" class="view-toggle__btn" data-chart-type="bar" aria-pressed="false">Barras</button>
+        </div>
+        <div class="day-chart" id="day-chart" role="img" aria-label="Gráfica del % de cumplimiento por día"></div>
+        <p class="day-chart__note">% de cumplimiento por día · un día sin hacer cuenta 0%</p>
+    </div>
+
+    <ul class="history-list" id="hist-list">
         {% for occ in occurrences %}
         <li class="history-row history-row--{{ occ.result }}">
             <span class="history-dot"></span>
@@ -52,6 +68,104 @@
         {% endfor %}
     </ul>
 </section>
+
+{{ chart_points|json_script:"chart-data" }}
+<script>
+(function () {
+    var NS = 'http://www.w3.org/2000/svg';
+    var data = JSON.parse(document.getElementById('chart-data').textContent);
+    var list = document.getElementById('hist-list');
+    var chartBox = document.getElementById('hist-chart');
+    var host = document.getElementById('day-chart');
+    var chartType = 'line';
+
+    function el(name, attrs, text) {
+        var n = document.createElementNS(NS, name);
+        for (var k in attrs) n.setAttribute(k, attrs[k]);
+        if (text != null) n.textContent = text;
+        return n;
+    }
+
+    function draw() {
+        host.innerHTML = '';
+        var n = data.length;
+        if (!n) return;
+        var m = {l: 40, r: 16, t: 14, b: 34};
+        var step = 44;
+        var W = Math.max(520, m.l + m.r + n * step), H = 280;
+        var pw = W - m.l - m.r, ph = H - m.t - m.b;
+        var svg = el('svg', {viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, 'class': 'day-chart__svg'});
+
+        function x(i) { return m.l + (i + 0.5) * (pw / n); }
+        function y(v) { return m.t + ph - (v / 100) * ph; }
+
+        for (var v = 0; v <= 100; v += 20) {
+            svg.appendChild(el('line', {x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), 'class': v === 0 ? 'day-chart__axis' : 'day-chart__grid'}));
+            svg.appendChild(el('text', {x: m.l - 8, y: y(v) + 4, 'text-anchor': 'end', 'class': 'day-chart__tick'}, v));
+        }
+        svg.appendChild(el('line', {x1: m.l, x2: m.l, y1: m.t, y2: m.t + ph, 'class': 'day-chart__axis'}));
+
+        var every = Math.ceil(n / Math.max(1, Math.floor(pw / 56)));
+        data.forEach(function (p, i) {
+            if (i % every === 0 || i === n - 1) {
+                svg.appendChild(el('text', {x: x(i), y: H - 12, 'text-anchor': 'middle', 'class': 'day-chart__tick'}, p.label));
+            }
+        });
+
+        if (chartType === 'bar') {
+            var bw = Math.min(30, (pw / n) * 0.7);
+            data.forEach(function (p, i) {
+                var h = (p.pct / 100) * ph;
+                var r = el('rect', {x: x(i) - bw / 2, y: y(p.pct), width: bw, height: Math.max(h, 2),
+                                    'class': 'day-chart__bar' + (p.pct === 0 ? ' is-zero' : p.pct < 100 ? ' is-partial' : '')});
+                r.appendChild(el('title', {}, p.label + ' · ' + p.pct + '%'));
+                svg.appendChild(r);
+            });
+        } else {
+            var pts = data.map(function (p, i) { return x(i) + ',' + y(p.pct); }).join(' ');
+            svg.appendChild(el('polyline', {points: pts, 'class': 'day-chart__line'}));
+            data.forEach(function (p, i) {
+                var c = el('circle', {cx: x(i), cy: y(p.pct), r: 4.5, 'class': 'day-chart__dot' + (p.pct === 0 ? ' is-zero' : '')});
+                c.appendChild(el('title', {}, p.label + ' · ' + p.pct + '%'));
+                svg.appendChild(c);
+            });
+        }
+        host.appendChild(svg);
+    }
+
+    function setActive(attr, value) {
+        document.querySelectorAll('[' + attr + ']').forEach(function (b) {
+            var on = b.getAttribute(attr) === value;
+            b.classList.toggle('is-active', on);
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+    }
+    function showView(view) {
+        var isChart = view === 'chart';
+        chartBox.hidden = !isChart;
+        list.hidden = isChart;
+        setActive('data-hist-view', view);
+        if (isChart) draw();
+        try { localStorage.setItem('histView', view); } catch (e) {}
+    }
+    document.querySelectorAll('[data-hist-view]').forEach(function (b) {
+        b.addEventListener('click', function () { showView(b.getAttribute('data-hist-view')); });
+    });
+    document.querySelectorAll('[data-chart-type]').forEach(function (b) {
+        b.addEventListener('click', function () {
+            chartType = b.getAttribute('data-chart-type');
+            setActive('data-chart-type', chartType);
+            try { localStorage.setItem('histChartType', chartType); } catch (e) {}
+            draw();
+        });
+    });
+    try {
+        var ct = localStorage.getItem('histChartType');
+        if (ct === 'bar' || ct === 'line') { chartType = ct; setActive('data-chart-type', ct); }
+        if (localStorage.getItem('histView') === 'chart') showView('chart');
+    } catch (e) {}
+})();
+</script>
 
 <div class="task-form__actions">
     <form action="{% url 'tasks:stats_delete_series' series_id %}" method="post" class="inline-delete"

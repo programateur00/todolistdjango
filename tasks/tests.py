@@ -209,27 +209,42 @@ class AntiTaskTests(TestCase):
         self.assertFalse(t.is_avoid)
 
 
-class StatsChartToggleTests(TestCase):
-    """Estadísticas: toggle entre lista y gráfica con los datos que ya se guardan."""
+class StatsDetailChartTests(TestCase):
+    """Detalle de una estadística: lista o gráfica con el % de cada día."""
 
-    def test_stats_list_has_toggle_list_and_chart(self):
+    def test_chart_points_done_100_missed_0_partial_keeps_pct(self):
+        from .views import _stats_chart_points
+        u = get_current_user()
+        hecha = Task.objects.create(title="G", due_date=date.today() - timedelta(days=2), user=u)
+        hecha.mark_done()
+        fallada = Task.objects.create(title="G", due_date=date.today() - timedelta(days=1), user=u, series_id=hecha.series_id)
+        fallada.mark_expired()
+        parcial = Task.objects.create(title="G", due_date=date.today(), user=u, series_id=hecha.series_id)
+        WorkoutSession.objects.create(
+            task=parcial, user=u, series_id=parcial.series_id, exercise="pushup",
+            total_reps=18, total_sets=3, session_duration_seconds=60,
+            target_sets=3, target_reps=8,
+        )
+        parcial.mark_expired()
+        occs = Occurrence.objects.filter(series_id=hecha.series_id).order_by("-recorded_at")
+        pcts = sorted(p["pct"] for p in _stats_chart_points(occs))
+        self.assertEqual(pcts, [0, 75, 100])
+
+    def test_detail_page_has_toggle_and_chart_data(self):
         from django.test import override_settings
         from django.urls import reverse
-        done = Task.objects.create(title="Leer", due_date=date.today(), user=get_current_user())
-        done.mark_done()
-        missed = Task.objects.create(title="Correr", due_date=date.today(), user=get_current_user())
-        missed.mark_expired()
+        t = Task.objects.create(title="H", due_date=date.today(), user=get_current_user())
+        t.mark_expired()
         # Sin manifiesto de collectstatic: el test solo mira el HTML.
         with override_settings(STORAGES={
             "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
             "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
         }):
-            resp = self.client.get(reverse("tasks:stats_list"))
+            resp = self.client.get(reverse("tasks:stats_detail", args=[t.series_id]))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'data-stats-view="chart"')
-        self.assertContains(resp, 'id="stats-list"')
-        self.assertContains(resp, 'id="stats-chart"')
-        self.assertContains(resp, 'class="stats-chart__row"', count=2)
+        self.assertContains(resp, 'data-hist-view="chart"')
+        self.assertContains(resp, 'id="chart-data"')
+        self.assertContains(resp, 'id="hist-list"')
 
 
 class OccurrenceIdempotencyTests(TestCase):

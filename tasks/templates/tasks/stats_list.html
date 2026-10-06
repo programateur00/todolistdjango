@@ -33,31 +33,7 @@
 {% endif %}
 
 {% if series_list %}
-<div class="view-toggle" role="group" aria-label="Cómo ver las estadísticas">
-    <button type="button" class="view-toggle__btn is-active" data-stats-view="list" aria-pressed="true">☰ Lista</button>
-    <button type="button" class="view-toggle__btn" data-stats-view="chart" aria-pressed="false">▤ Gráfica</button>
-</div>
-
-<section class="stats-chart" id="stats-chart" hidden aria-label="Gráfica de cumplimiento por tarea">
-    <h2 class="stats-chart__title">% cumplido por tarea</h2>
-    <ul class="stats-chart__rows">
-        {% for s in series_list|dictsortreversed:"success_rate" %}
-        <li class="stats-chart__row">
-            <a href="{% url 'tasks:stats_detail' s.series_id %}" class="stats-chart__link">
-                <span class="stats-chart__name">{{ s.title }}</span>
-                <span class="stats-chart__track">
-                    <span class="stats-chart__fill{% if s.success_rate >= 80 %} stats-chart__fill--high{% elif s.success_rate < 40 %} stats-chart__fill--low{% endif %}"
-                          style="width:{{ s.success_rate }}%"></span>
-                </span>
-                <span class="stats-chart__pct">{{ s.success_rate }}%</span>
-                <span class="stats-chart__meta">{{ s.done }}/{{ s.total }}</span>
-            </a>
-        </li>
-        {% endfor %}
-    </ul>
-</section>
-
-<ul class="stats-list" id="stats-list">
+<ul class="stats-list">
     {% for s in series_list %}
     <li class="stats-card">
         <a href="{% url 'tasks:stats_detail' s.series_id %}" class="stats-card__link">
@@ -89,31 +65,6 @@
         <button type="submit" class="ghost-btn ghost-btn--danger">Borrar todas las estadísticas</button>
     </form>
 </div>
-<script>
-(function () {
-    var list = document.getElementById('stats-list');
-    var chart = document.getElementById('stats-chart');
-    var buttons = document.querySelectorAll('[data-stats-view]');
-    if (!list || !chart) return;
-    function show(view) {
-        var isChart = view === 'chart';
-        chart.hidden = !isChart;
-        list.hidden = isChart;
-        buttons.forEach(function (b) {
-            var on = b.getAttribute('data-stats-view') === view;
-            b.classList.toggle('is-active', on);
-            b.setAttribute('aria-pressed', on ? 'true' : 'false');
-        });
-        try { localStorage.setItem('statsView', view); } catch (e) {}
-    }
-    buttons.forEach(function (b) {
-        b.addEventListener('click', function () { show(b.getAttribute('data-stats-view')); });
-    });
-    var saved = null;
-    try { saved = localStorage.getItem('statsView'); } catch (e) {}
-    if (saved === 'chart') show('chart');
-})();
-</script>
 {% else %}
 <p class="empty-state">Todavía no hay historial. Marca tareas como hechas o no hechas para ver tus estadísticas aquí.</p>
 {% endif %}
