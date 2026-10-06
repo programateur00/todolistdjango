@@ -1687,8 +1687,10 @@ def stats_list(request):
     for occ in Occurrence.objects.filter(user=get_current_user()).order_by("recorded_at"):
         s = summary.setdefault(occ.series_id, {
             "title": occ.title, "done": 0, "not_done": 0, "series_id": occ.series_id,
+            "pcts": [],
         })
         s["title"] = occ.title
+        s["pcts"].append(occ.pct)
         if occ.result == Occurrence.RESULT_DONE:
             s["done"] += 1
         else:
@@ -1698,7 +1700,9 @@ def stats_list(request):
     for s in series_list:
         total = s["done"] + s["not_done"]
         s["total"] = total
-        s["success_rate"] = round((s["done"] / total) * 100) if total else 0
+        # % cumplido = media del % de cada día (no solo hecho/no hecho).
+        s["success_rate"] = round(sum(s["pcts"]) / len(s["pcts"])) if s["pcts"] else 0
+        s["bar_pct"] = min(100, s["success_rate"])
         streaks = Occurrence.streak_stats(s["series_id"])
         s["current_streak"] = streaks["current_streak"]
         s["max_streak"] = streaks["max_streak"]
@@ -1715,37 +1719,18 @@ def stats_list(request):
 def _stats_chart_points(occurrences, limit=60):
     """
     Un punto por día de la tarea, en orden cronológico, para la gráfica de
-    stats_detail: {"label": "06/10", "pct": 0-100, "done": bool}.
-
-    Hecha = 100%. Un día sin hacer cuenta 0%, salvo que caducara con
-    sesiones de entreno/temporizador a medias: ahí cuenta lo que se llegó
-    a hacer (75% del objetivo = 75). No hay campo nuevo: se calcula con
-    las ocurrencias y sesiones que ya se guardan.
+    stats_detail: {"label": "06/10", "pct": N, "done": bool}. El % es el
+    que se guardó ese día (Occurrence.completion_pct: media de todos los
+    ejercicios hechos; un día sin hacer = 0).
     """
     occs = list(occurrences)[::-1][-limit:]  # occurrences viene de más nuevo a más viejo
-    task_ids = {o.task_id for o in occs if o.task_id}
-    best = {}
-    if task_ids:
-        sessions = list(WorkoutSession.objects.filter(task_id__in=task_ids)) + list(
-            TimerSession.objects.filter(task_id__in=task_ids)
-        )
-        for sess in sessions:
-            pct = sess.achievement_pct
-            if pct is not None:
-                best[sess.task_id] = max(best.get(sess.task_id, 0), pct)
     points = []
     for o in occs:
-        if o.result == Occurrence.RESULT_DONE:
-            pct = 100
-        elif o.auto_expired and o.task_id in best:
-            pct = max(0, min(99, best[o.task_id]))
-        else:
-            pct = 0
         day = o.due_date or timezone.localtime(o.recorded_at).date()
         points.append({
             "label": day.strftime("%d/%m"),
             "date": day.isoformat(),
-            "pct": pct,
+            "pct": o.pct,
             "done": o.result == Occurrence.RESULT_DONE,
         })
     return points
@@ -1762,8 +1747,7 @@ def stats_detail(request, series_id):
     title = occurrences.first().title
     done_count = occurrences.filter(result=Occurrence.RESULT_DONE).count()
     not_done_count = occurrences.filter(result=Occurrence.RESULT_NOT_DONE).count()
-    total = done_count + not_done_count
-    success_rate = round((done_count / total) * 100) if total else 0
+    success_rate = Occurrence.average_pct(occurrences)
     streaks = Occurrence.streak_stats(series_id)
     chart_points = _stats_chart_points(occurrences)
 

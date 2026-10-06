@@ -53,7 +53,7 @@
             <button type="button" class="view-toggle__btn" data-chart-type="bar" aria-pressed="false">Barras</button>
         </div>
         <div class="day-chart" id="day-chart" role="img" aria-label="Gráfica del % de cumplimiento por día"></div>
-        <p class="day-chart__note">% de cumplimiento por día · un día sin hacer cuenta 0%</p>
+        <p class="day-chart__note">% de cumplimiento por día (media de todos los ejercicios del día; por encima de 100% = superaste el objetivo) · un día sin hacer cuenta 0%</p>
     </div>
 
     <ul class="history-list" id="hist-list">
@@ -62,7 +62,7 @@
             <span class="history-dot"></span>
             <span class="history-date">{{ occ.recorded_at|date:"d \d\e F, Y · H:i" }}</span>
             <span class="history-result">
-                {{ occ.get_result_display }}{% if occ.auto_expired %} (auto){% endif %}
+                {{ occ.get_result_display }}{% if occ.auto_expired %} (auto){% endif %} · {{ occ.pct }}%
             </span>
         </li>
         {% endfor %}
@@ -96,14 +96,21 @@
         var pw = W - m.l - m.r, ph = H - m.t - m.b;
         var svg = el('svg', {viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, 'class': 'day-chart__svg'});
 
+        // El eje llega a 100% como mínimo, y más si algún día se superó el objetivo.
+        var maxPct = data.reduce(function (a, p) { return Math.max(a, p.pct); }, 100);
+        var tick = maxPct > 200 ? 50 : 20;
+        var ymax = Math.ceil(maxPct / tick) * tick;
         function x(i) { return m.l + (i + 0.5) * (pw / n); }
-        function y(v) { return m.t + ph - (v / 100) * ph; }
+        function y(v) { return m.t + ph - (v / ymax) * ph; }
 
-        for (var v = 0; v <= 100; v += 20) {
+        for (var v = 0; v <= ymax; v += tick) {
             svg.appendChild(el('line', {x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), 'class': v === 0 ? 'day-chart__axis' : 'day-chart__grid'}));
             svg.appendChild(el('text', {x: m.l - 8, y: y(v) + 4, 'text-anchor': 'end', 'class': 'day-chart__tick'}, v));
         }
         svg.appendChild(el('line', {x1: m.l, x2: m.l, y1: m.t, y2: m.t + ph, 'class': 'day-chart__axis'}));
+        if (ymax > 100) {  // línea del 100% = objetivo cumplido
+            svg.appendChild(el('line', {x1: m.l, x2: W - m.r, y1: y(100), y2: y(100), 'class': 'day-chart__goal'}));
+        }
 
         var every = Math.ceil(n / Math.max(1, Math.floor(pw / 56)));
         data.forEach(function (p, i) {
@@ -115,9 +122,9 @@
         if (chartType === 'bar') {
             var bw = Math.min(30, (pw / n) * 0.7);
             data.forEach(function (p, i) {
-                var h = (p.pct / 100) * ph;
+                var h = (p.pct / ymax) * ph;
                 var r = el('rect', {x: x(i) - bw / 2, y: y(p.pct), width: bw, height: Math.max(h, 2),
-                                    'class': 'day-chart__bar' + (p.pct === 0 ? ' is-zero' : p.pct < 100 ? ' is-partial' : '')});
+                                    'class': 'day-chart__bar' + (p.pct === 0 ? ' is-zero' : p.pct < 100 ? ' is-partial' : p.pct > 100 ? ' is-over' : '')});
                 r.appendChild(el('title', {}, p.label + ' · ' + p.pct + '%'));
                 svg.appendChild(r);
             });

@@ -1031,4 +1031,6 @@ body.cam-fullscreen .page { animation:none; transform:none; }
 .day-chart__bar { fill:var(--gold); }
 .day-chart__bar.is-partial { fill:var(--amber); }
 .day-chart__bar.is-zero { fill:var(--ember); }
+.day-chart__bar.is-over { fill:var(--gold); stroke:var(--amber); stroke-width:1.5; }
+.day-chart__goal { stroke:var(--amber); stroke-opacity:.8; stroke-dasharray:6 4; }
 .day-chart__note { font-size:.75rem; opacity:.6; margin:6px 0 0; }

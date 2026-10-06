@@ -308,9 +308,10 @@ def stats_list(request):
     for occ in Occurrence.objects.filter(user=_user()).order_by("recorded_at"):
         key = str(occ.series_id)
         s = summary.setdefault(key, {
-            "series_id": key, "title": occ.title, "done": 0, "not_done": 0,
+            "series_id": key, "title": occ.title, "done": 0, "not_done": 0, "_pcts": [],
         })
         s["title"] = occ.title
+        s["_pcts"].append(occ.pct)
         if occ.result == Occurrence.RESULT_DONE:
             s["done"] += 1
         else:
@@ -319,7 +320,8 @@ def stats_list(request):
         s.update(Occurrence.streak_stats(key))
         total = s["done"] + s["not_done"]
         s["total"] = total
-        s["rate"] = round(100 * s["done"] / total) if total else 0
+        pcts = s.pop("_pcts")
+        s["rate"] = round(sum(pcts) / len(pcts)) if pcts else 0  # % de cumplimiento medio
     return JsonResponse({
         "stats": list(summary.values()),
         "weekly": Occurrence.weekly_completion(_user()),
@@ -345,13 +347,14 @@ def stats_detail(request, series_id):
     not_done_count = occurrences.filter(result=Occurrence.RESULT_NOT_DONE).count()
     total = done_count + not_done_count
     streaks = Occurrence.streak_stats(series_id)
+    success_rate = Occurrence.average_pct(occurrences)
 
     return JsonResponse({
         "title": title,
         "series_id": str(series_id),
         "done_count": done_count,
         "not_done_count": not_done_count,
-        "success_rate": round((done_count / total) * 100) if total else 0,
+        "success_rate": success_rate,
         "current_streak": streaks["current_streak"],
         "max_streak": streaks["max_streak"],
         "occurrences": [
@@ -363,6 +366,7 @@ def stats_detail(request, series_id):
                 "recorded_at": occ.recorded_at.isoformat(),
                 "auto_expired": occ.auto_expired,
                 "minutes_watched": occ.minutes_watched,
+                "completion_pct": occ.pct,
             }
             for occ in occurrences
         ],

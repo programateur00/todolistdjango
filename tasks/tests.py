@@ -210,41 +210,76 @@ class AntiTaskTests(TestCase):
 
 
 class StatsDetailChartTests(TestCase):
-    """Detalle de una estadística: lista o gráfica con el % de cada día."""
+    """Cada día guarda la media del % de sus ejercicios; la gráfica sale de ahí."""
 
-    def test_chart_points_done_100_missed_0_partial_keeps_pct(self):
-        from .views import _stats_chart_points
-        u = get_current_user()
-        hecha = Task.objects.create(title="G", due_date=date.today() - timedelta(days=2), user=u)
-        hecha.mark_done()
-        fallada = Task.objects.create(title="G", due_date=date.today() - timedelta(days=1), user=u, series_id=hecha.series_id)
-        fallada.mark_expired()
-        parcial = Task.objects.create(title="G", due_date=date.today(), user=u, series_id=hecha.series_id)
-        WorkoutSession.objects.create(
-            task=parcial, user=u, series_id=parcial.series_id, exercise="pushup",
-            total_reps=18, total_sets=3, session_duration_seconds=60,
-            target_sets=3, target_reps=8,
+    def _session(self, task, slug, reps, sets=3, target_reps=10):
+        return WorkoutSession.objects.create(
+            task=task, user=task.user, series_id=task.series_id, exercise=slug,
+            total_reps=reps, total_sets=sets, session_duration_seconds=60,
+            target_sets=3, target_reps=target_reps,
         )
-        parcial.mark_expired()
-        occs = Occurrence.objects.filter(series_id=hecha.series_id).order_by("-recorded_at")
-        pcts = sorted(p["pct"] for p in _stats_chart_points(occs))
-        self.assertEqual(pcts, [0, 75, 100])
+
+    def test_done_with_short_exercises_saves_average_not_100(self):
+        t = Task.objects.create(title="Circuito", due_date=date.today(), user=get_current_user())
+        self._session(t, "pushup", 15)    # 15/30 = 50%
+        self._session(t, "squat", 30)     # 30/30 = 100%
+        t.mark_done()                     # cerrar el circuito NO es 100%
+        self.assertEqual(Occurrence.objects.get(series_id=t.series_id).completion_pct, 75)
+
+    def test_exceeding_target_saves_over_100(self):
+        t = Task.objects.create(title="Circuito", due_date=date.today(), user=get_current_user())
+        self._session(t, "pushup", 45)    # 150%
+        self._session(t, "squat", 30)     # 100%
+        t.mark_done()
+        self.assertEqual(Occurrence.objects.get(series_id=t.series_id).completion_pct, 125)
+
+    def test_same_exercise_twice_counts_best_session(self):
+        t = Task.objects.create(title="Circuito", due_date=date.today(), user=get_current_user())
+        self._session(t, "pushup", 15)
+        self._session(t, "pushup", 30)
+        t.mark_done()
+        self.assertEqual(Occurrence.objects.get(series_id=t.series_id).completion_pct, 100)
+
+    def test_no_target_sessions_done_is_100_and_missed_is_0(self):
+        hecha = Task.objects.create(title="Leer", due_date=date.today(), user=get_current_user())
+        hecha.mark_done()
+        fallada = Task.objects.create(title="Leer", due_date=date.today() - timedelta(days=1), user=get_current_user(), series_id=hecha.series_id)
+        fallada.mark_expired()
+        pcts = sorted(o.completion_pct for o in Occurrence.objects.filter(series_id=hecha.series_id))
+        self.assertEqual(pcts, [0, 100])
+
+    def test_expired_with_partial_session_keeps_partial(self):
+        t = Task.objects.create(title="Corto", due_date=date.today(), user=get_current_user())
+        self._session(t, "pushup", 18, target_reps=8)  # 18/24 = 75%
+        t.mark_expired()
+        self.assertEqual(Occurrence.objects.get(series_id=t.series_id).completion_pct, 75)
+
+    def test_old_rows_without_pct_fall_back_to_done_or_not(self):
+        t = Task.objects.create(title="Vieja", due_date=date.today(), user=get_current_user())
+        t.mark_done()
+        Occurrence.objects.filter(series_id=t.series_id).update(completion_pct=None)
+        self.assertEqual(Occurrence.objects.get(series_id=t.series_id).pct, 100)
 
     def test_detail_page_has_toggle_and_chart_data(self):
         from django.test import override_settings
         from django.urls import reverse
         t = Task.objects.create(title="H", due_date=date.today(), user=get_current_user())
-        t.mark_expired()
+        self._session(t, "pushup", 45)
+        t.mark_done()
         # Sin manifiesto de collectstatic: el test solo mira el HTML.
         with override_settings(STORAGES={
             "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
             "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
         }):
             resp = self.client.get(reverse("tasks:stats_detail", args=[t.series_id]))
+            lst = self.client.get(reverse("tasks:stats_list"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'data-hist-view="chart"')
-        self.assertContains(resp, 'id="chart-data"')
         self.assertContains(resp, 'id="hist-list"')
+        self.assertEqual(resp.context["chart_points"][0]["pct"], 150)
+        self.assertEqual(resp.context["success_rate"], 150)
+        self.assertEqual(lst.status_code, 200)
+        self.assertEqual(lst.context["series_list"][0]["bar_pct"], 100)
 
 
 class OccurrenceIdempotencyTests(TestCase):

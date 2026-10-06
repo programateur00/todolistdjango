@@ -1498,6 +1498,35 @@ class Task(models.Model):
             reading_day_goal=self._reading_day_goal_for(next_date),
         )
 
+    def day_completion_pct(self, result):
+        """
+        % de cumplimiento de ESTE día (puede pasar de 100), el que se
+        guarda en Occurrence.completion_pct para las estadísticas.
+
+        Si el día tiene sesiones con objetivo (entrenos de un plan,
+        circuitos, temporizadores con minutos objetivo) es la MEDIA del
+        % de cada ejercicio: 3 ejercicios al 100%, 50% y 150% = 100%.
+        Antes se guardaba "hecho = 100%" aunque no llegaras a las
+        repeticiones, porque terminar el circuito o pulsar "hecho" cierra
+        la tarea. Si un ejercicio se hizo en varias sesiones el mismo
+        día, cuenta la mejor.
+
+        Sin ninguna sesión con objetivo (tarea normal, entreno libre):
+        hecha = 100, no hecha = 0.
+        """
+        per_exercise = {}
+        for ws in WorkoutSession.objects.filter(task=self):
+            pct = ws.achievement_pct
+            if pct is not None:
+                per_exercise[ws.exercise] = max(per_exercise.get(ws.exercise, 0), pct)
+        for ts in TimerSession.objects.filter(task=self):
+            pct = ts.achievement_pct
+            if pct is not None:
+                per_exercise["__timer__"] = max(per_exercise.get("__timer__", 0), pct)
+        if per_exercise:
+            return round(sum(per_exercise.values()) / len(per_exercise))
+        return 100 if result == Occurrence.RESULT_DONE else 0
+
     def _record_occurrence(self, result, auto_expired=False, minutes_watched=None):
         """
         Registra el resultado del día en Occurrence, de forma idempotente.
@@ -1520,18 +1549,20 @@ class Task(models.Model):
         historial/estadísticas, no cambia si el día cuenta como hecho o no
         (eso ya lo decidió quien llamó a mark_done()).
         """
+        pct = self.day_completion_pct(result)
         if self.due_date is None:
             return Occurrence.objects.create(
                 task=self, series_id=self.series_id, title=self.title,
                 result=result, due_date=None, auto_expired=auto_expired,
                 user=self.user, minutes_watched=minutes_watched,
+                completion_pct=pct,
             )
         obj, _ = Occurrence.objects.update_or_create(
             series_id=self.series_id, due_date=self.due_date,
             defaults=dict(
                 task=self, title=self.title, result=result,
                 auto_expired=auto_expired, user=self.user,
-                minutes_watched=minutes_watched,
+                minutes_watched=minutes_watched, completion_pct=pct,
             ),
         )
         return obj
@@ -4943,6 +4974,13 @@ class Occurrence(models.Model):
         help_text="Solo en tareas de vídeo: minutos reales vistos en el navegador "
                    "(IFrame API de YouTube), no un dato introducido a mano.",
     )
+    completion_pct = models.PositiveSmallIntegerField(
+        null=True, blank=True,
+        help_text="% de cumplimiento de ese día: media del % de cada ejercicio hecho "
+                   "(puede pasar de 100). Sin sesiones con objetivo: hecha=100, no hecha=0. "
+                   "Ver Task.day_completion_pct. None en filas antiguas (ver Occurrence.pct y "
+                   "el comando backfill_completion_pct).",
+    )
     recorded_at = models.DateTimeField(auto_now_add=True)
     uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -4964,6 +5002,19 @@ class Occurrence(models.Model):
 
     def __str__(self):
         return f"{self.title} — {self.get_result_display()} ({self.recorded_at:%Y-%m-%d})"
+
+    @property
+    def pct(self):
+        """% de cumplimiento del día; en filas antiguas sin calcular, 100/0 según el resultado."""
+        if self.completion_pct is not None:
+            return self.completion_pct
+        return 100 if self.result == self.RESULT_DONE else 0
+
+    @classmethod
+    def average_pct(cls, occs):
+        """Media del % de cumplimiento de una lista de ocurrencias (entero)."""
+        pcts = [o.pct for o in occs]
+        return round(sum(pcts) / len(pcts)) if pcts else 0
 
     @classmethod
     def streak_stats(cls, series_id):
