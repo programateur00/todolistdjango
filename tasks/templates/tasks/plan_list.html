@@ -90,7 +90,7 @@ leído) en vez de forzarlo en la tarjeta de Plan normal.
                             {% else %}
                             <span class="plan-card__pill">Te faltan {{ p.status.days_left }} días</span>
                             {% endif %}
-                            <span class="plan-card__pill">{{ p.status.pace_per_day }} pág./día</span>
+                            {% if not p.status.is_overdue %}<span class="plan-card__pill">{{ p.status.pace_per_day }} pág./día</span>{% endif %}
                         </p>
                         <div class="plan-card__progress">
                             <div class="plan-bar"><div class="plan-bar__fill" style="width: {{ p.status.pct }}%"></div></div>

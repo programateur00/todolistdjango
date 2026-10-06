@@ -1762,7 +1762,7 @@ def stats_delete_series(request, series_id):
 # ─────────────────────────────────────────────────────────────────────
 
 # Contadores que existen de verdad en workout.js.
-COUNTERS = {"superman", "lsit", "elephantsteps", "burpee", "pullup", "dip", "pushup", "squat", "splitsquat", "crunch", "legraise", "highlegraise", "situp", "doublecrunch", "scissor", "archerpullup", "inclinepushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "hipforwardback", "scapularpull", "handstandpushup"}
+COUNTERS = {"superman", "lsit", "elephantsteps", "burpee", "pullup", "dip", "pushup", "squat", "splitsquat", "crunch", "legraise", "highlegraise", "situp", "doublecrunch", "scissor", "archerpullup", "inclinepushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "hipforwardback", "scapularpull", "handstandpushup", "pistolsquat"}
 
 # Ejercicios "timed" (se aguantan, no se cuentan en repeticiones) que
 # workout.js sabe seguir con cámara comprobando la postura — plancha,

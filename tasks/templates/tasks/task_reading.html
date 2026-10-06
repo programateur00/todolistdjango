@@ -22,7 +22,7 @@
         <span>Página {{ status.current_page }} de {{ status.last_page }}</span>
         <span>·</span>
         <span id="reading-pace">
-            {% if status.is_overdue %}Vas {{ status.days_left|cut:"-" }} días tarde — {{ status.pace_per_day }} pág./día para ponerte al día
+            {% if status.is_overdue %}Vas {{ status.days_left|cut:"-" }} días tarde
             {% else %}Te faltan {{ status.days_left }} días · ritmo: {{ status.pace_per_day }} pág./día{% endif %}
         </span>
         {% else %}
@@ -519,7 +519,7 @@
         if (data.status) {
             progressBar.style.width = data.status.pct + '%';
             paceLabel.textContent = data.status.is_overdue
-                ? ('Vas ' + Math.abs(data.status.days_left) + ' días tarde — ' + data.status.pace_per_day + ' pág./día para ponerte al día')
+                ? ('Vas ' + Math.abs(data.status.days_left) + ' días tarde')
                 : ('Te faltan ' + data.status.days_left + ' días · ritmo: ' + data.status.pace_per_day + ' pág./día');
         }
         // Objetivo de HOY -- fijo durante el día (ver Task.reading_today_status),

@@ -1085,9 +1085,7 @@ const SPLITSQUAT_SUPPORT_MAX_ANGLE_DEG = 150;
 // de pie de frente, UNA repetición con la pierna izquierda y luego otra con la derecha. De frente NO hay
 // ángulo de rodilla fiable (la pierna que se dobla y la que se estira apuntan hacia la cámara y la pierna
 // entera ni siquiera se ve), así que se mide el ACORTAMIENTO de la pierna: distancia cadera->tobillo de
-// cada pierna dividida por la suya de pie (calibrada al armar). SOLO SE USAN CADERAS Y TOBILLOS: ni
-// hombros, ni brazos, ni cabeza (Alex: da igual que te agarres a algo, lo que importa son las piernas;
-// además en móvil vertical la cabeza/hombros pueden quedar fuera). Datos reales (PoseLandmarker VIDEO):
+// cada pierna dividida por la suya de pie (calibrada al armar). Datos reales (PoseLandmarker VIDEO):
 //   - pierna que trabaja: ratio 0.11-0.46 (izq) / 0.40-0.68 (der) abajo, ~1.0 de pie
 //   - pierna estirada al frente: 0.54-0.71 (izq trabaja) / 0.90-1.0 (der trabaja) -- también se acorta
 //     por escorzo, por eso NO basta "una pierna corta": se exige ASIMETRÍA entre las dos (0.33-0.54 real)
@@ -1096,8 +1094,8 @@ const SPLITSQUAT_SUPPORT_MAX_ANGLE_DEG = 150;
 //   - el tobillo de la pierna que trabaja baja a visibilidad 0.35-0.45 abajo: NO se exige visibilidad de
 //     pies para seguir una repetición ya empezada, solo para armar.
 // Cada pierna cuenta como UNA repetición (izquierda y derecha suman cada una 1); el lado se ve en el estado.
-const PISTOLSQUAT_MIN_VISIBILITY = 0.5;        // tobillos para armar (de pie real: 0.9-0.99)
-const PISTOLSQUAT_HIPS_MIN_VISIBILITY = 0.4;   // caderas para seguir (si no, cuenta como ausencia)
+const PISTOLSQUAT_MIN_VISIBILITY = 0.5;        // hombros/caderas/tobillos para armar (de pie real: 0.9-0.99)
+const PISTOLSQUAT_BODY_MIN_VISIBILITY = 0.4;   // hombros/caderas para seguir (si no, cuenta como ausencia)
 const PISTOLSQUAT_FEET_LOST_VISIBILITY = 0.3;  // de pie ya armado: tobillos por debajo de esto = frame ignorado
 const PISTOLSQUAT_ARM_STABLE_MS = 700;         // de pie quieto antes de calibrar
 const PISTOLSQUAT_ARM_SETTLE_MS = 500;         // mismo criterio que SQUAT_ARM_SETTLE_MS
@@ -1112,14 +1110,7 @@ const PISTOLSQUAT_MAX_REP_MS = 10000;          // abajo más de esto = se descar
 const PISTOLSQUAT_MIN_REP_SECONDS = 0.6;       // solo ruido de un frame suelto (reps reales: 2.1-4.2s)
 const PISTOLSQUAT_IDLE_CLOSE_MS = 8000;        // pedido por Alex: 8s sin hacer ninguna rep cierra la serie. Solo si ya hay
                                                // reps en la serie (antes de la primera no hay prisa: colocarse, hablar...)
-// Te acercas/alejas de la cámara (o te mueves) ESTANDO DE PIE: las dos piernas cambian IGUAL respecto a la
-// referencia (asimetría ~0) y se quedan así. Se recalibra tras RECAL_MS en vez de arrastrar una referencia
-// vieja. Una pistol de verdad es asimétrica, así que nunca dispara esto. (Antes se medía con el ancho de
-// hombros/cadera, pero la cadera mide ~6% del ancho de imagen y en móvil es puro ruido.)
-const PISTOLSQUAT_RECAL_MS = 1200;
-const PISTOLSQUAT_RECAL_MAX_ASYM = 0.12;
-const PISTOLSQUAT_RECAL_BAND = 0.15;           // las dos piernas fuera de 1.0 +- 15%
-const PISTOLSQUAT_RECAL_DROP_MAX = 0.25;       // y la cadera sin bajar claramente
+const PISTOLSQUAT_MAX_W_CHANGE = 0.25;         // te acercas/alejas de la cámara >25%: se recalibra en vez de contar
 const PISTOLSQUAT_REF_ALPHA = 0.05;            // la referencia sigue a tu postura de pie (deriva lenta)
 const PISTOLSQUAT_REF_TRACK_DROP = 0.08;       // ...solo mientras estás claramente de pie
 const PISTOLSQUAT_REF_TRACK_MIN_LEG = 0.85;
@@ -5683,7 +5674,6 @@ class WorkoutSession {
       this.pistolRef = null;
       this.pistolArmedAt = null;
       this.pistolIdleSince = null;
-      this.pistolOffSince = null;
       this.pistolSide = null;
       this.pistolLeftTotal = 0;
       this.pistolRightTotal = 0;
@@ -8799,11 +8789,11 @@ class WorkoutSession {
   /**
    * Pistol squat (sentadilla a una pierna) DE FRENTE a la cámara. Se mide el ACORTAMIENTO de cada pierna
    * (cadera->tobillo / su largo de pie) en vez de un ángulo de rodilla -- ver el bloque PISTOLSQUAT_* de
-   * arriba para los datos reales. Solo caderas y tobillos: da igual dónde tengas las manos o si te agarras
-   * a algo. Una repetición = bajar sobre UNA pierna (la otra estirada al frente) y volver a subir; cada
-   * pierna cuenta 1. Se cierra la serie tras PISTOLSQUAT_IDLE_CLOSE_MS sin repetir.
+   * arriba para los datos reales. Una repetición = bajar sobre UNA pierna (la otra estirada al frente) y
+   * volver a subir; cada pierna cuenta 1. Se cierra la serie tras PISTOLSQUAT_IDLE_CLOSE_MS sin repetir.
    */
   processPistolSquat(lm, now) {
+    const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
     const lH = lm[L_HIP], rH = lm[R_HIP];
     const lA = lm[L_ANKLE], rA = lm[R_ANKLE];
     const vis = (p) => p.visibility ?? 1;
@@ -8815,10 +8805,10 @@ class WorkoutSession {
       return;
     }
 
-    const hipsVis = Math.min(vis(lH), vis(rH));
-    if (hipsVis < PISTOLSQUAT_HIPS_MIN_VISIBILITY) {
-      this.announceStatus("No se te ven las caderas. Ponte de frente a la cámara, con las piernas enteras en el encuadre.", "pistolsquat_novis");
-      if (this.debugEl) this.debugEl.textContent = `buscando caderas de frente… vis ${hipsVis.toFixed(2)}`;
+    const bodyVis = Math.min(vis(lS), vis(rS), vis(lH), vis(rH));
+    if (bodyVis < PISTOLSQUAT_BODY_MIN_VISIBILITY) {
+      this.announceStatus("No se te ven los hombros y las caderas. Ponte de frente a la cámara.", "pistolsquat_novis");
+      if (this.debugEl) this.debugEl.textContent = `buscando hombros y caderas de frente… vis ${bodyVis.toFixed(2)}`;
       this.pistolArmSince = null;
       this.noteAbsence(now);
       return;
@@ -8830,6 +8820,7 @@ class WorkoutSession {
     const dist = (a, b) => Math.hypot(a.x - b.x, (a.y - b.y) * aspect); // en unidades de ancho de imagen
     const legL = dist(lH, lA), legR = dist(rH, rA);
     const hipY = (lH.y + rH.y) / 2;
+    const shoulderW = Math.abs(lS.x - rS.x);
 
     // --- Armar: de pie, de frente, quieto, las dos piernas parecidas ---
     if (this.state === null) {
@@ -8841,17 +8832,16 @@ class WorkoutSession {
       if (feetVis >= PISTOLSQUAT_MIN_VISIBILITY && legsEven && still) {
         if (this.pistolArmSince == null) {
           this.pistolArmSince = now;
-          this.pistolAcc = { l: 0, r: 0, y: 0, n: 0 };
+          this.pistolAcc = { l: 0, r: 0, y: 0, w: 0, n: 0 };
         }
         const a = this.pistolAcc;
-        a.l += legL; a.r += legR; a.y += hipY; a.n += 1;
+        a.l += legL; a.r += legR; a.y += hipY; a.w += shoulderW; a.n += 1;
         if (now - this.pistolArmSince >= PISTOLSQUAT_ARM_STABLE_MS) {
-          this.pistolRef = { l: a.l / a.n, r: a.r / a.n, y: a.y / a.n };
+          this.pistolRef = { l: a.l / a.n, r: a.r / a.n, y: a.y / a.n, w: a.w / a.n };
           this.state = "top";
           this.pistolArmSince = null;
           this.pistolArmedAt = now;
           this.pistolIdleSince = now;
-          this.pistolOffSince = null;
           this.announceStatus("¡Listo! Baja a una pierna y vuelve a subir.", "ready_to_go");
         } else {
           this.setStatus("De pie, de frente… confirmando (no te muevas)");
@@ -8875,38 +8865,30 @@ class WorkoutSession {
     const ref = this.pistolRef;
     const rL = legL / ref.l, rR = legR / ref.r;
     const drop = ((hipY - ref.y) * aspect) / ((ref.l + ref.r) / 2); // >0 = cadera más baja que de pie
+    const wChange = Math.abs(shoulderW - ref.w) / ref.w;
 
     if (this.state === "top") {
-      if (drop >= PISTOLSQUAT_DROP_DOWN && Math.min(rL, rR) <= PISTOLSQUAT_LEG_SHORT
+      if (wChange > PISTOLSQUAT_MAX_W_CHANGE) {
+        // Te has acercado/alejado de la cámara: no es una bajada, se recalibra aquí.
+        this.pistolRef = { l: legL, r: legR, y: hipY, w: shoulderW };
+      } else if (drop >= PISTOLSQUAT_DROP_DOWN && Math.min(rL, rR) <= PISTOLSQUAT_LEG_SHORT
         && Math.abs(rL - rR) >= PISTOLSQUAT_ASYMMETRY && (now - this.pistolArmedAt) >= PISTOLSQUAT_ARM_SETTLE_MS) {
         this.pistolSide = rL < rR ? "left" : "right"; // la pierna MÁS CORTA es la que trabaja
         this.state = "down";
-        this.pistolOffSince = null;
         this.repStartTime = now;
         this.setStatus(`Bajando con la pierna ${this.pistolSide === "left" ? "izquierda" : "derecha"}…`);
-      } else if (drop < PISTOLSQUAT_RECAL_DROP_MAX && Math.abs(rL - rR) <= PISTOLSQUAT_RECAL_MAX_ASYM
-        && (Math.min(rL, rR) < 1 - PISTOLSQUAT_RECAL_BAND || Math.max(rL, rR) > 1 + PISTOLSQUAT_RECAL_BAND)) {
-        // Las dos piernas cambian igual y se quedan así: te has acercado/alejado (no es una pistol).
-        if (this.pistolOffSince == null) {
-          this.pistolOffSince = now;
-        } else if (now - this.pistolOffSince >= PISTOLSQUAT_RECAL_MS) {
-          this.pistolRef = { l: legL, r: legR, y: hipY };
-          this.pistolOffSince = null;
-        }
-      } else {
-        this.pistolOffSince = null;
-        if (drop < PISTOLSQUAT_REF_TRACK_DROP && Math.min(rL, rR) > PISTOLSQUAT_REF_TRACK_MIN_LEG) {
-          const k = PISTOLSQUAT_REF_ALPHA;
-          ref.l = (1 - k) * ref.l + k * legL;
-          ref.r = (1 - k) * ref.r + k * legR;
-          ref.y = (1 - k) * ref.y + k * hipY;
-        }
+      } else if (drop < PISTOLSQUAT_REF_TRACK_DROP && Math.min(rL, rR) > PISTOLSQUAT_REF_TRACK_MIN_LEG) {
+        const k = PISTOLSQUAT_REF_ALPHA;
+        ref.l = (1 - k) * ref.l + k * legL;
+        ref.r = (1 - k) * ref.r + k * legR;
+        ref.y = (1 - k) * ref.y + k * hipY;
+        ref.w = (1 - k) * ref.w + k * shoulderW;
       }
     } else if (this.state === "down") {
-      if (now - this.repStartTime > PISTOLSQUAT_MAX_REP_MS) {
-        // Llevas demasiado abajo: se descarta, no cuenta.
+      if (wChange > PISTOLSQUAT_MAX_W_CHANGE * 1.5 || now - this.repStartTime > PISTOLSQUAT_MAX_REP_MS) {
+        // Te has desplazado hacia/desde la cámara o llevas demasiado abajo: se descarta, no cuenta.
         this.state = "top";
-        this.pistolRef = { l: legL, r: legR, y: hipY };
+        this.pistolRef = { l: legL, r: legR, y: hipY, w: shoulderW };
         this.pistolIdleSince = now;
       } else if (drop <= PISTOLSQUAT_DROP_UP && rL >= PISTOLSQUAT_LEG_UP && rR >= PISTOLSQUAT_LEG_UP) {
         const sideLabel = this.pistolSide === "left" ? "izquierda" : "derecha";
@@ -8921,7 +8903,7 @@ class WorkoutSession {
       this.debugEl.textContent =
         `[pistol] piernaIzq ${rL.toFixed(2)} piernaDer ${rR.toFixed(2)} (abajo ≤${PISTOLSQUAT_LEG_SHORT}, arriba ≥${PISTOLSQUAT_LEG_UP}) | ` +
         `asimetría ${Math.abs(rL - rR).toFixed(2)} (≥${PISTOLSQUAT_ASYMMETRY}) | bajada cadera ${drop.toFixed(2)} (≥${PISTOLSQUAT_DROP_DOWN}, arriba ≤${PISTOLSQUAT_DROP_UP}) | ` +
-        `pies vis ${feetVis.toFixed(2)} | lado ${this.pistolSide ?? "-"} | ` +
+        `pies vis ${feetVis.toFixed(2)} | cambioAncho ${(wChange * 100).toFixed(0)}% | lado ${this.pistolSide ?? "-"} | ` +
         `izq ${this.pistolLeftTotal} der ${this.pistolRightTotal} | estado: ${this.state}`;
     }
   }
