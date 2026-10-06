@@ -201,6 +201,10 @@ const POSE_DELEGATE = "GPU";
 // fondos, flexiones, sentadillas...). Los pocos de cadencia muy rapida
 // (jumping jacks, circulos de brazos, talones al gluteo, rodillas altas)
 // llevan voice_step=5 puesto por la migracion 0050_set_voice_step_fast_exercises.
+// Velocidad de la voz al contar reps (1 = normal). El plugin nativo (TtsPlugin.java) la aplica con setSpeechRate.
+const REP_VOICE_RATE = 2.0;
+// Si no es null, TODOS los ejercicios cuentan de este en este, ignorando Exercise.voice_step del catalogo (1 = cada rep). Poner null para volver a respetar el voice_step por ejercicio.
+const FORCE_VOICE_STEP = 1;
 const DEFAULT_VOICE_STEP = 1;
 const HANG_STABLE_MS = 500;   // cuanto tiempo seguido con los brazos en alto para empezar a calibrar
 const ARMS_DOWN_STABLE_MS = 400; // cuanto tiempo seguido con los brazos abajo para dar la serie por terminada (evita falsos positivos por un frame ruidoso)
@@ -4807,7 +4811,7 @@ class WorkoutSession {
     // DEFAULT_VOICE_STEP y speakRep mas abajo) -- viene del catalogo
     // (Exercise.voice_step) via data-voice-step; si no llega nada (NaN,
     // vacio, challenges.js que no lo manda) cae al valor por defecto.
-    this.voiceStep = parseInt(root.dataset.voiceStep, 10) || DEFAULT_VOICE_STEP;
+    this.voiceStep = FORCE_VOICE_STEP ?? (parseInt(root.dataset.voiceStep, 10) || DEFAULT_VOICE_STEP);
     this.video = el("workout-video");
     this.canvas = el("workout-canvas");
     this.ctx = this.canvas.getContext("2d");
@@ -6572,7 +6576,7 @@ class WorkoutSession {
     // número real siempre se ve aunque la voz solo marque los múltiplos
     // de voiceStep.
     if (n % this.voiceStep !== 0) return;
-    speakOut(numeroEnPalabras(n), { rate: 1.1, force: true }); // un poco más rápido que el habla normal, para no quedarse atrás
+    speakOut(numeroEnPalabras(n), { rate: REP_VOICE_RATE, force: true }); // más rápido que el habla normal, para no quedarse atrás
   }
 
   countRep(duration, now, label, minSeconds = MIN_REP_SECONDS) {

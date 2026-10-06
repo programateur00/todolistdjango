@@ -209,6 +209,29 @@ class AntiTaskTests(TestCase):
         self.assertFalse(t.is_avoid)
 
 
+class StatsChartToggleTests(TestCase):
+    """Estadísticas: toggle entre lista y gráfica con los datos que ya se guardan."""
+
+    def test_stats_list_has_toggle_list_and_chart(self):
+        from django.test import override_settings
+        from django.urls import reverse
+        done = Task.objects.create(title="Leer", due_date=date.today(), user=get_current_user())
+        done.mark_done()
+        missed = Task.objects.create(title="Correr", due_date=date.today(), user=get_current_user())
+        missed.mark_expired()
+        # Sin manifiesto de collectstatic: el test solo mira el HTML.
+        with override_settings(STORAGES={
+            "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+            "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+        }):
+            resp = self.client.get(reverse("tasks:stats_list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'data-stats-view="chart"')
+        self.assertContains(resp, 'id="stats-list"')
+        self.assertContains(resp, 'id="stats-chart"')
+        self.assertContains(resp, 'class="stats-chart__row"', count=2)
+
+
 class OccurrenceIdempotencyTests(TestCase):
     """
     El resultado de un día es un hecho corregible, no un log que se apila.
