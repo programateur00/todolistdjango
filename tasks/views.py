@@ -1747,16 +1747,18 @@ def _stats_chart_points(occurrences, limit=60):
                     "name": names[ws.exercise], "pct": pct, "done": hecho,
                     "target": ws.target_label or "",
                 }
-        for ts in TimerSession.objects.filter(task_id__in=task_ids).order_by("recorded_at"):
-            pct = ts.achievement_pct
-            if pct is None:
+        timers = {}
+        for ts in TimerSession.objects.filter(task_id__in=task_ids, deleted_at__isnull=True).select_related("task"):
+            timers.setdefault(ts.task_id, []).append(ts)
+        for task_id, group in timers.items():
+            target = group[0].task.target_minutes or max((g.target_minutes or 0 for g in group), default=0)
+            if not target:
                 continue
-            row = by_task.setdefault(ts.task_id, {})
-            if "__timer__" not in row or pct >= row["__timer__"]["pct"]:
-                row["__timer__"] = {
-                    "name": ts.subcategory_label, "pct": pct, "done": f"{ts.minutes} min",
-                    "target": f"{ts.target_minutes} min" if ts.target_minutes else "",
-                }
+            total = sum(g.minutes for g in group)
+            by_task.setdefault(task_id, {})["__timer__"] = {
+                "name": group[0].subcategory_label, "pct": round(100 * total / target),
+                "done": f"{total} min", "target": f"{target} min",
+            }
     points = []
     for o in occs:
         day = o.due_date or timezone.localtime(o.recorded_at).date()

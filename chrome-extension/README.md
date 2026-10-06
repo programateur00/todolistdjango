@@ -99,13 +99,19 @@ falta el subtipo.
 - Si cambias de pestaña, minimizas la ventana, o pasas más de un
   minuto sin tocar ratón/teclado, esa sesión se cierra y se manda; al
   volver, empieza una sesión nueva. (Para Udemy con audio exigido
-  —el valor por defecto— el ratón/teclado no cuenta si la pestaña está
-  sonando — se asume que sigues viendo el vídeo. Para un PDF, o para un
-  curso de Udemy marcado como "casi sin audio", no hay señal de sonido
-  en la que fiarse, así que ahí sí hace falta seguir tocando algo de vez
-  en cuando — si pasan 5 minutos sin tocar nada, chrome.idle lo detecta
-  y se para de contar, aunque la pestaña del curso se quede abierta y en
-  primer plano.)
+  —el valor por defecto— cuenta si la pestaña suena (se asume que sigues
+  viendo el vídeo, aunque no toques nada) O si hay actividad de
+  ratón/teclado: así las pausas, ejercicios y ratos de leer en silencio
+  también suman. Solo deja de contar si está en silencio Y llevas 5
+  minutos sin tocar nada. Para un PDF, o para un curso de Udemy marcado
+  como "casi sin audio", no hay señal de sonido en la que fiarse, así
+  que ahí hace falta seguir tocando algo de vez en cuando — si pasan 5
+  minutos sin tocar nada, chrome.idle lo detecta y se para de contar,
+  aunque la pestaña del curso se quede abierta y en primer plano.)
+- Los segundos sueltos de cada trozo no se pierden: lo que sobra (o
+  falta) para el minuto entero se arrastra al siguiente trozo de esa
+  tarea el mismo día (`takeWholeMinutes`), así que salir y volver varias
+  veces no hace perder minutos.
 - El icono de la extensión (clic izquierdo) enseña qué se está
   contando ahora mismo, si algo.
 

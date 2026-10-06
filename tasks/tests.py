@@ -254,6 +254,20 @@ class StatsDetailChartTests(TestCase):
         t.mark_expired()
         self.assertEqual(Occurrence.objects.get(series_id=t.series_id).completion_pct, 75)
 
+    def test_timer_sessions_are_summed_not_best_single(self):
+        """La extensión corta la sesión al cambiar de pestaña: 1+18+1+1 min de 30 = 70%, no 60%."""
+        t = Task.objects.create(
+            title="Deutsch", due_date=date.today(), user=get_current_user(),
+            category=Task.CATEGORY_STUDY, target_minutes=30,
+        )
+        for mins in (1, 18, 1, 1):
+            TimerSession.objects.create(
+                task=t, user=t.user, series_id=t.series_id, minutes=mins, target_minutes=30,
+                source=TimerSession.SOURCE_PC_USAGE,
+            )
+        t.mark_done()
+        self.assertEqual(Occurrence.objects.get(series_id=t.series_id).completion_pct, 70)
+
     def test_old_rows_without_pct_fall_back_to_done_or_not(self):
         t = Task.objects.create(title="Vieja", due_date=date.today(), user=get_current_user())
         t.mark_done()

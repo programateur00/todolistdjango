@@ -14,10 +14,11 @@
  * subtipo de tarea distinto:
  *
  *   - Udemy (category="study", subcategory="udemy"): la pestaña es
- *     udemy.com Y ADEMÁS suena (chrome.tabs.audible) — estar en el
- *     Q&A, las reseñas o el temario del curso sin el vídeo reproduciéndose
- *     NO cuenta como estudiar, el audio es la señal POR DEFECTO desde
- *     fuera de la página de que la clase se está viendo de verdad. Un
+ *     udemy.com Y ADEMÁS suena (chrome.tabs.audible) O hay actividad
+ *     reciente de ratón/teclado — el audio es la señal POR DEFECTO desde
+ *     fuera de la página de que la clase se está viendo de verdad, y la
+ *     actividad cubre las pausas y ejercicios en silencio (si no, esos
+ *     minutos se perdían aunque el curso estuviera delante). Un
  *     curso puesto como "casi sin audio" (Task.watch_requires_audio=false,
  *     pensado para cursos sobre todo de ejercicios) cambia esa exigencia
  *     por la misma que usa Lectura más abajo: sin inactividad de
@@ -41,12 +42,13 @@
  * No hay tramos "en pausa": si sales de la pestaña o del contenido,
  * esa sesión se cierra y se manda tal cual — volver más tarde empieza
  * una sesión nueva. Es literalmente "cuenta segundos con la pestaña en
- * primer plano", sin acumular huecos.
+ * primer plano", sin acumular huecos. Los segundos sueltos de cada trozo
+ * no se pierden: se arrastran al siguiente del mismo día (takeWholeMinutes).
  */
 
 const TASKS_CACHE_TTL_MS = 2 * 60 * 1000;     // 2 min
 const IDLE_DETECTION_SECONDS = 300;            // 5 min sin tocar ratón/teclado = inactivo
-const MIN_SESSION_MINUTES_TO_SEND = 1;         // sesiones de <1 min no se mandan, no aportan nada
+const MIN_SESSION_MINUTES_TO_SEND = 1;         // no se manda 0 min; el resto de segundos se acumula (ver takeWholeMinutes)
 const HEARTBEAT_ALARM = "libreta-udemy-heartbeat";
 const RETRY_ALARM = "libreta-udemy-retry-uploads";
 
@@ -219,9 +221,20 @@ async function getActiveMatch() {
       // inactividad de ratón/teclado -- es la única forma de detectar
       // que se dejó el curso en primer plano sin nadie delante,
       // haciendo trampa.
+      //
+      // Con audio exigido, que NO suene tampoco corta ya la cuenta si
+      // estás delante: un curso de idiomas tiene pausas, ejercicios y
+      // ratos de leer/anotar en silencio, y con "solo si suena" esos
+      // minutos se perdían del todo aunque el curso estuviera en primer
+      // plano (30 min reales llegaban como 21). Ahora cuenta si suena
+      // O si hay actividad reciente de ratón/teclado; solo se deja de
+      // contar al estar inactivo Y en silencio (curso abandonado).
       const requiresAudio = found.task.watch_requires_audio !== false;
       if (requiresAudio) {
-        if (!tab.audible) return null;
+        if (!tab.audible) {
+          const idleState = await chrome.idle.queryState(IDLE_DETECTION_SECONDS);
+          if (idleState !== "active") return null;
+        }
       } else {
         const idleState = await chrome.idle.queryState(IDLE_DETECTION_SECONDS);
         if (idleState !== "active") return null;
@@ -531,9 +544,55 @@ async function checkCourseCompletion(taskUuid, tabId, itemId = null) {
 
 // ------------------------------------------------------------ el ciclo
 
+// Segundos que sobran entre sesiones. La extensión corta la sesión cada vez
+// que sales de la pestaña, y antes cada trozo se redondeaba al minuto por
+// separado (y los de <30 s se tiraban): salir y volver varias veces hacía
+// perder minutos reales (30 min de estudio llegaban como 21). Ahora lo que
+// sobra (o falta) de cada trozo se guarda por tarea y por día y se suma al
+// siguiente, así lo mandado en total difiere del tiempo real menos de 30 s.
+let carryLock = Promise.resolve();
+function withCarryLock(fn) {
+  const run = carryLock.then(fn);
+  carryLock = run.catch(() => {});
+  return run;
+}
+
+function localDayKey(ms) {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Minutos enteros a mandar por este trozo, acumulando el resto en el día.
+function takeWholeMinutes(taskUuid, elapsedMs) {
+  return withCarryLock(async () => {
+    const { sessionCarry } = await chrome.storage.local.get("sessionCarry");
+    const all = sessionCarry && typeof sessionCarry === "object" ? sessionCarry : {};
+    const day = localDayKey(Date.now());
+    const prev = all[taskUuid] && all[taskUuid].day === day ? all[taskUuid].ms : 0;
+    const total = prev + elapsedMs;
+    const minutes = Math.max(0, Math.round(total / 60000));
+    all[taskUuid] = { day, ms: total - minutes * 60000 };
+    // Se limpian las tareas de días anteriores para que no crezca sin fin.
+    for (const key of Object.keys(all)) if (all[key].day !== day) delete all[key];
+    await chrome.storage.local.set({ sessionCarry: all });
+    return minutes;
+  });
+}
+
+// Una sesión solo se cierra (y se manda) UNA vez: reevaluate() lo disparan
+// varios eventos a la vez (cambio de pestaña, foco, inactividad…) y todos
+// leían la misma sesión en curso antes de que ninguno la borrara, así que
+// salían dos envíos casi simultáneos de la misma sesión.
+const endedSessions = new Set();
+
 async function endSession(session) {
+  const key = `${session.task.uuid}:${session.startedAt}`;
+  if (endedSessions.has(key)) return;
+  endedSessions.add(key);
+  if (endedSessions.size > 50) endedSessions.delete(endedSessions.values().next().value);
+
   await setCurrentSession(null);
-  const minutes = Math.round((Date.now() - session.startedAt) / 60000);
+  const minutes = await takeWholeMinutes(session.task.uuid, Date.now() - session.startedAt);
   if (minutes < MIN_SESSION_MINUTES_TO_SEND) return;
   await sendSessionMinutes(session.task.uuid, minutes, session.appPackage);
 }

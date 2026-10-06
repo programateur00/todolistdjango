@@ -1509,7 +1509,7 @@ class Task(models.Model):
         Antes se guardaba "hecho = 100%" aunque no llegaras a las
         repeticiones, porque terminar el circuito o pulsar "hecho" cierra
         la tarea. Si un ejercicio se hizo en varias sesiones el mismo
-        día, cuenta la mejor.
+        día, cuenta la mejor. Los minutos de temporizador se suman.
 
         Sin ninguna sesión con objetivo (tarea normal, entreno libre):
         hecha = 100, no hecha = 0.
@@ -1519,10 +1519,14 @@ class Task(models.Model):
             pct = ws.achievement_pct
             if pct is not None:
                 per_exercise[ws.exercise] = max(per_exercise.get(ws.exercise, 0), pct)
-        for ts in TimerSession.objects.filter(task=self):
-            pct = ts.achievement_pct
-            if pct is not None:
-                per_exercise["__timer__"] = max(per_exercise.get("__timer__", 0), pct)
+        # Temporizadores (lectura, estudio, la extensión de Chrome…): cada
+        # sesión es un trozo del día (la extensión corta al cambiar de
+        # pestaña), así que se SUMAN los minutos del día contra el objetivo,
+        # no se mira la mejor sesión suelta.
+        timers = list(TimerSession.objects.filter(task=self, deleted_at__isnull=True))
+        target = self.target_minutes or max((ts.target_minutes or 0 for ts in timers), default=0)
+        if timers and target:
+            per_exercise["__timer__"] = round(100 * sum(ts.minutes for ts in timers) / target)
         if per_exercise:
             return round(sum(per_exercise.values()) / len(per_exercise))
         return 100 if result == Occurrence.RESULT_DONE else 0
