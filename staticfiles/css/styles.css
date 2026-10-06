@@ -1020,13 +1020,14 @@ body.cam-fullscreen .page { animation:none; transform:none; }
 .view-toggle__btn { background:transparent; color:inherit; border:0; padding:8px 16px; font:inherit; font-size:.85rem; cursor:pointer; }
 .view-toggle__btn.is-active { background:var(--gold); color:#1a1a1a; font-weight:600; }
 #hist-chart[hidden], .history-list[hidden] { display:none; }
+.day-chart-wrap { position:relative; }
 .day-chart { overflow-x:auto; padding-bottom:4px; }
 .day-chart__svg { display:block; max-width:none; }
 .day-chart__grid { stroke:currentColor; stroke-opacity:.15; stroke-dasharray:3 4; }
 .day-chart__axis { stroke:currentColor; stroke-opacity:.5; }
 .day-chart__tick { fill:currentColor; fill-opacity:.7; font-size:11px; }
 .day-chart__line { fill:none; stroke:var(--gold); stroke-width:2.5; stroke-linejoin:round; stroke-linecap:round; }
-.day-chart__dot { fill:var(--gold); stroke:var(--bg, #171310); stroke-width:1.5; }
+.day-chart__dot { fill:var(--gold); stroke:var(--ash); stroke-width:1.5; }
 .day-chart__dot.is-zero { fill:var(--ember); }
 .day-chart__bar { fill:var(--gold); }
 .day-chart__bar.is-partial { fill:var(--amber); }
@@ -1034,3 +1035,26 @@ body.cam-fullscreen .page { animation:none; transform:none; }
 .day-chart__bar.is-over { fill:var(--gold); stroke:var(--amber); stroke-width:1.5; }
 .day-chart__goal { stroke:var(--amber); stroke-opacity:.8; stroke-dasharray:6 4; }
 .day-chart__note { font-size:.75rem; opacity:.6; margin:6px 0 0; }
+.day-chart__hit { fill:transparent; cursor:crosshair; outline:none; }
+.day-chart__guide { stroke:var(--amber); stroke-opacity:.45; stroke-dasharray:3 3; pointer-events:none; }
+.day-chart__dot { transition:r .12s ease; }
+.day-chart__dot.is-hot { r:7; stroke:var(--amber); stroke-width:2.5; }
+.day-chart__bar.is-hot { filter:brightness(1.2); }
+
+/* Tooltip de la gráfica: instantáneo, sin el retardo del title nativo */
+.chart-tip { position:absolute; z-index:5; transform:translateX(-50%); min-width:150px; max-width:260px; padding:10px 12px;
+    background:var(--ash-soft); color:var(--bone); border:1px solid var(--ember-deep); border-radius:10px;
+    box-shadow:0 8px 22px rgba(0,0,0,.45); pointer-events:none; font-size:.8rem; line-height:1.35; }
+.chart-tip[hidden] { display:none; }
+.chart-tip__date { font-size:.72rem; color:var(--bone-faded); margin-bottom:2px; }
+.chart-tip__pct { font-family:var(--font-mono); font-size:1.7rem; font-weight:700; color:var(--gold); line-height:1.1; }
+.chart-tip__pct.is-zero { color:var(--danger); }
+.chart-tip__pct.is-over { color:var(--amber); }
+.chart-tip__status { font-size:.75rem; opacity:.85; margin-bottom:2px; }
+.chart-tip__line { font-size:.75rem; opacity:.8; }
+.chart-tip__list { list-style:none; margin:8px 0 0; padding:8px 0 0; border-top:1px solid var(--line); display:flex; flex-direction:column; gap:5px; }
+.chart-tip__list li { display:grid; grid-template-columns:1fr auto; column-gap:10px; align-items:baseline; }
+.chart-tip__ex { font-weight:600; }
+.chart-tip__ex-pct { font-family:var(--font-mono); font-weight:700; color:var(--gold); }
+.chart-tip__ex-pct.is-short { color:var(--amber); }
+.chart-tip__ex-detail { grid-column:1 / -1; font-size:.7rem; opacity:.65; }

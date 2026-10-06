@@ -52,7 +52,10 @@
             <button type="button" class="view-toggle__btn is-active" data-chart-type="line" aria-pressed="true">Línea</button>
             <button type="button" class="view-toggle__btn" data-chart-type="bar" aria-pressed="false">Barras</button>
         </div>
-        <div class="day-chart" id="day-chart" role="img" aria-label="Gráfica del % de cumplimiento por día"></div>
+        <div class="day-chart-wrap" id="day-chart-wrap">
+            <div class="day-chart" id="day-chart" role="img" aria-label="Gráfica del % de cumplimiento por día"></div>
+            <div class="chart-tip" id="chart-tip" role="tooltip" hidden></div>
+        </div>
         <p class="day-chart__note">% de cumplimiento por día (media de todos los ejercicios del día; por encima de 100% = superaste el objetivo) · un día sin hacer cuenta 0%</p>
     </div>
 
@@ -125,7 +128,6 @@
                 var h = (p.pct / ymax) * ph;
                 var r = el('rect', {x: x(i) - bw / 2, y: y(p.pct), width: bw, height: Math.max(h, 2),
                                     'class': 'day-chart__bar' + (p.pct === 0 ? ' is-zero' : p.pct < 100 ? ' is-partial' : p.pct > 100 ? ' is-over' : '')});
-                r.appendChild(el('title', {}, p.label + ' · ' + p.pct + '%'));
                 svg.appendChild(r);
             });
         } else {
@@ -133,12 +135,90 @@
             svg.appendChild(el('polyline', {points: pts, 'class': 'day-chart__line'}));
             data.forEach(function (p, i) {
                 var c = el('circle', {cx: x(i), cy: y(p.pct), r: 4.5, 'class': 'day-chart__dot' + (p.pct === 0 ? ' is-zero' : '')});
-                c.appendChild(el('title', {}, p.label + ' · ' + p.pct + '%'));
                 svg.appendChild(c);
             });
         }
+
+        // Una zona transparente por día (toda la columna): fácil de apuntar y de tocar.
+        var guide = el('line', {y1: m.t, y2: m.t + ph, 'class': 'day-chart__guide', visibility: 'hidden'});
+        svg.insertBefore(guide, svg.firstChild.nextSibling);
+        var dots = svg.querySelectorAll('.day-chart__dot, .day-chart__bar');
+        data.forEach(function (p, i) {
+            var hit = el('rect', {x: m.l + i * (pw / n), y: m.t, width: pw / n, height: ph,
+                                  'class': 'day-chart__hit', tabindex: 0,
+                                  'aria-label': p.label + ': ' + p.pct + '%'});
+            function on() {
+                guide.setAttribute('x1', x(i)); guide.setAttribute('x2', x(i));
+                guide.setAttribute('visibility', 'visible');
+                if (dots[i]) dots[i].classList.add('is-hot');
+                showTip(p, hit, y(p.pct));
+            }
+            function off() {
+                guide.setAttribute('visibility', 'hidden');
+                if (dots[i]) dots[i].classList.remove('is-hot');
+                hideTip();
+            }
+            hit.addEventListener('mouseenter', on);
+            hit.addEventListener('mouseleave', off);
+            hit.addEventListener('focus', on);
+            hit.addEventListener('blur', off);
+            hit.addEventListener('click', function (e) { e.stopPropagation(); on(); });  // táctil
+            svg.appendChild(hit);
+        });
         host.appendChild(svg);
     }
+
+    // ---- Tooltip propio (instantáneo, con el estilo de la app) ----
+    var tip = document.getElementById('chart-tip');
+    var wrap = document.getElementById('day-chart-wrap');
+    function div(cls, text) {
+        var d = document.createElement('div');
+        d.className = cls;
+        if (text != null) d.textContent = text;
+        return d;
+    }
+    function fullDate(iso) {
+        var a = iso.split('-');
+        var d = new Date(+a[0], +a[1] - 1, +a[2]);
+        var s = d.toLocaleDateString('es-ES', {weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'});
+        return s.charAt(0).toUpperCase() + s.slice(1);
+    }
+    function showTip(p, hit, py) {
+        tip.innerHTML = '';
+        tip.appendChild(div('chart-tip__date', fullDate(p.date)));
+        var big = div('chart-tip__pct' + (p.pct === 0 ? ' is-zero' : p.pct > 100 ? ' is-over' : ''), p.pct + '%');
+        tip.appendChild(big);
+        var status = p.done ? 'Hecha' : 'No hecha';
+        if (p.auto) status += ' · caducó sin marcar';
+        if (p.pct > 100) status += ' · superaste el objetivo';
+        tip.appendChild(div('chart-tip__status', status));
+        if (p.minutes_watched) tip.appendChild(div('chart-tip__line', 'Vistos ' + p.minutes_watched + ' min'));
+        if (p.exercises && p.exercises.length) {
+            var ul = document.createElement('ul');
+            ul.className = 'chart-tip__list';
+            p.exercises.forEach(function (e) {
+                var li = document.createElement('li');
+                li.appendChild(div('chart-tip__ex', e.name));
+                var detail = e.done + (e.target ? ' / ' + e.target : '');
+                li.appendChild(div('chart-tip__ex-detail', detail));
+                li.appendChild(div('chart-tip__ex-pct' + (e.pct < 100 ? ' is-short' : ''), e.pct + '%'));
+                ul.appendChild(li);
+            });
+            tip.appendChild(ul);
+        }
+        tip.hidden = false;
+        var wr = wrap.getBoundingClientRect(), hr = hit.getBoundingClientRect();
+        var cx = hr.left + hr.width / 2 - wr.left;
+        var tw = tip.offsetWidth, th = tip.offsetHeight;
+        var left = Math.max(tw / 2 + 4, Math.min(wr.width - tw / 2 - 4, cx));
+        var pointY = hr.top - wr.top + (py - (+hit.getAttribute('y')));
+        var top = pointY - th - 14;
+        if (top < 0) top = pointY + 16;   // no cabe arriba: se pone debajo del punto
+        tip.style.left = left + 'px';
+        tip.style.top = top + 'px';
+    }
+    function hideTip() { tip.hidden = true; }
+    document.addEventListener('click', hideTip);
 
     function setActive(attr, value) {
         document.querySelectorAll('[' + attr + ']').forEach(function (b) {

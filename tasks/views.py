@@ -1719,11 +1719,44 @@ def stats_list(request):
 def _stats_chart_points(occurrences, limit=60):
     """
     Un punto por día de la tarea, en orden cronológico, para la gráfica de
-    stats_detail: {"label": "06/10", "pct": N, "done": bool}. El % es el
-    que se guardó ese día (Occurrence.completion_pct: media de todos los
-    ejercicios hechos; un día sin hacer = 0).
+    stats_detail. Lleva lo que enseña el tooltip al pasar el ratón: fecha,
+    % guardado ese día (Occurrence.completion_pct: media de todos los
+    ejercicios; un día sin hacer = 0), si se hizo o caducó, y el desglose
+    por ejercicio (mejor sesión de cada uno, igual que Task.day_completion_pct).
     """
     occs = list(occurrences)[::-1][-limit:]  # occurrences viene de más nuevo a más viejo
+    task_ids = {o.task_id for o in occs if o.task_id}
+    by_task = {}
+    names = {}
+    if task_ids:
+        for ws in WorkoutSession.objects.filter(task_id__in=task_ids).order_by("recorded_at"):
+            pct = ws.achievement_pct
+            if pct is None:
+                continue
+            if ws.exercise not in names:
+                names[ws.exercise] = ws.exercise_name
+            if ws.distance_km is not None:
+                hecho = f"{ws.distance_km:g} km"
+            elif ws.target_seconds and not ws.target_reps:
+                hecho = f"{ws.session_duration_seconds} s"
+            else:
+                hecho = f"{ws.total_reps} reps"
+            row = by_task.setdefault(ws.task_id, {})
+            if ws.exercise not in row or pct >= row[ws.exercise]["pct"]:
+                row[ws.exercise] = {
+                    "name": names[ws.exercise], "pct": pct, "done": hecho,
+                    "target": ws.target_label or "",
+                }
+        for ts in TimerSession.objects.filter(task_id__in=task_ids).order_by("recorded_at"):
+            pct = ts.achievement_pct
+            if pct is None:
+                continue
+            row = by_task.setdefault(ts.task_id, {})
+            if "__timer__" not in row or pct >= row["__timer__"]["pct"]:
+                row["__timer__"] = {
+                    "name": ts.subcategory_label, "pct": pct, "done": f"{ts.minutes} min",
+                    "target": f"{ts.target_minutes} min" if ts.target_minutes else "",
+                }
     points = []
     for o in occs:
         day = o.due_date or timezone.localtime(o.recorded_at).date()
@@ -1732,6 +1765,9 @@ def _stats_chart_points(occurrences, limit=60):
             "date": day.isoformat(),
             "pct": o.pct,
             "done": o.result == Occurrence.RESULT_DONE,
+            "auto": o.auto_expired,
+            "minutes_watched": o.minutes_watched,
+            "exercises": list(by_task.get(o.task_id, {}).values()) if o.task_id else [],
         })
     return points
 
