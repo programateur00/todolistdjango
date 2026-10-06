@@ -52,7 +52,7 @@ function renderDebug(snap) {
   if (snap.tab) {
     lines.push(`Pestaña activa — título: "${snap.tab.title}"`);
     lines.push(`Pestaña activa — URL: ${snap.tab.url ?? "(oculta — falta el permiso de acceso a archivos)"}`);
-    lines.push(`Tipo de pestaña detectado: ${{ udemy: "Udemy", ilerna: "Clases de Ilerna (Zoom)", pdf: "PDF", otro: "ninguno de los tres" }[snap.tabKind]}`);
+    lines.push(`Tipo de pestaña detectado: ${{ udemy: "Udemy", pdf: "PDF", otro: "ninguno de los dos" }[snap.tabKind]}`);
     lines.push(`¿Suena audio en la pestaña?: ${snap.tab.audible ? "sí" : "no"}`);
   } else {
     lines.push("Pestaña activa: (no se detecta ninguna)");
@@ -70,7 +70,7 @@ function renderDebug(snap) {
       lines.push(`   · [${t.subcategory}] "${t.title}" — palabra clave: "${t.watch_keyword}"${audioNote}`);
     });
   } else {
-    lines.push('   (ninguna — revisa que la tarea sea de hoy: Estudio → "Curso de Udemy" / "Clases de Ilerna", o Enfoque → "Lectura")');
+    lines.push('   (ninguna — revisa que la tarea sea de hoy: Estudio → "Curso de Udemy", o Enfoque → "Lectura", con palabra clave puesta)');
   }
   lines.push(`Coincidencia encontrada ahora: ${snap.match ? `SÍ — "${snap.match.taskTitle}" (por "${snap.match.keyword}")` : "NO"}`);
   lines.push(`Sesión en curso: ${snap.currentSession ? `${snap.currentSession.taskTitle} [${snap.currentSession.subcategory}]` : "ninguna"}`);

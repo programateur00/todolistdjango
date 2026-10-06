@@ -197,8 +197,8 @@
 
     <div id="udemy-fields">
         <label class="field">
-            <span class="field__label" id="watch-keyword-label">Palabra clave del PDF (opcional)</span>
-            <input type="text" name="watch_keyword" id="watch-keyword-input" maxlength="120" value="{{ task.watch_keyword|default:'' }}"
+            <span class="field__label">Palabra clave del PDF (opcional)</span>
+            <input type="text" name="watch_keyword" maxlength="120" value="{{ task.watch_keyword|default:'' }}"
                 placeholder="Ej: clean-code">
             <details class="hint-details">
                 <summary>¿cómo lo detecta?</summary>
@@ -394,8 +394,6 @@
     var languageFields = document.getElementById('language-fields');
     var udemyFields = document.getElementById('udemy-fields');
     var udemyGenericHint = document.getElementById('udemy-generic-hint');
-    var watchKeywordLabel = document.getElementById('watch-keyword-label');
-    var watchKeywordInput = document.getElementById('watch-keyword-input');
     var focusTargetField = document.getElementById('focus-target-field');
     var generalTimerField = document.getElementById('general-timer-field');
     var wantsTimerInput = document.getElementById('wants-timer-input');
@@ -436,15 +434,10 @@
         // campo de objetivo en minutos, por eso se decide aquí y no solo
         // con v === 'work'.
         var esUdemy = v === 'study' && subSelValue === 'udemy';
-        // Clases de Ilerna (Zoom): como Udemy cronometra con la
-        // extensión y comparte el campo de minutos, pero SÍ admite
-        // palabra clave (asignatura, opcional) y no necesita vídeo.
-        var esIlerna = v === 'study' && subSelValue === 'ilerna';
-        var esCursoExterno = esUdemy || esIlerna;
         var esGeneral = v === 'general';
         generalTimerField.style.display = esGeneral ? 'block' : 'none';
         var esGeneralConTimer = esGeneral && wantsTimerInput.checked;
-        focusTargetField.style.display = (v === 'work' || esCursoExterno || esGeneralConTimer) ? 'block' : 'none';
+        focusTargetField.style.display = (v === 'work' || esUdemy || esGeneralConTimer) ? 'block' : 'none';
         var esCarrera = sub === 'running';
         var modosPorSub = { upper_body: ['camera', 'circuit', 'video'], lower_body: ['camera', 'circuit', 'video'], warmup: ['camera', 'circuit'] };
         var modosValidos = modosPorSub[sub] || [];
@@ -486,11 +479,7 @@
         // generico (ver _study_link_error en el backend) -- asi que
         // enseña solo el aviso, nunca el input. Lectura sigue con su
         // input de siempre, sin cambios.
-        udemyFields.style.display = (esLectura || esIlerna) ? 'block' : 'none';
-        // El mismo input sirve a Lectura (PDF) y a Ilerna (asignatura):
-        // solo cambia el texto, para no mandar dos watch_keyword.
-        watchKeywordLabel.textContent = esIlerna ? 'Asignatura (opcional)' : 'Palabra clave del PDF (opcional)';
-        watchKeywordInput.placeholder = esIlerna ? "Un trozo del título de la clase, ej. 'Programación'" : 'Ej: clean-code';
+        udemyFields.style.display = esLectura ? 'block' : 'none';
         udemyGenericHint.style.display = esUdemy ? 'block' : 'none';
         var videoEnDeporte = esDeporte && modoActual === 'video';
         // Lectura vigilada por palabra clave no necesita ni tiene sentido
@@ -501,13 +490,13 @@
         videoSourceField.style.display = (esEnfoqueConVideo || videoEnDeporte) ? 'block' : 'none';
         var fuente = (document.querySelector('[name="video_source"]:checked') || {}).value || 'youtube';
         videoField.style.display =
-            (esEstudio && !esCursoExterno) || ((esEnfoqueConVideo || videoEnDeporte) && fuente === 'youtube') ? 'block' : 'none';
+            (esEstudio && !esUdemy) || ((esEnfoqueConVideo || videoEnDeporte) && fuente === 'youtube') ? 'block' : 'none';
         // "YouTube" e Idiomas SIEMPRE necesitan un vídeo o una playlist
         // -- si no, la tarea no tiene forma de saber qué estudiar ni de
         // cerrarse sola al terminarlo (ver Task.study_link_error en el
         // backend, que exige justo esto mismo). Udemy queda fuera: es la
         // única excepción, a propósito (ver esUdemy más arriba).
-        requiresYoutubeLink = esEstudio && !esCursoExterno;
+        requiresYoutubeLink = esEstudio && !esUdemy;
         if (!requiresYoutubeLink) videoInput.setCustomValidity('');
         document.querySelector('[data-label-video]').textContent =
             requiresYoutubeLink ? 'Vídeo de YouTube' : 'Vídeo de YouTube (opcional)';
@@ -519,9 +508,9 @@
         // de 40 horas, y Enfoque ya tiene su vídeo simple de sobra.
         // "Curso de Udemy" queda fuera: no es un vídeo de YouTube, es un
         // curso externo que se sigue por la palabra clave de arriba.
-        playlistField.style.display = (esEstudio && !esCursoExterno) ? 'block' : 'none';
-        videoTargetMinutesField.style.display = (esEstudio && !esCursoExterno) ? 'block' : 'none';
-        videoTargetCountField.style.display = (esEstudio && !esCursoExterno) ? 'block' : 'none';
+        playlistField.style.display = (esEstudio && !esUdemy) ? 'block' : 'none';
+        videoTargetMinutesField.style.display = (esEstudio && !esUdemy) ? 'block' : 'none';
+        videoTargetCountField.style.display = (esEstudio && !esUdemy) ? 'block' : 'none';
         avoidFields.style.display = v === 'avoid' ? 'block' : 'none';
 
         // Una antitarea no "vence": se te pregunta. Y en cuanto una tarea

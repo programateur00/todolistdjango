@@ -30,16 +30,6 @@
  *     Udemy lo reporta al 100% eso además cierra la tarea entera, no
  *     solo el día.
  *
- *   - Clases de Ilerna (category="study", subcategory="ilerna"): la pestaña
- *     es ilernaonline.zoom.us (grabaciones de las clases en Zoom). Misma
- *     regla que un curso de Udemy por defecto: cuenta si la pestaña suena
- *     O hay actividad reciente de ratón/teclado (pausas, apuntes), y deja
- *     de contar si estás inactivo Y en silencio. No hay "curso completado"
- *     que leer de Zoom -- solo se cuenta tiempo; el día se da por cumplido
- *     al llegar a los minutos objetivo (focus_save, backend). La palabra
- *     clave de la tarea (asignatura) es opcional: si hay, tiene que
- *     aparecer en el título de la pestaña; si no, vale cualquier clase.
- *
  *   - Lectura de un PDF (category="work", subcategory="reading"): la
  *     pestaña es un .pdf (local, file://, o servido por una web) visto
  *     con el visor nativo de Chrome. No hay forma de detectar "página
@@ -106,9 +96,7 @@ async function fetchTasksFromServer(cfg) {
   // minutos, aunque haya otro PDF cualquiera en primer plano. Solo el
   // Freestyle (y Udemy) pasan por aquí.
   return pending.filter(
-    (t) =>
-      (t.subcategory === "udemy" || t.subcategory === "ilerna" || t.subcategory === "reading") &&
-      t.reading_mode !== "plan"
+    (t) => (t.subcategory === "udemy" || t.subcategory === "reading") && t.reading_mode !== "plan"
   );
 }
 
@@ -178,15 +166,6 @@ function isUdemyUrl(rawUrl) {
   }
 }
 
-function isIlernaUrl(rawUrl) {
-  try {
-    const u = new URL(rawUrl);
-    return /(^|\.)ilernaonline\.zoom\.us$/i.test(u.hostname);
-  } catch {
-    return false;
-  }
-}
-
 function isPdfUrl(rawUrl) {
   try {
     const u = new URL(rawUrl);
@@ -218,20 +197,19 @@ async function getActiveMatch() {
     if (!tab || !tab.url) return null;
 
     const udemy = isUdemyUrl(tab.url);
-    const ilerna = !udemy && isIlernaUrl(tab.url);
-    const pdf = !udemy && !ilerna && isPdfUrl(tab.url);
-    if (!udemy && !ilerna && !pdf) return null;
+    const pdf = !udemy && isPdfUrl(tab.url);
+    if (!udemy && !pdf) return null;
 
     // Qué tarea encaja se mira ANTES de decidir qué se exige para
     // contar -- en Udemy la exigencia (audio o solo inactividad) depende
     // de la propia tarea/curso (ver Task.watch_requires_audio), no es
     // fija como en Lectura.
     const tasks = await getCachedTasks();
-    const candidates = tasks.filter((t) => t.subcategory === (udemy ? "udemy" : ilerna ? "ilerna" : "reading"));
+    const candidates = tasks.filter((t) => t.subcategory === (udemy ? "udemy" : "reading"));
     const found = matchTask(candidates, tab.title);
     if (!found) return null;
 
-    if (udemy || ilerna) {
+    if (udemy) {
       // Por defecto (watch_requires_audio=true, o caché vieja sin el
       // campo), la única señal fiable desde fuera de la página de que
       // la clase se está reproduciendo de verdad es que la pestaña
@@ -251,9 +229,7 @@ async function getActiveMatch() {
       // plano (30 min reales llegaban como 21). Ahora cuenta si suena
       // O si hay actividad reciente de ratón/teclado; solo se deja de
       // contar al estar inactivo Y en silencio (curso abandonado).
-      // Ilerna no tiene opción de "casi sin audio": una grabación de
-      // clase siempre suena, así que usa siempre la regla por defecto.
-      const requiresAudio = ilerna ? true : found.task.watch_requires_audio !== false;
+      const requiresAudio = found.task.watch_requires_audio !== false;
       if (requiresAudio) {
         if (!tab.audible) {
           const idleState = await chrome.idle.queryState(IDLE_DETECTION_SECONDS);
@@ -273,7 +249,7 @@ async function getActiveMatch() {
     return {
       task: found.task,
       tabId: tab.id,
-      appPackage: udemy ? "udemy.com" : ilerna ? "ilernaonline.zoom.us" : pdfFileName(tab.url),
+      appPackage: udemy ? "udemy.com" : pdfFileName(tab.url),
     };
   } catch (err) {
     console.warn("[Libreta] getActiveMatch falló:", err);
@@ -793,13 +769,12 @@ async function debugSnapshot() {
 
   const hasUrl = Boolean(tab && tab.url);
   const isUdemyTab = hasUrl && isUdemyUrl(tab.url);
-  const isIlernaTab = hasUrl && !isUdemyTab && isIlernaUrl(tab.url);
-  const isPdfTab = hasUrl && !isUdemyTab && !isIlernaTab && isPdfUrl(tab.url);
+  const isPdfTab = hasUrl && !isUdemyTab && isPdfUrl(tab.url);
   const noUrlButFileTab = Boolean(tab && !tab.url);
-  const tabKind = isUdemyTab ? "udemy" : isIlernaTab ? "ilerna" : isPdfTab ? "pdf" : "otro";
+  const tabKind = isUdemyTab ? "udemy" : isPdfTab ? "pdf" : "otro";
 
-  const candidates = tasks.filter((t) => t.subcategory === (isUdemyTab ? "udemy" : isIlernaTab ? "ilerna" : "reading"));
-  const match = isUdemyTab || isIlernaTab || isPdfTab ? matchTask(candidates, tab.title) : null;
+  const candidates = tasks.filter((t) => t.subcategory === (isUdemyTab ? "udemy" : "reading"));
+  const match = isUdemyTab || isPdfTab ? matchTask(candidates, tab.title) : null;
 
   const current = await getCurrentSession();
 

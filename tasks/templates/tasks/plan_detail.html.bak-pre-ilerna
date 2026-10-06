@@ -96,7 +96,7 @@
         </span>
     </div>
 
-    {% if headline.item.is_udemy_course %}
+    {% if headline.item.watch_keyword %}
     {# Barra de progreso del curso #}
     {% include "tasks/_course_bar.html" with item=headline.item %}
     {% endif %}

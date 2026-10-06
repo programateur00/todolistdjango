@@ -216,13 +216,8 @@
             <div class="repeat-options">
                 <label class="repeat-option">
                     <input type="radio" name="study_source" value="udemy" class="study-source-radio"
-                        {% if study_headline.watch_site == 'ilerna' %}{% elif study_headline.watch_keyword or not study_headline.youtube_video_id and not study_headline.youtube_playlist_id %}checked{% endif %}>
+                        {% if study_headline.watch_keyword or not study_headline.youtube_video_id and not study_headline.youtube_playlist_id %}checked{% endif %}>
                     <span>Curso de Udemy</span>
-                </label>
-                <label class="repeat-option">
-                    <input type="radio" name="study_source" value="ilerna" class="study-source-radio"
-                        {% if study_headline.watch_site == 'ilerna' %}checked{% endif %}>
-                    <span>Clases de Ilerna (Zoom)</span>
                 </label>
                 <label class="repeat-option">
                     <input type="radio" name="study_source" value="video" class="study-source-radio"
@@ -280,24 +275,6 @@
                     que no valga dejar el curso abierto y no estar delante.
                 </span>
             </fieldset>
-        </div>
-        <div class="field" id="study-source-ilerna-field">
-            <label class="field">
-                <span class="field__label">Asignatura (opcional)</span>
-                <input type="text" name="ilerna_keyword" maxlength="120"
-                    value="{% if study_headline.watch_site == 'ilerna' %}{{ study_headline.watch_keyword }}{% endif %}"
-                    placeholder="Un trozo del título de la clase, ej. 'Programación'">
-                <details class="hint-details">
-                    <summary>¿cómo lo detecta?</summary>
-                    <span class="field__hint">
-                        La extensión de Chrome cuenta el tiempo mientras tienes una grabación de
-                        ilernaonline.zoom.us en primer plano y sonando (o tocando ratón/teclado).
-                        Sin asignatura cuenta cualquier clase de Ilerna; con asignatura, solo
-                        cuando esa palabra sale en el título de la pestaña. Pon abajo los minutos
-                        de clase al día — el plan se da por cumplido cada día al llegar a ellos.
-                    </span>
-                </details>
-            </label>
         </div>
         <label class="field" id="study-source-video-field">
             <span class="field__label">Vídeo de YouTube</span>
@@ -433,9 +410,6 @@
     var studyVideoFieldsError = document.getElementById("study-video-fields-error");
     var studySourceRadios = document.querySelectorAll(".study-source-radio");
     var watchKeywordField = document.getElementById("study-source-udemy-field");
-    var ilernaField = document.getElementById("study-source-ilerna-field");
-    var ilernaKeywordInput = studyVideoFields.querySelector('input[name="ilerna_keyword"]');
-    var studyMinutesInput = studyVideoFields.querySelector('input[name="target_minutes"]');
     var studyVideoField = document.getElementById("study-source-video-field");
     var studyPlaylistField = document.getElementById("study-source-playlist-field");
     var studyVideoCountField = document.getElementById("study-source-video-count-field");
@@ -514,9 +488,6 @@
         for (var k = 0; k < watchTrackModeRadios.length; k++) {
             watchTrackModeRadios[k].disabled = source !== "udemy";
         }
-        ilernaField.style.display = source === "ilerna" ? "block" : "none";
-        ilernaKeywordInput.disabled = source !== "ilerna";
-        studyMinutesInput.required = source === "ilerna";
         studyVideoField.style.display = source === "video" ? "block" : "none";
         studyVideoInput.disabled = source !== "video";
         studyPlaylistField.style.display = source === "playlist" ? "block" : "none";
@@ -779,7 +750,7 @@
             dailyMinutesError.scrollIntoView({ behavior: "smooth", block: "center" });
             return;
         }
-        if (isStudyGeneral && selectedValue(studySourceRadios) !== "ilerna" && !watchKeywordInput.value.trim() && !studyVideoInput.value.trim() && !studyPlaylistInput.value.trim()) {
+        if (isStudyGeneral && !watchKeywordInput.value.trim() && !studyVideoInput.value.trim() && !studyPlaylistInput.value.trim()) {
             e.preventDefault();
             studyVideoFieldsError.hidden = false;
             studyVideoFieldsError.scrollIntoView({ behavior: "smooth", block: "center" });

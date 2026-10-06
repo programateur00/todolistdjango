@@ -681,7 +681,7 @@ def plan_udemy_courses(request):
     items = PlanItem.objects.filter(
         plan__in=plans_qs().filter(closed_at__isnull=True, is_active=True),
         exercise__isnull=True,
-    ).exclude(watch_keyword="").exclude(watch_site=PlanItem.SITE_ILERNA)
+    ).exclude(watch_keyword="")
     return JsonResponse({"courses": [
         {"item_id": i.pk, "watch_keyword": i.watch_keyword, "name": i.display_name}
         for i in items

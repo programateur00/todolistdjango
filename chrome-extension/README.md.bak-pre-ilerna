@@ -28,17 +28,6 @@ tipos de pestaña trackeable, cada uno emparejado con un tipo de tarea:
   inactividad de ratón/teclado (chrome.idle, 5 min) — para poder seguir
   contando aunque no suene nada, sin dejar de detectar si dejaste el
   curso abierto en primer plano y te fuiste.
-- **Clases de Ilerna (Zoom)** — tarea de categoría Estudio, subtipo
-  "Clases de Ilerna (Zoom)" (o plan de Estudio → "Clases de Ilerna").
-  Cuenta tiempo mientras tienes una grabación de `ilernaonline.zoom.us`
-  en primer plano y suena (o tocas ratón/teclado; para tras 5 min
-  inactivo Y en silencio). Sin curso que terminar: la tarea del día se da
-  por cumplida al llegar a los minutos objetivo, y el plan se cierra por
-  semanas como cualquier hábito de Estudio. La palabra clave (asignatura)
-  es opcional — si la pones, tiene que aparecer en el título de la
-  pestaña de Zoom; si no, cuenta cualquier clase de Ilerna. Para ver qué
-  título tiene la pestaña, abre el popup de la extensión (panel de
-  diagnóstico).
 - **Lectura de un PDF (modo Freestyle)** — tarea de categoría
   "Lectura". Si el título de la pestaña activa es un `.pdf` (local o
   de una web) y coincide con la palabra clave de la tarea, cuenta

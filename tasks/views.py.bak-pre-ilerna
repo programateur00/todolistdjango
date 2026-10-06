@@ -2526,18 +2526,7 @@ def plan_form(request, pk=None):
                         item.is_headline = True
                         item.youtube_video_id = request.POST.get("youtube_video_id", "").strip()[:255]
                         item.youtube_playlist_id = request.POST.get("youtube_playlist_id", "").strip()[:255]
-                        # Clases de Ilerna (Zoom): no es un curso de Udemy aunque
-                        # lleve palabra clave (asignatura, opcional) -- watch_site
-                        # lo distingue. La palabra clave de cada fuente viaja en su
-                        # propio input (los de las fuentes no elegidas llegan
-                        # deshabilitados, ver refreshStudySource en plan_form.html).
-                        is_ilerna = request.POST.get("study_source") == "ilerna"
-                        if is_ilerna:
-                            item.watch_site = PlanItem.SITE_ILERNA
-                            item.watch_keyword = request.POST.get("ilerna_keyword", "").strip()[:120]
-                        else:
-                            item.watch_site = ""
-                            item.watch_keyword = request.POST.get("watch_keyword", "").strip()[:120]
+                        item.watch_keyword = request.POST.get("watch_keyword", "").strip()[:120]
                         # Solo tiene sentido con watch_keyword puesto (Curso de
                         # Udemy) -- toggle "por vídeos vistos" (exige audio, de
                         # siempre) vs "por tiempo en la página" (vídeo + ejercicios,
@@ -2548,7 +2537,7 @@ def plan_form(request, pk=None):
                         # plan sale con una tarea diaria "Estudio simple"
                         # sin nada que comprobar ni forma de cerrarse solo
                         # -- ya no se deja crear/guardar así.
-                        if not (item.youtube_video_id or item.youtube_playlist_id or item.watch_keyword or is_ilerna):
+                        if not (item.youtube_video_id or item.youtube_playlist_id or item.watch_keyword):
                             messages.error(
                                 request,
                                 "Pon algo enlazado: un curso de Udemy (palabra clave), un vídeo "
@@ -2564,9 +2553,6 @@ def plan_form(request, pk=None):
                             item.target_minutes = max(1, int(raw_minutes)) if raw_minutes else None
                         except (TypeError, ValueError):
                             item.target_minutes = None
-                        if is_ilerna and not item.target_minutes:
-                            messages.error(request, "Clases de Ilerna: pon los minutos de clase al día.")
-                            return redirect(reverse("tasks:plan_edit", args=[plan.pk]))
                         raw_count = request.POST.get("target_video_count", "").strip()
                         try:
                             item.target_video_count = max(1, int(raw_count)) if raw_count else None
