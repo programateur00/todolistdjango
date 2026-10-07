@@ -37,7 +37,7 @@ from . import ai
 from .models import (
     CourseModule, CoursePlaylist, CourseQuiz, DebugLog, Exercise, Occurrence, Plan, PlanItem,
     Routine, RoutineItem, SavedVideo, Task, TimerSession, WarmupStatus, WorkoutSession,
-    day_average_pace, last_set_reps,
+    day_average_pace, last_set_reps, last_set_seconds,
 )
 from .utils import get_current_user, read_mobile_release, resolve_plan_target as _plan_context
 from .youtube_search import YouTubeSearchError, get_videos_details, list_playlist_items
@@ -298,6 +298,9 @@ def exercise_target(request, slug):
         # siempre, también en entrenos sueltos sin plan (a diferencia del
         # objetivo, esto es historial tuyo, no de ningún plan).
         "last_sets": last_set_reps(_user(), slug, plan=ctx["plan"]),
+        # Lo mismo para ejercicios cronometrados: segundos aguantados en
+        # cada serie ([45, 40]) -- "la última vez aguantaste 45 segundos".
+        "last_seconds": last_set_seconds(_user(), slug, plan=ctx["plan"]),
     })
 
 
@@ -2522,6 +2525,19 @@ def _set_reps_to_sets(raw):
     ]
 
 
+def _set_seconds_to_sets(raw):
+    """[45, 40] (segundos aguantados en cada serie de un ejercicio
+    cronometrado) -> [{"reps": 0, "durations": [45.0]}, ...], el mismo
+    formato que ya guarda la cámara para las planchas (ver
+    last_set_seconds en models.py). Sin datos válidos, []."""
+    if not isinstance(raw, list):
+        return []
+    return [
+        {"reps": 0, "durations": [round(float(s), 1)]} for s in raw[:50]
+        if isinstance(s, (int, float)) and not isinstance(s, bool) and 0 < s <= 36000
+    ]
+
+
 @api("POST")
 def plan_session_save(request, uuid, plan_uuid):
     """Guarda la sesión del plan: una entrada por ejercicio, con el
@@ -2549,7 +2565,7 @@ def plan_session_save(request, uuid, plan_uuid):
         created.append(WorkoutSession.objects.create(
             task=task, user=_user(), plan=plan, series_id=task.series_id,
             exercise=slug,
-            sets=_set_reps_to_sets(b.get("set_reps")),
+            sets=_set_reps_to_sets(b.get("set_reps")) or _set_seconds_to_sets(b.get("set_seconds")),
             total_reps=_num(b, "reps"), total_sets=_num(b, "sets"),
             session_duration_seconds=_num(b, "seconds"),
             target_sets=t.get("sets"), target_reps=t.get("reps"),

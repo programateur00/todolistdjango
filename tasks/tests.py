@@ -2501,6 +2501,72 @@ class LastSetRepsTests(TestCase):
         self.assertEqual(data["last_sets"], [9, 6])
 
 
+class LastSetSecondsTests(TestCase):
+    """"Serie 2: la última vez aguantaste 40 segundos" -- lo mismo que
+    LastSetRepsTests pero para ejercicios cronometrados."""
+
+    def setUp(self):
+        from .models import Exercise, Plan, PlanItem, Routine, WorkoutSession, last_set_seconds
+        self.last_set_seconds = last_set_seconds
+        self.WS, self.Routine = WorkoutSession, Routine
+        self.user = get_current_user()
+        self.ex, _ = Exercise.objects.get_or_create(
+            slug="plank", defaults=dict(name="Plancha", mode="timed", counter_key="plank"),
+        )
+        self.plan = Plan.objects.create(name="P", user=self.user)
+        self.item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.ex, progression=PlanItem.PROG_FAILURE, start_sets=3, order=0,
+        )
+
+    def _ws(self, secs, **kw):
+        return self.WS.objects.create(
+            user=self.user, exercise="plank", session_duration_seconds=sum(secs),
+            sets=[{"reps": 0, "durations": [s]} for s in secs], **kw,
+        )
+
+    def test_none_without_history(self):
+        self.assertIsNone(self.last_set_seconds(self.user, "plank"))
+        self.assertIsNone(self.item.last_session_set_seconds())
+
+    def test_returns_seconds_per_set_rounded(self):
+        self._ws([45.4, 40.6])
+        self.assertEqual(self.last_set_seconds(self.user, "plank"), [45, 41])
+        self.assertEqual(self.item.last_session_set_seconds(), [45, 41])
+
+    def test_old_session_with_only_totals_is_ignored(self):
+        self.WS.objects.create(user=self.user, exercise="plank", session_duration_seconds=90, total_sets=3)
+        self.assertIsNone(self.last_set_seconds(self.user, "plank"))
+
+    def test_routine_sessions_do_not_count_in_fallback(self):
+        self._ws([45, 40])
+        self._ws([10], routine=self.Routine.objects.create(name="warm", user=self.user))
+        self.assertEqual(self.item.last_session_set_seconds(), [45, 40])
+
+    def test_rep_exercise_gets_no_seconds(self):
+        from .models import Exercise, PlanItem
+        pull, _ = Exercise.objects.get_or_create(
+            slug="pullup", defaults=dict(name="Dominadas", mode="pose", counter_key="pullup"),
+        )
+        it = PlanItem.objects.create(plan=self.plan, exercise=pull, progression=PlanItem.PROG_FAILURE, start_sets=3, order=1)
+        self.assertIsNone(it.last_session_set_seconds())
+
+    def test_api_exercise_target_returns_last_seconds(self):
+        self._ws([45, 40])
+        data = self.client.get("/api/exercises/plank/target/").json()
+        self.assertEqual(data["last_seconds"], [45, 40])
+
+    def test_plan_session_save_stores_set_seconds(self):
+        from .models import Task
+        task = Task.objects.create(title="Plancha", user=self.user)
+        resp = self.client.post(
+            f"/api/tasks/{task.uuid}/plan/{self.plan.uuid}/save/",
+            data={"breakdown": [{"exercise": "plank", "seconds": 85, "sets": 2, "set_seconds": [45, 40]}]},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(self.last_set_seconds(self.user, "plank", plan=self.plan), [45, 40])
+
+
 class ReadingPlanDayPctTests(TestCase):
     """"Terminar sesión de hoy" no debe dar 100% si no se llegó al objetivo del día."""
 

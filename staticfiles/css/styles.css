@@ -1058,3 +1058,18 @@ body.cam-fullscreen .page { animation:none; transform:none; }
 .chart-tip__ex-pct { font-family:var(--font-mono); font-weight:700; color:var(--gold); }
 .chart-tip__ex-pct.is-short { color:var(--amber); }
 .chart-tip__ex-detail { grid-column:1 / -1; font-size:.7rem; opacity:.65; }
+
+/* Gráfica de progreso de reps (planes al fallo) — ver _failure_chart.html */
+.fchart { margin: 14px 0 18px; }
+.fchart__title { font-family: var(--font-d); letter-spacing: .04em; font-size: 18px; margin: 0 0 6px; }
+.fchart__svg { width: 100%; height: auto; display: block; }
+.fchart__grid { stroke: var(--line); stroke-width: 1; }
+.fchart__ref { stroke: var(--bone-faded); stroke-width: 1.2; stroke-dasharray: 4 4; }
+.fchart__tick { fill: var(--bone-faded); font-family: var(--font-mono); font-size: 10px; }
+.fchart__line { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; opacity: .9; }
+.fchart__line--total { stroke-width: 3.4; opacity: 1; }
+.fchart__dot { fill: currentColor; stroke: var(--ash); stroke-width: 1.5; }
+.fchart__legend { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 0; margin: 6px 0 4px; font-size: 12px; }
+.fchart__legend b { font-family: var(--font-mono); font-weight: 600; margin-left: 2px; }
+.fchart__swatch { display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+.fchart__swatch--total { height: 5px; }

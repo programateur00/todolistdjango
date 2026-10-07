@@ -16,7 +16,7 @@ from . import ai, api
 from . import time_stats
 from .models import (
     CourseQuiz, Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, SavedVideo, Task,
-    TimerSession, WarmupStatus, WorkoutSession, last_set_reps,
+    TimerSession, WarmupStatus, WorkoutSession, last_set_reps, last_set_seconds,
 )
 from .utils import get_current_user, read_mobile_release, resolve_plan_target
 from urllib.parse import quote
@@ -682,10 +682,13 @@ def task_workout(request, pk):
     # Reps de cada serie la última vez que hiciste este ejercicio (también
     # en entreno suelto, sin plan) -- "Serie 2: la última vez hiciste 10".
     last_sets = last_set_reps(get_current_user(), exercise.slug, plan=target["plan"])
+    # Ejercicios cronometrados (plancha...): segundos aguantados por serie.
+    last_seconds = last_set_seconds(get_current_user(), exercise.slug, plan=target["plan"])
     return render(request, "tasks/task_workout.html", {
         "task": task, "exercise": exercise,
         "target": target,
         "last_sets_json": json.dumps(last_sets) if last_sets else "",
+        "last_seconds_json": json.dumps(last_seconds) if last_seconds else "",
     })
 
 
@@ -1976,6 +1979,128 @@ def weekly_review(request):
     })
 
 
+# Colores de las líneas de la gráfica de "al fallo" (ver _failure_chart).
+# Vars del tema donde hay (se adaptan a oscuro/claro) + tonos fijos
+# distinguibles entre sí para cuando hay más ejercicios que vars.
+_CHART_COLORS = [
+    "var(--ember)", "var(--gold)", "#4FA3C7", "#8DB654",
+    "#B47CCB", "var(--amber)", "#D9627A", "#5FBFA6",
+]
+
+
+def _failure_chart(plan):
+    """
+    Gráfica de progreso de un plan con ejercicios "al fallo": en estos
+    la barra de logro (series hechas / pedidas) siempre da 100% y no
+    enseña lo único que de verdad mejora, las repeticiones.
+
+    Cada ejercicio es una línea en % de SU propia base (100% = media de
+    sus 2 primeras sesiones, para que un mal primer día no falsee todo),
+    así dominadas (8 reps) y sentadillas (40) caben en el mismo eje. La
+    línea gruesa es el total de la sesión: reps hechas / base de los
+    ejercicios que se hicieron ESE día (si un día faltó uno, no se
+    compara contra reps que nunca se pidieron).
+
+    Devuelve None si no hay objetivos al fallo. Si hay menos de 2 días
+    con sesión devuelve {"ready": False, ...} (con una sola sesión todo
+    sería 100% y no hay nada que dibujar).
+
+    La geometría (coordenadas SVG) se calcula aquí, no en la plantilla.
+    """
+    items = [i for i in plan.ordered_items() if i.progression == PlanItem.PROG_FAILURE and i.exercise_id]
+    if not items:
+        return None
+
+    # {item.pk: {date: {"reps": int, "sets": [reps por serie]}}}
+    per_item = {}
+    for it in items:
+        days = {}
+        for s in it._sessions():
+            d = s.recorded_at.astimezone(timezone.get_current_timezone()).date() if timezone.is_aware(s.recorded_at) else s.recorded_at.date()
+            slot = days.setdefault(d, {"reps": 0, "sets": []})
+            slot["reps"] += s.total_reps or 0
+            # Solo series de repeticiones: las de aguante ({"reps": 0,
+            # "durations": [...]}) no pintan "0-0" en el tooltip.
+            slot["sets"] += [x.get("reps", 0) for x in (s.sets or []) if isinstance(x, dict) and (x.get("reps") or 0) > 0]
+        if days:
+            per_item[it.pk] = days
+
+    all_dates = sorted({d for days in per_item.values() for d in days})
+    if len(all_dates) < 2:
+        return {"ready": False, "n_dates": len(all_dates)}
+
+    lines = []  # una entrada por ejercicio: puntos en %
+    for idx, it in enumerate(i for i in items if i.pk in per_item):
+        days = per_item[it.pk]
+        ds = sorted(days)
+        first = [days[d]["reps"] for d in ds[:2]]
+        base = sum(first) / len(first)
+        if base <= 0:
+            continue
+        lines.append({
+            "name": it.display_name,
+            "color": _CHART_COLORS[idx % len(_CHART_COLORS)],
+            "base": base,
+            "pts": {d: {"pct": 100.0 * days[d]["reps"] / base, "reps": days[d]["reps"], "sets": days[d]["sets"]} for d in ds},
+        })
+    if not lines:
+        return {"ready": False, "n_dates": len(all_dates)}
+
+    total = {}
+    for d in all_dates:
+        done = [l for l in lines if d in l["pts"]]
+        if not done:
+            continue
+        num = sum(l["pts"][d]["reps"] for l in done)
+        den = sum(l["base"] for l in done)
+        total[d] = {"pct": 100.0 * num / den, "reps": num, "sets": []}
+
+    vals = [p["pct"] for l in lines for p in l["pts"].values()] + [p["pct"] for p in total.values()]
+    lo = min(80, int(min(vals) // 10) * 10)
+    hi = max(120, int(-(-max(vals) // 10)) * 10)
+
+    W, H = 640, 260
+    L, R, T, B = 46, 14, 14, 30
+    pw, ph = W - L - R, H - T - B
+    n = len(all_dates)
+
+    def X(i):
+        return round(L + (pw * i / (n - 1)), 1)
+
+    def Y(v):
+        return round(T + ph * (1 - (v - lo) / (hi - lo)), 1)
+
+    xi = {d: i for i, d in enumerate(all_dates)}
+
+    def build(name, color, pts, thick):
+        dots = []
+        for d in sorted(pts):
+            p = pts[d]
+            tip = f"{name} · {d.strftime('%d/%m')}: {p['reps']} reps ({round(p['pct'])}%)"
+            if p["sets"]:
+                tip += " — " + "-".join(str(r) for r in p["sets"])
+            dots.append({"x": X(xi[d]), "y": Y(p["pct"]), "tip": tip})
+        return {
+            "name": name, "color": color, "thick": thick, "dots": dots,
+            "points": " ".join(f"{q['x']},{q['y']}" for q in dots),
+            "last": round(pts[max(pts)]["pct"]),
+        }
+
+    out_lines = [build("Total", "var(--bone)", total, True)]
+    out_lines += [build(l["name"], l["color"], l["pts"], False) for l in lines]
+
+    step = 20 if hi - lo > 60 else 10
+    yticks = [{"y": Y(v), "label": f"{v}%"} for v in range(lo, hi + 1, step)]
+    # Como mucho ~6 etiquetas de fecha para que no se pisen.
+    every = max(1, -(-n // 6))
+    xticks = [{"x": X(i), "label": all_dates[i].strftime("%d/%m")} for i in range(0, n, every)]
+
+    return {
+        "ready": True, "w": W, "h": H, "left": L, "right": W - R, "bottom": H - B,
+        "ref_y": Y(100), "yticks": yticks, "xticks": xticks, "lines": out_lines,
+    }
+
+
 def plan_detail(request, pk):
     """
     La pantalla del plan: dónde estás, qué te toca hoy, el camino que
@@ -2054,6 +2179,7 @@ def plan_detail(request, pk):
         "headline": _pack(head) if head else None,
         "supports": supports,
         "progress": plan.progress_pct(),
+        "failure_chart": _failure_chart(plan),
         "is_language": is_language,
         "is_study_general": is_study_general,
         "course_progress": course_progress,
@@ -3295,6 +3421,12 @@ def plan_session_save(request, pk, plan_pk):
             sets=[
                 {"reps": int(r)} for r in (b.get("set_reps") if isinstance(b.get("set_reps"), list) else [])[:50]
                 if isinstance(r, (int, float)) and not isinstance(r, bool) and 0 < r <= 1000
+            ] or [
+                # Ejercicios cronometrados: segundos aguantados por serie
+                # (mismo formato que la cámara, ver last_set_seconds).
+                {"reps": 0, "durations": [round(float(x), 1)]}
+                for x in (b.get("set_seconds") if isinstance(b.get("set_seconds"), list) else [])[:50]
+                if isinstance(x, (int, float)) and not isinstance(x, bool) and 0 < x <= 36000
             ],
             total_reps=num("reps"), total_sets=num("sets"),
             session_duration_seconds=num("seconds"),

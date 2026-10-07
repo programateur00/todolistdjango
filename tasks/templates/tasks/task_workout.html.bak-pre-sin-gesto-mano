@@ -1,0 +1,259 @@
+{% extends "tasks/base.html" %}
+{% load static %}
+{% block title %}Entreno — {{ task.title }}{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">{{ exercise.name }}</span>
+        <h1>{{ task.title }}</h1>
+    </div>
+    <a href="{% url 'tasks:task_workout' task.pk %}" class="stats-link">← Cambiar ejercicio</a>
+</header>
+
+<div id="workout-root"
+     data-save-url="{% url 'tasks:task_workout_save' task.pk %}?exercise={{ exercise.slug }}"
+     data-cancel-url="{% url 'tasks:task_list' %}"
+     data-exercise-slug="{{ exercise.slug }}"
+     data-counter-key="{{ exercise.counter_key|default:'pullup' }}"
+     data-voice-step="{{ exercise.voice_step }}"
+     data-target-sets="{{ target.target_sets|default:'' }}"
+     data-target-reps="{{ target.target_reps|default:'' }}"
+     data-target-seconds="{{ target.target_seconds|default:'' }}"
+     data-last-sets="{{ last_sets_json }}"
+     class="workout">
+    {% csrf_token %}
+
+    <div class="workout__camera">
+        <video id="workout-video" playsinline muted class="workout__video"></video>
+        <canvas id="workout-canvas" class="workout__canvas"></canvas>
+    </div>
+
+    <p id="workout-goal-banner" class="workout__goal-banner" hidden></p>
+    <p id="workout-last-hint" class="circuit__side-hint run-last-hint" hidden></p>
+    <button type="button" id="workout-debug-export" class="workout__btn workout__btn--ghost">
+        📋 Copiar registro de depuración
+    </button>
+    <p id="workout-debug-export-status" class="workout__debug"></p>
+
+    <details class="workout__stats-toggle">
+        <summary class="workout__stats-summary">Datos</summary>
+        <div class="workout__stats">
+            <div class="workout__stat">
+                <span class="workout__stat-value" id="workout-reps">0</span>
+                <span class="workout__stat-label">
+                    {% if exercise.counter_key == "plank" or exercise.counter_key == "sideplank" or exercise.counter_key == "wallsit" or exercise.counter_key == "kneeholdbar" or exercise.counter_key == "lsithold" or exercise.counter_key == "supermanhold" %}segundos{% else %}{{ exercise.name|lower }}{% endif %}
+                </span>
+            </div>
+            <div class="workout__stat">
+                <span class="workout__stat-value" id="workout-sets">1</span>
+                <span class="workout__stat-label">serie</span>
+            </div>
+            <div class="workout__stat">
+                <span class="workout__stat-value" id="workout-timer">0:00</span>
+                <span class="workout__stat-label">sesión</span>
+            </div>
+            <div class="workout__stat">
+                <span class="workout__stat-value" id="workout-rest">0:00</span>
+                <span class="workout__stat-label">descanso</span>
+            </div>
+        </div>
+    </details>
+
+    <div class="workout__actions">
+        <button type="button" id="workout-cancel" class="workout__btn workout__btn--ghost">Cancelar</button>
+        <button type="button" id="workout-recalibrate" class="workout__btn workout__btn--ghost">↻ Recalibrar</button>
+        <button type="button" id="workout-finish" class="workout__btn workout__btn--primary">Terminar sesión</button>
+    </div>
+
+    {% if exercise.counter_key == "squat" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti), no de frente —
+        así se ve bien cuánto doblas la rodilla. Encuadra toda la pierna, de la cadera al tobillo.
+    </p>
+    <p class="workout__note">
+        Si pasan más de 1:30 sin contar ninguna repetición (un descanso), la serie se cierra sola y empieza la siguiente.
+    </p>
+    {% elif exercise.counter_key == "pushup" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti) y encuadra el cuerpo
+        entero, de los hombros a los pies — así se ve bien cuánto doblas el codo. Túmbate <strong>boca abajo</strong>,
+        en la posición de arriba de la flexión: <strong>brazos estirados</strong>, <strong>manos a la altura del
+        pecho</strong> y codos <strong>pegados al cuerpo</strong> (mirando hacia atrás, no hacia los lados, para
+        que el ángulo se vea bien de perfil), con el cuerpo en línea recta.
+    </p>
+    <p class="workout__note">
+        Si pasan más de 1:30 sin contar ninguna repetición (un descanso), la serie se cierra sola y empieza la siguiente.
+    </p>
+    {% elif exercise.counter_key == "pikepushup" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti) y encuadra el cuerpo
+        entero, de las manos a los pies. Empieza en <strong>V invertida</strong>: manos y pies en el suelo,
+        <strong>caderas en alto</strong> y brazos y piernas estirados, y quédate quieto un momento. Una repetición es
+        <strong>bajar doblando los brazos</strong> mientras la cabeza baja hacia el suelo y <strong>volver a estirar los
+        brazos</strong>. Para terminar una serie, ponte de pie, sal del encuadre o levanta un brazo y agita la mano.
+    </p>
+    {% elif exercise.counter_key == "crunch" %}
+    <p class="workout__note">
+        🛏️ Túmbate boca arriba y coloca el móvil o el portátil <strong>a un lado</strong> (de perfil respecto a ti) —
+        así se ve bien cuánto se levantan los hombros del suelo. Encuadra el hombro, la cadera y la rodilla —
+        no hace falta que se vean los pies.
+    </p>
+    {% elif exercise.counter_key == "legraise" %}
+    <p class="workout__note">
+        🛏️ Túmbate boca arriba y coloca el móvil o el portátil <strong>a un lado</strong> (de perfil respecto a ti) —
+        así se ve bien cuánto suben las piernas. Encuadra el cuerpo entero, de los hombros a los tobillos.
+    </p>
+    {% elif exercise.counter_key == "situp" %}
+    <p class="workout__note">
+        🛏️ Túmbate boca arriba y coloca el móvil o el portátil <strong>a un lado</strong> (de perfil respecto a ti) —
+        así se ve bien cuánto te incorporas. Encuadra el hombro y la cadera — no hace falta que se vean ni las
+        piernas ni los pies.
+    </p>
+    {% elif exercise.counter_key == "doublecrunch" %}
+    <p class="workout__note">
+        🛏️ Túmbate boca arriba y coloca el móvil o el portátil <strong>a un lado</strong> (de perfil respecto a ti) —
+        así se ve bien el movimiento. Encuadra el hombro, la cadera y la rodilla — no hace falta que se vean los pies.
+    </p>
+    <p class="workout__note">
+        El torso se queda levantado en una postura intermedia (ni tumbado del todo ni sentado) durante todo el
+        ejercicio: lo que cuenta es el vaivén de las piernas llevando las rodillas al pecho y estirándolas de nuevo.
+    </p>
+    {% elif exercise.counter_key == "scissor" %}
+    <p class="workout__note">
+        🛏️ Túmbate boca arriba y coloca el móvil o el portátil <strong>a un lado</strong> (de perfil respecto a ti) —
+        así se ve bien el movimiento. Encuadra el cuerpo entero.
+    </p>
+    <p class="workout__note">
+        Las piernas se quedan levantadas <strong>a un palmo</strong> del suelo, sin llegar a apoyarlas, alternando
+        cuál de las dos sube más — como unas tijeras.
+    </p>
+    {% elif exercise.counter_key == "plank" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti) y encuadra el cuerpo entero,
+        de la cabeza a los pies. Primero túmbate <strong>boca arriba</strong>, para que la app confirme que te ve
+        entera/o — luego te pedirá que te des la vuelta y te pongas <strong>boca abajo</strong>, apoyada/o en los
+        antebrazos, con los codos justo debajo de los hombros y el cuerpo alzado del suelo, en línea recta.
+    </p>
+    {% elif exercise.counter_key == "sideplank" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti) y encuadra el cuerpo entero,
+        de la cabeza a los pies. Túmbate de lado y apóyate en el <strong>antebrazo</strong>, con el codo justo debajo
+        del hombro, mientras la otra mano descansa sobre la cadera de arriba. El cuerpo tiene que quedar en
+        <strong>diagonal</strong>, con la cadera bien alzada del suelo — no tumbada/o de lado.
+    </p>
+    <p class="workout__note">
+        Aquí no se cuentan repeticiones: es una postura que hay que <strong>aguantar</strong>. El contador de arriba
+        muestra los segundos aguantados. Si te levantas, sales del encuadre o levantas un brazo (para saludar o
+        estirarte) un par de segundos, la serie se cierra sola y empieza la siguiente.
+    </p>
+    {% elif exercise.counter_key == "wallsit" %}
+    <p class="workout__note">
+        📐 Ponte de espaldas a una pared y coloca el móvil o el portátil <strong>de lado</strong> (de perfil
+        respecto a ti), algo alejado, para que quepa la pierna entera en el encuadre — así se ve bien cuánto doblas
+        la rodilla. Dobla las rodillas deslizando la espalda por la pared hasta quedar <strong>sentada/o en una
+        silla invisible</strong>: muslos paralelos al suelo, rodillas a unos 90° y toda la espalda apoyada, sin
+        inclinarte hacia delante.
+    </p>
+    <p class="workout__note">
+        Aquí no se cuentan repeticiones: es una postura que hay que <strong>aguantar</strong>. El contador de arriba
+        muestra los segundos aguantados. Si te pones de pie del todo, sales del encuadre o levantas un brazo (para
+        saludar o estirarte) un par de segundos, la serie se cierra sola y empieza la siguiente.
+    </p>
+    {% elif exercise.counter_key == "kneeholdbar" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de frente</strong> a ti, algo alejado, para que quepa todo el cuerpo
+        colgado en el encuadre, de las manos a las rodillas. Agárrate a la barra con los brazos estirados y dobla las
+        rodillas, subiéndolas hasta dejarlas más o menos a la altura de la cadera.
+    </p>
+    <p class="workout__note">
+        Aquí no se cuentan repeticiones: es una postura que hay que <strong>aguantar</strong>. El contador de arriba
+        muestra los segundos aguantados. Si sueltas la barra o sales del encuadre un par de segundos, la serie se
+        cierra sola y empieza la siguiente.
+    </p>
+    {% elif exercise.counter_key == "dumbbellcurl" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti, como en flexiones o
+        fondos), no de frente — así se ve bien cuánto doblas el codo. Encuadra el brazo entero, del hombro a la
+        mano, y también la cadera del lado que mira a la cámara (se usa como referencia para saber si te
+        balanceas). Ponte de pie, de perfil, con <strong>una mancuerna en la mano del lado que mira a la
+        cámara</strong>, <strong>brazo estirado</strong> y <strong>codo pegado al cuerpo</strong>, para empezar.
+    </p>
+    <p class="workout__note">
+        Solo cuenta como repetición si el codo se mantiene pegado al costado durante todo el movimiento (sin
+        subir el brazo entero) y la muñeca no pasa de la altura de la cara — así no cuenta una repetición falsa
+        si levantas las manos por otro motivo o miras el móvil a media serie. Si te quedas con el brazo
+        doblado sin bajar, aparece un aviso de cuánto llevas aguantando: eso no cuenta como repetición hasta que
+        vuelvas a estirar el brazo del todo.
+    </p>
+    {% elif exercise.counter_key == "pullup" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de frente</strong> a ti, algo alejado, para que se vean los
+        hombros y los brazos enteros, hasta las manos, colgando de la barra — no hace falta que se vean las
+        piernas ni los pies (solo se sigue la nariz, los hombros, los codos y las muñecas). Agárrate a la barra
+        con los brazos estirados, para empezar.
+    </p>
+    <p class="workout__note">
+        <span style="color:var(--amber);">━</span> línea amarilla = altura de la barra (medida por tus muñecas al calibrar).
+        Si no coincide con tu barra real, pulsa «Recalibrar» estando ya colgado.
+    </p>
+    {% elif exercise.counter_key == "archerpullup" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de frente</strong> a ti, algo alejado, para que se vean los
+        hombros y los brazos enteros, hasta las manos, colgando de la barra — no hace falta que se vean las
+        piernas ni los pies (solo se sigue la nariz, los hombros, los codos y las muñecas). Agárrate a la barra
+        con los brazos estirados; al subir, lleva un brazo a 90° y estira el otro, alternando de lado en cada
+        repetición.
+    </p>
+    <p class="workout__note">
+        <span style="color:var(--amber);">━</span> línea amarilla = altura de la barra (medida por tus muñecas al calibrar).
+        Si no coincide con tu barra real, pulsa «Recalibrar» estando ya colgado.
+    </p>
+    {% elif exercise.counter_key == "dip" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti) y encuadra el hombro,
+        el codo y la muñeca del lado que mira a la cámara — no hace falta que se vean las piernas ni los pies.
+        Agárrate a las paralelas con los brazos estirados, para empezar.
+    </p>
+    {% elif exercise.counter_key == "superman" or exercise.counter_key == "supermanhold" %}
+    <p class="workout__note">
+        📐 Túmbate <strong>boca abajo</strong> y coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti), con el
+        <strong>cuerpo entero</strong> en el encuadre, de las manos a los pies. Empieza <strong>completamente estirado</strong>: brazos al
+        frente y piernas estiradas, todo apoyado en el suelo, y quédate quieto un momento para que la cámara aprenda tu posición de
+        reposo. Después <strong>levanta a la vez los brazos y las piernas</strong> del suelo
+        {% if exercise.counter_key == "superman" %}y vuelve a bajarlos: cuenta una repetición cada vez que los levantas (solo cuenta si
+        suben los brazos <em>y</em> las piernas; para la siguiente hay que bajar los dos del todo). Para terminar una serie, levántate o
+        sal del encuadre.{% else %}y aguanta arriba. Aquí no se cuentan repeticiones: el contador de arriba muestra los
+        <strong>segundos aguantados</strong>. Si bajas los brazos o las piernas, te levantas o sales del encuadre un par de segundos, la
+        serie se cierra sola.{% endif %}
+    </p>
+    {% elif exercise.counter_key == "lsit" or exercise.counter_key == "lsithold" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti) y encuadra el
+        <strong>cuerpo entero</strong>, de los hombros a los tobillos. Primero <strong>ponte de pie</strong> junto a las
+        paralelas, un momento, para que la cámara aprenda tu altura; luego <strong>súbete</strong> con los brazos estirados
+        {% if exercise.counter_key == "lsit" %}y sube y baja las piernas rectas, juntas, hasta la altura de la cadera (forma de L):
+        cuenta una repetición cada vez que las subes a la L y las dejas colgar del todo. Para terminar una serie, bájate de las
+        paralelas o sal del encuadre.{% else %}y aguanta las piernas rectas en L, a la altura de la cadera. Aquí no se cuentan
+        repeticiones: el contador de arriba muestra los <strong>segundos aguantados</strong>. Si bajas las piernas, te bajas de
+        las paralelas o sales del encuadre un par de segundos, la serie se cierra sola.{% endif %}
+    </p>
+    {% elif exercise.counter_key == "jumpingjack" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de frente</strong> a ti (no de perfil), con espacio a los lados
+        para abrir brazos y piernas, y encuadra el <strong>cuerpo entero</strong>, de los hombros a los tobillos.
+        Ponte de pie con los brazos pegados al cuerpo y los pies juntos, para empezar.
+    </p>
+    <p class="workout__note">
+        Si pasan más de 1:30 sin contar ninguna repetición (un descanso), la serie se cierra sola y empieza la siguiente.
+    </p>
+    {% endif %}
+    <p class="workout__note">
+        Nada de esto se graba ni se sube a ningún sitio — el vídeo se queda en tu navegador.
+        Solo se guardan los números al pulsar «Terminar sesión».
+    </p>
+</div>
+
+<script type="module" src="{% static 'js/workout.js' %}"></script>
+
+{% endblock %}

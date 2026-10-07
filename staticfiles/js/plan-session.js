@@ -21,7 +21,7 @@
 import {
   checkPlankPosture, checkSidePlankPosture, checkWallSitPosture,
   checkKneeHoldBarPosture, checkHandstandPosture, createLSitHoldChecker, createSupermanHoldChecker,
-  speakOut, numeroEnPalabras, isVoiceEnabled, exportDebugLogText,
+  speakOut, numeroEnPalabras, isVoiceEnabled, REP_VOICE_RATE, exportDebugLogText,
 } from "./workout.js";
 import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./mediapipe-vendor.js";
 
@@ -109,6 +109,42 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   let setNo = 1;
   let setsDone = 0;
   let heldTotal = 0;
+  let setSeconds = []; // segundos aguantados en cada serie del ejercicio en curso
+
+  // "45 segundos" / "1 minuto y 5 segundos" -- para "la última vez aguantaste X"
+  // en los ejercicios cronometrados (item.last_seconds, ver Plan.session_items()).
+  function secondsLabel(n) {
+    const t = Math.max(0, Math.round(n));
+    if (t < 60) return `${t} ${t === 1 ? "segundo" : "segundos"}`;
+    const m = Math.floor(t / 60), s = t % 60;
+    const mm = `${m} ${m === 1 ? "minuto" : "minutos"}`;
+    return s ? `${mm} y ${s} ${s === 1 ? "segundo" : "segundos"}` : mm;
+  }
+  /** Lo que aguantaste en ESTA serie la última vez (item.last_seconds,
+   *  [45, 40, 38]) o null si no hay historial. Sin parte "Serie N" si el
+   *  ejercicio solo tiene una serie. */
+  function lastSecondsText(item, { spoken = false } = {}) {
+    const last = item && item.last_seconds;
+    if (!Array.isArray(last) || !last.length) return null;
+    const i = setNo - 1; // serie en curso, base 0
+    const sep = spoken ? ". " : ": ";
+    const cap = spoken ? "La" : "la";
+    if (i >= last.length) {
+      return `Serie ${i + 1}${sep}${cap} última vez hiciste ${last.length} ${last.length === 1 ? "serie" : "series"}${spoken ? "." : ", esta es extra"}`;
+    }
+    const held = `${cap} última vez aguantaste ${secondsLabel(last[i])}`;
+    return setsTotal > 1 ? `Serie ${i + 1}${sep}${held}${spoken ? " en esta serie." : ""}` : `${held}${spoken ? "." : ""}`;
+  }
+  function lastSecondsHintHtml(item) {
+    const t = lastSecondsText(item);
+    return t ? `<p class="circuit__side-hint run-last-hint">${esc(t)}</p>` : "";
+  }
+  /** Lo dice por voz al empezar cada serie cronometrada (sin cortar lo que ya sonara). */
+  function announceLastSeconds(item) {
+    if (!isVoiceEnabled()) return;
+    const t = lastSecondsText(item, { spoken: true });
+    if (t) speakOut(t, { flush: false });
+  }
 
   function current() {
     return sequence[index];
@@ -119,8 +155,14 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   function progressBase() {
     return `Ejercicio ${index + 1} de ${sequence.length}`;
   }
+  // "Al fallo" (item.work vacío): la última serie se anuncia como tal en
+  // vez de "Serie N de N".
+  function setText(n, item) {
+    const last = n === setsTotal && setsTotal > 1 && item && !item.work;
+    return last ? "Última serie de este ejercicio" : `Serie ${n} de ${setsTotal}`;
+  }
   function progressLabel() {
-    return setsTotal > 1 ? `${progressBase()} · Serie ${setNo} de ${setsTotal}` : progressBase();
+    return setsTotal > 1 ? `${progressBase()} · ${setText(setNo, current())}` : progressBase();
   }
   function record(entry) {
     breakdown.push(entry);
@@ -148,6 +190,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     setNo = 1;
     setsDone = 0;
     heldTotal = 0;
+    setSeconds = [];
     // Dice el nombre del ejercicio al empezar (tren superior o inferior).
     if (isVoiceEnabled()) {
       speakOut(setsTotal > 1 ? `Ahora toca ${item.name}. Serie 1 de ${setsTotal}` : `Ahora toca ${item.name}`, { flush: true });
@@ -157,6 +200,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 
   /** Arranca UNA serie (o el ejercicio entero, si solo tiene una). */
   function runSet(item) {
+    if (item.mode !== "pose") announceLastSeconds(item);
     if (item.mode === "pose") runCamera(item);
     else if (POSTURE_COUNTERS.has(item.counter_key)) runTimerWithPosture(item);
     else runTimer(item);
@@ -173,6 +217,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     if (seconds > 0) {
       heldTotal += seconds;
       setsDone += 1;
+      setSeconds.push(Math.round(seconds * 10) / 10);
     }
     if (!skipExercise && setNo < setsTotal) {
       const done = setNo;
@@ -190,6 +235,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     if (seconds > 0) {
       heldTotal += seconds;
       setsDone += 1;
+      setSeconds.push(Math.round(seconds * 10) / 10);
     }
     recordTimed(item, recordEmpty);
     finish();
@@ -201,6 +247,8 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     // "sets" solo en ejercicios de plan (el % de los "al fallo" se mide en
     // series hechas).
     if (item.target_source === "plan") entry.sets = setsDone;
+    // Segundos de CADA serie: sirven para "la última vez aguantaste X".
+    if (setSeconds.length) entry.set_seconds = [...setSeconds];
     record(entry);
   }
 
@@ -211,9 +259,9 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     runRest(SET_REST_SECONDS, {
       nextItem: item,
       progress: `${progressBase()} · Serie ${doneNo} de ${setsTotal} hecha`,
-      nextLabel: `Siguiente: serie ${setNo} de ${setsTotal} — ${item.name}`,
+      nextLabel: `Siguiente: ${setText(setNo, item).toLowerCase()} — ${item.name}`,
       onDone: () => {
-        if (isVoiceEnabled()) speakOut(`Serie ${setNo} de ${setsTotal}`, { flush: true });
+        if (isVoiceEnabled()) speakOut(setText(setNo, item), { flush: true });
         runSet(item);
       },
       onSkipExercise: () => {
@@ -242,6 +290,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         <div class="circuit__icon">${iconFor(item.slug)}</div>
         <h2 class="circuit__exercise-name">${esc(item.name)}</h2>
         <p class="circuit__phase circuit__phase--work">${isFailure ? "Al fallo" : "Trabajo"}</p>
+        ${lastSecondsHintHtml(item)}
         <div class="circuit__timer" id="run-timer">${fmt(work || 0)}</div>
         <p class="circuit__next">${hasNext() ? `Siguiente: ${esc(sequence[index + 1].name)}` : "¡Último!"}</p>
         <div class="circuit__controls">
@@ -280,9 +329,9 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       if (isFailure) {
         timerEl.textContent = fmt(elapsed);
         logDebugLine("al fallo (cuenta libre)");
-        if (isVoiceEnabled() && elapsed % 5 === 0 && elapsed !== lastSpokenNumber) {
+        if (isVoiceEnabled() && elapsed !== lastSpokenNumber) {
           lastSpokenNumber = elapsed;
-          speakOut(numeroEnPalabras(elapsed));
+          speakOut(numeroEnPalabras(elapsed), { rate: REP_VOICE_RATE });
         }
         return;
       }
@@ -304,9 +353,9 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       // igual que ya se puede con las repeticiones).
       // Cada 5 segundos, no cada uno - dicho cada segundo la voz no daba
       // abasto (números solapándose/cortados a medias).
-      if (isVoiceEnabled() && remaining % 5 === 0 && remaining !== lastSpokenNumber) {
+      if (isVoiceEnabled() && remaining !== lastSpokenNumber) {
         lastSpokenNumber = remaining;
-        speakOut(numeroEnPalabras(remaining));
+        speakOut(numeroEnPalabras(remaining), { rate: REP_VOICE_RATE });
       }
       timerEl.textContent = fmt(remaining);
     }, 1000);
@@ -383,6 +432,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         <p class="circuit__progress">${esc(progressLabel())}</p>
         <h2 class="circuit__exercise-name">${esc(item.name)}</h2>
         <p class="circuit__phase circuit__phase--work">${isFailure ? "Al fallo" : "Trabajo"}</p>
+        ${lastSecondsHintHtml(item)}
         <div class="workout__camera">
           <video id="posture-video" playsinline muted class="workout__video"></video>
           <canvas id="posture-canvas" class="workout__canvas"></canvas>
@@ -565,9 +615,9 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       if (isFailure) {
         timerEl.textContent = fmt(elapsed);
         logDebugLine(`al fallo (cuenta libre), postura ok ${lastPostureDebug}`);
-        if (isVoiceEnabled() && elapsed % 5 === 0 && elapsed !== lastSpokenNumber) {
+        if (isVoiceEnabled() && elapsed !== lastSpokenNumber) {
           lastSpokenNumber = elapsed;
-          speakOut(numeroEnPalabras(elapsed));
+          speakOut(numeroEnPalabras(elapsed), { rate: REP_VOICE_RATE });
         }
         return;
       }
@@ -579,9 +629,9 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         if (remaining <= 3) beep(660, 0.1);
         // Cada 5 segundos, no cada uno - ver nota junto a runTimer() más
         // arriba.
-        if (isVoiceEnabled() && remaining % 5 === 0 && remaining !== lastSpokenNumber) {
+        if (isVoiceEnabled() && remaining !== lastSpokenNumber) {
           lastSpokenNumber = remaining;
-          speakOut(numeroEnPalabras(remaining));
+          speakOut(numeroEnPalabras(remaining), { rate: REP_VOICE_RATE });
         }
         return;
       }
@@ -600,7 +650,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         lastSpokenNumber = 0;
         logDebugLine(`objetivo cumplido (${item.work}s)`);
         beep(880, 0.2);
-        if (isVoiceEnabled()) speakOut(numeroEnPalabras(0), { flush: true });
+        if (isVoiceEnabled()) speakOut(numeroEnPalabras(0), { flush: true, rate: REP_VOICE_RATE });
         if (goalBannerEl) {
           goalBannerEl.hidden = false;
           goalBannerEl.textContent = `🎯 ¡Objetivo cumplido! (${fmt(item.work)}) Sigue si quieres, o termina cuando acabes.`;
@@ -615,9 +665,9 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       const over = elapsed - item.work;
       timerEl.textContent = `+${fmt(over)}`;
       logDebugLine(`propina +${over}s por encima del objetivo`);
-      if (isVoiceEnabled() && over % 5 === 0 && over !== lastSpokenNumber) {
+      if (isVoiceEnabled() && over !== lastSpokenNumber) {
         lastSpokenNumber = over;
-        speakOut(numeroEnPalabras(over));
+        speakOut(numeroEnPalabras(over), { rate: REP_VOICE_RATE });
       }
     }, 1000);
   }

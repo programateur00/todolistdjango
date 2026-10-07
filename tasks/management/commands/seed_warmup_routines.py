@@ -48,9 +48,7 @@ from tasks.utils import get_current_user
 #     atrás de 30s independientes, una por lado.
 # Los simétricos (jumping jacks, flexiones, tijera de brazos, rotación
 # de muñeca entrelazada, cadera adelante-atrás, rodillas altas, talón
-# al glúteo, medio giro de cuello, elevación de pierna alta -- side-
-# agnostic, elige sola la pierna con mejor visibilidad cada frame, no
-# hay lado fijo que alternar) se quedan con una sola serie: ya
+# al glúteo, medio giro de cuello) se quedan con una sola serie: ya
 # trabajan los dos lados a la vez o no tienen lado/sentido que alternar.
 ROUTINES = [
     {
@@ -112,7 +110,7 @@ ROUTINES = [
             ("jumping-jack", 1, 30),
             ("knee-raises", 1, 30),
             ("heel-kicks", 1, 30),
-            ("high-leg-raise", 1, 30),
+            # Alex (2026-10-06): quitada la elevación de pierna alta de este calentamiento.
             # A peticion de Alex (2026-09-30): elephant steps (aguante) en
             # lugar del estiramiento de isquios sentado. Cronometrado y
             # simetrico (las dos piernas a la vez) -- una sola pantalla.

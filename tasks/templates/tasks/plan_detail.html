@@ -77,6 +77,8 @@
 <p class="plan-head__meta">{{ progress }}% del plan</p>
 {% endif %}
 
+{% include "tasks/_failure_chart.html" with chart=failure_chart %}
+
 {% if headline %}
 {# El destacado solo se enseña arriba con más detalle, no decide el % (ver bloque anterior). #}
 <section class="plan-head">

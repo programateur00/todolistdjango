@@ -21,6 +21,7 @@
      data-target-reps="{{ target.target_reps|default:'' }}"
      data-target-seconds="{{ target.target_seconds|default:'' }}"
      data-last-sets="{{ last_sets_json }}"
+     data-last-seconds="{{ last_seconds_json }}"
      class="workout">
     {% csrf_token %}
 
@@ -91,7 +92,7 @@
         entero, de las manos a los pies. Empieza en <strong>V invertida</strong>: manos y pies en el suelo,
         <strong>caderas en alto</strong> y brazos y piernas estirados, y quédate quieto un momento. Una repetición es
         <strong>bajar doblando los brazos</strong> mientras la cabeza baja hacia el suelo y <strong>volver a estirar los
-        brazos</strong>. Para terminar una serie, ponte de pie, sal del encuadre o levanta un brazo y agita la mano.
+        brazos</strong>. Para terminar una serie, ponte de pie o sal del encuadre.
     </p>
     {% elif exercise.counter_key == "crunch" %}
     <p class="workout__note">
@@ -144,8 +145,7 @@
     </p>
     <p class="workout__note">
         Aquí no se cuentan repeticiones: es una postura que hay que <strong>aguantar</strong>. El contador de arriba
-        muestra los segundos aguantados. Si te levantas, sales del encuadre o levantas un brazo (para saludar o
-        estirarte) un par de segundos, la serie se cierra sola y empieza la siguiente.
+        muestra los segundos aguantados. Si te levantas o sales del encuadre, la serie se cierra sola y empieza la siguiente.
     </p>
     {% elif exercise.counter_key == "wallsit" %}
     <p class="workout__note">
@@ -157,8 +157,7 @@
     </p>
     <p class="workout__note">
         Aquí no se cuentan repeticiones: es una postura que hay que <strong>aguantar</strong>. El contador de arriba
-        muestra los segundos aguantados. Si te pones de pie del todo, sales del encuadre o levantas un brazo (para
-        saludar o estirarte) un par de segundos, la serie se cierra sola y empieza la siguiente.
+        muestra los segundos aguantados. Si te pones de pie del todo o sales del encuadre, la serie se cierra sola y empieza la siguiente.
     </p>
     {% elif exercise.counter_key == "kneeholdbar" %}
     <p class="workout__note">

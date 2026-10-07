@@ -21,7 +21,7 @@ import {
   checkPlankPosture, checkSidePlankPosture, checkWallSitPosture,
   checkKneeHoldBarPosture, checkDeadHangPosture, checkTuckLeverPosture, checkHandstandPosture, createLSitHoldChecker, createSupermanHoldChecker, checkArmCrossStretch, checkTricepsOverheadStretch,
   checkSeatedHamstringStretch, createStandingQuadStretchChecker, checkElephantStepsHold,
-  speakOut, numeroEnPalabras, isVoiceEnabled,
+  speakOut, numeroEnPalabras, isVoiceEnabled, REP_VOICE_RATE,
 } from "./workout.js";
 // De dónde sale MediaPipe (versión + rutas a los ficheros locales)
 // vive en un único sitio — ver static/js/mediapipe-vendor.js.
@@ -116,8 +116,14 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   function progressBase() {
     return `Ejercicio ${index + 1} de ${sequence.length}`;
   }
+  // "Al fallo" (item.work vacío): la última serie se anuncia como tal en
+  // vez de "Serie N de N".
+  function setText(n, item) {
+    const last = n === setsTotal && setsTotal > 1 && item && !item.work;
+    return last ? "Última serie de este ejercicio" : `Serie ${n} de ${setsTotal}`;
+  }
   function progressLabel() {
-    return setsTotal > 1 ? `${progressBase()} · Serie ${setNo} de ${setsTotal}` : progressBase();
+    return setsTotal > 1 ? `${progressBase()} · ${setText(setNo, current())}` : progressBase();
   }
   function record(entry) {
     breakdown.push(entry);
@@ -259,9 +265,9 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     runRest(SET_REST_SECONDS, {
       nextItem: item,
       progress: `${progressBase()} · Serie ${doneNo} de ${setsTotal} hecha`,
-      nextLabel: `Siguiente: serie ${setNo} de ${setsTotal} — ${item.name}`,
+      nextLabel: `Siguiente: ${setText(setNo, item).toLowerCase()} — ${item.name}`,
       onDone: () => {
-        if (isVoiceEnabled()) speakOut(`Serie ${setNo} de ${setsTotal}`, { flush: true });
+        if (isVoiceEnabled()) speakOut(setText(setNo, item), { flush: true });
         runSet(item);
       },
       onSkipExercise: () => {
@@ -312,9 +318,9 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       elapsed += 1;
       if (isFailure) {
         timerEl.textContent = fmt(elapsed);
-        if (isVoiceEnabled() && elapsed % 5 === 0 && elapsed !== lastSpokenNumber) {
+        if (isVoiceEnabled() && elapsed !== lastSpokenNumber) {
           lastSpokenNumber = elapsed;
-          speakOut(numeroEnPalabras(elapsed));
+          speakOut(numeroEnPalabras(elapsed), { rate: REP_VOICE_RATE });
         }
         return;
       }
@@ -334,9 +340,9 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       // igual que ya se puede con las repeticiones).
       // Cada 5 segundos, no cada uno - dicho cada segundo la voz no daba
       // abasto (números solapándose/cortados a medias).
-      if (isVoiceEnabled() && remaining % 5 === 0 && remaining !== lastSpokenNumber) {
+      if (isVoiceEnabled() && remaining !== lastSpokenNumber) {
         lastSpokenNumber = remaining;
-        speakOut(numeroEnPalabras(remaining));
+        speakOut(numeroEnPalabras(remaining), { rate: REP_VOICE_RATE });
       }
       timerEl.textContent = fmt(remaining);
     }, 1000);
@@ -603,9 +609,9 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 
       if (isFailure) {
         timerEl.textContent = fmt(elapsed);
-        if (isVoiceEnabled() && elapsed % 5 === 0 && elapsed !== lastSpokenNumber) {
+        if (isVoiceEnabled() && elapsed !== lastSpokenNumber) {
           lastSpokenNumber = elapsed;
-          speakOut(numeroEnPalabras(elapsed));
+          speakOut(numeroEnPalabras(elapsed), { rate: REP_VOICE_RATE });
         }
         return;
       }
@@ -620,9 +626,9 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         if (remaining <= 3) beep(660, 0.1);
         // Cada 5 segundos, no cada uno - ver nota junto a runTimer() más
         // arriba.
-        if (isVoiceEnabled() && remaining % 5 === 0 && remaining !== lastSpokenNumber) {
+        if (isVoiceEnabled() && remaining !== lastSpokenNumber) {
           lastSpokenNumber = remaining;
-          speakOut(numeroEnPalabras(remaining));
+          speakOut(numeroEnPalabras(remaining), { rate: REP_VOICE_RATE });
         }
         return;
       }
@@ -648,7 +654,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         goalReached = true;
         lastSpokenNumber = 0;
         beep(880, 0.2);
-        if (isVoiceEnabled()) speakOut(numeroEnPalabras(0), { flush: true });
+        if (isVoiceEnabled()) speakOut(numeroEnPalabras(0), { flush: true, rate: REP_VOICE_RATE });
         if (goalBannerEl) {
           goalBannerEl.hidden = false;
           goalBannerEl.textContent = `🎯 ¡Objetivo cumplido! (${fmt(work)}) Sigue si quieres, o termina cuando acabes.`;
@@ -670,9 +676,9 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       // sabe compararlo contra item.work).
       const over = elapsed - work;
       timerEl.textContent = `+${fmt(over)}`;
-      if (isVoiceEnabled() && over % 5 === 0 && over !== lastSpokenNumber) {
+      if (isVoiceEnabled() && over !== lastSpokenNumber) {
         lastSpokenNumber = over;
-        speakOut(numeroEnPalabras(over));
+        speakOut(numeroEnPalabras(over), { rate: REP_VOICE_RATE });
       }
     }, 1000);
   }

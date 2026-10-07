@@ -3205,6 +3205,7 @@ class Plan(models.Model):
             t = it.current_target()
             items.append({
                 "last_sets": it.last_session_set_reps(),
+                "last_seconds": it.last_session_set_seconds(),
                 "slug": it.exercise.slug,
                 "name": it.display_name,
                 "mode": it.exercise.mode,
@@ -3836,6 +3837,16 @@ class PlanItem(models.Model):
         if self.exercise.mode == Exercise.MODE_DISTANCE:
             return None
         return last_set_reps(self.plan.user, self.exercise.slug, plan=self.plan)
+
+    def last_session_set_seconds(self):
+        """
+        Segundos aguantados en CADA serie la última vez, p. ej. [45, 40]
+        -- el equivalente de last_session_set_reps() para ejercicios
+        cronometrados. None si no aplica o no hay nada guardado por serie.
+        """
+        if not self.exercise_id or self.exercise.mode != Exercise.MODE_TIMED:
+            return None
+        return last_set_seconds(self.plan.user, self.exercise.slug, plan=self.plan)
 
     def successes_and_streak(self):
         """
@@ -4540,6 +4551,51 @@ def last_set_reps(user, exercise_slug, plan=None):
         if found:
             return found
     return _first_with_reps(base.filter(routine__isnull=True))
+
+
+def last_set_seconds(user, exercise_slug, plan=None):
+    """
+    Lo mismo que last_set_reps() pero para ejercicios CRONOMETRADOS
+    (plancha, dead hang, estiramientos...): segundos aguantados en cada
+    serie la última vez ([45, 40, 38]), o None si no hay ninguna sesión
+    con los segundos por serie guardados. Alimenta el aviso "Serie 2: la
+    última vez aguantaste 40 segundos".
+
+    Las series de aguante se guardan como {"reps": 0, "durations": [s]}
+    (ver _flushPostureHold en workout.js y _set_seconds_to_sets en
+    api.py). Las sesiones antiguas que solo guardaron el total no tienen
+    reparto por serie y no se puede inventar.
+    """
+    if not user or not exercise_slug:
+        return None
+
+    def _first_with_seconds(qs):
+        for ws in qs.order_by("-recorded_at")[:10]:
+            secs = []
+            for s in (ws.sets or []):
+                if not isinstance(s, dict) or s.get("reps"):
+                    continue
+                durations = s.get("durations")
+                if not isinstance(durations, list):
+                    continue
+                held = sum(
+                    d for d in durations
+                    if isinstance(d, (int, float)) and not isinstance(d, bool)
+                )
+                if held > 0:
+                    secs.append(int(round(held)))
+            if secs:
+                return secs
+        return None
+
+    base = WorkoutSession.objects.filter(
+        exercise=exercise_slug, user=user, deleted_at__isnull=True,
+    )
+    if plan is not None:
+        found = _first_with_seconds(base.filter(plan=plan))
+        if found:
+            return found
+    return _first_with_seconds(base.filter(routine__isnull=True))
 
 
 

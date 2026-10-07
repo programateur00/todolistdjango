@@ -553,7 +553,8 @@ function runCindyPhase(host, state) {
     <div id="workout-root" class="workout"
          data-save-url="local" data-cancel-url="#" data-exercise-slug="${phase.slug}"
          data-counter-key="${phase.counter}"
-         data-target-sets="1" data-target-reps="${phase.min}" data-exact-reps="${phase.min}">
+         data-target-sets="1" data-target-reps="${phase.min}" data-exact-reps="${phase.min}"
+         data-voice-step="1">
       <p class="circuit__progress">Cindy · ronda ${roundNo} · ejercicio ${state.phaseIdx + 1} de ${CINDY_PHASES.length}
         · <strong id="cindy-clock">${fmt(Math.ceil(remainingMs() / 1000))}</strong> restantes</p>
       <h2 class="circuit__exercise-name">${phase.name}</h2>
