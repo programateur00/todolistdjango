@@ -810,6 +810,40 @@ class Task(models.Model):
             "label": f"{pasos_hoy}/{self.target_steps} pasos",
         }
 
+    def running_goal_met(self):
+        """
+        True si lo registrado HOY cumple el objetivo de una tarea de
+        running. Es lo que decide si un guardado manual cierra la tarea:
+        antes cualquier sesión guardada la marcaba hecha, y 4,33 km con
+        objetivo de 5 km salía como completada.
+
+        Misma regla que api.running_import (distancia O pasos, y el
+        ritmo mínimo se mira en media sobre el día). Sin ningún objetivo
+        puesto, basta con haber guardado algo.
+        """
+        if not (self.target_distance_km or self.target_steps or self.max_pace_seconds_per_km):
+            return True
+        hoy = timezone.localtime(timezone.now()).date()
+        sesiones = WorkoutSession.objects.filter(
+            user=self.user, series_id=self.series_id,
+            recorded_at__date=hoy, deleted_at__isnull=True,
+        )
+        max_pace = self.max_pace_seconds_per_km
+        ritmo_hoy = day_average_pace(sesiones)
+        ritmo_ok = max_pace is None or ritmo_hoy is None or ritmo_hoy <= max_pace
+
+        if self.target_distance_km:
+            km = sum(ws.distance_km for ws in sesiones if ws.distance_km)
+            if ritmo_ok and km >= self.target_distance_km:
+                return True
+        if self.target_steps:
+            pasos = sesiones.aggregate(p=Sum("steps"))["p"] or 0
+            if pasos >= self.target_steps:
+                return True
+        if max_pace is not None and not self.target_distance_km and not self.target_steps:
+            return ritmo_hoy is not None and ritmo_hoy <= max_pace
+        return False
+
     @property
     def is_avoid(self):
         """
@@ -2179,7 +2213,7 @@ class Exercise(models.Model):
     # solo enseñen los campos de peso cuando el ejercicio elegido de
     # verdad lo usa, en vez de para todo el catálogo. Si se añade un
     # ejercicio con peso nuevo al catálogo, su slug va aquí.
-    WEIGHTED_SLUGS = {"weighted-pullup", "wide-weighted-pullup", "weighted-dips", "weighted-squat"}
+    WEIGHTED_SLUGS = {"weighted-pullup", "wide-weighted-pullup", "weighted-dips", "weighted-squat", "weighted-crunch"}
     # Cada ejercicio con peso -> su versión sin peso. Define las "familias"
     # que usa weighted_first() para ordenar la sesión: con peso primero,
     # dentro de su familia (dominadas con peso antes que dominadas, etc.).
@@ -2190,6 +2224,7 @@ class Exercise(models.Model):
         "wide-weighted-pullup": "wide-pullup",
         "weighted-dips": "dips",
         "weighted-squat": "squat",
+        "weighted-crunch": "crunch",
     }
 
     name = models.CharField(max_length=64)

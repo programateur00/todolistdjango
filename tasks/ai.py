@@ -444,6 +444,7 @@ _WEIGHTED_CATEGORY_BY_SLUG = {
     "wide-weighted-pullup": "weighted_pull",
     "weighted-dips": "weighted_pull",
     "weighted-squat": "weighted_legs",
+    "weighted-crunch": "weighted_core",
 }
 
 _EXERCISE_CATEGORY_DEFAULTS = {
@@ -482,6 +483,13 @@ _EXERCISE_CATEGORY_DEFAULTS = {
         "beginner":     {"sets": 2, "low": 6,  "top": 10, "weight_goal": 10},
         "intermediate": {"sets": 3, "low": 8,  "top": 12, "weight_goal": 15},
         "advanced":     {"sets": 4, "low": 10, "top": 15, "weight_goal": 20},
+    },
+    "weighted_core": {  # crunch con pesa en las manos — 'reps' con peso objetivo. Pesa
+        # de mano (mancuerna/disco), mucho más ligera que un chaleco lastrado:
+        # más repeticiones por serie y tope de peso bajo.
+        "beginner":     {"sets": 2, "low": 8,  "top": 12, "weight_goal": 3},
+        "intermediate": {"sets": 3, "low": 10, "top": 15, "weight_goal": 5},
+        "advanced":     {"sets": 4, "low": 12, "top": 20, "weight_goal": 8},
     },
     "running": {
         "beginner":     {"start_km": 1.0, "goal_km": 3.0, "start_pace": 420, "goal_pace": 360},

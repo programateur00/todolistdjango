@@ -1115,9 +1115,14 @@ def workout_save_manual(request, uuid):
     )
     # finish=false permite guardar un ejercicio y seguir con otro en la
     # misma sesion: la tarea solo se cierra cuando el usuario lo dice.
-    if data.get("finish", True):
+    goal_met = t.running_goal_met()
+    if data.get("finish", True) and goal_met:
         t.mark_done()
-    return JsonResponse({"ok": True, "session_uuid": str(ws.uuid), "task": task_json(t)})
+    progress = None if t.is_done else t.auto_progress
+    return JsonResponse({
+        "ok": True, "session_uuid": str(ws.uuid), "task": task_json(t),
+        "goal_met": goal_met, "progress_label": progress["label"] if progress else None,
+    })
 
 
 @api("POST")

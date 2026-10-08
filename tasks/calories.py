@@ -41,7 +41,7 @@ SECONDS_PER_REP = {
     "pullup": 4.0, "wide-pullup": 4.0, "chinup": 4.0, "weighted-pullup": 4.5,
     "wide-weighted-pullup": 4.5, "archer-pullup": 5.0, "jumping-pullup": 3.0,
     "dips": 4.0, "weighted-dips": 4.5, "handstand-push-up": 5.0,
-    "burpee": 4.0, "pistol-squat": 5.0, "l-sit": 4.0, "weighted-squat": 4.0,
+    "burpee": 4.0, "pistol-squat": 5.0, "l-sit": 4.0, "weighted-squat": 4.0, "weighted-crunch": 2.5,
 }
 
 # MET por defecto cuando Exercise.met está vacío.

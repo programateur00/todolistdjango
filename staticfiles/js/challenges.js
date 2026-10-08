@@ -24,6 +24,7 @@ import {
   checkPushupTopHoldPosture, checkPushupBottomHoldPosture,
   speakOut, stopSpeaking, isVoiceEnabled, startWorkout, setQuietVoice, clearPullupCalibCache, exportDebugLogText,
 } from "./workout.js";
+import { PersonGate } from "./workout.js";
 import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./mediapipe-vendor.js";
 
 const fmt = (s) => {
@@ -188,7 +189,7 @@ async function runSallyPushups(host) {
     const vision = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_BASE_URL);
     poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
       baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
-      runningMode: "VIDEO", numPoses: 1,
+      runningMode: "VIDEO", numPoses: 1, outputSegmentationMasks: true,
     });
   } catch (err) {
     statusEl.textContent = "No se pudo cargar el seguimiento de postura.";
@@ -198,10 +199,16 @@ async function runSallyPushups(host) {
 
   const currentChecker = () => (script[phaseIndex].phase === "top" ? checkPushupTopHoldPosture : checkPushupBottomHoldPosture);
 
+  const personGate = new PersonGate(); // 2026-10-08: solo se miden posturas de la persona confirmada (ver PersonGate en workout.js)
   const loop = () => {
     if (!running) return;
-    const result = poseLandmarker.detectForVideo(video, performance.now());
-    if (result.landmarks && result.landmarks.length) {
+    const frameNow = performance.now();
+    const result = poseLandmarker.detectForVideo(video, frameNow);
+    const hasPoseNow = !!(result.landmarks && result.landmarks.length);
+    if (hasPoseNow) personGate.sampleMask(result, frameNow);
+    const person = hasPoseNow ? personGate.check(result.landmarks[0], frameNow) : null;
+    if (typeof result.close === "function") result.close(); // libera las máscaras de persona
+    if (person && person.ok) {
       const check = currentChecker()(result.landmarks[0]);
       postureOk = check.ok;
       statusEl.textContent = check.ok ? "Postura correcta — aguanta." : `⚠️ ${check.reason}`;

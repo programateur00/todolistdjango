@@ -848,9 +848,20 @@ def task_workout_save_manual(request, pk):
     # A diferencia del resto de Deporte, running no pasa por el
     # enfriamiento obligatorio: la sesión ya viene de un dato real
     # (distancia/tiempo, Health Connect...), no hace falta el vídeo.
-    closed_plan = task.mark_done()
-    messages.success(request, "Sesión de running guardada: " + ", ".join(bits) + ".")
-    return redirect(_finish_redirect_url(task, closed_plan))
+    # Solo se cierra si lo de hoy cumple el objetivo (distancia/pasos/
+    # ritmo). Si no, la sesión queda guardada y la tarea sigue abierta
+    # para completarla.
+    if task.running_goal_met():
+        closed_plan = task.mark_done()
+        messages.success(request, "Sesión de running guardada: " + ", ".join(bits) + ".")
+        return redirect(_finish_redirect_url(task, closed_plan))
+    progress = task.auto_progress
+    falta = f" ({progress['label']})" if progress else ""
+    messages.warning(
+        request,
+        "Sesión guardada: " + ", ".join(bits) + f". Aún no llegas al objetivo{falta}, la tarea sigue pendiente.",
+    )
+    return redirect(reverse("tasks:task_list"))
 
 
 def task_warmup(request, pk):

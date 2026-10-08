@@ -88,7 +88,7 @@ button { font-family:var(--font-b); cursor:pointer; }
   text-decoration:none; padding:0 2px; border-bottom:2px solid transparent;
   transition: color .15s ease, border-color .15s ease;
 }
-.site-nav__links a:hover { color:var(--ember); }
+@media (hover:hover) { .site-nav__links a:hover { color:var(--ember); } }
 .site-nav__links a.is-active { color:var(--ember); border-bottom-color:var(--ember); }
 .theme-toggle {
   background:transparent; border:none; border-left:1px solid var(--line);
@@ -96,7 +96,7 @@ button { font-family:var(--font-b); cursor:pointer; }
   align-items:center; justify-content:center; padding:0 0 0 16px; margin-left:2px;
   color:var(--bone-faded); transition:color .15s ease;
 }
-.theme-toggle:hover { color:var(--ember); }
+@media (hover:hover) { .theme-toggle:hover { color:var(--ember); } }
 @media (max-width:480px) {
   .site-nav__inner { padding:12px 16px; gap:10px; }
   .site-nav__links { gap:12px; }
@@ -127,7 +127,7 @@ button { font-family:var(--font-b); cursor:pointer; }
 .stats-link { display:flex; align-items:center; gap:6px; color:var(--bone-faded);
   border:1px solid var(--line); background:var(--paper); padding:9px 14px;
   border-radius:999px; font-size:13px; font-weight:500; flex-shrink:0; }
-.stats-link:hover { border-color:var(--ember); color:var(--ember); background:var(--ember-soft); }
+@media (hover:hover) { .stats-link:hover { border-color:var(--ember); color:var(--ember); background:var(--ember-soft); } }
 
 /* ── Stamps (stats_detail) ──────────────────────────────────────────── */
 .stamp-row { display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; }
@@ -182,10 +182,10 @@ button { font-family:var(--font-b); cursor:pointer; }
 .quick-add__button { background:var(--ember); color:var(--paper); border:none;
   border-radius:10px; padding:9px 16px; font-size:14px; font-weight:600;
   transition: transform .15s ease, box-shadow .15s ease, background .15s ease; }
-.quick-add__button:hover { background:#E05A18; transform:translateY(-2px);
-  box-shadow: 0 10px 22px -10px rgba(184,66,15,.6); }
+@media (hover:hover) { .quick-add__button:hover { background:#E05A18; transform:translateY(-2px);
+  box-shadow: 0 10px 22px -10px rgba(184,66,15,.6); } }
 .quick-add__more { font-size:12px; color:var(--bone-faded); padding:0 8px; white-space:nowrap; transition:color .15s ease; }
-.quick-add__more:hover { color:var(--ember); }
+@media (hover:hover) { .quick-add__more:hover { color:var(--ember); } }
 
 /* ── Sections ───────────────────────────────────────────────────────── */
 .task-section { margin-bottom:28px; }
@@ -262,7 +262,7 @@ button { font-family:var(--font-b); cursor:pointer; }
 .projected-toggle { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
 .projected-more-btn { cursor:pointer; font-size:11px; color:var(--bone-faded);
   padding:2px 8px; border-radius:999px; border:1px dashed var(--line); transition:all .15s; }
-.projected-more-btn:hover { border-color:var(--ember); color:var(--ember); }
+@media (hover:hover) { .projected-more-btn:hover { border-color:var(--ember); color:var(--ember); } }
 .projected-more-btn::before { content:"+ "; }
 .projected-more-btn--hide::before { content:"− "; }
 /* "Ocultar" siempre en su propia línea, empezando en el mismo sitio
@@ -283,12 +283,12 @@ button { font-family:var(--font-b); cursor:pointer; }
 .task-card, .plan-card, .stats-card, .streak-card, .category-chip, .range-chip {
   transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
 }
-.task-card:hover, .plan-card:hover, .stats-card:hover, .streak-card:hover {
+@media (hover:hover) { .task-card:hover, .plan-card:hover, .stats-card:hover, .streak-card:hover {
   transform: translateY(-3px);
   box-shadow: 0 14px 28px -14px rgba(184,66,15,.55), var(--shadow);
   border-color: var(--ember-deep);
-}
-.category-chip:hover, .range-chip:hover { transform: translateY(-1px); }
+} }
+@media (hover:hover) { .category-chip:hover, .range-chip:hover { transform: translateY(-1px); } }
 
 .task-card { display:flex; align-items:center; gap:10px; background:var(--paper);
   border:1px solid var(--line); border-radius:var(--radius); padding:10px 10px 10px 8px;
@@ -309,12 +309,12 @@ button { font-family:var(--font-b); cursor:pointer; }
   background:var(--ash); display:flex; align-items:center; justify-content:center;
   color:transparent; flex-shrink:0; transition:all .15s; }
 .check-btn--done          { color:var(--gold); }
-.check-btn--done:hover    { background:var(--gold-soft); border-color:var(--gold); }
+@media (hover:hover) { .check-btn--done:hover { background:var(--gold-soft); border-color:var(--gold); } }
 .check-btn--checked       { background:var(--gold-soft); border-color:var(--gold); }
 .check-btn--undone        { color:var(--ember); width:30px; height:30px; margin-top:2px; }
-.check-btn--undone:hover  { background:var(--ember-soft); border-color:var(--ember); }
+@media (hover:hover) { .check-btn--undone:hover { background:var(--ember-soft); border-color:var(--ember); } }
 .check-btn--undo          { color:var(--amber); }
-.check-btn--undo:hover    { background:var(--amber-soft); border-color:var(--amber); }
+@media (hover:hover) { .check-btn--undo:hover { background:var(--amber-soft); border-color:var(--amber); } }
 
 .task-card__body  { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; padding:4px 0; }
 .task-card__title { margin:0; font-size:15px; font-weight:500; word-break:break-word; }
@@ -345,7 +345,7 @@ button { font-family:var(--font-b); cursor:pointer; }
 
 .task-card__delete button { border:none; background:transparent; color:var(--bone-faded);
   width:28px; height:28px; display:flex; align-items:center; justify-content:center; border-radius:8px; }
-.task-card__delete button:hover { background:var(--ember-soft); color:var(--ember); }
+@media (hover:hover) { .task-card__delete button:hover { background:var(--ember-soft); color:var(--ember); } }
 
 /* ── Stats list ─────────────────────────────────────────────────────── */
 .stats-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }
@@ -417,7 +417,7 @@ button { font-family:var(--font-b); cursor:pointer; }
 
 /* ── Task form ──────────────────────────────────────────────────────── */
 .back-link { display:inline-block; font-size:13px; color:var(--bone-faded); margin-bottom:18px; }
-.back-link:hover { color:var(--ember); }
+@media (hover:hover) { .back-link:hover { color:var(--ember); } }
 .task-form { background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
   padding:24px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:18px; }
 .field { display:flex; flex-direction:column; gap:6px; border:none; padding:0; margin:0; }
@@ -465,7 +465,6 @@ button { font-family:var(--font-b); cursor:pointer; }
    porque background-color no se puede pisar directamente en Chrome
    para inputs con autofill. */
 .field input:-webkit-autofill,
-.field input:-webkit-autofill:hover,
 .field input:-webkit-autofill:focus,
 .field input:-webkit-autofill:active {
   -webkit-text-fill-color: var(--bone) !important;
@@ -474,6 +473,13 @@ button { font-family:var(--font-b); cursor:pointer; }
   box-shadow: 0 0 0 1000px var(--ash) inset !important;
   transition: background-color 9999s ease-in-out 0s;
 }
+@media (hover:hover) { .field input:-webkit-autofill:hover {
+  -webkit-text-fill-color: var(--bone) !important;
+  caret-color: var(--bone);
+  -webkit-box-shadow: 0 0 0 1000px var(--ash) inset !important;
+  box-shadow: 0 0 0 1000px var(--ash) inset !important;
+  transition: background-color 9999s ease-in-out 0s;
+} }
 
 .field-row { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
 
@@ -492,7 +498,7 @@ button { font-family:var(--font-b); cursor:pointer; }
 .exercise-toggle__move { display:inline-flex; gap:3px; }
 .exercise-toggle__move-btn { width:20px; height:20px; border-radius:6px; border:1px solid var(--line);
   background:var(--paper); font-size:11px; line-height:1; padding:0; cursor:pointer; }
-.exercise-toggle__move-btn:hover { border-color:var(--ember); }
+@media (hover:hover) { .exercise-toggle__move-btn:hover { border-color:var(--ember); } }
 
 .custom-days-field, .interval-field, .subcategory-field, .avoid-fields { display:none; }
 .interval-row  { display:flex; align-items:center; gap:8px; font-size:14px; }
@@ -513,14 +519,14 @@ button { font-family:var(--font-b); cursor:pointer; }
 .primary-btn { background:var(--ember); color:var(--paper); border:none;
   border-radius:10px; padding:11px 20px; font-size:14px; font-weight:600;
   transition: transform .15s ease, box-shadow .15s ease, background .15s ease; }
-.primary-btn:hover { background:#E05A18; transform:translateY(-2px);
-  box-shadow: 0 10px 22px -10px rgba(184,66,15,.6); }
+@media (hover:hover) { .primary-btn:hover { background:#E05A18; transform:translateY(-2px);
+  box-shadow: 0 10px 22px -10px rgba(184,66,15,.6); } }
 .ghost-btn { background:transparent; border:1px solid var(--line); border-radius:10px;
   padding:10px 16px; font-size:13px; color:var(--bone-faded); display:inline-block; text-decoration:none;
   transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease, color .15s ease; }
-.ghost-btn:hover { border-color:var(--ember-deep); color:var(--ember); transform:translateY(-2px);
-  box-shadow: 0 10px 20px -12px rgba(184,66,15,.45); }
-.ghost-btn--danger:hover { border-color:var(--ember); color:var(--ember); background:var(--ember-soft); }
+@media (hover:hover) { .ghost-btn:hover { border-color:var(--ember-deep); color:var(--ember); transform:translateY(-2px);
+  box-shadow: 0 10px 20px -12px rgba(184,66,15,.45); } }
+@media (hover:hover) { .ghost-btn--danger:hover { border-color:var(--ember); color:var(--ember); background:var(--ember-soft); } }
 .inline-delete { display:inline; }
 
 /* ── Sesión de entreno (cámara) ────────────────────────────────────────
@@ -555,17 +561,17 @@ button { font-family:var(--font-b); cursor:pointer; }
 .workout__actions { display:flex; gap:10px; }
 .workout__btn { flex:1; padding:14px; border-radius:999px; border:1px solid var(--line);
   font-weight:600; font-size:15px; transition: transform .15s ease, box-shadow .15s ease; cursor:pointer; }
-.workout__btn:hover:not(:disabled) { transform:translateY(-2px); box-shadow:0 10px 20px -12px rgba(184,66,15,.5); }
+@media (hover:hover) { .workout__btn:hover:not(:disabled) { transform:translateY(-2px); box-shadow:0 10px 20px -12px rgba(184,66,15,.5); } }
 .workout__btn--primary { background:linear-gradient(135deg, var(--ember) 0%, var(--ember-deep) 100%);
   color:var(--ash); border-color:var(--ember); font-weight:700; }
-.workout__btn--primary:hover:not(:disabled) { background:linear-gradient(135deg, #FF7A35 0%, var(--ember) 100%); }
+@media (hover:hover) { .workout__btn--primary:hover:not(:disabled) { background:linear-gradient(135deg, #FF7A35 0%, var(--ember) 100%); } }
 .workout__btn--primary:disabled { opacity:.6; }
 .workout__btn--ghost { background:var(--paper); color:var(--bone); }
-.workout__btn--ghost:hover:not(:disabled) { border-color:var(--ember-deep); color:var(--ember); }
+@media (hover:hover) { .workout__btn--ghost:hover:not(:disabled) { border-color:var(--ember-deep); color:var(--ember); } }
 .workout__btn--subtle { flex:0 0 auto; display:block; margin:6px auto 0; padding:8px 10px;
   border:none; background:none; color:var(--bone-faded); font-weight:500; font-size:13px;
   text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
-.workout__btn--subtle:hover:not(:disabled) { transform:none; box-shadow:none; color:var(--bone); }
+@media (hover:hover) { .workout__btn--subtle:hover:not(:disabled) { transform:none; box-shadow:none; color:var(--bone); } }
 .workout__note { font-size:12px; color:var(--bone-faded); text-align:center; margin:0; }
 .workout__note--warn { color:var(--danger); }
 
@@ -657,7 +663,7 @@ button { font-family:var(--font-b); cursor:pointer; }
 .range-filter::-webkit-scrollbar { display:none; }
 .range-chip { flex:0 0 auto; white-space:nowrap; padding:6px 13px; border-radius:999px;
   font-size:12px; color:var(--bone-faded); transition:all .15s; }
-.range-chip:hover { color:var(--ember); }
+@media (hover:hover) { .range-chip:hover { color:var(--ember); } }
 .range-chip--active { background:var(--bone); color:var(--paper); font-weight:600; }
 
 /* Chips de categoría: más compactos que antes y en una sola fila con
@@ -669,7 +675,7 @@ button { font-family:var(--font-b); cursor:pointer; }
 .category-chip { flex:0 0 auto; white-space:nowrap; display:inline-flex; align-items:center; gap:5px; padding:5px 10px;
   border:1px solid var(--line); border-radius:999px; background:var(--paper);
   font-size:11px; color:var(--bone-faded); transition:all .15s; }
-.category-chip:hover { border-color:var(--ember); color:var(--ember); }
+@media (hover:hover) { .category-chip:hover { border-color:var(--ember); color:var(--ember); } }
 .category-chip--active { background:var(--bone); color:var(--paper); border-color:var(--bone); }
 .category-chip__count { background:rgba(255,255,255,.10); padding:0 5px; border-radius:999px;
   font-size:10px; font-weight:600; }
@@ -696,8 +702,8 @@ button { font-family:var(--font-b); cursor:pointer; }
   background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
   padding:16px 18px; box-shadow:var(--shadow); text-decoration:none; color:var(--bone);
   transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
-.exercise-picker__item:hover { border-color:var(--ember-deep); transform:translateY(-3px);
-  box-shadow: 0 14px 28px -14px rgba(184,66,15,.55), var(--shadow); }
+@media (hover:hover) { .exercise-picker__item:hover { border-color:var(--ember-deep); transform:translateY(-3px);
+  box-shadow: 0 14px 28px -14px rgba(184,66,15,.55), var(--shadow); } }
 .exercise-picker__name { font-weight:600; font-size:16px; }
 .exercise-picker__mode { font-size:12px; color:var(--bone-faded); text-transform:uppercase; letter-spacing:.04em; }
 .exercise-picker__empty { color:var(--bone-faded); font-size:14px; }
@@ -710,13 +716,13 @@ button { font-family:var(--font-b); cursor:pointer; }
 .workout-btn { display:inline-flex; align-items:center; justify-content:center; width:40px; height:40px;
   border-radius:999px; background:var(--sport-soft, var(--gold-soft)); color:var(--sport, var(--gold));
   border:1px solid transparent; }
-.workout-btn:hover { border-color:currentColor; }
+@media (hover:hover) { .workout-btn:hover { border-color:currentColor; } }
 
 /* ── Circuitos: selector, constructor y reproductor ────────────────── */
 
 .exercise-picker__hint--routines { margin-top:18px; }
 .exercise-picker__item--ghost { border-style:dashed; box-shadow:none; color:var(--bone-faded); }
-.exercise-picker__item--ghost:hover { color:var(--ember); }
+@media (hover:hover) { .exercise-picker__item--ghost:hover { color:var(--ember); } }
 
 .exercise-icon { width:100%; height:100%; color:var(--bone); }
 
@@ -988,7 +994,7 @@ button { font-family:var(--font-b); cursor:pointer; }
   background:rgba(0,0,0,.55); color:#fff; cursor:pointer;
   -webkit-tap-highlight-color:transparent; transition:background .15s ease;
 }
-.cam-fs-btn:hover { background:rgba(0,0,0,.8); }
+@media (hover:hover) { .cam-fs-btn:hover { background:rgba(0,0,0,.8); } }
 .cam-fs-btn--exit { display:none; }
 
 @media (min-width:760px) {
@@ -1135,7 +1141,8 @@ body.cam-fullscreen .page { animation:none; transform:none; }
 .avatar--icon { color:#fff; }
 .avatar--icon svg { display:block; }
 .nav-avatar { display:flex; align-items:center; text-decoration:none; }
-.nav-avatar.is-active .avatar, .nav-avatar:hover .avatar { box-shadow:0 0 0 2px var(--paper), 0 0 0 4px var(--ember); }
+.nav-avatar.is-active .avatar { box-shadow:0 0 0 2px var(--paper), 0 0 0 4px var(--ember); }
+@media (hover:hover) { .nav-avatar:hover .avatar { box-shadow:0 0 0 2px var(--paper), 0 0 0 4px var(--ember); } }
 
 .profile-hero { display:flex; align-items:center; gap:18px; margin-bottom:20px; }
 .profile-hero__name { font-family:var(--font-d); font-weight:400; font-size:30px;

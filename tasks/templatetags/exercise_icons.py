@@ -87,6 +87,7 @@ ALIAS = {
     "incline-push-up": "push-up",
     "pike-push-up": "push-up",
     "bench-dip": "dips",
+    "weighted-crunch": "crunch",
 }
 
 LABELS = {
@@ -105,6 +106,7 @@ LABELS = {
     "superman-hold": "Superman (hold)",
     "jumping-jack": "Jumping Jacks",
     "bench-dip": "Fondos en banco",
+    "weighted-crunch": "Weighted crunch",
 }
 
 

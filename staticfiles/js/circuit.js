@@ -21,8 +21,9 @@ import {
   checkPlankPosture, checkSidePlankPosture, checkWallSitPosture,
   checkKneeHoldBarPosture, checkDeadHangPosture, checkTuckLeverPosture, checkHandstandPosture, createLSitHoldChecker, createSupermanHoldChecker, checkArmCrossStretch, checkTricepsOverheadStretch,
   checkSeatedHamstringStretch, createStandingQuadStretchChecker, checkElephantStepsHold,
-  speakOut, numeroEnPalabras, isVoiceEnabled, REP_VOICE_RATE,
+  speakOut, numeroEnPalabras, isVoiceEnabled, REP_VOICE_RATE, clearVoiceTransitionMute,
 } from "./workout.js";
+import { PersonGate } from "./workout.js";
 // De dónde sale MediaPipe (versión + rutas a los ficheros locales)
 // vive en un único sitio — ver static/js/mediapipe-vendor.js.
 import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./mediapipe-vendor.js";
@@ -97,7 +98,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   // (target_source === "plan": plancha, pino, silla en pared...) se repite
   // target_sets veces con descanso entre series, en vez de ser UNA sola
   // cuenta. SET_REST_SECONDS = REST_ALERT_SECONDS de workout.js.
-  const SET_REST_SECONDS = 90;
+  const SET_REST_SECONDS = 60;
   // "Al fallo" con cámara: la serie se da por terminada sola cuando la
   // postura lleva FAILURE_POSTURE_LOST_SECONDS seguidos rota, siempre que
   // antes se hubieran aguantado FAILURE_MIN_HOLD_SECONDS.
@@ -206,7 +207,8 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     setNo = 1;
     setsDone = 0;
     heldTotal = 0;
-    if (setsTotal > 1 && isVoiceEnabled()) speakOut(`Serie 1 de ${setsTotal}`, { flush: true });
+    clearVoiceTransitionMute();
+    if (setsTotal > 1 && isVoiceEnabled()) speakOut(`Serie 1 de ${setsTotal}`, { flush: false });
     runSet(item);
   }
 
@@ -262,7 +264,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   /** Descanso ENTRE series del mismo ejercicio (el de entre ejercicios
    *  sigue siendo item.rest, ver advance()). */
   function runSetRest(item, doneNo) {
-    if (isVoiceEnabled()) speakOut(`Serie ${doneNo} de ${setsTotal} terminada. Descanso.`, { flush: true });
+    if (isVoiceEnabled()) speakOut(`Serie ${doneNo} de ${setsTotal} terminada. Descanso.`, { flush: false });
     runRest(SET_REST_SECONDS, {
       nextItem: item,
       progress: `${progressBase()} · Serie ${doneNo} de ${setsTotal} hecha`,
@@ -553,7 +555,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         const vision = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_BASE_URL);
         poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
           baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
-          runningMode: "VIDEO", numPoses: 1,
+          runningMode: "VIDEO", numPoses: 1, outputSegmentationMasks: true,
         });
       } catch (err) {
         statusEl.textContent = "No se pudo cargar el seguimiento de postura. La cuenta atrás sigue sin comprobarla.";
@@ -568,10 +570,16 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
       }
 
       if (poseLandmarker) {
+        const personGate = new PersonGate(); // 2026-10-08: solo se miden posturas de la persona confirmada (ver PersonGate en workout.js)
         const loop = () => {
           if (!running) return;
-          const result = poseLandmarker.detectForVideo(video, performance.now());
-          if (result.landmarks && result.landmarks.length) {
+          const frameNow = performance.now();
+          const result = poseLandmarker.detectForVideo(video, frameNow);
+          const hasPoseNow = !!(result.landmarks && result.landmarks.length);
+          if (hasPoseNow) personGate.sampleMask(result, frameNow);
+          const person = hasPoseNow ? personGate.check(result.landmarks[0], frameNow) : null;
+          if (typeof result.close === "function") result.close(); // libera las máscaras de persona
+          if (person && person.ok) {
             const check = checker(result.landmarks[0]);
             postureOk = check.ok;
             if (check.ok && check.side) detectedSide = check.side;

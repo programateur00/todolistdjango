@@ -254,7 +254,7 @@ const DEFAULT_VOICE_STEP = 1; // cada cuantas reps habla la voz SI el ejercicio 
 const HANG_STABLE_MS = 500;   // cuanto tiempo seguido con los brazos en alto para empezar a calibrar
 const ARMS_DOWN_STABLE_MS = 400; // cuanto tiempo seguido con los brazos abajo para dar la serie por terminada (evita falsos positivos por un frame ruidoso)
 const CALIBRATION_MS = 1200;  // tiempo colgado quieto que se usa como referencia
-const REST_ALERT_SECONDS = 60;
+const REST_ALERT_SECONDS = 90;
 // Aviso de descanso largo: si pasan estos segundos desde que se cerró la
 // última serie y todavía no has empezado la siguiente (ni reps ni postura
 // mantenida), tickRestTimer() avisa "llevas 3 minutos de descanso" y lo
@@ -265,7 +265,7 @@ const LONG_REST_ALERT_SECONDS = 180;
 // nada aunque vuelvas a colocarte y te muevas antes de tiempo — antes
 // se contaban repeticiones calladas en pleno descanso si probabas a
 // moverte (pedido explícitamente, ver announceRestBlocked). Mismo
-// número que REST_ALERT_SECONDS a propósito: es el mismo "60 segundos"
+// número que REST_ALERT_SECONDS a propósito: es el mismo "90 segundos"
 // del que se avisa al usuario al cerrar la serie.
 const MIN_REST_MS = REST_ALERT_SECONDS * 1000;
 // Dominadas de arquero: mismo criterio de barra/subida-bajada que las
@@ -368,7 +368,6 @@ const STATUS_VOICE_REPEAT_GAP_MS = 25000;
 // hacerte esperar. Este margen mínimo es solo para evitar una ráfaga si
 // la detección parpadea entre dos estados en un par de frames seguidos.
 const STATUS_VOICE_MIN_GAP_MS = 2000;
-const PREARM_HINT_DELAY_MS = 2500; // visible sin armar este tiempo -> aviso de "colocate" (sin "Listo")
 // No se aplica nada de esto al conteo de repeticiones (speakRep), que
 // va aparte y siempre suena al momento.
 
@@ -536,7 +535,7 @@ const DIP_UP_ANGLE_DEG = 155;   // codo casi recto -> arriba/armado (posición d
 const DIP_DOWN_ANGLE_DEG = 90;  // codo doblado en ángulo recto o más -> abajo (mismo criterio "~90°" que ya se usaba antes)
 const DIP_MIN_VISIBILITY = 0.4; // visibilidad MEDIA de hombro+codo+muñeca (los tres puntos que se usan de verdad — ya no la cadera, ver arriba), para saber que se te ve en absoluto
 const DIP_CALIBRATION_MIN_VISIBILITY = 0.6; // visibilidad del HOMBRO EN SÍ (no la media de arriba) exigida para fiarse de él al (re)calibrar la referencia de pie — ver el bug real de la cadera corrupta, arriba
-const DIP_ARM_STABLE_MS = 800;  // cuánto tiempo con el codo recto y quieto para armar el contador — ya NO exige nada de cadera/hombro para armar (ver más abajo, en processDip, por qué)
+const DIP_ARM_STABLE_MS = 600;  // cuánto tiempo con el codo recto y quieto para armar el contador — ya NO exige nada de cadera/hombro para armar (ver más abajo, en processDip, por qué)
 const DIP_BREAK_STABLE_MS = 1000; // cuánto tiempo seguido con la combinación de desmonte "de perfil" (hombro cerca de la referencia de pie) para dar la serie por terminada
 const DIP_BREAK_INTERRUPT_GRACE_MS = 300; // octavo bug: un solo frame (o unos pocos) que deja de cumplir la forma de desmonte, por ruido de un landmark, NO reinicia la cuenta de arriba al momento — hace falta que la interrupción misma se sostenga esto para darla por real (ver processDip)
 const DIP_SHOULDER_RISE_MOUNTED_RATIO = 0.5;  // fracción del pico de subida de hombro de ESTA serie por debajo de la cual el ciclo de repetición se congela (te estás bajando/subiendo, no haciendo un fondo)
@@ -780,7 +779,7 @@ const PUSHUP_BREAK_STABLE_MS = 1000;
 const BURPEE_MIN_VISIBILITY = 0.4;             // media hombro+codo+muñeca+cadera+rodilla+tobillo del lado elegido (como flexiones, más rodilla)
 const BURPEE_STAND_KNEE_MIN_DEG = 160;         // pierna casi recta -> de pie (igual que SQUAT_UP_ANGLE_DEG)
 const BURPEE_STAND_TILT_MIN_DEG = 55;          // tronco bastante vertical -> de pie (90°=vertical, 0°=tumbado)
-const BURPEE_STAND_STABLE_MS = 800;            // de pie y quieto tanto tiempo para armar (igual que SQUAT_ARM_STABLE_MS)
+const BURPEE_STAND_STABLE_MS = 500;            // de pie y quieto tanto tiempo para armar (igual que SQUAT_ARM_STABLE_MS)
 const BURPEE_ARM_SETTLE_MS = 400;              // tras armar (o tras cada vuelta a "de pie" entre reps), ignora un reacomodo antes de aceptar el siguiente descenso -- mismo motivo que SQUAT_ARM_SETTLE_MS
 const BURPEE_DOWN_KNEE_MAX_DEG = 140;          // rodilla ya doblada de verdad -> ha empezado a agacharse (dispara la fase "down"; sin margen de estabilidad, es el arranque del movimiento, no una postura a sostener)
 const BURPEE_PLANK_MAX_TILT_DEG = 40;          // mismo criterio que ON_GROUND_MAX_TILT_DEG (flexiones/abdominales tumbado): por debajo de esto, tronco casi horizontal -> en el suelo
@@ -853,7 +852,7 @@ const CURL_ELBOW_DRIFT_MAX_FACTOR = 0.45; // cuánto puede alejarse el codo de l
 const CURL_ELBOW_RISE_MAX_FACTOR = 0.25;  // cuánto puede subir el codo respecto a su altura AL ARMAR (proporción al tronco) antes de dejar de considerarse un curl — evita que levantar el BRAZO entero por el hombro (en vez de solo doblar el antebrazo) cuente como curl. Es relativo a la referencia guardada al armar (curlElbowBaselineY), NO a la cadera — ver processDumbbellCurl para el porqué del cambio.
 const CURL_WRIST_FACE_MARGIN_FACTOR = 0.15; // margen (proporción al tronco) que la muñeca tiene que quedar POR DEBAJO de la nariz — mirar el móvil sube la mano a la cara, un curl real no pasa de pecho/hombro
 const CURL_BROKEN_STABLE_MS = 400; // cuánto tiempo seguido con la forma rota (codo despegado, muñeca a la altura de la cara, o cámara temblando) para dar la serie por rota y cerrarla — corto a propósito: aquí importa más cortar un falso positivo que aguantar un parpadeo de la detección
-const CURL_ARM_STABLE_MS = 800; // cuánto tiempo con el brazo estirado y en posición, seguido, para armar el contador
+const CURL_ARM_STABLE_MS = 500; // cuánto tiempo con el brazo estirado y en posición, seguido, para armar el contador
 // Temporizador de "aguantando arriba" que pidió Alex: si te quedas con
 // el brazo doblado (arriba del curl) sin volver a bajar, no es un curl
 // — es una sujeción aguantada (una bolsa, el propio móvil...). No cuenta
@@ -1088,7 +1087,7 @@ const SQUAT_MIN_VISIBILITY = 0.4;
 // (ON_GROUND_STABLE_MS) — sentadillas no lo tenía porque "no hay nada
 // que calibrar", pero armar el contador SÍ necesita esta estabilidad,
 // sea cual sea el ejercicio.
-const SQUAT_ARM_STABLE_MS = 800;
+const SQUAT_ARM_STABLE_MS = 500;
 // Reportado en vivo (2026-09-18): "me ha contado 1 repeticion de mas al
 // ponerme en posicion" en un plan al fallo, y la serie se cerro sola sin
 // querer justo despues. Dos sintomas, mismo momento (justo tras armar):
@@ -1137,7 +1136,7 @@ const ELEPHANTSTEPS_DOWN_ANGLE_DEG = 32;   // cadera doblada -- "abajo"/tocando
 const ELEPHANTSTEPS_UP_ANGLE_DEG = 38;     // cadera soltada -- "arriba" (no hace falta ponerse de pie del todo, solo salir del vaivén de abajo)
 const ELEPHANTSTEPS_MIN_VISIBILITY = 0.4;  // mismo criterio que SQUAT_MIN_VISIBILITY
 const ELEPHANTSTEPS_ARM_ANGLE_DEG = 140;   // de pie para armar -- más permisivo que un ángulo de cadera "perfecto" (170-180 real medido); un cuerpo relajado de pie no siempre llega tan arriba
-const ELEPHANTSTEPS_ARM_STABLE_MS = 800;   // mismo criterio que SQUAT_ARM_STABLE_MS
+const ELEPHANTSTEPS_ARM_STABLE_MS = 500;   // mismo criterio que SQUAT_ARM_STABLE_MS
 const ELEPHANTSTEPS_ARM_SETTLE_MS = 600;   // mismo criterio que SQUAT_ARM_SETTLE_MS -- evita contar el primer acomodo tras armar como repetición
 const ELEPHANTSTEPS_MIN_REP_SECONDS = 0.25; // el vaivén real más rápido medido fue de ~1s toque-a-toque; esto solo descarta ruido de un fotograma suelto, sin gating extra de estabilidad (mismo criterio ya aplicado en tijeras/círculos de brazos para no perder reps rápidas a fps bajo de móvil)
 
@@ -1152,7 +1151,7 @@ const ELEPHANTSTEPS_MIN_REP_SECONDS = 0.25; // el vaivén real más rápido medi
 const SPLITSQUAT_UP_ANGLE_DEG = 160;
 const SPLITSQUAT_DOWN_ANGLE_DEG = 100;
 const SPLITSQUAT_MIN_VISIBILITY = 0.4;
-const SPLITSQUAT_STABLE_MS = 800; // mismo criterio/valor que SQUAT_ARM_STABLE_MS
+const SPLITSQUAT_STABLE_MS = 500; // mismo criterio/valor que SQUAT_ARM_STABLE_MS
 const SPLITSQUAT_ARM_GATE_TOLERANCE_DEG = 15; // AÑADIDO 2026-09-17 tras un registro real: de pie en la postura escalonada (una pierna delante, otra detrás), el ángulo mínimo entre las dos piernas rara vez sostenía los 160° seguidos (oscilaba 125-176°, natural en un split squat -- la pierna de atrás no queda tan recta como en una sentadilla normal); solo afecta al armado inicial, ver SPLITSQUAT_ARM_GATE_ANGLE_DEG
 const SPLITSQUAT_ARM_GATE_ANGLE_DEG = SPLITSQUAT_UP_ANGLE_DEG - SPLITSQUAT_ARM_GATE_TOLERANCE_DEG;
 // Cuarta forma de terminar la serie: quedarte quieto (parado, de pie o
@@ -1235,7 +1234,7 @@ const JUMPINGJACK_ARMS_UP_MARGIN_FACTOR = 0.15;   // cuanto por encima del hombr
 const JUMPINGJACK_ARMS_DOWN_MARGIN_FACTOR = 0.1;  // cuanto como mucho por encima del hombro para contar "brazos abajo/pegados al cuerpo"
 const JUMPINGJACK_LEGS_OPEN_RATIO = 1.6;  // los tobillos tienen que estar al menos esto de veces mas separados que la cadera para contar "piernas abiertas"
 const JUMPINGJACK_LEGS_CLOSED_RATIO = 1.3; // como mucho esto de veces mas separados que la cadera para contar "piernas juntas" -- subido de 1.15: de pie de forma normal (sin pegar los pies a proposito) el ratio real ya anda cerca de 1.15-1.3, asi que exigir <1.15 en TODOS los frames de forma continua (sin margen de ruido, ver JUMPINGJACK_ARM_NOISE_TOLERANCE_MS) tardaba muchisimo en armar, o incluso no llegaba a armar
-const JUMPINGJACK_ARM_STABLE_MS = 800; // tiempo quieto en posicion cerrada para armar el contador (mismo patron que SQUAT_ARM_STABLE_MS)
+const JUMPINGJACK_ARM_STABLE_MS = 500; // tiempo quieto en posicion cerrada para armar el contador (mismo patron que SQUAT_ARM_STABLE_MS)
 const JUMPINGJACK_STILL_MS = 2000; // sin abrir ni cerrar (ni un medio-ciclo) durante esto: se interpreta que has parado y se cierra la serie sola -- sustituye a checkWaveGesture aqui, ver la nota junto a processJumpingJack
 const JUMPINGJACK_OPEN_STABLE_MS = 150; // "piernas abiertas" tiene que sostenerse esto seguido antes de contarlo como el inicio de un salto -- filtra un roce/ruido de un frame suelto (occlusion, un tropiezo) sin estar saltando; ver la nota junto a processJumpingJack sobre la serie fantasma reportada
 const JUMPINGJACK_FIRST_JUMP_GRACE_MS = 6000; // margen (desde que se arma) antes de que el primer salto cuente como "te has quedado quieto" -- tiene que cubrir el tiempo que tarda en decirse el aviso hablado "Listo!..." (unos 2-3s) MAS el tiempo de reaccion para empezar a saltar; ver la nota junto al bloque de armado en processJumpingJack
@@ -1281,7 +1280,7 @@ const JUMPINGJACK_MIN_REP_SECONDS = 0.12; // sustituye al MIN_REP_SECONDS generi
 const ARMCIRCLES_MIN_VISIBILITY = 0.4; // visibilidad media de hombros+muñecas exigida para fiarse del frame
 const ARMCIRCLES_MIN_REACH_FACTOR = 0.45; // la muñeca tiene que estar al menos esto de veces el ancho de hombros lejos del hombro para considerar el brazo "extendido" (evita acumular ángulo con el brazo pegado al cuerpo, quieto) -- bajado de 0.6 (segundo test en cámara real, 2026-09-05): con 0.6 hacía falta el brazo prácticamente perfectamente recto para armar el contador, cualquier codo algo doblado se quedaba corto
 const ARMCIRCLES_MAX_HANG_REL = 0.35; // NUEVO (2026-09-22, vídeo de referencia con audio de Alex, analizado fotograma a fotograma con MediaPipe simulado + transcripción de la voz con Vosk): la muñeca no puede colgar más de esto (veces el ancho de hombros) por DEBAJO del propio hombro para que el brazo cuente como "posición inicial correcta" al armar -- antes solo se exigía ARMCIRCLES_MIN_REACH_FACTOR (distancia al hombro en CUALQUIER dirección), que un brazo colgando totalmente relajado ya cumple de sobra (reach medido ~0.8 en el vídeo, muy por encima de 0.45) -- así que el contador se armaba en cuanto Alex se quedaba de pie explicando el ejercicio, sin haber levantado los brazos todavía. Solo se exige al ARMAR (this.state === null); durante el giro activo el brazo pasa por "colgando" en la parte baja del círculo con total normalidad y no se comprueba.
-const ARMCIRCLES_ARM_STABLE_MS = 800; // brazos extendidos sostenido esto antes de armar el contador (mismo espíritu que JUMPINGJACK_ARM_STABLE_MS, más corto porque aquí no hay piernas que comprobar)
+const ARMCIRCLES_ARM_STABLE_MS = 400; // brazos extendidos sostenido esto antes de armar el contador (mismo espíritu que JUMPINGJACK_ARM_STABLE_MS, más corto porque aquí no hay piernas que comprobar)
 const ARMCIRCLES_MIN_ANGULAR_DELTA = 0.09; // SUBIDO de 0.02 (~1.15°/frame) a 0.09 (~5.2°/frame) el 2026-09-22: analizando fotograma a fotograma (MediaPipe simulado a ~10fps, el ritmo real de móvil) el vídeo de referencia de Alex, la pausa real que hace entre un sentido y otro (brazos quietos, en alto) sigue produciendo 1-18°/frame de ruido de tracking sosteniendo la postura -- muy por encima del umbral viejo, así que ARMCIRCLES_STILL_MS nunca llegaba a completarse (0 pausas detectadas como quietud de verdad en todo el vídeo) y el cambio de sentido no se disparaba nunca por esta vía (ver ARMCIRCLES_STILL_MS y el cambio de sentido por vuelta completa en dirección contraria, en processArmCircles, que ya no depende de esto). Radianes por frame por debajo de esto se consideran ruido de tracking sosteniendo una postura, no giro de verdad.
 const ARMCIRCLES_STILL_MS = 4000; // SUBIDO de 2500 a 4000 (2026-09-22, mismo motivo y mismo valor que ARMSCISSORS_STILL_MS ese mismo día): en el vídeo de referencia la pausa real entre sentidos dura casi 3 segundos (brazos quietos, en alto) -- con el ruido ya corregido (ver ARMCIRCLES_MIN_ANGULAR_DELTA) 2500ms hubiera cerrado la serie entera de golpe a mitad de una pausa normal para coger aire, antes de girar en el sentido contrario. Ahora esta constante solo decide cuándo se da la sesión entera por TERMINADA -- el cambio de sentido DENTRO de la sesión ya no depende de esto (ver el cambio por vuelta completa en dirección contraria, más abajo).
 const ARMCIRCLES_OUT_OF_FRAME_MS = 3000; // mismo motivo que JUMPINGJACK_OUT_OF_FRAME_MS: girando de verdad los brazos también se pierde visibilidad por motion blur, no solo al salirte del encuadre
@@ -1304,7 +1303,7 @@ const NECKLATERAL_MIN_VISIBILITY = 0.4; // visibilidad media de nariz+hombros ex
 const NECKLATERAL_ENTER_FACTOR = 0.16; // la nariz tiene que separarse del punto medio de los hombros al menos esto de veces el ancho de hombros para contar "ha llegado a un lado"
 const NECKLATERAL_MAX_VERTICAL_FACTOR = 0.12; // cuanto puede "caer" la nariz (respecto a los hombros, ya descontado tu propio centro) para que un desplazamiento siga contando como ir HACIA UN LADO -- reportado en la primera prueba real (2026-09-05): tirar la cabeza hacia delante/abajo (barbilla al pecho) se contaba como repetición, porque ese movimiento también corre algo la nariz en horizontal (ruido de tracking/perspectiva), aunque el movimiento real sea sobre todo vertical. Por debajo de este umbral el vaivén se acepta igual (una inclinación lateral real también baja algo la nariz hacia el hombro, no es un movimiento puramente horizontal); por encima, se descarta como "eso ha sido hacia abajo, no hacia un lado"
 const NECKLATERAL_EXIT_FACTOR = 0.05; // tiene que volver a estar más cerca del centro que esto para cerrar el vaivén y contar la repetición (histéresis, evita contar temblores cerca del umbral de entrada como varias repeticiones)
-const NECKLATERAL_CENTER_STABLE_MS = 800; // centrada/o y quieta/o sostenido esto antes de armar el contador -- fija tu propio "centro" real como baseline (mismo espíritu que ARMCIRCLES_ARM_STABLE_MS/JUMPINGJACK_ARM_STABLE_MS)
+const NECKLATERAL_CENTER_STABLE_MS = 500; // centrada/o y quieta/o sostenido esto antes de armar el contador -- fija tu propio "centro" real como baseline (mismo espíritu que ARMCIRCLES_ARM_STABLE_MS/JUMPINGJACK_ARM_STABLE_MS)
 const NECKLATERAL_SIDE_STABLE_MS = 100; // el lado tiene que sostenerse esto seguido antes de confirmarse -- filtra un pico de un frame suelto (ruido de tracking), no un giro de verdad
 const NECKLATERAL_MIN_REP_SECONDS = 0.15; // sustituye al MIN_REP_SECONDS generico (0.3s) SOLO para este ejercicio -- repStartTime se marca YA DESPUES del debounce de confirmacion (NECKLATERAL_SIDE_STABLE_MS), que es el que de verdad filtra el ruido de un pico de un frame suelto (mismo razonamiento que JUMPINGJACK_MIN_REP_SECONDS); exigir encima 0.3s completos desde ahi hasta volver al centro descartaba como "ruido" un vaiven real hecho con cierta soltura (visto en pruebas: 400ms de ida y vuelta, con 100ms ya consumidos por el debounce, se quedaba en ~300ms y caia justo en el borde)
 const NECKLATERAL_STILL_MS = 4000; // sin completar ningún vaivén durante esto: se interpreta que has terminado y se cierra la serie sola (mismo patrón que JUMPINGJACK_STILL_MS/ARMCIRCLES_STILL_MS, con más margen porque este es un movimiento lento de cuello, no un salto o un giro de brazo entero)
@@ -1334,7 +1333,7 @@ const NECKTURN_MIN_VISIBILITY = 0.4; // visibilidad media de nariz+hombros exigi
 const NECKTURN_ENTER_FACTOR = 0.16; // la nariz tiene que separarse del punto medio de los hombros al menos esto de veces el ancho de hombros para contar "ha llegado a un lado" (mismo umbral que NECKLATERAL_ENTER_FACTOR)
 const NECKTURN_MAX_VERTICAL_FACTOR = 0.12; // cuánto puede "caer" la nariz (respecto a los hombros, ya descontado tu propio centro) para que un desplazamiento siga contando como ir HACIA UN LADO y no hacia delante/abajo (barbilla al pecho) -- mismo umbral y mismo motivo que NECKLATERAL_MAX_VERTICAL_FACTOR
 const NECKTURN_EXIT_FACTOR = 0.05; // tiene que volver a estar más cerca del centro que esto para cerrar el vaivén y contar la repetición (histéresis, mismo umbral que NECKLATERAL_EXIT_FACTOR)
-const NECKTURN_CENTER_STABLE_MS = 800; // mirando al frente y quieta/o sostenido esto antes de armar el contador -- fija tu propio "centro" real como baseline (mismo valor que NECKLATERAL_CENTER_STABLE_MS)
+const NECKTURN_CENTER_STABLE_MS = 500; // mirando al frente y quieta/o sostenido esto antes de armar el contador -- fija tu propio "centro" real como baseline (mismo valor que NECKLATERAL_CENTER_STABLE_MS)
 const NECKTURN_SIDE_STABLE_MS = 100; // el lado tiene que sostenerse esto seguido antes de confirmarse -- filtra un pico de un frame suelto (ruido de tracking), no un giro de verdad (mismo valor que NECKLATERAL_SIDE_STABLE_MS)
 const NECKTURN_MIN_REP_SECONDS = 0.15; // sustituye al MIN_REP_SECONDS genérico (0.3s) SOLO para este ejercicio, mismo motivo y mismo valor que NECKLATERAL_MIN_REP_SECONDS
 const NECKTURN_STILL_MS = 4000; // sin completar ningún vaivén durante esto: se interpreta que has terminado y se cierra la serie sola (mismo valor que NECKLATERAL_STILL_MS)
@@ -1359,7 +1358,7 @@ const NECKTURN_DRIFT_TOLERANCE_FACTOR = 0.12; // cuánto puede desplazarse el pu
 // real, mismo patrón que el resto de la familia.
 const NECKCIRCLE_MIN_VISIBILITY = 0.4; // visibilidad media de nariz+hombros exigida para fiarse del frame (mismo umbral que NECKLATERAL_MIN_VISIBILITY)
 const NECKCIRCLE_CENTER_ENTER_FACTOR = 0.16; // para armar, la nariz tiene que estar dentro de esto (veces el ancho de hombros) del centro -- de frente y quieta/o, no a mitad de un giro (mismo umbral que NECKLATERAL_ENTER_FACTOR)
-const NECKCIRCLE_CENTER_STABLE_MS = 800; // de frente y quieta/o sostenido esto antes de armar el contador (mismo valor que NECKLATERAL_CENTER_STABLE_MS)
+const NECKCIRCLE_CENTER_STABLE_MS = 500; // de frente y quieta/o sostenido esto antes de armar el contador (mismo valor que NECKLATERAL_CENTER_STABLE_MS)
 const NECKCIRCLE_MIN_ANGULAR_DELTA = 0.02; // radianes por frame por debajo de esto se consideran ruido de tracking, no giro de verdad (mismo umbral que ARMCIRCLES_MIN_ANGULAR_DELTA/LEGROTATION_MIN_ANGULAR_DELTA)
 const NECKCIRCLE_MAX_SINGLE_FRAME_DELTA = 1.2; // BAJADO de 2.4 (~137°, copiado sin más de ARMCIRCLES_MAX_SINGLE_ARM_DELTA/LEGROTATION_MAX_SINGLE_LEG_DELTA) a 1.2 (~69°) tras una prueba real (2026-09-17, Redmi A5, ~10-12fps): el registro mostró saltos puntuales de 56°, 81°, 99° e incluso 127° en un solo fotograma aceptados como giro real -- físicamente imposibles para un cuello (rango de movimiento mucho menor y más lento que un brazo o una pierna haciendo círculos anchos, que es para lo que se pensó el 2.4 original). Esos saltos, en ambos sentidos, se sumaban al acumulado y se cancelaban entre sí sin avance neto -- la vuelta completa de 360° nunca llegaba a cerrarse en toda la sesión. 1.2 rad deja margen de sobra (más del doble) sobre los saltos de giro real más rápidos vistos en ese mismo registro (~30-45°/frame) y rechaza los picos de ruido. Pendiente de confirmar con un test real nuevo.
 const NECKCIRCLE_STILL_MS = 4000; // sin progreso angular de verdad durante esto: se interpreta que has terminado y se cierra la serie sola (mismo patrón que NECKLATERAL_STILL_MS, más margen que ARMCIRCLES_STILL_MS porque el cuello gira más despacio que un brazo)
@@ -1396,7 +1395,7 @@ const NECKCIRCLE_MIN_REP_SECONDS = 1.0; // una vuelta completa por debajo de est
 // el usuario ("que también cuenten si los hago en sentido contrario").
 const NECKHALFTURN_MIN_VISIBILITY = 0.4; // visibilidad media de nariz+hombros exigida para fiarse del frame (mismo umbral que NECKCIRCLE_MIN_VISIBILITY/NECKLATERAL_MIN_VISIBILITY)
 const NECKHALFTURN_CENTER_ENTER_FACTOR = 0.16; // para armar, la nariz tiene que estar dentro de esto (veces el ancho de hombros) del centro (mismo umbral que NECKCIRCLE_CENTER_ENTER_FACTOR)
-const NECKHALFTURN_CENTER_STABLE_MS = 800; // de frente y quieta/o sostenido esto antes de armar el contador (mismo valor que NECKCIRCLE_CENTER_STABLE_MS)
+const NECKHALFTURN_CENTER_STABLE_MS = 500; // de frente y quieta/o sostenido esto antes de armar el contador (mismo valor que NECKCIRCLE_CENTER_STABLE_MS)
 const NECKHALFTURN_MIN_ANGULAR_DELTA = 0.02; // radianes por frame por debajo de esto se consideran ruido de tracking, no giro de verdad ni posible cambio de sentido (mismo umbral que NECKCIRCLE_MIN_ANGULAR_DELTA)
 const NECKHALFTURN_MAX_SINGLE_FRAME_DELTA = 1.2; // BAJADO de 2.4 a la vez que NECKCIRCLE_MAX_SINGLE_FRAME_DELTA (mismo registro real 2026-09-17, mismo motivo): un salto de ruido de ~130° en el sentido contrario, sostenido apenas NECKHALFTURN_REVERSE_STABLE_MS (150ms, 1-2 fotogramas a este fps), bastaba por sí solo para superar tanto ese umbral como NECKHALFTURN_MIN_SWING_RAD (60°) y contar una repetición falsa -- causa muy probable de contar 3 en vez de 1 en media vuelta reportado ese mismo día. Pendiente de confirmar con un test real nuevo.
 const NECKHALFTURN_STILL_MS = 4000; // sin progreso angular de verdad durante esto: se interpreta que has terminado y se cierra la serie sola (mismo valor que NECKCIRCLE_STILL_MS/NECKLATERAL_STILL_MS)
@@ -1729,7 +1728,7 @@ const FRONTPOS_MAX_SWAY_Y = 0.35; // idem vertical (acercarte/alejarte o agachar
 const FRONTPOS_MAX_SCALE_CHANGE = 0.14; // cambio relativo del ancho de hombros en la ventana (acercarte/alejarte de la camara)
 const FRONTPOS_LOST_MS = 350; // fuera de posicion seguido esto => se descarta la subida en curso y se avisa (un parpadeo de 1-2 frames no)
 const KNEERAISE_MAX_UP_SECONDS = 2; // una rodilla 'levantada' mas de esto no es marchar (es un paso o un equilibrio): se descarta sin contar
-const HEELKICK_ARM_STEADY_MS = 600; // en su sitio, entero y de frente, sostenido esto (ademas de la ventana de FRONTPOS_SETTLED_MS) antes de armar
+const HEELKICK_ARM_STEADY_MS = 400; // en su sitio, entero y de frente, sostenido esto (ademas de la ventana de FRONTPOS_SETTLED_MS) antes de armar
 const HEELKICK_ARM_MAX_DIFF = 0.09; // mientras no esta armado se aprende el desnivel de reposo de los tobillos (camara/suelo torcidos) si la diferencia es menor que esto
 const HEELKICK_MAX_UP_SECONDS = 1.5; // un talon 'arriba' mas de esto no es un talon al gluteo de marcha (es un paso, o estirar el cuadriceps): se descarta
 const HEELKICK_HIDDEN_ONLY_MIN_SECONDS = 0.2; // subida sostenida SOLO por 'tobillo oculto' (sin desnivel real) debe durar al menos esto para contar
@@ -1857,7 +1856,7 @@ const ON_GROUND_MAX_TILT_DEG = 40;  // por encima de esto, no se considera "tumb
 // dejando margen de sobra sin colar una simple postura de "agachado
 // colocando la cámara".
 const ON_GROUND_ARM_MAX_TILT_DEG = 20;
-const ON_GROUND_STABLE_MS = 800;    // cuanto tiempo tumbado y quieto para armar el contador
+const ON_GROUND_STABLE_MS = 600;    // cuanto tiempo tumbado y quieto para armar el contador
 const OFF_GROUND_STABLE_MS = 400;   // cuanto tiempo "de pie" seguido para dar la serie por terminada
 
 // Crunch: solo se levantan cabeza y hombros, la cadera casi no se
@@ -2057,7 +2056,7 @@ const SCISSOR_MIN_REP_SECONDS = 0.2;   // un vaivén completo real rápido midi�
 //      cambia el signo de la diferencia (SCISSOR_CROSS_*). Si nunca se acercan no hay cruce.
 const SCISSOR_ARM_LIFT_FACTOR = 0.20;   // para armar basta UNA pierna con el tobillo al menos esto por encima de la cadera (en muslos) -- "un palmo" son ~0.3
 const SCISSOR_ARM_MAX_FACTOR = 2.5;     // techo solo contra lecturas absurdas (pierna vertical completa ~2 muslos)
-const SCISSOR_ARM_STABLE_MS = 600;      // tiempo seguido con esa pierna arriba antes de armar
+const SCISSOR_ARM_STABLE_MS = 300;      // tiempo seguido con esa pierna arriba antes de armar
 const SCISSOR_ARM_GRACE_MS = 250;       // huecos más cortos que esto no reinician la confirmación (patrón "un frame malo no reinicia el reloj")
 const SCISSOR_ARM_MAX_TILT_DEG = 55;    // hombro-cadera respecto a la horizontal: más que esto = no estás tumbado (apoyado en codos sí vale)
 const SCISSOR_REST_MAX_FACTOR = 0.10;   // las dos piernas por debajo de esto = "pies en el suelo"
@@ -2242,35 +2241,6 @@ export function tiltFromHorizontal(a, b) {
   const dx = b.x - a.x, dy = b.y - a.y;
   if (!dx && !dy) return null;
   return (Math.atan2(Math.abs(dy), Math.abs(dx)) * 180) / Math.PI;
-}
-
-// POSICION INICIAL REAL (2026-10-08, pedido de Alex: "que me vea en posicion inicial y no
-// una falsa posicion inicial"). Armar con SOLO un angulo de rodilla/cadera dejaba pasar
-// sentado o tumbado con la pierna recta. De pie de verdad, visto de PERFIL: la pierna
-// (cadera->rodilla o tobillo) casi vertical y, si el hombro se ve, el tronco erguido.
-const ARM_STANDING_LEG_MIN_TILT_DEG = 65;   // de pie: ~85-90; sentado en el suelo: ~0-20; en silla: ~40-50
-const ARM_STANDING_TORSO_MIN_TILT_DEG = 55; // tronco (hombro->cadera) erguido
-const SPLITSQUAT_ARM_MIN_LEG_TILT_DEG = 40; // zancada: la pierna adelantada va inclinada, por eso mas laxo
-const ARM_FRONT_LEG_TORSO_MIN_RATIO = 1.1;  // de frente: cadera->tobillo (alto) / hombro->cadera (alto); de pie ~1.5, sentado ~0.6
-function isStandingSideView(shoulder, hip, lower, legMinTilt = ARM_STANDING_LEG_MIN_TILT_DEG) {
-  if (!hip || !lower) return false;
-  const legTilt = tiltFromHorizontal(hip, lower);
-  if (legTilt === null || legTilt < legMinTilt) return false;
-  if (shoulder && (shoulder.visibility ?? 1) >= 0.5) {
-    const torsoTilt = tiltFromHorizontal(shoulder, hip);
-    if (torsoTilt === null || torsoTilt < ARM_STANDING_TORSO_MIN_TILT_DEG) return false;
-  }
-  return true;
-}
-// De FRENTE no hay perfil que medir: se compara lo largo que se ve el tren inferior contra el
-// tronco (solo alturas). Si no se ven hombros, caderas y tobillos, no se puede saber -> no bloquea.
-function isStandingFrontView(lm, minRatio = ARM_FRONT_LEG_TORSO_MIN_RATIO) {
-  const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER], lH = lm[L_HIP], rH = lm[R_HIP], lA = lm[L_ANKLE], rA = lm[R_ANKLE];
-  if ([lS, rS, lH, rH, lA, rA].some((p) => !p || (p.visibility ?? 1) < 0.5)) return true;
-  const torso = (lH.y + rH.y) / 2 - (lS.y + rS.y) / 2;
-  const leg = (lA.y + rA.y) / 2 - (lH.y + rH.y) / 2;
-  if (torso <= 0 || leg <= 0) return false; // cabeza abajo o tumbado
-  return leg / torso >= minRatio;
 }
 
 /**
@@ -5576,17 +5546,17 @@ class WorkoutSession {
     // de arquero) y el aviso de "descanso acabado" (ver tickRestTimer):
     // recuerda que hay que decir "cuélgate de la barra para empezar la
     // siguiente serie" en ESE momento, no nada más cerrar la serie — decirlo
-    // antes no tiene sentido, porque todavía quedan los 60s de descanso
+    // antes no tiene sentido, porque todavía quedan los 90s de descanso
     // obligatorio por delante (ver MIN_REST_MS) y colgarse ahí sería
     // justo lo contrario de descansar.
     this.pendingHangReminder = false;
     // Silencia CUALQUIER voz (avisos, consejos, "te veo"/"no te veo",
     // "¡listo!"...) desde que termina una serie hasta que el reloj de
-    // descanso llega a REST_ALERT_SECONDS (1:00). Se pone a true justo
+    // descanso llega a REST_ALERT_SECONDS (1:30). Se pone a true justo
     // al cerrar una serie (con reps o con tiempo aguantado), y se quita
     // en dos sitios: cuando de verdad arranca la siguiente serie
     // (countRep, o al entrar en postura válida en notePostureOk) o
-    // cuando el aviso automático de "descanso acabado" salta a los 60s
+    // cuando el aviso automático de "descanso acabado" salta a los 90s
     // (tickRestTimer). Mientras esté a true, el texto en pantalla se
     // sigue actualizando como siempre — solo la voz se calla.
     this.restVoiceQuiet = false;
@@ -5617,11 +5587,6 @@ class WorkoutSession {
     // sesión (primera serie), no hace falta repetirlo entre series: para
     // la segunda serie ya sabes cómo colocarte.
     this.startupVoiceGiven = false;
-    // Aviso previo a armar (ver announcePreArm): el "¡Listo!" SOLO suena al armar, con la
-    // posicion inicial ya confirmada; antes, si acaso, un "colocate" sin "Listo".
-    this.startupPreArmSeen = false;
-    this.startupPreArmTip = "";
-    this.preArmSince = null;
     // Cuántas veces se ha anunciado por voz un "serie terminada" en esta
     // sesión — ver announceSetComplete(). La PRIMERA vez se dice la chapa
     // completa (cómo colocarte para la siguiente serie); a partir de la
@@ -5682,7 +5647,7 @@ class WorkoutSession {
     if (!this.voiceEnabled) return;
     // Todavía en el tramo silencioso del descanso (ver restVoiceQuiet):
     // ni avisos, ni consejos, ni "te veo"/"no te veo" — nada de voz. El
-    // descanso es de verdad de los 60s (REST_ALERT_SECONDS), cámara
+    // descanso es de verdad de los 90s (REST_ALERT_SECONDS), cámara
     // colocada una vez al principio de la sesión incluido — así que
     // esto no necesita excepciones.
     if (this.restVoiceQuiet && !force) return;
@@ -5725,35 +5690,7 @@ class WorkoutSession {
    * CUALQUIER aviso hablado, sea del tipo que sea, solo para no
    * solapar dos avisos casi en el mismo instante.
    */
-  /**
-   * Aviso de "ya te veo, colocate" ANTES de armar. Nunca dice "¡Listo!": eso solo lo dice el
-   * aviso de armado (key ready_to_go), con la posicion inicial confirmada y mantenida. Se
-   * llama en cada frame mientras no hay armado; solo habla una vez por sesion y solo si
-   * llevas PREARM_HINT_DELAY_MS visible sin armar (si ya estas bien colocado, no hace falta).
-   * Si arma antes, el consejo (tip: como terminar la serie...) se anade al "¡Listo!".
-   */
-  announcePreArm(now, text, tip = "") {
-    if (this.startupVoiceGiven) return;
-    this.startupPreArmSeen = true;
-    this.startupPreArmTip = tip || "";
-    if (this.state !== null) return;
-    if (this.preArmSince == null) this.preArmSince = now;
-    if (now - this.preArmSince < PREARM_HINT_DELAY_MS) return;
-    this.startupVoiceGiven = true;
-    this.announceStatus(text, "startup_ready");
-  }
-
   announceStatus(text, key = text, speechText = text, force = false) {
-    // Primer "¡Listo!" de la sesion en un ejercicio con aviso previo: aqui ya esta armado.
-    if (key === "ready_to_go" && !this.startupVoiceGiven && this.startupPreArmSeen) {
-      this.startupVoiceGiven = true;
-      const tip = this.startupPreArmTip;
-      if (tip) {
-        const sameSpeech = speechText === text;
-        text = `${text} ${tip}`;
-        speechText = sameSpeech ? text : (speechText ? `${speechText} ${tip}` : speechText);
-      }
-    }
     this.setStatus(text);
     if (!this.voiceEnabled) return;
     if (!speechText) return; // speechText vacio = aviso solo en pantalla, sin voz
@@ -5762,8 +5699,7 @@ class WorkoutSession {
     const keyGap = lastForKey === null ? Infinity : now - lastForKey;
     if (keyGap < STATUS_VOICE_REPEAT_GAP_MS) return;
     const anyGap = this.lastSpokenStatusAt === null ? Infinity : now - this.lastSpokenStatusAt;
-    // El "¡Listo!" de armado nunca se traga por el margen entre avisos: es justo lo que se espera oir.
-    if (key !== "ready_to_go" && anyGap < STATUS_VOICE_MIN_GAP_MS) return;
+    if (anyGap < STATUS_VOICE_MIN_GAP_MS) return;
     this.lastSpokenStatusAt = now;
     this.lastSpokenAtByKey.set(key, now);
     this.speak(speechText, { flush: false, force });
@@ -5785,7 +5721,7 @@ class WorkoutSession {
     // regla: la chapa completa solo la PRIMERA vez de la sesión; a partir
     // de la segunda serie ya sabes que hay descanso obligatorio y cuánto
     // dura, así que por voz basta con "Descanso.", a secas. La regla de
-    // "no cuento nada hasta que no pasen los 60s" en sí no cambia (ver
+    // "no cuento nada hasta que no pasen los 90s" en sí no cambia (ver
     // MIN_REST_MS, countRep, notePostureOk) — si intentas algo antes de
     // tiempo, announceRestBlocked() sí te lo explica con detalle cada vez,
     // porque ahí hace falta. Mismo cambio que en la web (ver
@@ -5806,7 +5742,7 @@ class WorkoutSession {
     // siguiente" (waitingMessage) se guarda para decírtelo POR VOZ
     // cuando el descanso termine de verdad (ver maybeAnnounceRestEnd(),
     // llamado cada frame desde processResult) -- decírtelo ya, aquí,
-    // junto con "descansa 60 segundos", pedía colocarte antes de que
+    // junto con "descansa 90 segundos", pedía colocarte antes de que
     // pudieras siquiera empezar el descanso, y así lo describió un
     // usuario real. En pantalla se sigue viendo todo junto de inmediato
     // (fullText, arriba) porque leer con calma no tiene el mismo
@@ -6721,7 +6657,7 @@ class WorkoutSession {
 
     if (this.state === null) {
       const still = prevY != null && (Math.abs(y - prevY) * aspect) / W <= SQUATFRONT_SHOULDER_ARM_MAX_JUMP;
-      if (still && isStandingFrontView(lm, 1.0)) {
+      if (still) {
         if (this.frontArmSince == null) { this.frontArmSince = now; this.frontRefSum = 0; this.frontRefN = 0; this.frontRefWSum = 0; }
         this.frontRefSum += y; this.frontRefN += 1; this.frontRefWSum += W;
         if (now - this.frontArmSince >= SQUATFRONT_ARM_STABLE_MS) {
@@ -9070,7 +9006,13 @@ class WorkoutSession {
     // La primera vez en toda la sesión que se te ve bien, un aviso de
     // que ya puedes empezar — en las siguientes series no hace falta
     // repetirlo, ya sabes cómo colocarte.
-    this.announcePreArm(now, "Cadera, rodilla y tobillo a la vista. Ponte de pie, de perfil a la cámara, y espera al «Listo» para empezar. Para terminar una serie, ponte de frente a la cámara o sal del encuadre.", "Para terminar una serie, ponte de frente a la cámara o sal del encuadre.");
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Cadera, rodilla y tobillo a la vista. ¡Listo! Ya puedes empezar. Para terminar una serie, ponte de frente a la cámara o sal del encuadre.",
+        "startup_ready"
+      );
+    }
 
     const hip = useLeft ? lHip : rHip;
     const knee = useLeft ? lKnee : rKnee;
@@ -9088,9 +9030,7 @@ class WorkoutSession {
       // rodilla alto por casualidad y armar el contador antes de que
       // estés de verdad de pie — se exige la postura estable durante
       // SQUAT_ARM_STABLE_MS, igual que hangStableSince en dominadas.
-      // Y de pie DE VERDAD (no sentado/tumbado con la pierna recta) -- ver isStandingSideView.
-      const sqStanding = isStandingSideView(useLeft ? lm[L_SHOULDER] : lm[R_SHOULDER], hip, ankle);
-      if (kneeAngle >= SQUAT_UP_ANGLE_DEG && sqStanding) {
+      if (kneeAngle >= SQUAT_UP_ANGLE_DEG) {
         if (this.squatArmStableSince === null) this.squatArmStableSince = now;
         if (now - this.squatArmStableSince >= SQUAT_ARM_STABLE_MS) {
           this.state = "top";
@@ -9102,9 +9042,7 @@ class WorkoutSession {
         }
       } else {
         this.squatArmStableSince = null;
-        this.setStatus(kneeAngle >= SQUAT_UP_ANGLE_DEG
-          ? "Ponte de pie del todo (no sentado ni tumbado), de perfil a la cámara, para empezar."
-          : "Ponte de pie, de perfil a la cámara, para empezar.");
+        this.setStatus("Ponte de pie, de perfil a la cámara, para empezar.");
       }
     } else if (this.state === "top") {
       // No basta con cruzar el ángulo de bajada: justo tras armar, un
@@ -9168,7 +9106,13 @@ class WorkoutSession {
     }
     this.outOfFrameSince = null;
 
-    this.announcePreArm(now, "Hombro, cadera y rodilla a la vista. Ponte de pie, de perfil a la cámara, y espera al «Listo» para empezar. Después, dobla las rodillas lo que haga falta para tocar el suelo, e intenta ir estirando las piernas poco a poco. Para terminar una serie, sal del encuadre.", "Para terminar una serie, sal del encuadre.");
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Hombro, cadera y rodilla a la vista. ¡Listo! Dobla las rodillas lo que haga falta para tocar el suelo, e intenta ir estirando las piernas poco a poco. Para terminar una serie, sal del encuadre.",
+        "startup_ready"
+      );
+    }
 
     const shoulder = useLeft ? lShoulder : rShoulder;
     const hip = useLeft ? lHip : rHip;
@@ -9180,7 +9124,7 @@ class WorkoutSession {
     this.elephantStepsHipAngle = hipAngle;
 
     if (this.state === null) {
-      if (hipAngle >= ELEPHANTSTEPS_ARM_ANGLE_DEG && isStandingSideView(shoulder, hip, knee)) {
+      if (hipAngle >= ELEPHANTSTEPS_ARM_ANGLE_DEG) {
         if (this.elephantStepsArmStableSince === null) this.elephantStepsArmStableSince = now;
         if (now - this.elephantStepsArmStableSince >= ELEPHANTSTEPS_ARM_STABLE_MS) {
           this.state = "top";
@@ -9192,9 +9136,7 @@ class WorkoutSession {
         }
       } else {
         this.elephantStepsArmStableSince = null;
-        this.setStatus(hipAngle >= ELEPHANTSTEPS_ARM_ANGLE_DEG
-          ? "Ponte de pie del todo (no tumbado ni sentado), de perfil a la cámara, para empezar."
-          : "Ponte de pie, de perfil a la cámara, para empezar.");
+        this.setStatus("Ponte de pie, de perfil a la cámara, para empezar.");
       }
     } else if (this.state === "top") {
       const armSettled = this.elephantStepsArmedAt === null || (now - this.elephantStepsArmedAt) >= ELEPHANTSTEPS_ARM_SETTLE_MS;
@@ -9252,7 +9194,10 @@ class WorkoutSession {
 
     // La primera vez en toda la sesión que se te ve bien, un aviso de
     // que ya puedes empezar (mismo patrón que processSquat).
-    this.announcePreArm(now, "Ponte de pie, en posición, y espera al «Listo» para empezar.", "");
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus("¡Listo! Empieza.", "startup_ready");
+    }
 
     const leftAngle = leftOk ? angle(lHip, lKnee, lAnkle) : null;
     const rightAngle = rightOk ? angle(rHip, rKnee, rAnkle) : null;
@@ -9270,9 +9215,7 @@ class WorkoutSession {
       // Hay que empezar de pie (las dos rodillas casi rectas) y de
       // forma estable, para no contar media repetición al entrar en
       // encuadre a media bajada -- mismo patrón que squatArmStableSince.
-      const splitTilts = [leftOk ? tiltFromHorizontal(lHip, lAnkle) : null, rightOk ? tiltFromHorizontal(rHip, rAnkle) : null].filter((t) => t !== null);
-      const splitUpright = splitTilts.length > 0 && Math.min(...splitTilts) >= SPLITSQUAT_ARM_MIN_LEG_TILT_DEG;
-      if (kneeAngle >= SPLITSQUAT_ARM_GATE_ANGLE_DEG && splitUpright) {
+      if (kneeAngle >= SPLITSQUAT_ARM_GATE_ANGLE_DEG) {
         if (this.splitSquatStableSince === null) this.splitSquatStableSince = now;
         if (now - this.splitSquatStableSince >= SPLITSQUAT_STABLE_MS) {
           this.state = "top";
@@ -9490,7 +9433,13 @@ class WorkoutSession {
     // La primera vez en toda la sesión que se te ve bien, un aviso de
     // que ya puedes empezar — en las siguientes series no hace falta
     // repetirlo (mismo patrón que processSquat/processDip).
-    this.announcePreArm(now, "Cuerpo entero a la vista. Ponte de frente, con los pies juntos y los brazos pegados al cuerpo, y espera al «Listo» para empezar. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.", "Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.");
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Cuerpo entero a la vista. ¡Listo! Ya puedes empezar. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
+        "startup_ready"
+      );
+    }
 
     // Parar de moverse (ni abrir ni cerrar) JUMPINGJACK_STILL_MS seguidos
     // es la señal de que has terminado la serie — ver la nota de más
@@ -9525,7 +9474,7 @@ class WorkoutSession {
       // JUMPINGJACK_ARM_NOISE_TOLERANCE_MS seguidos) no cuenta como que
       // te has movido de verdad; solo se reinicia el cronómetro si el
       // frame "malo" se sostiene más que eso.
-      if (armsDownNow && legsClosedNow && isStandingFrontView(lm)) {
+      if (armsDownNow && legsClosedNow) {
         this.jjArmBadSince = null;
         if (this.jjArmStableSince === null) this.jjArmStableSince = now;
         if (now - this.jjArmStableSince >= JUMPINGJACK_ARM_STABLE_MS) {
@@ -9660,13 +9609,16 @@ class WorkoutSession {
     }
     this.outOfFrameSince = null;
 
-    {
-      const acTail = this.armCircleLockedPhase
-        ? `Gíralos ${this.armCircleLockedPhase === "forward" ? "hacia delante" : "hacia atrás"}. Al llegar al objetivo pasa solo al siguiente.`
-        : this.armCircleAnyDirection
-        ? "Gíralos en el sentido que quieras. Al llegar al objetivo pasa solo al siguiente."
-        : "Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.";
-      this.announcePreArm(now, `Hombros y muñecas a la vista. Ponte de frente, con los dos brazos levantados a los lados, a la altura de los hombros, y espera al «Listo» para empezar. ${acTail}`, acTail);
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        this.armCircleLockedPhase
+          ? `Hombros y muñecas a la vista. ¡Listo! Levanta los dos brazos a los lados, a la altura de los hombros, y gíralos ${this.armCircleLockedPhase === "forward" ? "hacia delante" : "hacia atrás"}. Al llegar al objetivo pasa solo al siguiente.`
+          : this.armCircleAnyDirection
+          ? "Hombros y muñecas a la vista. ¡Listo! Levanta los dos brazos a los lados, a la altura de los hombros, y gíralos en el sentido que quieras. Al llegar al objetivo pasa solo al siguiente."
+          : "Hombros y muñecas a la vista. ¡Listo! Levanta los dos brazos a los lados, a la altura de los hombros, y empieza a girarlos. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
+        "startup_ready"
+      );
     }
 
     const shoulderWidth = Math.hypot(lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y);
@@ -9973,7 +9925,13 @@ class WorkoutSession {
     }
     this.outOfFrameSince = null;
 
-    this.announcePreArm(now, "Cara y hombros a la vista. Ponte de frente a la cámara, mirando al frente, y espera al «Listo» para empezar. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.", "Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.");
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Cara y hombros a la vista. ¡Listo! Ya puedes empezar. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
+        "startup_ready"
+      );
+    }
 
     const shoulderMidX = (lShoulder.x + rShoulder.x) / 2;
     const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
@@ -10126,7 +10084,13 @@ class WorkoutSession {
     }
     this.outOfFrameSince = null;
 
-    this.announcePreArm(now, "Cara y hombros a la vista. Ponte de frente a la cámara, mirando al frente, y espera al «Listo» para empezar. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.", "Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.");
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Cara y hombros a la vista. ¡Listo! Ya puedes empezar. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
+        "startup_ready"
+      );
+    }
 
     const shoulderMidX = (lShoulder.x + rShoulder.x) / 2;
     const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
@@ -10277,7 +10241,13 @@ class WorkoutSession {
     }
     this.outOfFrameSince = null;
 
-    this.announcePreArm(now, "Cara y hombros a la vista. Ponte de frente a la cámara, mirando al frente, y espera al «Listo» para empezar. Después, gira la cabeza en el sentido que prefieras. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.", "Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.");
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Cara y hombros a la vista. ¡Listo! Empieza a girar la cabeza, en el sentido que prefieras. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
+        "startup_ready"
+      );
+    }
 
     const shoulderMidX = (lShoulder.x + rShoulder.x) / 2;
     const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
@@ -10408,7 +10378,13 @@ class WorkoutSession {
     }
     this.outOfFrameSince = null;
 
-    this.announcePreArm(now, "Cara y hombros a la vista. Ponte de frente a la cámara, mirando al frente, y espera al «Listo» para empezar. Después, lleva la cabeza de un lado a otro pasando por el centro, en cualquier sentido. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.", "Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.");
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Cara y hombros a la vista. ¡Listo! Lleva la cabeza de un lado a otro pasando por el centro, en cualquier sentido. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
+        "startup_ready"
+      );
+    }
 
     const shoulderMidX = (lShoulder.x + rShoulder.x) / 2;
     const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
@@ -10571,7 +10547,13 @@ class WorkoutSession {
     }
     this.outOfFrameSince = null;
 
-    this.announcePreArm(now, "Cadera y pies a la vista. Ponte de pie, de frente a la cámara y quieto, y espera al «Listo» para empezar. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.", "Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.");
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Cadera y pies a la vista. ¡Listo! Ya puedes empezar. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
+        "startup_ready"
+      );
+    }
 
     const rawHipMidX = (lHip.x + rHip.x) / 2;
     const rawHipMidZ = (lHip.z + rHip.z) / 2;
@@ -10836,7 +10818,13 @@ class WorkoutSession {
     }
     this.outOfFrameSince = null;
 
-    this.announcePreArm(now, "Cadera y tobillo a la vista. Ponte de pie, de perfil a la cámara y quieto, y espera al «Listo» para empezar. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.", "Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.");
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Cadera y tobillo a la vista. ¡Listo! Ya puedes empezar. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
+        "startup_ready"
+      );
+    }
 
     // Lado a vigilar: el elegido al armar (this.hipForwardBackTrackedSide),
     // o mientras tanto el que mejor se ve ahora mismo (ver el comentario
@@ -11108,7 +11096,13 @@ class WorkoutSession {
     }
     this.outOfFrameSince = null;
 
-    this.announcePreArm(now, "Hombros y muñecas a la vista. Ponte de frente, con los brazos extendidos en cruz, y espera al «Listo» para empezar. Después, crúzalos por delante. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.", "Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.");
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Hombros y muñecas a la vista. ¡Listo! Extiende los brazos en cruz y crúzalos por delante. Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.",
+        "startup_ready"
+      );
+    }
 
     const shoulderWidth = Math.hypot(lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y);
     if (!shoulderWidth) return;
@@ -11241,7 +11235,13 @@ class WorkoutSession {
     // seguidos antes de anunciarlo, para no decir que se ve algo que en
     // realidad no se veía.
     if (this.legRotationVisibleSince === null) this.legRotationVisibleSince = now;
-    if (now - this.legRotationVisibleSince >= LEGROTATION_VISIBLE_CONFIRM_MS) this.announcePreArm(now, "Caderas y rodillas a la vista. Ponte de pie, de frente a la cámara y quieto, y espera al «Listo» para empezar. Para terminar una serie, párate quieto unos segundos, o sal del encuadre.", "Para terminar una serie, párate quieto unos segundos, o sal del encuadre.");
+    if (!this.startupVoiceGiven && now - this.legRotationVisibleSince >= LEGROTATION_VISIBLE_CONFIRM_MS) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Caderas y rodillas a la vista. ¡Listo! Levanta una rodilla y gírala. Para terminar una serie, párate quieto unos segundos, o sal del encuadre.",
+        "startup_ready"
+      );
+    }
 
     // ---- Geometría DE FRENTE (2026-10-07, reescrita) -------------------
     // BUG REAL de la versión anterior: la "bajada" se medía como
@@ -12059,7 +12059,13 @@ class WorkoutSession {
     const grabRightRotates = distGrabR <= FOREARMROTATION_GRAB_MAX_FACTOR;
 
     if (this.state === null) {
-      this.announcePreArm(now, "Hombros, codos y muñecas a la vista. Agarra el codo de un brazo con la otra mano y espera al «Listo» para empezar. Después, gira ese brazo. Vale cualquiera de los dos, y puedes cambiar de brazo cuando quieras. Para terminar una serie, párate quieto unos segundos, o sal del encuadre.", "Vale cualquiera de los dos, y puedes cambiar de brazo cuando quieras. Para terminar una serie, párate quieto unos segundos, o sal del encuadre.");
+      if (!this.startupVoiceGiven) {
+        this.startupVoiceGiven = true;
+        this.announceStatus(
+          "Hombros, codos y muñecas a la vista. ¡Listo! Agarra el codo de un brazo con la otra mano y empieza a girar ese brazo. Vale cualquiera de los dos, y puedes cambiar de brazo cuando quieras. Para terminar una serie, párate quieto unos segundos, o sal del encuadre.",
+          "startup_ready"
+        );
+      }
       // v3: se elige el lado con el agarre MAS CERCANO (ver FOREARMROTATION_GRAB_ARM_MAX_FACTOR)
       const armL = distGrabL <= FOREARMROTATION_GRAB_ARM_MAX_FACTOR;
       const armR = distGrabR <= FOREARMROTATION_GRAB_ARM_MAX_FACTOR;
@@ -12960,7 +12966,7 @@ class WorkoutSession {
       const standby = checkStandbyPosture(lm);
       if (standby.visible && !this.startupVoiceGiven) {
         this.startupVoiceGiven = true;
-        this.announceStatus("Ponte de pie, relajada/o, con los brazos sueltos a los lados, para empezar.", "startup_ready", "Ponte en posición standby.");
+        this.announceStatus("¡Listo! Ponte de pie, relajada/o, con los brazos sueltos a los lados, para empezar.", "startup_ready", "Ponte en posición standby.");
       }
       if (standby.ok) {
         if (this.postureGroundSince === null) this.postureGroundSince = now;
@@ -13016,23 +13022,23 @@ class WorkoutSession {
       // quedaba en texto en pantalla nada más, sin decirse en voz alta.
       if (isKneeHoldStep1 && flat.visible && !this.startupVoiceGiven) {
         this.startupVoiceGiven = true;
-        this.announceStatus("Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
+        this.announceStatus("¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
       }
       if (isTuckLeverStep1 && flat.visible && !this.startupVoiceGiven) {
         this.startupVoiceGiven = true;
-        this.announceStatus("Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
+        this.announceStatus("¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
       }
       if (isDeadHangStep1 && flat.visible && !this.startupVoiceGiven) {
         this.startupVoiceGiven = true;
-        this.announceStatus("Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
+        this.announceStatus("¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
       }
       if (isWallsitStep1 && flat.visible && !this.startupVoiceGiven) {
         this.startupVoiceGiven = true;
-        this.announceStatus("Ponte de pie del todo, con la pierna estirada, para empezar.", "startup_ready", "Te quiero ver recto.");
+        this.announceStatus("¡Listo! Ponte de pie del todo, con la pierna estirada, para empezar.", "startup_ready", "Te quiero ver recto.");
       }
       if (isElephantStepsStep1 && flat.visible && !this.startupVoiceGiven) {
         this.startupVoiceGiven = true;
-        this.announceStatus("Ponte de pie del todo, con las piernas estiradas, para empezar.", "startup_ready", "Te quiero ver de pie.");
+        this.announceStatus("¡Listo! Ponte de pie del todo, con las piernas estiradas, para empezar.", "startup_ready", "Te quiero ver de pie.");
       }
       if (flat.ok) {
         if (this.postureGroundSince === null) this.postureGroundSince = now;
@@ -13366,7 +13372,13 @@ class WorkoutSession {
     // piernas alarga el muslo en pantalla y encarecía el umbral a media serie.
     const thighLength = (this.state !== null && this.crunchScaleRef) || liveThigh;
 
-    this.announcePreArm(now, "Te veo. Túmbate boca arriba y espera al «Listo» para empezar. Para terminar una serie, levántate o sal del encuadre.", "Para terminar una serie, levántate o sal del encuadre.");
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Te veo. ¡Listo! Túmbate boca arriba y empieza cuando quieras. Para terminar una serie, levántate o sal del encuadre.",
+        "startup_ready"
+      );
+    }
 
     // Cuánto sube el hombro por ENCIMA de la cadera (en pantalla, arriba
     // es "y" menor), en proporción al muslo.
@@ -13510,7 +13522,13 @@ class WorkoutSession {
     }
     this.outOfFrameSince = null;
 
-    this.announcePreArm(now, "Te veo. Túmbate boca arriba con las piernas estiradas y la cabeza ligeramente levantada del suelo, y espera al «Listo» para empezar. Para terminar una serie, levántate o sal del encuadre.", "Para terminar una serie, levántate o sal del encuadre.");
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Te veo. ¡Listo! Túmbate boca arriba con las piernas estiradas y la cabeza ligeramente levantada del suelo, y empieza cuando quieras. Para terminar una serie, levántate o sal del encuadre.",
+        "startup_ready"
+      );
+    }
 
     const shoulder = useLeft ? lShoulder : rShoulder;
     const hip = useLeft ? lHip : rHip;
@@ -13646,7 +13664,13 @@ class WorkoutSession {
     }
     this.outOfFrameSince = null;
 
-    this.announcePreArm(now, "Te veo. Túmbate boca arriba con las piernas estiradas y espera al «Listo» para empezar. Después, sube una pierna hacia el pecho o la cabeza, ayúdate con las manos si quieres, y vuelve a bajarla. Para terminar una serie, levántate o sal del encuadre.", "Para terminar una serie, levántate o sal del encuadre.");
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Te veo. ¡Listo! Túmbate boca arriba y empieza cuando quieras: sube una pierna hacia el pecho o la cabeza, ayúdate con las manos si quieres, y vuelve a bajarla. Para terminar una serie, levántate o sal del encuadre.",
+        "startup_ready"
+      );
+    }
 
     const shoulder = useLeft ? lShoulder : rShoulder;
     const hip = useLeft ? lHip : rHip;
@@ -14130,7 +14154,13 @@ class WorkoutSession {
     }
     this.outOfFrameSince = null;
 
-    this.announcePreArm(now, "Te veo. Túmbate boca arriba, con las manos detrás de la nuca o los brazos cruzados sobre el pecho, y espera al «Listo» para empezar. No te ayudes apoyando las manos en el suelo, no cuenta. Para terminar una serie, levántate, sal del encuadre o quédate más de unos segundos sin hacer ninguna repetición.", "No te ayudes apoyando las manos en el suelo, no cuenta. Para terminar una serie, levántate, sal del encuadre o quédate más de unos segundos sin hacer ninguna repetición.");
+    if (!this.startupVoiceGiven) {
+      this.startupVoiceGiven = true;
+      this.announceStatus(
+        "Te veo. ¡Listo! Túmbate boca arriba, con las manos detrás de la nuca o los brazos cruzados sobre el pecho, y empieza cuando quieras. No te ayudes apoyando las manos en el suelo, no cuenta. Para terminar una serie, levántate, sal del encuadre o quédate más de unos segundos sin hacer ninguna repetición.",
+        "startup_ready"
+      );
+    }
 
     const shoulder = useLeft ? lShoulder : rShoulder;
     const hip = useLeft ? lHip : rHip;
@@ -14782,7 +14812,7 @@ class WorkoutSession {
       const waitedSeconds = Math.floor((now - this.prepStartTs) / 1000);
       if ((wristVisible || elbowVisible) && !this.startupVoiceGiven) {
         this.startupVoiceGiven = true;
-        this.announceStatus("Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
+        this.announceStatus("¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
       }
 
       if (armsUpNow) {
@@ -14894,7 +14924,7 @@ class WorkoutSession {
           // todavía es > 0 en este punto).
           // El "cuélgate otra vez" ya NO se dice aquí — se dice cuando el
           // descanso obligatorio de verdad termina (ver tickRestTimer /
-          // pendingHangReminder): decirlo ahora, con 60s de descanso todavía
+          // pendingHangReminder): decirlo ahora, con 90s de descanso todavía
           // por delante, no tiene sentido.
           // "Al fallo": si esta era la ultima serie prescrita, pasa solo al
           // siguiente ejercicio (ver failureGoalReached).
@@ -15073,7 +15103,7 @@ class WorkoutSession {
       const waitedSeconds = Math.floor((now - this.prepStartTs) / 1000);
       if ((wristVisible || elbowVisible) && !this.startupVoiceGiven) {
         this.startupVoiceGiven = true;
-        this.announceStatus("Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
+        this.announceStatus("¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
       }
 
       if (armsUpNow) {
@@ -15819,7 +15849,7 @@ if (this.counterKey === "crunch") {
       // repetirlo, ya sabes cómo colocarte.
       if ((wristVisible || elbowVisible) && !this.startupVoiceGiven) {
         this.startupVoiceGiven = true;
-        this.announceStatus("Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
+        this.announceStatus("¡Listo! Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
       }
 
       if (armsUpNow) {
@@ -15949,7 +15979,7 @@ if (this.counterKey === "crunch") {
           // todavía es > 0 en este punto).
           // El "cuélgate otra vez" ya NO se dice aquí — se dice cuando el
           // descanso obligatorio de verdad termina (ver tickRestTimer /
-          // pendingHangReminder): decirlo ahora, con 60s de descanso todavía
+          // pendingHangReminder): decirlo ahora, con 90s de descanso todavía
           // por delante, no tiene sentido.
           // "Al fallo": si esta era la ultima serie prescrita, pasa solo al
           // siguiente ejercicio (ver failureGoalReached).
@@ -16045,7 +16075,7 @@ if (this.counterKey === "crunch") {
     if (restSeconds >= REST_ALERT_SECONDS && !this.restAlerted && !NO_REST_COUNTERS.has(this.counterKey)) {
       this.restAlerted = true;
       this.restAlertsTriggered += 1;
-      // Han pasado los 1:00 de descanso: a partir de aquí la voz ya
+      // Han pasado los 1:30 de descanso: a partir de aquí la voz ya
       // puede volver a hablar (este mismo aviso incluido).
       this.restVoiceQuiet = false;
       this.restPauseUntil = null; // la detección se reanuda junto con el aviso
@@ -16065,7 +16095,7 @@ if (this.counterKey === "crunch") {
    * desde que se cerró la última serie y no has empezado otra (ni una
    * rep contada ni una postura mantenida en curso). Se repite en cada
    * múltiplo (6, 9 min…). Se mide desde setClosedAt (no desde
-   * lastRepTime, que se reinicia al recalibrar tras el aviso de los 60s).
+   * lastRepTime, que se reinicia al recalibrar tras el aviso de los 90s).
    * No aplica a NO_REST_COUNTERS (no tienen descanso entre series).
    */
   checkLongRestAlert(now) {
