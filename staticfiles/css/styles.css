@@ -1132,6 +1132,8 @@ body.cam-fullscreen .page { animation:none; transform:none; }
   box-shadow:0 0 0 3px var(--paper), 0 0 0 4px var(--line);
 }
 .avatar--sm { --size:28px; box-shadow:none; }
+.avatar--icon { color:#fff; }
+.avatar--icon svg { display:block; }
 .nav-avatar { display:flex; align-items:center; text-decoration:none; }
 .nav-avatar.is-active .avatar, .nav-avatar:hover .avatar { box-shadow:0 0 0 2px var(--paper), 0 0 0 4px var(--ember); }
 
