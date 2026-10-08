@@ -5,3 +5,6 @@ __pycache__/
 db.sqlite3
 backups/
 mobile_releases/
+
+# Copias de seguridad automaticas (*.bak-pre-*): no se suben a git, pesan ~100 MB
+*.bak*
