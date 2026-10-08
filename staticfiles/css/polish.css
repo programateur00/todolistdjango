@@ -136,7 +136,7 @@ body {
 /* Sin el zigzag "tallado": la superficie limpia se lee más profesional. */
 .streak-card::before, .plan-card:not(.plan-card--off)::before { display: none; }
 
-.week-summary { padding: 16px 18px; margin-bottom: 20px; }
+.week-summary { padding: 16px 18px; margin-bottom: 16px; }
 .week-summary__top { align-items: center; margin-bottom: 8px; }
 .week-summary__top:not(:first-child) { margin-top: 18px; }
 .week-summary__label {
@@ -191,12 +191,10 @@ legend.field__label { padding: 0; }
   gap: 12px; padding: 12px 12px 12px 12px;
   transition: border-color .18s var(--ease), background .18s var(--ease);
 }
-.task-card--important { border-left: 3px solid var(--amber); }
 .task-card--done { opacity: .6; }
 .task-card--overdue {
   background: linear-gradient(0deg, var(--danger-soft), var(--danger-soft)), var(--paper);
   border-color: rgba(229, 73, 58, .35);
-  border-left: 3px solid var(--danger);
   animation: none;
 }
 .task-card__actions { gap: 6px; }
@@ -478,7 +476,7 @@ body { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
 
 /* ── 18 · Web de escritorio ─────────────────────────────────────────────── */
 body { --page-w: 720px; }
-body:has(.dash) { --page-w: 1080px; }
+body:has(.dash) { --page-w: 800px; }
 .site-nav__inner { max-width: var(--page-w); }
 .page { max-width: var(--page-w); }
 
@@ -500,16 +498,6 @@ body:has(.dash) { --page-w: 1080px; }
   .page { padding-top: 40px; }
   .topbar__title h1 { font-size: 52px; }
   .topbar__eyebrow { font-size: 12px; }
-}
-@media (min-width: 960px) {
-  .dash { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 36px; align-items: start; }
-  .dash__side { position: sticky; top: 88px; }
-  .dash__side .week-summary { margin-bottom: 14px; }
-  .dash__side .quick-add { margin-bottom: 22px; }
-  .dash__side .filters { display: flex; flex-direction: column; gap: 18px; margin-bottom: 0; }
-  .dash__side .category-filter { margin: 0; }
-  .dash__side .range-filter { display: flex; flex-wrap: wrap; border-radius: 18px; }
-  .dash__main .task-section:first-child .task-section__title { margin-top: 2px; }
 }
 
 /* El avatar y el tema van dentro de la barra, no pegados a la esquina de la ventana. */
@@ -539,3 +527,189 @@ body:has(.dash) { --page-w: 1080px; }
   .site-nav__links { gap: 0; }
   .site-nav__links a { padding: 0 9px; font-size: 13px; }
 }
+
+/* ══ 20 · Rediseño v2: tarjetas en rejilla, resumen en dos mosaicos ═══════ */
+
+/* Tarjeta: [círculo de acción] [título + etiquetas] [✕ / papelera apilados].
+   Todas las tarjetas comparten las mismas columnas, así que los títulos
+   quedan alineados sean del tipo que sean. */
+.task-card {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 32px;
+  grid-template-rows: auto auto;
+  column-gap: 12px; row-gap: 0;
+  align-items: center;
+  padding: 11px 8px 11px 12px;
+  min-height: 74px;
+  border-left-width: 1px;
+}
+.task-card__actions { display: contents; }
+.task-card__actions > :first-child {
+  grid-column: 1; grid-row: 1 / span 2; align-self: center; justify-self: center;
+}
+.task-card__body { grid-column: 2; grid-row: 1 / span 2; min-width: 0; padding: 1px 0; align-self: center; }
+.task-card__actions > :nth-child(2) { grid-column: 3; grid-row: 1; align-self: end; justify-self: center; }
+.task-card__delete { grid-column: 3; grid-row: 2; align-self: start; justify-self: center; margin: 0; }
+.task-card:not(:has(.task-card__actions > :nth-child(2))) .task-card__delete {
+  grid-row: 1 / span 2; align-self: center;
+}
+.task-card__actions > :nth-child(2) .check-btn--undone,
+.task-card__actions > .check-btn--undone { width: 30px; height: 30px; border-color: transparent; background: transparent; }
+.task-card__delete, .task-card__delete button {
+  width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; border-radius: 50%; background: transparent; border: none;
+}
+.task-card__delete svg { opacity: .8; }
+
+/* Importante / vencida: la franja es una sombra interior, no un borde, para que no empuje el contenido. */
+.task-card--important, .task-card--overdue { border-left-width: 1px; }
+.task-card { position: relative; }
+.task-card--important::before, .task-card--overdue::before {
+  content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--amber);
+}
+.task-card--overdue::before { background: var(--danger); }
+
+/* Título: nunca se parte por la mitad de una palabra salvo que no quepa de ninguna forma. */
+.task-card__title {
+  word-break: normal; overflow-wrap: break-word; hyphens: manual;
+  text-wrap: pretty;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+}
+.task-card__title-row { flex-wrap: nowrap; align-items: flex-start; gap: 8px; }
+.task-card__title-row .task-card__title { flex: 1 1 auto; min-width: 0; }
+.task-card__streak { flex: none; margin-top: 1px; }
+.task-card__meta { margin-top: 1px; }
+
+/* Tareas automáticas (Udemy, Ilerna, running…): un círculo punteado con un rayo, en vez de un hueco vacío. */
+.task-card__actions-spacer {
+  width: 40px; height: 40px; border-radius: 50%; position: relative; display: block;
+  border: 1.5px dashed var(--line); color: var(--bone-faded);
+}
+.task-card__actions-spacer::after {
+  content: ""; position: absolute; inset: 0; margin: auto; width: 18px; height: 18px;
+  background: currentColor; opacity: .85;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M13 2L4 14h7l-1 8 9-12h-7z'/%3E%3C/svg%3E") center / contain no-repeat;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M13 2L4 14h7l-1 8 9-12h-7z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+/* Barras de progreso dentro de la tarjeta. */
+.task-card .task-progress { margin-top: 4px; }
+
+/* ── Resumen de hoy / semana: dos mosaicos lado a lado ── */
+.week-summary {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto auto auto; grid-auto-flow: column;
+  column-gap: 34px; padding: 16px 20px 18px;
+  background:
+    linear-gradient(var(--line), var(--line)) center / 1px calc(100% - 36px) no-repeat,
+    var(--paper);
+}
+.week-summary__top, .week-summary__top:not(:first-child) { margin: 0 0 9px; }
+.week-summary__label { font-size: 11px; }
+.week-summary__pct { font-size: 20px; line-height: 1; }
+.week-summary__meta { margin: 9px 0 0; font-size: 12px; line-height: 1.35; }
+@media (max-width: 400px) {
+  .week-summary { column-gap: 26px; padding: 14px 16px 16px; }
+  .week-summary__pct { font-size: 18px; }
+}
+
+/* ── Añadir rápido: el botón nunca se sale del contenedor ── */
+.quick-add { box-sizing: border-box; width: 100%; overflow: hidden; margin-bottom: 18px; }
+.quick-add__input { min-width: 0; width: 100%; }
+.quick-add__button { flex: none; }
+
+/* ── Filtros en línea ── */
+.filters { display: grid; gap: 12px; margin: 4px 0 14px; }
+.filter-group { display: flex; flex-direction: row; align-items: center; gap: 12px; min-width: 0; }
+.filter-group__label { flex: none; width: 76px; margin: 0; }
+.filter-group nav { min-width: 0; }
+.range-filter { flex-wrap: nowrap; }
+@media (max-width: 640px) {
+  .filter-group { flex-direction: column; align-items: stretch; gap: 8px; }
+  .filter-group__label { width: auto; }
+  .range-filter, .category-filter {
+    overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; margin: 0 -18px; padding-left: 18px; padding-right: 18px;
+  }
+  .range-filter { margin: 0; align-self: flex-start; max-width: 100%; }
+  .range-chip, .category-chip { flex: none; }
+  .category-filter::-webkit-scrollbar, .range-filter::-webkit-scrollbar { display: none; }
+}
+.dash__main .task-section:first-child .task-section__title { margin-top: 8px; }
+
+/* ══ 21 · Microinteracciones al pulsar (sobrias) ═══════════════════════════ */
+:root { --spring: cubic-bezier(.34, 1.56, .64, 1); }
+
+/* Ondulación sutil desde el punto de pulsación (la inserta fx.js). */
+.fx-host { position: relative; overflow: hidden; isolation: isolate; }
+.fx-ripple {
+  position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%;
+  background: currentColor; opacity: .22; pointer-events: none; z-index: 0;
+  animation: fx-ripple .5s var(--ease) forwards;
+}
+@keyframes fx-ripple { to { transform: scale(var(--fx-s, 24)); opacity: 0; } }
+
+/* Respuesta de pulsación: todo lo que se toca "se hunde" un poco. */
+.primary-btn:active, .quick-add__button:active, .ghost-btn:active { transform: scale(.97); }
+.range-chip:active, .category-chip:active, .option-chip:active { transform: scale(.95); }
+.menu-row:active, .plan-card:active, .stats-card:active { transform: scale(.985); }
+.task-card:active { background: var(--paper-press, var(--paper)); }
+.range-chip, .category-chip, .menu-row, .plan-card, .stats-card, .primary-btn, .ghost-btn, .quick-add__button {
+  transition-property: background, border-color, color, transform, filter, box-shadow;
+  transition-duration: .16s; transition-timing-function: var(--ease);
+}
+.tabbar a svg { transition: transform .2s var(--spring); }
+.tabbar a:active svg { transform: scale(.82); }
+.tabbar a.active svg { animation: fx-pop .38s var(--spring); }
+@keyframes fx-pop { 0% { transform: scale(.78); } 100% { transform: scale(1); } }
+
+/* Los chips de filtro y las opciones "rebotan" al activarse. */
+.range-chip--active, .category-chip--active { animation: fx-pop .32s var(--spring); }
+.option-chip input:checked + span, .option-chip:has(input:checked) { animation: fx-pop .3s var(--spring); }
+
+/* Completar una tarea: el tic se dibuja, el círculo se rellena y la tarjeta se desliza fuera. */
+.check-btn--done svg path { stroke-dasharray: 24; stroke-dashoffset: 0; }
+.task-card.fx-completing .check-btn--done {
+  background: var(--gold); border-color: var(--gold); color: #14110E; transform: scale(1.08);
+  transition: background .16s var(--ease), color .16s var(--ease), transform .24s var(--spring);
+}
+.task-card.fx-completing .check-btn--done svg path { animation: fx-draw .28s .04s var(--ease) both; }
+@keyframes fx-draw { from { stroke-dashoffset: 24; } to { stroke-dashoffset: 0; } }
+.task-card.fx-completing { animation: fx-out .26s .2s var(--ease) forwards; }
+.task-card.fx-failing { animation: fx-fail .36s var(--ease) forwards; }
+.task-card.fx-failing .check-btn--undone { color: var(--danger); background: var(--danger-soft); }
+@keyframes fx-out  { to { opacity: 0; transform: translateX(26px) scale(.98); } }
+@keyframes fx-fail { 0%{transform:translateX(0)} 20%{transform:translateX(-5px)} 40%{transform:translateX(4px)}
+                     60%{transform:translateX(-3px)} 100%{transform:translateX(0); opacity:.35} }
+
+/* Papelera "armada": un pequeño latido para avisar de que hay que confirmar. */
+.task-card__delete--armed { animation: fx-pop .3s var(--spring); }
+
+/* Entrada escalonada de la lista al abrir una pantalla (solo al navegar, no al refrescar tras pulsar). */
+html.fx-intro .task-card, html.fx-intro .plan-card, html.fx-intro .stats-card,
+html.fx-intro .streak-card, html.fx-intro .menu-row, html.fx-intro .week-summary {
+  animation: fx-in .42s var(--ease) both;
+}
+html.fx-intro .task-card:nth-child(2), html.fx-intro .plan-card:nth-child(2), html.fx-intro .stats-card:nth-child(2) { animation-delay: .04s; }
+html.fx-intro .task-card:nth-child(3), html.fx-intro .plan-card:nth-child(3), html.fx-intro .stats-card:nth-child(3) { animation-delay: .08s; }
+html.fx-intro .task-card:nth-child(4), html.fx-intro .plan-card:nth-child(4), html.fx-intro .stats-card:nth-child(4) { animation-delay: .12s; }
+html.fx-intro .task-card:nth-child(5), html.fx-intro .plan-card:nth-child(5), html.fx-intro .stats-card:nth-child(5) { animation-delay: .16s; }
+html.fx-intro .task-card:nth-child(n+6), html.fx-intro .plan-card:nth-child(n+6) { animation-delay: .2s; }
+@keyframes fx-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* Las barras de progreso crecen al aparecer. */
+html.fx-intro .stats-bar__done, html.fx-intro .task-progress__done {
+  transform-origin: left center; animation: fx-grow .7s .1s var(--ease) both;
+}
+@keyframes fx-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .fx-ripple { display: none; }
+  html.fx-intro * { animation: none !important; }
+  .task-card.fx-completing, .task-card.fx-failing { animation: none; }
+}
+
+/* Etiquetas largas (p. ej. "Cada semana (Lunes, Miércoles, Viernes)") se recortan en vez de invadir los botones. */
+.task-card__meta .meta-pill { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-card__body { padding-right: 2px; }
+.task-card__title-row .task-card__title { flex: 0 1 auto; }

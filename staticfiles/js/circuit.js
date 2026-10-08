@@ -41,15 +41,6 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   const modeSelect = document.getElementById("circuit-mode-select");
   const playerHost = document.getElementById("circuit-player");
 
-  const iconMap = {};
-  const iconsHost = document.getElementById("circuit-icons");
-  if (iconsHost) {
-    iconsHost.querySelectorAll("[data-slug]").forEach((div) => {
-      iconMap[div.dataset.slug] = div.innerHTML;
-    });
-  }
-  const iconFor = (slug) => iconMap[slug] || iconMap.generic || "";
-
   const esc = (s) =>
     String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -294,7 +285,6 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     playerHost.innerHTML = `
       <div class="circuit">
         <p class="circuit__progress">${esc(progressLabel())}</p>
-        <div class="circuit__icon">${iconFor(item.slug)}</div>
         <h2 class="circuit__exercise-name">${esc(item.name)}</h2>
         <p class="circuit__phase circuit__phase--work">${isFailure ? "Al fallo" : "Trabajo"}</p>
         <div class="circuit__timer" id="run-timer">${fmt(item.work || 0)}</div>
@@ -815,7 +805,6 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     playerHost.innerHTML = `
       <div class="circuit">
         <p class="circuit__progress">${esc(opts.progress || progressLabel())}</p>
-        <div class="circuit__icon circuit__icon--next">${iconFor(next.slug)}</div>
         <h2 class="circuit__exercise-name">Descanso</h2>
         <p class="circuit__phase circuit__phase--rest">Descanso</p>
         <div class="circuit__timer" id="run-timer">${fmt(seconds)}</div>

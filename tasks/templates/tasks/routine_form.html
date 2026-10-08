@@ -1,5 +1,4 @@
 {% extends "tasks/base.html" %}
-{% load exercise_icons %}
 {% block title %}{% if routine %}Editar circuito{% else %}Nuevo circuito{% endif %}{% endblock %}
 {% block content %}
 
@@ -61,7 +60,6 @@
         <ul class="routine-builder__available" id="available-list">
             {% for exercise in exercises %}
             <li class="routine-builder__available-item">
-                <span class="routine-builder__icon">{% exercise_icon exercise.slug compact=True %}</span>
                 <span class="routine-builder__available-name">{{ exercise.name }}
                     <small class="routine-mode">{% if exercise.mode == "pose" %}cámara{% else %}cronómetro{% endif %}</small>
                 </span>

@@ -58,9 +58,6 @@
         {% endif %}
         {% block content %}{% endblock %}
     </div>
-    <p class="credits">
-        Ilustraciones de ejercicios: <strong>Everkinetic</strong> (CC BY-SA 3.0).
-    </p>
     <script>
         (function () {
             var btn = document.getElementById('theme-toggle');
@@ -86,5 +83,6 @@
         })();
     </script>
     <script type="module" src="{% static 'js/camera-fullscreen.js' %}"></script>
+    <script src="{% static 'js/fx.js' %}" defer></script>
 </body>
 </html>

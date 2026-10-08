@@ -1,6 +1,5 @@
 {% extends "tasks/base.html" %}
 {% load static %}
-{% load exercise_icons %}
 {% block title %}{{ routine.name }} — {{ task.title }}{% endblock %}
 {% block content %}
 
@@ -30,8 +29,6 @@
     <div class="circuit__player" id="circuit-player" hidden>
         <p class="circuit__progress" id="circuit-progress">Ejercicio 1 de {{ items|length }}</p>
 
-        <div class="circuit__icon" id="circuit-icon"></div>
-
         <h2 class="circuit__exercise-name" id="circuit-exercise-name">—</h2>
         <p class="circuit__phase" id="circuit-phase">Trabajo</p>
 
@@ -51,15 +48,6 @@
         <p id="circuit-done-summary"></p>
         <button type="button" class="primary-btn" id="circuit-finish">Guardar y volver</button>
     </div>
-</div>
-
-<!-- Ilustraciones precargadas y ocultas: circuit.js las va mostrando
-     según toca, sin tener que duplicar el diccionario de SVGs en JS. -->
-<div id="circuit-icons" hidden>
-    {% for item in items %}
-    <div data-slug="{{ item.exercise.slug }}">{% exercise_icon item.exercise.slug %}</div>
-    {% endfor %}
-    <div data-slug="generic">{% exercise_icon "generic" %}</div>
 </div>
 
 <script type="module" src="{% static 'js/circuit.js' %}"></script>

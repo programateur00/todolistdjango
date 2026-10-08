@@ -1,6 +1,5 @@
 {% extends "tasks/base.html" %}
 {% load static %}
-{% load exercise_icons %}
 {% block title %}{{ plan.name }}{% endblock %}
 {% block content %}
 
@@ -41,13 +40,6 @@
     </div>
 
     <div class="circuit__player" id="session-player" hidden></div>
-</div>
-
-<div id="circuit-icons" hidden>
-    {% for i in items %}
-    <div data-slug="{{ i.slug }}">{% exercise_icon i.slug %}</div>
-    {% endfor %}
-    <div data-slug="generic">{% exercise_icon "generic" %}</div>
 </div>
 
 <script type="module" src="{% static 'js/plan-session.js' %}"></script>
