@@ -35,6 +35,10 @@
                 <a href="{% url 'tasks:weekly_review' %}" class="{% if request.resolver_match.url_name == 'weekly_review' %}is-active{% endif %}">Revisión</a>
                 <a href="{% url 'tasks:stats_list' %}" class="{% if '/estadisticas' in request.path %}is-active{% endif %}">Estadísticas</a>
                 <a href="{% url 'tasks:settings' %}" class="{% if request.resolver_match.url_name == 'settings' %}is-active{% endif %}">Ajustes</a>
+            </div>
+            {# Perfil y tema van aparte de los enlaces: en pantallas estrechas los #}
+            {# enlaces hacen scroll/bajan de fila, pero esto siempre se ve arriba a la derecha. #}
+            <div class="site-nav__actions">
                 {% nav_profile as me %}
                 <a href="{% url 'tasks:profile' %}" class="nav-avatar{% if request.resolver_match.url_name == 'profile' %} is-active{% endif %}" title="Mi perfil" aria-label="Mi perfil"><span class="avatar avatar--sm" style="--avatar-color: {{ me.avatar_color }}">{{ me.avatar_emoji }}</span></a>
                 <button type="button" class="theme-toggle" id="theme-toggle" title="Cambiar a modo claro/oscuro" aria-label="Cambiar de tema">🌙</button>

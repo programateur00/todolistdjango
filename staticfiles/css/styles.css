@@ -77,7 +77,11 @@ button { font-family:var(--font-b); cursor:pointer; }
   color:var(--ember); text-decoration:none; text-shadow:0 0 14px rgba(255,106,31,.35);
   line-height:1;
 }
-.site-nav__links { display:flex; align-items:center; gap:18px; }
+.site-nav__links { display:flex; align-items:center; gap:18px; margin-left:auto; min-width:0;
+  overflow-x:auto; scrollbar-width:none; }
+.site-nav__links::-webkit-scrollbar { display:none; }
+.site-nav__links a { flex:none; }
+.site-nav__actions { display:flex; align-items:center; gap:14px; flex:none; margin-left:2px; }
 .site-nav__links a {
   display:flex; align-items:center; height:30px;
   font-family:var(--font-b); font-size:14px; color:var(--bone-faded);
@@ -98,6 +102,17 @@ button { font-family:var(--font-b); cursor:pointer; }
   .site-nav__links { gap:12px; }
   .site-nav__links a { font-size:13px; }
   .theme-toggle { padding-left:10px; margin-left:0; }
+}
+/* Pantalla ancha: el perfil y el tema van pegados a la esquina superior derecha de la ventana. */
+@media (min-width:900px) {
+  .site-nav__actions { position:absolute; right:28px; top:50%; transform:translateY(-50%); margin-left:0; }
+}
+/* Móvil: marca + perfil/tema en la primera fila, enlaces debajo (con scroll si no caben). */
+@media (max-width:560px) {
+  .site-nav__inner { flex-wrap:wrap; row-gap:8px; }
+  .site-nav__actions { order:2; margin-left:auto; }
+  .site-nav__links { order:3; flex:1 1 100%; margin-left:0; gap:16px; }
+  .site-nav__links a { height:28px; }
 }
 
 .credits { text-align:center; font-size:12px; color:var(--bone-faded); padding:0 20px 24px; margin:0; }
@@ -1117,9 +1132,8 @@ body.cam-fullscreen .page { animation:none; transform:none; }
   box-shadow:0 0 0 3px var(--paper), 0 0 0 4px var(--line);
 }
 .avatar--sm { --size:28px; box-shadow:none; }
-.site-nav__links a.nav-avatar { height:auto; padding:0; border-bottom:none; margin-left:2px; }
-.site-nav__links a.nav-avatar.is-active .avatar { box-shadow:0 0 0 2px var(--paper), 0 0 0 4px var(--ember); }
-.site-nav__links a.nav-avatar:hover .avatar { box-shadow:0 0 0 2px var(--paper), 0 0 0 4px var(--ember); }
+.nav-avatar { display:flex; align-items:center; text-decoration:none; }
+.nav-avatar.is-active .avatar, .nav-avatar:hover .avatar { box-shadow:0 0 0 2px var(--paper), 0 0 0 4px var(--ember); }
 
 .profile-hero { display:flex; align-items:center; gap:18px; margin-bottom:20px; }
 .profile-hero__name { font-family:var(--font-d); font-weight:400; font-size:30px;
