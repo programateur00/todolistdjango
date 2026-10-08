@@ -475,3 +475,67 @@ body { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
     animation-duration: .01ms !important;
   }
 }
+
+/* ── 18 · Web de escritorio ─────────────────────────────────────────────── */
+body { --page-w: 720px; }
+body:has(.dash) { --page-w: 1080px; }
+.site-nav__inner { max-width: var(--page-w); }
+.page { max-width: var(--page-w); }
+
+.site-nav__inner { padding-top: 12px; padding-bottom: 12px; }
+.site-nav__links { gap: 2px; }
+.site-nav__links a {
+  height: 36px; padding: 0 13px; border-radius: 999px; border-bottom: none;
+  font-size: 14px; font-weight: 600; color: var(--bone-faded);
+  transition: background .15s var(--ease), color .15s var(--ease);
+}
+.site-nav__links a:active { background: var(--press); }
+.site-nav__links a.is-active { color: var(--ember); background: var(--ember-soft); border-bottom: none; }
+@media (hover: hover) {
+  .site-nav__links a:hover { background: var(--press); color: var(--bone); }
+  .site-nav__links a.is-active:hover { background: var(--ember-soft); color: var(--ember); }
+}
+
+@media (min-width: 720px) {
+  .page { padding-top: 40px; }
+  .topbar__title h1 { font-size: 52px; }
+  .topbar__eyebrow { font-size: 12px; }
+}
+@media (min-width: 960px) {
+  .dash { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 36px; align-items: start; }
+  .dash__side { position: sticky; top: 88px; }
+  .dash__side .week-summary { margin-bottom: 14px; }
+  .dash__side .quick-add { margin-bottom: 22px; }
+  .dash__side .filters { display: flex; flex-direction: column; gap: 18px; margin-bottom: 0; }
+  .dash__side .category-filter { margin: 0; }
+  .dash__side .range-filter { display: flex; flex-wrap: wrap; border-radius: 18px; }
+  .dash__main .task-section:first-child .task-section__title { margin-top: 2px; }
+}
+
+/* El avatar y el tema van dentro de la barra, no pegados a la esquina de la ventana. */
+@media (min-width: 900px) {
+  .site-nav__actions { position: static; transform: none; right: auto; top: auto; margin-left: 8px; }
+  .site-nav__links { flex: 1 1 0; min-width: 0; margin-left: 0; justify-content: flex-end; }
+}
+
+/* Los botones que son enlaces (<a class="primary-btn">) centran su texto igual que los <button>. */
+.primary-btn, a.ghost-btn { display: inline-flex; align-items: center; justify-content: center; text-align: center; }
+.plan-list-actions__cta { display: flex; }
+
+/* ── 19 · Retoques tras la revisión final ───────────────────────────────── */
+.tabbar a.active::before { top: -6px; }
+
+/* Las tarjetas de Rachas llevaban el relleno dos veces (tarjeta + enlace interior). */
+.stats-card:has(> .stats-card__link) { padding: 0; }
+.stats-card__link { padding: 14px 16px; }
+
+/* En el móvil el botón principal de un formulario ocupa todo el ancho. */
+@media (max-width: 520px) {
+  .task-form > .primary-btn, .task-form > button.primary-btn { width: 100%; }
+}
+
+/* Web en móvil: las cinco pestañas caben sin cortarse. */
+@media (max-width: 520px) {
+  .site-nav__links { gap: 0; }
+  .site-nav__links a { padding: 0 9px; font-size: 13px; }
+}

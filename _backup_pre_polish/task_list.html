@@ -9,8 +9,6 @@
     </div>
 </header>
 
-<div class="dash">
-<aside class="dash__side">
 {% include "tasks/_progress_bars.html" %}
 
 {# Los mensajes ahora se pintan una sola vez, en base.html, para que #}
@@ -70,9 +68,7 @@
     });
 })();
 </script>
-</aside>
 
-<div class="dash__main">
 <section class="task-section">
     <h2 class="task-section__title">Pendientes <span class="task-section__count">{{ pending_tasks|length }}</span></h2>
     {% if pending_tasks %}
@@ -273,8 +269,5 @@
     </details>
 </section>
 {% endif %}
-
-</div>
-</div>
 
 {% endblock %}
