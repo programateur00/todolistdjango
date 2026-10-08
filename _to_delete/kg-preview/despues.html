@@ -1,0 +1,2110 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark light" id="color-scheme-meta">
+    <title>Fuerza superior</title>
+    <meta name="theme-color" content="#171310" id="theme-color-meta">
+    <script>
+        // Se fija ANTES de que cargue el CSS/pinte nada, para no ver un
+        // parpadeo del tema equivocado un instante al cargar la página.
+        // Preferencia del propio navegador (localStorage), no del servidor.
+        (function () {
+            var t = localStorage.getItem('theme');
+            if (t === 'light') {
+                document.documentElement.setAttribute('data-theme', 'light');
+                document.getElementById('color-scheme-meta')?.setAttribute('content', 'light');
+                document.getElementById('theme-color-meta')?.setAttribute('content', '#F1E0BE');
+            }
+        })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Staatliches&family=Work+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/styles.css">
+<style>/* ── Tokens: Strive — ceniza, brasa y hueso ──────────────────────────── */
+:root {
+  color-scheme: dark;
+  --ash:         #171310;   /* fondo — ceniza fría, casi negro pero cálido */
+  --ash-soft:    #221B15;   /* superficie elevada — tarjetas, inputs */
+  --bone:        #EFE3D2;   /* texto principal — hueso, no blanco puro */
+  --bone-faded:  #9C8B77;   /* texto secundario — hueso deslavado */
+  --ember:       #FF6A1F;   /* acento principal — brasa encendida */
+  --ember-deep:  #B8420F;   /* brasa más apagada — hovers, bordes al pasar el ratón */
+  --ember-soft:  #3A2313;   /* fondo tenue de acento (badges, hover suave) */
+  --gold:        #D8A63D;   /* logro / 100% — oro, no verde */
+  --gold-soft:   #3A2E14;
+  --amber:       #E0883A;   /* aviso / parcial — ámbar, distinto del oro */
+  --amber-soft:  #3A2A16;
+  --danger:      #E5493A;   /* error / antitarea incumplida */
+  --danger-soft: #3A1B15;
+  --line:        #3A2C20;   /* bordes y separadores — madera quemada */
+  --paper:       #1C1611;   /* superficie de contraste (inputs, chips) */
+  --font-d:      "Staatliches", "sans-serif-condensed", "Arial Narrow", sans-serif;   /* titulares — marcado, como sellado a fuego */
+  --font-b:      "Work Sans", system-ui, sans-serif;          /* cuerpo */
+  --font-mono:   "JetBrains Mono", "Roboto Mono", "Courier New", monospace;  /* números — reps, %, rachas */
+  --radius:      14px;
+  --shadow:      0 1px 0 rgba(0,0,0,.3), 0 10px 24px -12px rgba(255,106,31,.18);
+}
+
+/* Modo claro — no es "el oscuro pero blanco de oficina": es la misma
+   cueva a la luz del día. Arenisca y ocre en vez de blanco liso, para
+   que siga sintiéndose ceniza/brasa/hueso y no un tema genérico. Se
+   activa con [data-theme="light"] en <html>, puesto por un script en
+   el <head> ANTES de pintar nada (para no ver un parpadeo del tema
+   equivocado al cargar), y guardado en localStorage — es una
+   preferencia del aparato, no algo que viva en el servidor. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --ash:         #F1E0BE;   /* arenisca al sol — el "blanco" de este tema */
+  --ash-soft:    #E7CE9E;   /* arenisca más honda — tarjetas, superficie elevada */
+  --bone:        #2E2013;   /* tinta/carbón sobre piedra clara — texto principal */
+  --bone-faded:  #7C6244;   /* texto secundario, ocre apagado */
+  --ember:       #E2540D;   /* misma brasa, ahora vista de día */
+  --ember-deep:  #A83C0C;
+  --ember-soft:  #F4C79A;   /* brasa tenue sobre arenisca, no rosa-pastel */
+  --gold:        #96650D;
+  --gold-soft:   #EBD49B;
+  --amber:       #A85913;
+  --amber-soft:  #EBD09B;
+  --danger:      #AD2C1B;
+  --danger-soft: #EFC7B8;
+  --line:        #D2B685;   /* veta más oscura en la piedra */
+  --paper:       #FAF0DC;   /* pergamino — donde se escribe/toca, no blanco puro */
+  --shadow:      0 1px 0 rgba(60,30,0,.06), 0 10px 24px -12px rgba(226,84,13,.22);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin:0; padding:0; background:var(--ash); color:var(--bone);
+  font-family:var(--font-b); -webkit-font-smoothing:antialiased; }
+body { background-image: radial-gradient(circle at 1px 1px, rgba(255,106,31,.06) 1px, transparent 1.6px);
+  background-size:22px 22px; }
+a { color:inherit; text-decoration:none; }
+button { font-family:var(--font-b); cursor:pointer; }
+:focus-visible { outline:2px solid var(--ember); outline-offset:2px; }
+.page { max-width:640px; margin:0 auto; padding:28px 20px 80px; animation:pageIn .38s ease both; }
+@keyframes pageIn {
+  from { opacity:0; transform:translateY(10px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .page { animation:none; }
+}
+
+.site-nav { background:var(--paper); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:10; }
+.site-nav__inner {
+  max-width:640px; margin:0 auto; padding:14px 20px;
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+}
+.site-nav__brand {
+  font-family:var(--font-d); font-weight:400; font-size:22px; letter-spacing:.08em;
+  color:var(--ember); text-decoration:none; text-shadow:0 0 14px rgba(255,106,31,.35);
+  line-height:1;
+}
+.site-nav__links { display:flex; align-items:center; gap:18px; }
+.site-nav__links a {
+  display:flex; align-items:center; height:30px;
+  font-family:var(--font-b); font-size:14px; color:var(--bone-faded);
+  text-decoration:none; padding:0 2px; border-bottom:2px solid transparent;
+  transition: color .15s ease, border-color .15s ease;
+}
+.site-nav__links a:hover { color:var(--ember); }
+.site-nav__links a.is-active { color:var(--ember); border-bottom-color:var(--ember); }
+.theme-toggle {
+  background:transparent; border:none; border-left:1px solid var(--line);
+  height:22px; font-size:15px; line-height:1; display:flex; flex:none;
+  align-items:center; justify-content:center; padding:0 0 0 16px; margin-left:2px;
+  color:var(--bone-faded); transition:color .15s ease;
+}
+.theme-toggle:hover { color:var(--ember); }
+@media (max-width:480px) {
+  .site-nav__inner { padding:12px 16px; gap:10px; }
+  .site-nav__links { gap:12px; }
+  .site-nav__links a { font-size:13px; }
+  .theme-toggle { padding-left:10px; margin-left:0; }
+}
+
+.credits { text-align:center; font-size:12px; color:var(--bone-faded); padding:0 20px 24px; margin:0; }
+
+/* ── Topbar ─────────────────────────────────────────────────────────── */
+.topbar { display:flex; justify-content:space-between; align-items:flex-end;
+  gap:16px; margin-bottom:22px; flex-wrap:wrap; }
+.topbar__eyebrow { display:block; font-size:12px; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--bone-faded); margin-bottom:2px; }
+.topbar__title h1 { font-family:var(--font-d); font-weight:400; font-size:42px; letter-spacing:.03em; text-transform:uppercase; margin:0; }
+
+.stats-link { display:flex; align-items:center; gap:6px; color:var(--bone-faded);
+  border:1px solid var(--line); background:var(--paper); padding:9px 14px;
+  border-radius:999px; font-size:13px; font-weight:500; flex-shrink:0; }
+.stats-link:hover { border-color:var(--ember); color:var(--ember); background:var(--ember-soft); }
+
+/* ── Stamps (stats_detail) ──────────────────────────────────────────── */
+.stamp-row { display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; }
+.stamp { display:flex; flex-direction:column; align-items:center; justify-content:center;
+  width:74px; height:74px; border-radius:50%; border:2px solid currentColor; }
+.stamp--done    { color:var(--gold);    transform:rotate(-4deg); }
+.stamp--undone  { color:var(--ember);   transform:rotate(3deg); }
+.stamp--rate    { color:var(--amber); transform:rotate(-2deg); }
+.stamp__number  { font-family:var(--font-mono); font-size:22px; font-weight:700; line-height:1; }
+.stamp__label   { font-size:9px; letter-spacing:.04em; text-transform:uppercase; margin-top:2px; text-align:center; }
+
+/* ── Streak cards ───────────────────────────────────────────────────── */
+.streak-row { display:flex; gap:12px; margin-bottom:24px; }
+.streak-card {
+  flex:1; background:var(--paper); border:1px solid var(--line);
+  border-radius:var(--radius); padding:20px 16px 16px; display:flex; flex-direction:column;
+  align-items:center; gap:4px; box-shadow:var(--shadow); position:relative; overflow:hidden;
+}
+/* Zigzag tallado, como marcas de conteo en madera — el detalle de
+   firma de Strive, puesto justo donde se cuentan cosas de verdad. */
+.streak-card::before {
+  content:""; position:absolute; top:0; left:0; right:0; height:6px;
+  background-image:
+    linear-gradient(135deg, var(--ember) 25%, transparent 25.5%),
+    linear-gradient(225deg, var(--ember) 25%, transparent 25.5%);
+  background-size:14px 14px; background-position:0 0, 7px 0;
+  opacity:.55;
+}
+.streak-card__icon  { font-size:22px; line-height:1; }
+.streak-card__number{ font-family:var(--font-mono); font-size:32px; font-weight:700; line-height:1; }
+.streak-card__label { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--bone-faded); }
+.streak-card--current .streak-card__number { color:var(--ember); }
+.streak-card--max    .streak-card__number { color:var(--amber); }
+
+/* ── Flash ──────────────────────────────────────────────────────────── */
+.flash-list { list-style:none; padding:0; margin:0 0 16px; }
+.flash { background:var(--gold-soft); color:var(--bone); padding:8px 14px;
+  border-radius:10px; font-size:13px; margin-bottom:6px; }
+/* Los errores (subcategoría "error" de Django messages, ver views.py) se
+   pintan en rojo -- antes todos los mensajes salían iguales y un error
+   de validación se leía igual de tranquilo que un "Tarea creada". */
+.flash--error { background:var(--danger-soft); color:var(--danger); }
+
+/* ── Quick-add ──────────────────────────────────────────────────────── */
+.quick-add { display:flex; align-items:center; gap:8px; background:var(--paper);
+  border:1px solid var(--line); border-radius:var(--radius); padding:6px 6px 6px 16px;
+  margin-bottom:28px; box-shadow:var(--shadow); }
+.quick-add__input  { flex:1; border:none; background:transparent; font-family:var(--font-b);
+  font-size:15px; padding:10px 0; color:var(--bone); }
+.quick-add__input:focus { outline:none; }
+.quick-add__input::placeholder { color:var(--bone-faded); }
+.quick-add__button { background:var(--ember); color:var(--paper); border:none;
+  border-radius:10px; padding:9px 16px; font-size:14px; font-weight:600;
+  transition: transform .15s ease, box-shadow .15s ease, background .15s ease; }
+.quick-add__button:hover { background:#E05A18; transform:translateY(-2px);
+  box-shadow: 0 10px 22px -10px rgba(184,66,15,.6); }
+.quick-add__more { font-size:12px; color:var(--bone-faded); padding:0 8px; white-space:nowrap; transition:color .15s ease; }
+.quick-add__more:hover { color:var(--ember); }
+
+/* ── Sections ───────────────────────────────────────────────────────── */
+.task-section { margin-bottom:28px; }
+.task-section__title { font-family:var(--font-d); font-size:15px; font-weight:600;
+  text-transform:uppercase; letter-spacing:.06em; color:var(--bone-faded);
+  display:flex; align-items:center; gap:8px; margin:0 0 12px;
+  padding-bottom:8px; border-bottom:1px solid var(--line); }
+.task-section__count { background:var(--ash-soft); color:var(--bone); font-size:11px;
+  padding:1px 8px; border-radius:999px; font-family:var(--font-b); letter-spacing:0; }
+
+/* Sección "Hechas" plegable, con <details>/<summary> — sin JavaScript.
+   OJO: el <summary> NO reutiliza .task-section__title a propósito. Esa
+   clase lleva `display:flex`, y cambiarle el display a un <summary> le
+   quita su `display:list-item` nativo, que es de donde salen la flecha y
+   parte del comportamiento. Aquí se replica el mismo aspecto pero
+   respetando lo que el navegador espera. */
+.done-summary { font-family:var(--font-d); font-size:15px; font-weight:600;
+  text-transform:uppercase; letter-spacing:.06em; color:var(--bone-faded);
+  margin:0 0 12px; padding-bottom:8px; border-bottom:1px solid var(--line);
+  cursor:pointer; user-select:none; }
+.done-summary::marker { content:""; }              /* navegadores modernos */
+.done-summary::-webkit-details-marker { display:none; }  /* Chrome y Safari antiguos */
+.done-summary::before { content:"▸ "; font-size:12px; }
+.done-details[open] > .done-summary::before { content:"▾ "; }
+.done-details[open] > .done-summary { margin-bottom:12px; }
+/* Fix del desplegable "Hechas": .task-list lleva display:flex, y en
+   algunos navegadores (sobre todo WebKit/Safari) un display:flex en el
+   hijo directo de <details> gana a la regla nativa que lo oculta cuando
+   el <details> está cerrado — así que la lista de tareas hechas se
+   quedaba visible aunque el desplegable estuviera "cerrado". Se fuerza
+   aquí explícitamente en vez de confiar en el comportamiento nativo. */
+.done-details:not([open]) > .task-list { display:none; }
+/* Mismo fix que el de arriba, pero para los desplegables de Planes
+   (activos por categoría, y "Planes cerrados"): .plan-list también
+   lleva display:flex, así que sin esto un plan cerrado se quedaba
+   visible en Safari/WebKit aunque el desplegable estuviera plegado
+   -- no se había notado antes porque "Planes cerrados" era el único
+   <details> que envolvía un .plan-list, y en la práctica casi nadie
+   lo abre para darse cuenta. Al añadir más <details> por categoría
+   (ver plan_list.html) se volvió más visible, así que se arregla aquí
+   de una vez para los dos casos.
+   .plan-group-title es la cabecera de cada sub-grupo (Deporte/Estudio/
+   General/Lectura) DENTRO de "Planes cerrados" -- no lleva su propio
+   <details>, solo separa visualmente sin añadir otro nivel de plegado
+   (un plan cerrado se consulta poco, no hace falta plegarlo dos veces). */
+.done-details:not([open]) > .plan-list,
+.done-details:not([open]) > .plan-group-title { display:none; }
+.plan-group-title { font-family:var(--font-d); font-size:12px; font-weight:600;
+  text-transform:uppercase; letter-spacing:.06em; color:var(--bone-faded);
+  margin:18px 0 8px; }
+.plan-group-title:first-of-type { margin-top:0; }
+.empty-state { color:var(--bone-faded); font-size:14px; padding:20px 4px; font-style:italic; }
+
+/* ── Por generar (previsión de repeticiones futuras) ──────────────────
+   Fechas que TODAVÍA no existen como tarea real — se calculan a partir
+   de la configuración de repetición, sin tocar la base de datos. Por
+   eso no llevan ninguna acción (nada que marcar, nada que borrar):
+   son solo un vistazo a lo que viene, distinto a paréntesis de una
+   tarjeta de tarea normal. */
+.projected-hint { font-size:12px; color:var(--bone-faded); margin:-6px 0 12px; }
+.projected-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+.projected-item { background:var(--paper); border:1px dashed var(--line); border-radius:var(--radius);
+  padding:10px 14px; }
+.projected-item__title { display:block; font-size:14px; font-weight:600; margin-bottom:6px; }
+.projected-item__infinite { font-size:19px; color:var(--bone-faded); }
+.projected-item__dates { display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+
+/* Truco sin JavaScript: un checkbox oculto + dos <label> apuntando al
+   mismo id. Cerrado se ve el label "+N más"; al marcarse (clic en
+   cualquiera de los dos labels) se esconde ese botón, aparecen las
+   fechas de más, y al final de esas fechas sale el label "Ocultar" —
+   así el botón para cerrar queda pegado a lo que vas a cerrar, no
+   arriba del todo con la sección seleccionada, se ve mejor. */
+.projected-toggle { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+.projected-more-btn { cursor:pointer; font-size:11px; color:var(--bone-faded);
+  padding:2px 8px; border-radius:999px; border:1px dashed var(--line); transition:all .15s; }
+.projected-more-btn:hover { border-color:var(--ember); color:var(--ember); }
+.projected-more-btn::before { content:"+ "; }
+.projected-more-btn--hide::before { content:"− "; }
+/* "Ocultar" siempre en su propia línea, empezando en el mismo sitio
+   (a la izquierda) donde estaba el botón "+N más" que se pulsó -- así
+   no hay que mover el ratón para encontrarlo, se queda a mano. */
+.projected-more__dates { display:none; flex-direction:column; align-items:flex-start;
+  gap:6px; margin-top:6px; flex-basis:100%; }
+.projected-more__pills { display:flex; flex-wrap:wrap; gap:4px; }
+.projected-toggle:checked ~ .projected-more-btn--show { display:none; }
+.projected-toggle:checked ~ .projected-more__dates { display:flex; }
+
+/* ── Task cards ─────────────────────────────────────────────────────── */
+.task-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+
+/* Tarjetas: al pasar el ratón, suben un poco y se iluminan con un brillo
+   naranja oscuro a juego con el tema — el mismo gesto en todas, para
+   que la app entera se sienta viva de la misma forma. */
+.task-card, .plan-card, .stats-card, .streak-card, .category-chip, .range-chip {
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.task-card:hover, .plan-card:hover, .stats-card:hover, .streak-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 28px -14px rgba(184,66,15,.55), var(--shadow);
+  border-color: var(--ember-deep);
+}
+.category-chip:hover, .range-chip:hover { transform: translateY(-1px); }
+
+.task-card { display:flex; align-items:center; gap:10px; background:var(--paper);
+  border:1px solid var(--line); border-radius:var(--radius); padding:10px 10px 10px 8px;
+  box-shadow:var(--shadow); }
+.task-card--important { border-left:3px solid var(--amber); }
+.task-card--done      { opacity:.72; }
+.task-card--overdue   { border-left:3px solid var(--danger); background:var(--danger-soft); animation:pulse-red 2s ease infinite; }
+
+@keyframes pulse-red {
+  0%, 100% { box-shadow: var(--shadow); }
+  50%       { box-shadow: 0 0 0 3px rgba(229,73,58,.22); }
+}
+
+.task-card__actions { display:flex; gap:4px; flex-shrink:0; }
+.task-card__actions-spacer { width:68px; flex-shrink:0; }
+
+.check-btn { width:34px; height:34px; border-radius:50%; border:1.6px solid var(--line);
+  background:var(--ash); display:flex; align-items:center; justify-content:center;
+  color:transparent; flex-shrink:0; transition:all .15s; }
+.check-btn--done          { color:var(--gold); }
+.check-btn--done:hover    { background:var(--gold-soft); border-color:var(--gold); }
+.check-btn--checked       { background:var(--gold-soft); border-color:var(--gold); }
+.check-btn--undone        { color:var(--ember); width:30px; height:30px; margin-top:2px; }
+.check-btn--undone:hover  { background:var(--ember-soft); border-color:var(--ember); }
+.check-btn--undo          { color:var(--amber); }
+.check-btn--undo:hover    { background:var(--amber-soft); border-color:var(--amber); }
+
+.task-card__body  { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; padding:4px 0; }
+.task-card__title { margin:0; font-size:15px; font-weight:500; word-break:break-word; }
+.task-card__title--struck { color:var(--bone-faded); }
+.task-card__title-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.task-card__streak {
+  flex:none; font-family:var(--font-mono); font-size:12px; font-weight:700;
+  background:var(--amber-soft); color:var(--amber); border-radius:999px; padding:2px 8px;
+  white-space:nowrap;
+}
+
+.strike-wrap { position:relative; display:inline-block; }
+.strike-wrap::after { content:""; position:absolute; left:-2%; right:-2%; top:52%;
+  height:2px; background:var(--gold); transform:rotate(-1.2deg); border-radius:2px; }
+
+.expired-badge { display:inline-block; font-size:10px; text-transform:uppercase;
+  letter-spacing:.05em; background:var(--danger-soft); color:var(--danger);
+  padding:1px 6px; border-radius:999px; margin-left:8px; vertical-align:middle; }
+.expired-badge--avoid-success { background:var(--gold-soft); color:var(--gold); }
+
+.task-card__meta { display:flex; gap:6px; flex-wrap:wrap; }
+.meta-pill { font-size:11px; padding:2px 8px; border-radius:999px;
+  background:var(--ash-soft); color:var(--bone-faded); white-space:nowrap; }
+.meta-pill--date   { background:var(--amber); color:var(--paper); opacity:.85; }
+.meta-pill--time   { background:var(--ash-soft); }
+.meta-pill--urgent { background:var(--amber-soft); color:var(--amber); font-weight:600; }
+.meta-pill--late   { background:var(--danger-soft); color:var(--danger); font-weight:600; }
+
+.task-card__delete button { border:none; background:transparent; color:var(--bone-faded);
+  width:28px; height:28px; display:flex; align-items:center; justify-content:center; border-radius:8px; }
+.task-card__delete button:hover { background:var(--ember-soft); color:var(--ember); }
+
+/* ── Stats list ─────────────────────────────────────────────────────── */
+.stats-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }
+.stats-card { background:var(--paper); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); }
+.stats-card__link  { display:block; padding:14px 16px; }
+.stats-card__top   { display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:8px; }
+.stats-card__title { margin:0; font-size:15px; font-weight:500; }
+.stats-card__rate  { font-family:var(--font-mono); font-weight:700; font-size:16px; color:var(--amber); flex-shrink:0; }
+.stats-bar { height:8px; background:var(--ember-soft); border-radius:999px; overflow:hidden; margin-bottom:10px; }
+.stats-bar__done { height:100%; background:var(--gold); border-radius:999px; }
+.stats-bar__done--over { background:var(--ember); }  /* objetivo de hoy superado -- ver Task.reading_today_status */
+
+/* Minibarra de progreso de hoy en tareas que se completan solas
+   (Lectura/Udemy vía pc_usage, Running vía distancia/pasos) — ver
+   Task.auto_progress. Más fina que .stats-bar porque vive dentro de
+   una tarjeta de la lista, no en su propia sección. */
+.task-progress { margin-top:8px; }
+.task-progress__bar { height:5px; background:var(--ember-soft); border-radius:999px; overflow:hidden; }
+.task-progress__done { height:100%; background:var(--gold); border-radius:999px; transition:width .3s ease; }
+.task-progress__done--over { background:var(--ember); }  /* objetivo de hoy superado -- ver Task.reading_today_status */
+.task-progress__label { display:block; margin-top:4px; font-size:11px; font-family:var(--font-mono); color:var(--bone-faded); }
+.stats-card__counts { display:flex; gap:8px; flex-wrap:wrap; }
+.count-pill { font-size:11px; padding:3px 10px; border-radius:999px; font-weight:500; }
+.count-pill--done     { background:var(--gold-soft); color:var(--gold); }
+.count-pill--not-done { background:var(--ember-soft); color:var(--ember); }
+.count-pill--streak   { background:var(--amber-soft); color:var(--amber); }
+.count-pill--max      { background:var(--amber-soft); color:var(--amber); }
+
+/* ── Week summary (12 Week Year: porcentaje semanal de ejecución) ─────── */
+.week-summary {
+  background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
+  box-shadow:var(--shadow); padding:14px 16px; margin-bottom:18px;
+}
+.week-summary__top   { display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:8px; }
+.week-summary__label { font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--bone-faded); }
+.week-summary__pct   { font-family:var(--font-mono); font-weight:700; font-size:20px; color:var(--gold); }
+.week-summary__meta  { margin:8px 0 0; font-size:12px; color:var(--bone-faded); }
+.week-summary__top--second { margin-top:18px; }
+.week-summary .stats-bar { margin-bottom:0; }
+
+/* ── Tiempo acumulado (Deporte/Enfoque, ver tasks/time_stats.py) ──────── */
+.time-totals__heading { font-size:13px; letter-spacing:.06em; text-transform:uppercase; color:var(--bone-faded); margin:0 0 8px; }
+.time-totals__list { list-style:none; margin:0 0 18px; padding:0; display:flex; flex-direction:column; gap:8px; }
+.time-card {
+  background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
+  box-shadow:var(--shadow); padding:12px 16px;
+}
+.time-card__top   { display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
+.time-card__title { margin:0; font-size:15px; font-weight:500; }
+.time-card__hours { font-family:var(--font-mono); font-weight:700; font-size:16px; color:var(--gold); flex-shrink:0; }
+.time-card__meta  { margin:4px 0 0; font-size:12px; color:var(--bone-faded); }
+.review-label {
+  font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--bone-faded); margin:12px 0 4px;
+}
+.plan-card .review-label:first-of-type { margin-top:10px; }
+
+/* ── History ────────────────────────────────────────────────────────── */
+.history-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; }
+.history-row  { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px; font-size:13px; }
+.history-row:nth-child(odd) { background:var(--ash-soft); }
+.history-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+.history-row--done     .history-dot   { background:var(--gold); }
+.history-row--not_done .history-dot   { background:var(--ember); }
+.history-date   { flex:1; color:var(--bone); }
+.history-result { font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+.history-row--done     .history-result { color:var(--gold); }
+.history-row--not_done .history-result { color:var(--ember); }
+
+/* ── Task form ──────────────────────────────────────────────────────── */
+.back-link { display:inline-block; font-size:13px; color:var(--bone-faded); margin-bottom:18px; }
+.back-link:hover { color:var(--ember); }
+.task-form { background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
+  padding:24px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:18px; }
+.field { display:flex; flex-direction:column; gap:6px; border:none; padding:0; margin:0; }
+.field--inline { flex-direction:row; align-items:center; gap:10px; }
+.field__label { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--bone-faded); font-weight:600; }
+.field__hint  { font-size:11px; color:var(--bone-faded); margin-top:2px; }
+.field__hint--error { color:var(--danger); font-weight:600; }
+/* Explicaciones largas, plegadas por defecto -- mucho texto siempre
+   visible cansa de leer. El resumen es el único texto que se ve hasta
+   que se abre. */
+.hint-details { margin:8px 0 6px; }
+.hint-details summary { cursor:pointer; color:var(--ember); font-size:11px;
+  list-style:none; }
+.hint-details summary::-webkit-details-marker { display:none; }
+.hint-details summary::marker { display:none; content:""; }
+.hint-details[open] { margin-bottom:12px; }
+.hint-details[open] summary { margin-bottom:6px; }
+.hint-details .field__hint { margin-top:0; }
+.hint-details ul { margin:0; padding-left:16px; }
+.hint-details li { margin-bottom:3px; }
+.hint-details li:last-child { margin-bottom:0; }
+.field input[type="text"],
+.field input[type="date"],
+.field input[type="time"],
+.field input[type="number"],
+.field input[type="password"],
+.field input[type="url"],
+.field input[type="email"],
+.field textarea {
+  font-family:var(--font-b); font-size:15px; padding:10px 12px;
+  border:1px solid var(--line); border-radius:10px; background:var(--ash); color:var(--bone); }
+.field input:focus, .field textarea:focus { outline:none; border-color:var(--ember); background:var(--paper); }
+.field textarea { resize:vertical; }
+.field select {
+  font-family:var(--font-b); font-size:15px; padding:10px 12px;
+  border:1px solid var(--line); border-radius:10px; background:var(--ash); color:var(--bone);
+}
+.field select:focus { outline:none; border-color:var(--ember); background:var(--paper); }
+
+/* El navegador/WebView mete su propio fondo y color de texto al
+   autocompletar usuario/contraseña guardados — y si el sistema además
+   fuerza modo oscuro sobre eso, puede acabar en fondo y letra los dos
+   negros, ilegible. Se fuerza aquí a que respete el tema en vez de
+   dejarle poner el suyo. El truco del box-shadow enorme es necesario
+   porque background-color no se puede pisar directamente en Chrome
+   para inputs con autofill. */
+.field input:-webkit-autofill,
+.field input:-webkit-autofill:hover,
+.field input:-webkit-autofill:focus,
+.field input:-webkit-autofill:active {
+  -webkit-text-fill-color: var(--bone) !important;
+  caret-color: var(--bone);
+  -webkit-box-shadow: 0 0 0 1000px var(--ash) inset !important;
+  box-shadow: 0 0 0 1000px var(--ash) inset !important;
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+.field-row { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+
+.repeat-options { display:flex; flex-wrap:wrap; gap:8px; }
+.repeat-option  { display:flex; align-items:center; gap:6px; font-size:13px;
+  padding:7px 12px; border:1px solid var(--line); border-radius:999px; background:var(--ash); cursor:pointer; }
+.repeat-option input { accent-color:var(--ember); }
+.repeat-option:has(input:checked) { border-color:var(--ember); background:var(--ember-soft); }
+
+/* Numeración/reorden inline del selector de ejercicios (plan_ai_form.html):
+   el orden en el que se han ido marcando, visible y corregible sin tener
+   que desmarcar nada — ver el JS al final de esa plantilla. */
+.exercise-toggle__order { display:inline-flex; align-items:center; justify-content:center;
+  min-width:18px; height:18px; padding:0 4px; border-radius:999px;
+  background:var(--ember); color:var(--paper); font-size:11px; font-weight:700; }
+.exercise-toggle__move { display:inline-flex; gap:3px; }
+.exercise-toggle__move-btn { width:20px; height:20px; border-radius:6px; border:1px solid var(--line);
+  background:var(--paper); font-size:11px; line-height:1; padding:0; cursor:pointer; }
+.exercise-toggle__move-btn:hover { border-color:var(--ember); }
+
+.custom-days-field, .interval-field, .subcategory-field, .avoid-fields { display:none; }
+.interval-row  { display:flex; align-items:center; gap:8px; font-size:14px; }
+.interval-input{ width:60px; font-family:var(--font-b); font-size:15px; padding:8px 10px;
+  border:1px solid var(--line); border-radius:8px; background:var(--ash); color:var(--bone); text-align:center; }
+.interval-input:focus { outline:none; border-color:var(--ember); background:var(--paper); }
+.interval-unit { color:var(--bone-faded); font-weight:500; }
+
+.weekday-picker { display:flex; gap:6px; flex-wrap:wrap; }
+.weekday-chip   { display:flex; align-items:center; justify-content:center; width:42px; height:42px;
+  border-radius:50%; border:1.6px solid var(--line); background:var(--ash);
+  font-size:12px; font-weight:600; text-transform:uppercase; cursor:pointer; position:relative; }
+.weekday-chip input { position:absolute; opacity:0; inset:0; cursor:pointer; }
+.weekday-chip:has(input:checked) { background:var(--amber); border-color:var(--amber); color:var(--paper); }
+
+.task-form__actions { display:flex; justify-content:space-between; align-items:center; margin-top:8px; }
+.local-video-picker { display:flex; margin-top:2px; }
+.primary-btn { background:var(--ember); color:var(--paper); border:none;
+  border-radius:10px; padding:11px 20px; font-size:14px; font-weight:600;
+  transition: transform .15s ease, box-shadow .15s ease, background .15s ease; }
+.primary-btn:hover { background:#E05A18; transform:translateY(-2px);
+  box-shadow: 0 10px 22px -10px rgba(184,66,15,.6); }
+.ghost-btn { background:transparent; border:1px solid var(--line); border-radius:10px;
+  padding:10px 16px; font-size:13px; color:var(--bone-faded); display:inline-block; text-decoration:none;
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease, color .15s ease; }
+.ghost-btn:hover { border-color:var(--ember-deep); color:var(--ember); transform:translateY(-2px);
+  box-shadow: 0 10px 20px -12px rgba(184,66,15,.45); }
+.ghost-btn--danger:hover { border-color:var(--ember); color:var(--ember); background:var(--ember-soft); }
+.inline-delete { display:inline; }
+
+/* ── Sesión de entreno (cámara) ────────────────────────────────────────
+   Misma estructura y clases que la app móvil (workout__camera/stats/
+   actions/btn), pero en escritorio no hay que llenar toda la pantalla:
+   se centra con un ancho máximo cómodo para no verse gigante en un
+   monitor ancho. Los datos (reps/series/cronómetro/descanso) van en un
+   desplegable "Datos", igual que en el móvil -- nada flota encima del
+   vídeo. */
+.workout { display:flex; flex-direction:column; gap:16px; max-width:460px; margin:0 auto; }
+.workout__camera { position:relative; width:100%; aspect-ratio:3/4; max-height:62vh; background:var(--bone);
+  border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow); }
+.workout__video, .workout__canvas { position:absolute; inset:0; width:100%; height:100%;
+  object-fit:cover; transform:scaleX(-1); }
+.workout__canvas { transform:none; } /* el espejo ya se aplica dentro del propio canvas */
+.workout__status { text-align:center; font-size:15px; color:var(--bone-faded); min-height:22px; margin:0; }
+.workout__goal-banner {
+  text-align:center; font-family:var(--font-d); font-weight:600; font-size:17px;
+  color:var(--gold); background:var(--gold-soft); border-radius:10px;
+  padding:10px 16px; margin:8px 0 0; animation:goalPulse 1.6s ease-in-out 2;
+}
+@keyframes goalPulse {
+  0%, 100% { transform:scale(1); }
+  50% { transform:scale(1.03); }
+}
+.workout__debug { text-align:center; font-size:11px; font-family:monospace; color:var(--bone-faded); opacity:.65; margin:-8px 0 0; }
+.workout__stats { display:flex; flex-wrap:wrap; gap:12px; }
+.workout__stat { flex:1 1 calc(50% - 6px); min-width:100px; background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
+  padding:14px; display:flex; flex-direction:column; align-items:center; gap:2px; box-shadow:var(--shadow); }
+.workout__stat-value { font-family:var(--font-mono); font-size:28px; font-weight:700; line-height:1; }
+.workout__stat-label { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--bone-faded); }
+.workout__actions { display:flex; gap:10px; }
+.workout__btn { flex:1; padding:14px; border-radius:999px; border:1px solid var(--line);
+  font-weight:600; font-size:15px; transition: transform .15s ease, box-shadow .15s ease; cursor:pointer; }
+.workout__btn:hover:not(:disabled) { transform:translateY(-2px); box-shadow:0 10px 20px -12px rgba(184,66,15,.5); }
+.workout__btn--primary { background:linear-gradient(135deg, var(--ember) 0%, var(--ember-deep) 100%);
+  color:var(--ash); border-color:var(--ember); font-weight:700; }
+.workout__btn--primary:hover:not(:disabled) { background:linear-gradient(135deg, #FF7A35 0%, var(--ember) 100%); }
+.workout__btn--primary:disabled { opacity:.6; }
+.workout__btn--ghost { background:var(--paper); color:var(--bone); }
+.workout__btn--ghost:hover:not(:disabled) { border-color:var(--ember-deep); color:var(--ember); }
+.workout__btn--subtle { flex:0 0 auto; display:block; margin:6px auto 0; padding:8px 10px;
+  border:none; background:none; color:var(--bone-faded); font-weight:500; font-size:13px;
+  text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
+.workout__btn--subtle:hover:not(:disabled) { transform:none; box-shadow:none; color:var(--bone); }
+.workout__note { font-size:12px; color:var(--bone-faded); text-align:center; margin:0; }
+.workout__note--warn { color:var(--danger); }
+
+/* Datos (reps/series/cronómetro/descanso) en un desplegable, igual que
+   en el móvil: por defecto solo se ve la cámara + un botón "Datos"
+   discreto, en vez de la cuadrícula de números siempre a la vista. */
+.workout__stats-toggle summary { list-style:none; cursor:pointer; }
+.workout__stats-summary { display:flex; align-items:center; justify-content:space-between;
+  background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
+  padding:12px 16px; font-weight:600; font-size:14px; color:var(--bone); box-shadow:var(--shadow); }
+.workout__stats-summary::-webkit-details-marker { display:none; }
+.workout__stats-summary::after {
+  content:""; flex:none; width:8px; height:8px; margin-left:8px;
+  border-right:2px solid var(--bone-faded); border-bottom:2px solid var(--bone-faded);
+  transform:rotate(45deg); transition:transform .2s ease;
+}
+.workout__stats-toggle[open] .workout__stats-summary { border-radius:var(--radius) var(--radius) 0 0; }
+.workout__stats-toggle[open] .workout__stats-summary::after { transform:rotate(-135deg); }
+.workout__stats-toggle .workout__stats {
+  margin-top:-1px; border:1px solid var(--line); border-top:none;
+  border-radius:0 0 var(--radius) var(--radius); padding:14px; gap:10px; background:var(--ash-soft);
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────── */
+@media (max-width:480px) {
+  .topbar__title h1 { font-size:32px; }
+  .task-form { padding:18px; }
+  .field-row { grid-template-columns:1fr; }
+  .streak-row { flex-direction:column; }
+  .plan-card__icon { width:36px; height:36px; font-size:16px; }
+}
+
+/* ── Categories ─────────────────────────────────────────────────────── */
+:root {
+  --study:      #6FA3D6;
+  --study-soft: #1A2733;
+  --sport:      #FF6A1F;
+  --sport-soft: #3A2313;
+  --work:       #B49BC9;
+  --work-soft:  #2A2233;
+  --personal:   #D4B44A;
+  --personal-soft: #332C14;
+  --other:      #8A7B68;
+  --other-soft: #2A241C;
+}
+:root[data-theme="light"] {
+  --study:      #2E6DA4;
+  --study-soft: #D9E4EC;
+  --sport:      #E2540D;
+  --sport-soft: #F4C79A;
+  --work:       #7A5FA0;
+  --work-soft:  #E7DCE9;
+  --personal:   #96650D;
+  --personal-soft: #EBD49B;
+  --other:      #6B5D4C;
+  --other-soft: #E7DBC4;
+}
+
+.category-options { display:flex; flex-wrap:wrap; gap:8px; }
+.category-option { display:flex; align-items:center; gap:6px; padding:8px 14px;
+  border:1px solid var(--line); border-radius:999px; background:var(--paper);
+  font-size:13px; font-weight:500; cursor:pointer; transition:all .15s; }
+.category-option input { accent-color: var(--bone); }
+.category-option:has(input:checked) { color:var(--paper); }
+.category-option--study:has(input:checked)    { background:var(--study); border-color:var(--study); }
+.category-option--sport:has(input:checked)    { background:var(--sport); border-color:var(--sport); }
+.category-option--work:has(input:checked)     { background:var(--work); border-color:var(--work); }
+.category-option--personal:has(input:checked) { background:var(--personal); border-color:var(--personal); }
+.category-option--general:has(input:checked)  { background:var(--gold); border-color:var(--gold); }
+.category-option--other:has(input:checked)    { background:var(--other); border-color:var(--other); }
+.category-option--avoid:has(input:checked)    { background:var(--bone); border-color:var(--bone); }
+
+/* Dos filtros distintos (rango de fecha + categoría) uno debajo del
+   otro: cada uno con su etiqueta y su propio estilo de chip, para que
+   a simple vista se note que son dos cosas separadas y no un batiburrillo
+   de botones. */
+.filters { display:flex; flex-direction:column; gap:14px; margin:18px 0 6px; }
+.filter-group { display:flex; flex-direction:column; gap:6px; min-width:0; }
+.filter-group__label { font-size:11px; font-weight:600; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--bone-faded); }
+
+/* Selector Hoy/Semana/Mes/Todas: control segmentado (un único "raíl"
+   con las opciones dentro), para que se lea como un único selector de
+   una sola cosa a la vez — a diferencia de las categorías, que son
+   chips sueltos. */
+.range-filter { display:flex; gap:2px; background:var(--paper); border:1px solid var(--line);
+  border-radius:999px; padding:3px; width:fit-content; max-width:100%;
+  overflow-x:auto; scrollbar-width:none; }
+.range-filter::-webkit-scrollbar { display:none; }
+.range-chip { flex:0 0 auto; white-space:nowrap; padding:6px 13px; border-radius:999px;
+  font-size:12px; color:var(--bone-faded); transition:all .15s; }
+.range-chip:hover { color:var(--ember); }
+.range-chip--active { background:var(--bone); color:var(--paper); font-weight:600; }
+
+/* Chips de categoría: más compactos que antes y en una sola fila con
+   scroll horizontal si no caben — así nunca se parten en dos líneas
+   feas, sea cual sea el ancho de pantalla. */
+.category-filter { display:flex; flex-wrap:nowrap; gap:5px; margin:0; overflow-x:auto;
+  scrollbar-width:none; padding-bottom:2px; }
+.category-filter::-webkit-scrollbar { display:none; }
+.category-chip { flex:0 0 auto; white-space:nowrap; display:inline-flex; align-items:center; gap:5px; padding:5px 10px;
+  border:1px solid var(--line); border-radius:999px; background:var(--paper);
+  font-size:11px; color:var(--bone-faded); transition:all .15s; }
+.category-chip:hover { border-color:var(--ember); color:var(--ember); }
+.category-chip--active { background:var(--bone); color:var(--paper); border-color:var(--bone); }
+.category-chip__count { background:rgba(255,255,255,.10); padding:0 5px; border-radius:999px;
+  font-size:10px; font-weight:600; }
+.category-chip--active .category-chip__count { background:rgba(0,0,0,.14); }
+
+.meta-pill--category { font-weight:600; }
+.meta-pill--general  { background:var(--gold-soft);    color:var(--gold); }
+.meta-pill--study    { background:var(--study-soft);   color:var(--study); }
+.meta-pill--sport    { background:var(--sport-soft);   color:var(--sport); }
+.meta-pill--work     { background:var(--work-soft);    color:var(--work); }
+.meta-pill--personal { background:var(--personal-soft); color:var(--personal); }
+.meta-pill--other    { background:var(--other-soft);   color:var(--other); }
+.meta-pill--avoid    { background:var(--bone); color:var(--paper); }
+
+.meta-pill--capability { background:var(--ash-soft); color:var(--bone-faded);
+  font-style:italic; }
+
+.exercise-picker__hint { font-family:var(--font-d); font-size:19px; margin:4px 0 2px; }
+.exercise-picker { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }
+.exercise-picker li { display:flex; align-items:center; gap:8px; }
+.exercise-picker li .exercise-picker__item { flex:1; }
+.exercise-picker li .inline-delete { flex:none; }
+.exercise-picker__item { display:flex; align-items:center; justify-content:space-between; gap:12px;
+  background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
+  padding:16px 18px; box-shadow:var(--shadow); text-decoration:none; color:var(--bone);
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+.exercise-picker__item:hover { border-color:var(--ember-deep); transform:translateY(-3px);
+  box-shadow: 0 14px 28px -14px rgba(184,66,15,.55), var(--shadow); }
+.exercise-picker__name { font-weight:600; font-size:16px; }
+.exercise-picker__mode { font-size:12px; color:var(--bone-faded); text-transform:uppercase; letter-spacing:.04em; }
+.exercise-picker__empty { color:var(--bone-faded); font-size:14px; }
+
+.video-add-form { display:flex; flex-wrap:wrap; gap:8px; margin:4px 0 20px; }
+.video-add-form input[type="text"] { flex:1; min-width:140px; border:1px solid var(--line);
+  border-radius:10px; background:var(--paper); padding:10px 12px; font-size:14px; color:var(--bone); }
+.video-add-form button { flex:none; }
+
+.workout-btn { display:inline-flex; align-items:center; justify-content:center; width:40px; height:40px;
+  border-radius:999px; background:var(--sport-soft, var(--gold-soft)); color:var(--sport, var(--gold));
+  border:1px solid transparent; }
+.workout-btn:hover { border-color:currentColor; }
+
+/* ── Circuitos: selector, constructor y reproductor ────────────────── */
+
+.exercise-picker__hint--routines { margin-top:18px; }
+.exercise-picker__item--ghost { border-style:dashed; box-shadow:none; color:var(--bone-faded); }
+.exercise-picker__item--ghost:hover { color:var(--ember); }
+
+.exercise-icon { width:100%; height:100%; color:var(--bone); }
+
+.routine-builder__picker { padding:0; border:none; }
+.routine-builder__available, .routine-builder__selected { list-style:none; margin:0; padding:0;
+  display:flex; flex-direction:column; gap:8px; }
+.routine-builder__available-item { display:flex; align-items:center; gap:10px;
+  background:var(--paper); border:1px solid var(--line); border-radius:10px; padding:8px 10px; }
+.routine-builder__icon { width:40px; height:30px; flex:none; }
+.routine-builder__available-name { flex:1; font-size:14px; font-weight:600; }
+.routine-builder__selected-item { display:flex; align-items:center; justify-content:space-between;
+  background:var(--gold-soft); border-radius:10px; padding:8px 12px; }
+.routine-builder__selected-name { font-size:14px; font-weight:600; }
+.routine-builder__selected-actions { display:flex; gap:4px; }
+.routine-builder__selected-actions button { width:28px; height:28px; border-radius:8px; border:1px solid var(--line);
+  background:var(--paper); font-size:13px; }
+.routine-builder__empty { color:var(--bone-faded); font-size:13px; }
+
+.circuit { display:flex; flex-direction:column; align-items:center; gap:16px; text-align:center;
+  padding:8px 0 24px; }
+.circuit__mode-select { display:flex; flex-direction:column; align-items:center; gap:14px; padding:32px 0; }
+.circuit__mode-hint { font-family:var(--font-d); font-size:19px; margin:0; }
+.circuit__mode-buttons { display:flex; gap:12px; }
+
+.circuit__player { display:flex; flex-direction:column; align-items:center; gap:6px; width:100%; }
+.circuit__progress { font-size:12px; color:var(--bone-faded); text-transform:uppercase; letter-spacing:.06em; margin:0; }
+.circuit__icon { width:180px; height:135px; margin:6px 0; }
+.circuit__video { width:100%; max-width:360px; aspect-ratio:16/9; border-radius:var(--radius); background:#000; margin:6px 0; }
+.circuit__exercise-name { font-family:var(--font-d); font-size:26px; margin:0; }
+.circuit__phase { font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:.06em;
+  margin:0; padding:3px 12px; border-radius:999px; }
+.circuit__phase--work { background:var(--ember-soft); color:var(--ember); }
+.circuit__phase--rest { background:var(--gold-soft); color:var(--gold); }
+.circuit__timer { font-family:var(--font-mono); font-size:64px; font-weight:600; line-height:1; margin:6px 0; }
+.circuit__next { font-size:13px; color:var(--bone-faded); min-height:18px; margin:0; }
+.circuit__side-badge { font-size:14px; font-weight:500; color:var(--bone-faded); }
+.circuit__side-hint { font-size:13px; color:var(--gold); background:var(--gold-soft); border-radius:8px; padding:6px 12px; margin:0; text-align:center; }
+.circuit__controls { display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; justify-content:center; }
+
+/* ── Enfoque: temporizador de leer/estudiar/estirar ───────────────────── */
+.focus-timer {
+  text-align:center; background:var(--paper); border:1px solid var(--line);
+  border-radius:var(--radius); box-shadow:var(--shadow); padding:36px 20px;
+}
+.focus-timer__display { font-family:var(--font-mono); font-size:56px; font-weight:700; margin:0 0 6px; }
+.focus-timer__target  { font-size:13px; color:var(--bone-faded); margin:0 0 14px; }
+.focus-timer .stats-bar { max-width:280px; margin:0 auto 14px; }
+.focus-timer__actions { display:flex; gap:10px; justify-content:center; margin-top:20px; }
+.focus-timer #focus-hint { margin-top:14px; }
+.focus-timer__alt { display:block; width:100%; margin-top:14px; }
+
+/* ── Vídeo embebido de YouTube en una tarea ────────────────────────── */
+.video-embed { text-align:center; }
+.video-embed__player { width:100%; aspect-ratio:16/9; border-radius:var(--radius);
+  background:#000; box-shadow:var(--shadow); }
+.video-embed .field__hint { margin-top:12px; }
+
+.circuit__done { display:flex; flex-direction:column; align-items:center; gap:12px; padding:32px 0; }
+.circuit__done-title { font-family:var(--font-d); font-size:24px; margin:0; }
+
+.circuit__icon--next { opacity:.5; }   /* el que viene, durante el descanso */
+
+/* Vista previa del circuito antes de empezar, y resumen al terminar. */
+.run-preview, .run-summary {
+  list-style:none; margin:12px 0; padding:0; width:100%;
+  display:flex; flex-direction:column; gap:6px;
+}
+.run-preview li, .run-summary li {
+  display:flex; justify-content:space-between; gap:12px;
+  font-size:13px; padding:7px 12px;
+  background:var(--paper); border:1px solid var(--line); border-radius:8px;
+}
+.run-preview li span:last-child, .run-summary li span:last-child {
+  color:var(--bone-faded); white-space:nowrap;
+}
+
+/* Objetivo del plan mientras entrenas, y logro al terminar. */
+.run-target { font-size:14px; color:var(--bone-faded); margin:0 0 8px; }
+.run-target strong { color:var(--ember); }
+.run-plan {
+  display:block; font-size:11px; color:var(--ember);
+  text-transform:uppercase; letter-spacing:.04em; margin-top:2px;
+}
+.run-pct {
+  display:inline-block; margin-left:6px; padding:1px 7px;
+  border-radius:999px; font-size:11px; font-weight:600;
+}
+.run-pct--full { background:var(--gold-soft); color:var(--gold); }
+.run-pct--partial { background:var(--amber-soft); color:var(--amber); }
+
+
+/* ── Ilustraciones de ejercicio (Everkinetic) ──────────────────────── */
+/* Las dos posturas se apilan y se alternan: enseñar el movimiento como
+   animación se lee mejor que dos viñetas, y ocupa la mitad de ancho. */
+.ex-fig {
+  position: relative; width: 100%; max-width: 260px;
+  aspect-ratio: 16 / 9; margin: 6px auto; color: var(--bone);
+}
+.ex-fig img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%; object-fit: contain;
+}
+/* Aguanta en cada postura y cambia rápido, como demostrando el gesto.
+   El cruce es corto a propósito: un fundido lento se ve borroso. */
+@keyframes ex-a { 0%, 44% { opacity: 1 } 50%, 94% { opacity: 0 } 100% { opacity: 1 } }
+@keyframes ex-b { 0%, 44% { opacity: 0 } 50%, 94% { opacity: 1 } 100% { opacity: 0 } }
+.ex-fig img:nth-of-type(1) { animation: ex-a 2.6s ease-in-out infinite; }
+.ex-fig img:nth-of-type(2) { animation: ex-b 2.6s ease-in-out infinite; }
+
+/* Isométricos (planchas): no hay dos posturas que alternar, pero una
+   imagen totalmente quieta deja la pantalla muerta. Se les da un latido
+   muy leve, como el temblor de aguantar la postura: transmite esfuerzo
+   sin inventarse un movimiento que el ejercicio no tiene. */
+@keyframes ex-hold {
+  0%, 100% { transform: scale(1) translateY(0); }
+  50%      { transform: scale(1.018) translateY(-1px); }
+}
+.ex-fig--static img:nth-of-type(1) {
+  animation: ex-hold 3.2s ease-in-out infinite;
+  opacity: 1;
+}
+.ex-fig--static img:nth-of-type(2) { animation: none; opacity: 0; }
+.ex-fig__hold {
+  position: absolute; right: 4px; bottom: 2px;
+  font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--bone-faded); background: var(--ash-soft);
+  padding: 1px 7px; border-radius: 999px;
+}
+
+.ex-fig--compact { max-width: 92px; margin: 0; }
+.ex-fig--compact .ex-fig__hold { display: none; }
+.ex-fig--empty {
+  display: flex; align-items: center; justify-content: center;
+  aspect-ratio: 16 / 9; font-size: 12px; color: var(--bone-faded); font-style: italic;
+}
+
+/* Quien prefiera no ver movimiento (ajuste del sistema). */
+@media (prefers-reduced-motion: reduce) {
+  .ex-fig img { animation: none; }
+  .ex-fig img:nth-of-type(2) { opacity: 0; }
+}
+
+/* ── Planes de progresión ───────────────────────────────────────────── */
+.plan-notes { font-size:13px; color:var(--bone-faded); margin:0 0 14px; }
+
+.plan-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }
+.plan-card { background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
+  box-shadow:var(--shadow); }
+.plan-card a { display:block; padding:14px 16px; text-decoration:none; color:var(--bone); }
+.plan-card--off { opacity:.6; }
+.plan-card__name { font-family:var(--font-d); font-size:17px; margin:0 0 2px; }
+.plan-card__meta { font-size:11px; color:var(--bone-faded); text-transform:uppercase;
+  letter-spacing:.05em; margin:0 0 8px; }
+.plan-card__head { font-size:13px; margin:0 0 8px; }
+
+/* ── Barra de acciones de Planes (plan_list.html) ──────────────────────
+   Antes eran dos .task-form__actions apiladas a todo lo ancho -- con eso
+   la acción principal (crear plan) pesaba visualmente lo mismo que la
+   secundaria (retos). Aquí los tres botones van en una sola fila, todos
+   con el mismo trato (revisión semanal ya tiene su pestaña en el nav de
+   arriba, así que no hacía falta un enlace aparte aquí). */
+.plan-toolbar { display:flex; align-items:center; gap:10px 16px; flex-wrap:wrap; margin-bottom:24px; }
+
+/* ── Tarjeta de plan con icono (plan_list.html) ────────────────────────
+   Sigue siendo la misma .plan-card de siempre -- weekly_review.html la
+   usa tal cual, sin ninguna de las clases de aquí abajo, así que nada
+   de esto le afecta. Aquí, dentro del <a>, el contenido se organiza en
+   icono + cuerpo (en vez de un bloque de texto plano) para que se lea
+   de un vistazo qué tipo de plan es cada tarjeta y cómo va, sin tener
+   que entrar. */
+.plan-card__row  { display:flex; align-items:flex-start; gap:14px; }
+.plan-card__icon { flex:none; width:42px; height:42px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center; font-size:18px;
+  background:var(--ember-soft); border:1.6px solid var(--line); }
+.plan-card__icon--reading { background:var(--gold-soft); }
+.plan-card__body { flex:1; min-width:0; }
+.plan-card__pills { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:0 0 8px; }
+.plan-card__pill { font-size:11px; padding:2px 8px; border-radius:999px; font-weight:500;
+  background:var(--ash-soft); color:var(--bone-faded); white-space:nowrap; }
+.plan-card__pill--late   { background:var(--danger-soft); color:var(--danger); font-weight:600; }
+.plan-card__pill--paused { font-style:italic; }
+.plan-card__progress { display:flex; align-items:center; gap:8px; }
+.plan-card__progress .plan-bar { flex:1; margin:0; }
+.plan-card__pct { flex:none; font-family:var(--font-mono); font-size:11px; color:var(--bone-faded); min-width:32px; text-align:right; }
+
+/* La medida principal: lo que define si el plan se ha conseguido. */
+.plan-head { background:var(--ash-soft); border-radius:var(--radius);
+  padding:18px 18px 14px; margin-bottom:20px; }
+.plan-head__eyebrow { font-size:10px; text-transform:uppercase; letter-spacing:.08em;
+  color:var(--bone-faded); margin:0; }
+.plan-head__name { font-family:var(--font-d); font-size:22px; margin:2px 0 12px; }
+.plan-head__now { display:flex; flex-direction:column; gap:2px; margin-bottom:12px; }
+.plan-head__label { font-size:11px; color:var(--bone-faded); text-transform:uppercase;
+  letter-spacing:.05em; }
+.plan-head__target { font-family:var(--font-mono); font-size:26px; }
+.plan-head__target em { font-style:normal; font-size:18px; color:var(--ember); }
+.plan-head__meta { font-size:12px; color:var(--bone-faded); margin:6px 0 0; }
+
+/* ── Cierre de ciclo: la pantalla de "lo has conseguido" ──────────────── */
+.celebration { text-align:center; padding:28px 16px 8px; }
+.celebration__emoji { font-size:44px; margin:0 0 8px; line-height:1; }
+.celebration__title { font-family:var(--font-d); font-size:24px; margin:0 0 6px; }
+.celebration__text { font-size:14px; color:var(--bone-faded); margin:0; }
+.celebration__reward { margin:14px auto 0; max-width:320px; font-size:14px;
+  background:var(--gold-soft); color:var(--gold); border-radius:var(--radius); padding:10px 14px; }
+
+.plan-bar { height:8px; background:var(--paper); border-radius:999px; overflow:hidden;
+  border:1px solid var(--line); }
+.plan-bar__fill { height:100%; background:var(--gold); border-radius:999px; }
+
+.plan-deload { font-size:12px; background:var(--amber-soft); color:var(--amber);
+  padding:8px 12px; border-radius:10px; margin:0 0 12px; }
+
+.plan-item { border:1px solid var(--line); border-radius:var(--radius);
+  background:var(--paper); padding:14px 16px; margin-bottom:12px; }
+.plan-item__head { display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
+.plan-item__head h3 { font-family:var(--font-d); font-size:16px; margin:0; }
+.plan-item__prog { font-size:10px; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--bone-faded); }
+.plan-item__now { font-size:14px; margin:6px 0 10px; }
+.plan-item__left { font-size:11px; color:var(--bone-faded); margin-left:8px; }
+.plan-item__done { font-size:11px; color:var(--gold); font-weight:600; margin-left:8px; }
+.plan-item__actions { display:flex; gap:8px; margin-top:10px; }
+
+.quiz-review-options { list-style:none; margin:6px 0 0; padding:0; display:flex;
+  flex-direction:column; gap:4px; }
+.quiz-review-options li { font-size:13px; padding:6px 10px; border-radius:8px;
+  border:1px solid var(--line); }
+.quiz-review-options__correct { background:var(--gold-soft); border-color:var(--gold);
+  color:var(--gold); font-weight:600; }
+.quiz-review-options__wrong { background:var(--danger-soft); border-color:var(--danger);
+  color:var(--danger); }
+
+.plan-details { margin-top:8px; }
+.plan-details > summary { cursor:pointer; font-size:12px; color:var(--bone-faded);
+  padding:4px 0; list-style:none; }
+.plan-details > summary::marker { content:""; }
+.plan-details > summary::-webkit-details-marker { display:none; }
+.plan-details > summary::before { content:"▸ "; }
+.plan-details[open] > summary::before { content:"▾ "; }
+
+.plan-table { width:100%; border-collapse:collapse; font-size:12px; margin-top:6px; }
+.plan-table th { text-align:left; font-weight:600; color:var(--bone-faded);
+  text-transform:uppercase; font-size:10px; letter-spacing:.05em;
+  padding:4px 6px; border-bottom:1px solid var(--line); }
+.plan-table td { padding:5px 6px; border-bottom:1px solid var(--ash-soft); }
+.plan-row--here { background:var(--gold-soft); font-weight:600; }
+.plan-here { font-size:10px; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--gold); margin-left:6px; }
+
+.plan-pct { display:inline-block; padding:1px 7px; border-radius:999px;
+  font-size:11px; font-weight:600; }
+.plan-pct--full { background:var(--gold-soft); color:var(--gold); }
+.plan-pct--partial { background:var(--amber-soft); color:var(--amber); }
+
+.header-links { display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+
+/* ── Cámara grande + pantalla completa (camera-fullscreen.js) ──────────
+   En escritorio la cámara ya no se queda en un marco vertical de 460px que
+   recortaba el vídeo 16:9 de la webcam: la página se ensancha cuando hay
+   cámara y esta usa 16:9 (el vídeo se ve entero, sin recortes), con altura
+   máxima del 78% de la ventana. Resto de controles siguen en columna
+   estrecha. El video y el canvas comparten tamaño y object-fit, así que
+   el dibujo de la pose sigue alineado. */
+.cam-fs-btn {
+  position:absolute; top:10px; right:10px; z-index:5;
+  width:40px; height:40px; padding:0; border:none; border-radius:999px;
+  display:flex; align-items:center; justify-content:center; gap:6px;
+  background:rgba(0,0,0,.55); color:#fff; cursor:pointer;
+  -webkit-tap-highlight-color:transparent; transition:background .15s ease;
+}
+.cam-fs-btn:hover { background:rgba(0,0,0,.8); }
+.cam-fs-btn--exit { display:none; }
+
+@media (min-width:760px) {
+  .page:has(.workout__camera) { max-width:1040px; }
+  .workout:has(.workout__camera) { max-width:none; }
+  .workout:has(.workout__camera) > :not(.workout__camera) {
+    width:100%; max-width:460px; margin-left:auto; margin-right:auto;
+  }
+  .workout__camera {
+    aspect-ratio:16/9; max-height:none;
+    width:min(100%, calc(78vh * 16 / 9)); margin-left:auto; margin-right:auto;
+  }
+}
+
+/* Pantalla completa: Fullscreen API nativa (:fullscreen) o, si no existe,
+   overlay fijo sobre toda la ventana. */
+.workout__camera.workout__camera--full,
+.workout__camera:fullscreen {
+  position:fixed; inset:0; z-index:9999;
+  width:100%; height:100%; max-width:none; max-height:none; aspect-ratio:auto;
+  margin:0; border-radius:0; box-shadow:none; background:#000;
+}
+.workout__camera--full .cam-fs-btn--enter { display:none; }
+.workout__camera--full .cam-fs-btn--exit {
+  display:flex; width:auto; padding:0 16px 0 12px; font-size:14px; font-weight:600;
+}
+.workout__camera--full .cam-fs-btn {
+  top:max(12px, env(safe-area-inset-top)); right:max(12px, env(safe-area-inset-right));
+}
+/* Pantalla apaisada: se ve el encuadre entero (sin recortar al cuerpo);
+   en vertical (móvil) se llena la pantalla. */
+@media (orientation:landscape) {
+  .workout__camera--full .workout__video,
+  .workout__camera--full .workout__canvas { object-fit:contain; }
+}
+body.cam-fullscreen { overflow:hidden; }
+/* Un transform/animation en un ancestro rompe position:fixed. */
+body.cam-fullscreen .page { animation:none; transform:none; }
+
+/* Detalle de estadística: toggle Lista / Gráfica y gráfica por día (stats_detail.html) */
+.history-head { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.view-toggle { display:inline-flex; border:1px solid var(--ember-soft); border-radius:999px; overflow:hidden; margin:4px 0 12px; }
+.view-toggle--small .view-toggle__btn { padding:5px 12px; font-size:.78rem; }
+.view-toggle__btn { background:transparent; color:inherit; border:0; padding:8px 16px; font:inherit; font-size:.85rem; cursor:pointer; }
+.view-toggle__btn.is-active { background:var(--gold); color:#1a1a1a; font-weight:600; }
+#hist-chart[hidden], .history-list[hidden] { display:none; }
+.day-chart-wrap { position:relative; }
+.day-chart { overflow-x:auto; padding-bottom:4px; }
+.day-chart__svg { display:block; max-width:none; }
+.day-chart__grid { stroke:currentColor; stroke-opacity:.15; stroke-dasharray:3 4; }
+.day-chart__axis { stroke:currentColor; stroke-opacity:.5; }
+.day-chart__tick { fill:currentColor; fill-opacity:.7; font-size:11px; }
+.day-chart__line { fill:none; stroke:var(--gold); stroke-width:2.5; stroke-linejoin:round; stroke-linecap:round; }
+.day-chart__dot { fill:var(--gold); stroke:var(--ash); stroke-width:1.5; }
+.day-chart__dot.is-zero { fill:var(--ember); }
+.day-chart__bar { fill:var(--gold); }
+.day-chart__bar.is-partial { fill:var(--amber); }
+.day-chart__bar.is-zero { fill:var(--ember); }
+.day-chart__bar.is-over { fill:var(--gold); stroke:var(--amber); stroke-width:1.5; }
+.day-chart__goal { stroke:var(--amber); stroke-opacity:.8; stroke-dasharray:6 4; }
+.day-chart__note { font-size:.75rem; opacity:.6; margin:6px 0 0; }
+.day-chart__hit { fill:transparent; cursor:crosshair; outline:none; }
+.day-chart__guide { stroke:var(--amber); stroke-opacity:.45; stroke-dasharray:3 3; pointer-events:none; }
+.day-chart__dot { transition:r .12s ease; }
+.day-chart__dot.is-hot { r:7; stroke:var(--amber); stroke-width:2.5; }
+.day-chart__bar.is-hot { filter:brightness(1.2); }
+
+/* Tooltip de la gráfica: instantáneo, sin el retardo del title nativo */
+.chart-tip { position:absolute; z-index:5; transform:translateX(-50%); min-width:150px; max-width:260px; padding:10px 12px;
+    background:var(--ash-soft); color:var(--bone); border:1px solid var(--ember-deep); border-radius:10px;
+    box-shadow:0 8px 22px rgba(0,0,0,.45); pointer-events:none; font-size:.8rem; line-height:1.35; }
+.chart-tip[hidden] { display:none; }
+.chart-tip__date { font-size:.72rem; color:var(--bone-faded); margin-bottom:2px; }
+.chart-tip__pct { font-family:var(--font-mono); font-size:1.7rem; font-weight:700; color:var(--gold); line-height:1.1; }
+.chart-tip__pct.is-zero { color:var(--danger); }
+.chart-tip__pct.is-over { color:var(--amber); }
+.chart-tip__status { font-size:.75rem; opacity:.85; margin-bottom:2px; }
+.chart-tip__line { font-size:.75rem; opacity:.8; }
+.chart-tip__list { list-style:none; margin:8px 0 0; padding:8px 0 0; border-top:1px solid var(--line); display:flex; flex-direction:column; gap:5px; }
+.chart-tip__list li { display:grid; grid-template-columns:1fr auto; column-gap:10px; align-items:baseline; }
+.chart-tip__ex { font-weight:600; }
+.chart-tip__ex-pct { font-family:var(--font-mono); font-weight:700; color:var(--gold); }
+.chart-tip__ex-pct.is-short { color:var(--amber); }
+.chart-tip__ex-detail { grid-column:1 / -1; font-size:.7rem; opacity:.65; }
+
+/* Gráfica de progreso (planes al fallo, con y sin peso) — ver _failure_chart.html */
+.fchart { margin: 14px 0 18px; }
+.fchart__title { font-family: var(--font-d); letter-spacing: .04em; font-size: 18px; margin: 0 0 6px; }
+.fchart__svg { width: 100%; height: auto; display: block; overflow: visible; }
+.fchart__zone { fill: var(--gold); opacity: .06; }
+.fchart__grid { stroke: var(--line); stroke-width: 1; }
+.fchart__ref { stroke: var(--gold); stroke-width: 1.2; stroke-dasharray: 4 4; opacity: .8; }
+.fchart__tick { fill: var(--bone-faded); font-family: var(--font-mono); font-size: 11px; }
+.fchart__tick--base { fill: var(--gold); font-weight: 700; }
+.fchart__g { transition: opacity .15s; }
+.fchart__g.is-dim, .fchart__item.is-dim { opacity: .18; }
+.fchart__line { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; opacity: .9; }
+.fchart__line--total { stroke-width: 3.4; opacity: 1; }
+.fchart__dot { fill: currentColor; stroke: var(--ash); stroke-width: 1.5; }
+.fchart__dot--last { stroke: currentColor; stroke-width: 2; fill: var(--ash); }
+.fchart__up { fill: currentColor; stroke: var(--ash); stroke-width: 1.5; stroke-linejoin: round; }
+.fchart__hit { fill: transparent; stroke: none; cursor: pointer; outline: none; }
+.fchart__hit.is-on { stroke: var(--bone); stroke-width: 1.5; fill: rgba(239,227,210,.12); }
+.fchart__hit:focus-visible { stroke: var(--bone); stroke-width: 1.5; }
+.fchart__tip { min-height: 2.6em; margin: 6px 0 8px; padding: 7px 10px; border-radius: 10px; background: var(--paper);
+               border: 1px solid var(--line); font-family: var(--font-mono); font-size: 12px; line-height: 1.4; color: var(--bone); }
+.fchart__legend { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 8px; padding: 0; margin: 0 0 6px; font-size: 13px; }
+.fchart__item { display: inline-flex; align-items: baseline; gap: 6px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px;
+                background: var(--paper); cursor: pointer; transition: opacity .15s; }
+.fchart__item:focus-visible { outline: 2px solid var(--bone); outline-offset: 1px; }
+.fchart__name { color: var(--bone); }
+.fchart__delta { font-family: var(--font-mono); font-weight: 700; }
+.fchart__delta--up { color: var(--gold); }
+.fchart__delta--down { color: var(--danger); }
+.fchart__delta--flat { color: var(--bone-faded); }
+.fchart__kg { font-family: var(--font-mono); font-size: 11px; color: var(--bone-faded); }
+.fchart__swatch { display: inline-block; width: 12px; height: 3px; border-radius: 2px; align-self: center; }
+.fchart__swatch--total { height: 5px; }
+/* ========================================================================
+   Mini nav (Pendientes de hoy / Todas las tareas / Estadísticas)
+   Reutiliza los tokens de styles.css (--coral, --ink, --line, etc.)
+   ======================================================================== */
+.mini-nav {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 22px;
+    flex-wrap: wrap;
+}
+
+.mini-nav__link {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--white-paper);
+    color: var(--ink-faded);
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+}
+
+.mini-nav__link:hover {
+    border-color: var(--coral);
+    color: var(--coral);
+    background: var(--coral-soft);
+}
+
+.mini-nav__link--active {
+    background: var(--coral);
+    border-color: var(--coral);
+    color: var(--white-paper);
+}
+
+/* ========================================================================
+   Pendientes de puntuar (tareas atrasadas que nunca se marcaron)
+   ======================================================================== */
+.task-section--to-score .task-section__title {
+    color: var(--coral);
+    border-bottom-color: var(--coral-soft);
+}
+
+.task-section--to-score .task-section__count {
+    background: var(--coral-soft);
+    color: #95402A;
+}
+
+.section-hint {
+    font-size: 12px;
+    color: var(--ink-faded);
+    margin: -6px 0 12px;
+    font-style: italic;
+}
+
+.task-card--to-score {
+    border-left: 3px solid var(--coral);
+}
+
+.meta-pill--overdue {
+    background: var(--coral);
+    color: var(--white-paper);
+    opacity: 0.9;
+}
+
+/* ========================================================================
+   Hechas hoy: sección desplegable (JS hace toggle)
+   ======================================================================== */
+.toggle-done-btn {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    background: transparent;
+    border: none;
+    padding: 0 0 12px;
+    margin: 0 0 12px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--line);
+    font-family: inherit;
+}
+
+.toggle-done-btn:hover .task-section__title {
+    color: var(--coral);
+}
+
+.toggle-done-btn .task-section__title {
+    border-bottom: none;
+    margin: 0;
+    padding: 0;
+}
+
+.toggle-done-icon {
+    color: var(--ink-faded);
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+}
+
+.toggle-done-btn[aria-expanded="true"] .toggle-done-icon {
+    transform: rotate(180deg);
+}
+
+.task-list--collapsed {
+    display: none;
+}
+
+/* ========================================================================
+   Vista "Todas las tareas"
+   ======================================================================== */
+.task-card--future {
+    opacity: 0.92;
+}</style></head>
+<body>
+    <nav class="site-nav">
+        <div class="site-nav__inner">
+            <a href="/tareas/" class="site-nav__brand">STRIVE</a>
+            <div class="site-nav__links">
+                <a href="/tareas/" class="">Tareas</a>
+                <a href="/tareas/planes/" class="is-active">Planes</a>
+                <a href="/tareas/revision/" class="">Revisión</a>
+                <a href="/tareas/estadisticas/" class="">Estadísticas</a>
+                <a href="/tareas/ajustes/" class="">Ajustes</a>
+                <button type="button" class="theme-toggle" id="theme-toggle" title="Cambiar a modo claro/oscuro" aria-label="Cambiar de tema">🌙</button>
+            </div>
+        </div>
+    </nav>
+    <div class="page">
+        
+        
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">
+            
+            plan · semana 1 de 12
+            
+        </span>
+        <h1>Fuerza superior</h1>
+    </div>
+    <a href="/tareas/planes/" class="stats-link">← Planes</a>
+</header>
+
+
+
+
+
+
+
+
+
+
+
+
+<section class="fchart" data-fchart>
+    <h3 class="fchart__title">Progreso de repeticiones y peso</h3>
+    
+    <svg class="fchart__svg" viewBox="0 0 520 250" role="img"
+         aria-label="Progreso por sesión, en % de la base de cada ejercicio">
+        <rect class="fchart__zone" x="42" y="12" width="466" height="150.0"/>
+        
+        <line class="fchart__grid" x1="42" x2="508" y1="222.0" y2="222.0"/>
+        <text class="fchart__tick" x="36" y="222.0" text-anchor="end" dominant-baseline="middle">80%</text>
+        
+        <line class="fchart__grid" x1="42" x2="508" y1="162.0" y2="162.0"/>
+        <text class="fchart__tick fchart__tick--base" x="36" y="162.0" text-anchor="end" dominant-baseline="middle">100%</text>
+        
+        <line class="fchart__grid" x1="42" x2="508" y1="102.0" y2="102.0"/>
+        <text class="fchart__tick" x="36" y="102.0" text-anchor="end" dominant-baseline="middle">120%</text>
+        
+        <line class="fchart__grid" x1="42" x2="508" y1="42.0" y2="42.0"/>
+        <text class="fchart__tick" x="36" y="42.0" text-anchor="end" dominant-baseline="middle">140%</text>
+        
+        <line class="fchart__ref" x1="42" x2="508" y1="162.0" y2="162.0"/>
+        
+        <text class="fchart__tick" x="42.0" y="240" text-anchor="middle">08/09</text>
+        
+        <text class="fchart__tick" x="145.6" y="240" text-anchor="middle">14/09</text>
+        
+        <text class="fchart__tick" x="249.1" y="240" text-anchor="middle">20/09</text>
+        
+        <text class="fchart__tick" x="352.7" y="240" text-anchor="middle">26/09</text>
+        
+        <text class="fchart__tick" x="456.2" y="240" text-anchor="middle">02/10</text>
+        
+        
+        
+        
+        <g class="fchart__g" data-line="1" style="color: var(--ember)">
+            <polyline class="fchart__line" points="42.0,165.9 93.8,158.1 145.6,150.3 197.3,145.3 249.1,137.0 300.9,128.7 352.7,135.1 404.4,126.4 456.2,117.8 508.0,124.8"/>
+            
+            
+            <circle class="fchart__dot" cx="42.0" cy="165.9" r="3"/>
+            
+            <circle class="fchart__hit" cx="42.0" cy="165.9" r="13" data-tip="Dominadas con peso · 08/09 — 8-7-6 (21 reps) · 99%" tabindex="0"><title>Dominadas con peso · 08/09 — 8-7-6 (21 reps) · 99%</title></circle>
+            
+            
+            <circle class="fchart__dot" cx="93.8" cy="158.1" r="3"/>
+            
+            <circle class="fchart__hit" cx="93.8" cy="158.1" r="13" data-tip="Dominadas con peso · 11/09 — 9-8-6 (23 reps) · 101%" tabindex="0"><title>Dominadas con peso · 11/09 — 9-8-6 (23 reps) · 101%</title></circle>
+            
+            
+            <circle class="fchart__dot" cx="145.6" cy="150.3" r="3"/>
+            
+            <circle class="fchart__hit" cx="145.6" cy="150.3" r="13" data-tip="Dominadas con peso · 14/09 — 10-8-7 (25 reps) · 104%" tabindex="0"><title>Dominadas con peso · 14/09 — 10-8-7 (25 reps) · 104%</title></circle>
+            
+            
+            <path class="fchart__up" d="M197.3 139.3 l5.5 6 l-5.5 6 l-5.5 -6 z"/>
+            
+            <circle class="fchart__hit" cx="197.3" cy="145.3" r="13" data-tip="Dominadas con peso · 17/09 — 8-6-5 (19 reps) · +5 kg · 106% · subiste el peso" tabindex="0"><title>Dominadas con peso · 17/09 — 8-6-5 (19 reps) · +5 kg · 106% · subiste el peso</title></circle>
+            
+            
+            <circle class="fchart__dot" cx="249.1" cy="137.0" r="3"/>
+            
+            <circle class="fchart__hit" cx="249.1" cy="137.0" r="13" data-tip="Dominadas con peso · 20/09 — 9-7-6 (22 reps) · +5 kg · 108%" tabindex="0"><title>Dominadas con peso · 20/09 — 9-7-6 (22 reps) · +5 kg · 108%</title></circle>
+            
+            
+            <circle class="fchart__dot" cx="300.9" cy="128.7" r="3"/>
+            
+            <circle class="fchart__hit" cx="300.9" cy="128.7" r="13" data-tip="Dominadas con peso · 23/09 — 10-8-6 (24 reps) · +5 kg · 111%" tabindex="0"><title>Dominadas con peso · 23/09 — 10-8-6 (24 reps) · +5 kg · 111%</title></circle>
+            
+            
+            <path class="fchart__up" d="M352.7 129.1 l5.5 6 l-5.5 6 l-5.5 -6 z"/>
+            
+            <circle class="fchart__hit" cx="352.7" cy="135.1" r="13" data-tip="Dominadas con peso · 26/09 — 8-7-5 (20 reps) · +7.5 kg · 109% · subiste el peso" tabindex="0"><title>Dominadas con peso · 26/09 — 8-7-5 (20 reps) · +7.5 kg · 109% · subiste el peso</title></circle>
+            
+            
+            <circle class="fchart__dot" cx="404.4" cy="126.4" r="3"/>
+            
+            <circle class="fchart__hit" cx="404.4" cy="126.4" r="13" data-tip="Dominadas con peso · 29/09 — 9-7-6 (22 reps) · +7.5 kg · 112%" tabindex="0"><title>Dominadas con peso · 29/09 — 9-7-6 (22 reps) · +7.5 kg · 112%</title></circle>
+            
+            
+            <circle class="fchart__dot" cx="456.2" cy="117.8" r="3"/>
+            
+            <circle class="fchart__hit" cx="456.2" cy="117.8" r="13" data-tip="Dominadas con peso · 02/10 — 10-8-7 (25 reps) · +7.5 kg · 115%" tabindex="0"><title>Dominadas con peso · 02/10 — 10-8-7 (25 reps) · +7.5 kg · 115%</title></circle>
+            
+            
+            <path class="fchart__up" d="M508.0 118.8 l5.5 6 l-5.5 6 l-5.5 -6 z"/>
+            
+            <circle class="fchart__hit" cx="508.0" cy="124.8" r="13" data-tip="Dominadas con peso · 05/10 — 8-6-5 (19 reps) · +10 kg · 112% · subiste el peso" tabindex="0"><title>Dominadas con peso · 05/10 — 8-6-5 (19 reps) · +10 kg · 112% · subiste el peso</title></circle>
+            
+        </g>
+        
+        <g class="fchart__g" data-line="2" style="color: var(--gold)">
+            <polyline class="fchart__line" points="42.0,165.5 93.8,158.5 145.6,151.4 197.3,160.0 249.1,152.5 300.9,144.9 352.7,137.4 404.4,140.4 456.2,132.4 508.0,124.4"/>
+            
+            
+            <circle class="fchart__dot" cx="42.0" cy="165.5" r="3"/>
+            
+            <circle class="fchart__hit" cx="42.0" cy="165.5" r="13" data-tip="Fondos con peso · 08/09 — 12-10-9 (31 reps) · 99%" tabindex="0"><title>Fondos con peso · 08/09 — 12-10-9 (31 reps) · 99%</title></circle>
+            
+            
+            <circle class="fchart__dot" cx="93.8" cy="158.5" r="3"/>
+            
+            <circle class="fchart__hit" cx="93.8" cy="158.5" r="13" data-tip="Fondos con peso · 11/09 — 13-11-9 (33 reps) · 101%" tabindex="0"><title>Fondos con peso · 11/09 — 13-11-9 (33 reps) · 101%</title></circle>
+            
+            
+            <circle class="fchart__dot" cx="145.6" cy="151.4" r="3"/>
+            
+            <circle class="fchart__hit" cx="145.6" cy="151.4" r="13" data-tip="Fondos con peso · 14/09 — 14-12-10 (36 reps) · 104%" tabindex="0"><title>Fondos con peso · 14/09 — 14-12-10 (36 reps) · 104%</title></circle>
+            
+            
+            <path class="fchart__up" d="M197.3 154.0 l5.5 6 l-5.5 6 l-5.5 -6 z"/>
+            
+            <circle class="fchart__hit" cx="197.3" cy="160.0" r="13" data-tip="Fondos con peso · 17/09 — 10-9-8 (27 reps) · +5 kg · 101% · subiste el peso" tabindex="0"><title>Fondos con peso · 17/09 — 10-9-8 (27 reps) · +5 kg · 101% · subiste el peso</title></circle>
+            
+            
+            <circle class="fchart__dot" cx="249.1" cy="152.5" r="3"/>
+            
+            <circle class="fchart__hit" cx="249.1" cy="152.5" r="13" data-tip="Fondos con peso · 20/09 — 11-10-8 (29 reps) · +5 kg · 103%" tabindex="0"><title>Fondos con peso · 20/09 — 11-10-8 (29 reps) · +5 kg · 103%</title></circle>
+            
+            
+            <circle class="fchart__dot" cx="300.9" cy="144.9" r="3"/>
+            
+            <circle class="fchart__hit" cx="300.9" cy="144.9" r="13" data-tip="Fondos con peso · 23/09 — 12-10-9 (31 reps) · +5 kg · 106%" tabindex="0"><title>Fondos con peso · 23/09 — 12-10-9 (31 reps) · +5 kg · 106%</title></circle>
+            
+            
+            <circle class="fchart__dot" cx="352.7" cy="137.4" r="3"/>
+            
+            <circle class="fchart__hit" cx="352.7" cy="137.4" r="13" data-tip="Fondos con peso · 26/09 — 13-11-9 (33 reps) · +5 kg · 108%" tabindex="0"><title>Fondos con peso · 26/09 — 13-11-9 (33 reps) · +5 kg · 108%</title></circle>
+            
+            
+            <path class="fchart__up" d="M404.4 134.4 l5.5 6 l-5.5 6 l-5.5 -6 z"/>
+            
+            <circle class="fchart__hit" cx="404.4" cy="140.4" r="13" data-tip="Fondos con peso · 29/09 — 10-8-7 (25 reps) · +10 kg · 107% · subiste el peso" tabindex="0"><title>Fondos con peso · 29/09 — 10-8-7 (25 reps) · +10 kg · 107% · subiste el peso</title></circle>
+            
+            
+            <circle class="fchart__dot" cx="456.2" cy="132.4" r="3"/>
+            
+            <circle class="fchart__hit" cx="456.2" cy="132.4" r="13" data-tip="Fondos con peso · 02/10 — 11-9-8 (28 reps) · +10 kg · 110%" tabindex="0"><title>Fondos con peso · 02/10 — 11-9-8 (28 reps) · +10 kg · 110%</title></circle>
+            
+            
+            <circle class="fchart__dot fchart__dot--last" cx="508.0" cy="124.4" r="3"/>
+            
+            <circle class="fchart__hit" cx="508.0" cy="124.4" r="13" data-tip="Fondos con peso · 05/10 — 12-9-8 (29 reps) · +10 kg · 113%" tabindex="0"><title>Fondos con peso · 05/10 — 12-9-8 (29 reps) · +10 kg · 113%</title></circle>
+            
+        </g>
+        
+        <g class="fchart__g" data-line="3" style="color: #4FA3C7">
+            <polyline class="fchart__line" points="42.0,164.8 93.8,159.2 145.6,136.8 197.3,125.6 249.1,114.3 300.9,97.5 352.7,86.3 404.4,69.5 456.2,58.3 508.0,41.4"/>
+            
+            
+            <circle class="fchart__dot" cx="42.0" cy="164.8" r="3"/>
+            
+            <circle class="fchart__hit" cx="42.0" cy="164.8" r="13" data-tip="Sentadillas · 08/09 — 20-18-15 (53 reps) · 99%" tabindex="0"><title>Sentadillas · 08/09 — 20-18-15 (53 reps) · 99%</title></circle>
+            
+            
+            <circle class="fchart__dot" cx="93.8" cy="159.2" r="3"/>
+            
+            <circle class="fchart__hit" cx="93.8" cy="159.2" r="13" data-tip="Sentadillas · 11/09 — 20-18-16 (54 reps) · 101%" tabindex="0"><title>Sentadillas · 11/09 — 20-18-16 (54 reps) · 101%</title></circle>
+            
+            
+            <circle class="fchart__dot" cx="145.6" cy="136.8" r="3"/>
+            
+            <circle class="fchart__hit" cx="145.6" cy="136.8" r="13" data-tip="Sentadillas · 14/09 — 22-20-16 (58 reps) · 108%" tabindex="0"><title>Sentadillas · 14/09 — 22-20-16 (58 reps) · 108%</title></circle>
+            
+            
+            <circle class="fchart__dot" cx="197.3" cy="125.6" r="3"/>
+            
+            <circle class="fchart__hit" cx="197.3" cy="125.6" r="13" data-tip="Sentadillas · 17/09 — 22-20-18 (60 reps) · 112%" tabindex="0"><title>Sentadillas · 17/09 — 22-20-18 (60 reps) · 112%</title></circle>
+            
+            
+            <circle class="fchart__dot" cx="249.1" cy="114.3" r="3"/>
+            
+            <circle class="fchart__hit" cx="249.1" cy="114.3" r="13" data-tip="Sentadillas · 20/09 — 24-20-18 (62 reps) · 116%" tabindex="0"><title>Sentadillas · 20/09 — 24-20-18 (62 reps) · 116%</title></circle>
+            
+            
+            <circle class="fchart__dot" cx="300.9" cy="97.5" r="3"/>
+            
+            <circle class="fchart__hit" cx="300.9" cy="97.5" r="13" data-tip="Sentadillas · 23/09 — 25-22-18 (65 reps) · 121%" tabindex="0"><title>Sentadillas · 23/09 — 25-22-18 (65 reps) · 121%</title></circle>
+            
+            
+            <circle class="fchart__dot" cx="352.7" cy="86.3" r="3"/>
+            
+            <circle class="fchart__hit" cx="352.7" cy="86.3" r="13" data-tip="Sentadillas · 26/09 — 25-22-20 (67 reps) · 125%" tabindex="0"><title>Sentadillas · 26/09 — 25-22-20 (67 reps) · 125%</title></circle>
+            
+            
+            <circle class="fchart__dot" cx="404.4" cy="69.5" r="3"/>
+            
+            <circle class="fchart__hit" cx="404.4" cy="69.5" r="13" data-tip="Sentadillas · 29/09 — 26-24-20 (70 reps) · 131%" tabindex="0"><title>Sentadillas · 29/09 — 26-24-20 (70 reps) · 131%</title></circle>
+            
+            
+            <circle class="fchart__dot" cx="456.2" cy="58.3" r="3"/>
+            
+            <circle class="fchart__hit" cx="456.2" cy="58.3" r="13" data-tip="Sentadillas · 02/10 — 28-24-20 (72 reps) · 135%" tabindex="0"><title>Sentadillas · 02/10 — 28-24-20 (72 reps) · 135%</title></circle>
+            
+            
+            <circle class="fchart__dot fchart__dot--last" cx="508.0" cy="41.4" r="3"/>
+            
+            <circle class="fchart__hit" cx="508.0" cy="41.4" r="13" data-tip="Sentadillas · 05/10 — 28-25-22 (75 reps) · 140%" tabindex="0"><title>Sentadillas · 05/10 — 28-25-22 (75 reps) · 140%</title></circle>
+            
+        </g>
+        
+        
+        
+        <g class="fchart__g" data-line="0" style="color: var(--bone)">
+            <polyline class="fchart__line fchart__line--total" points="42.0,165.2 93.8,158.8 145.6,143.9 197.3,139.9 249.1,130.3 300.9,118.0 352.7,111.5 404.4,102.3 456.2,92.5 508.0,83.2"/>
+            
+            
+            <circle class="fchart__dot fchart__dot--total" cx="42.0" cy="165.2" r="4"/>
+            
+            <circle class="fchart__hit" cx="42.0" cy="165.2" r="13" data-tip="Total · 08/09 · 99%" tabindex="0"><title>Total · 08/09 · 99%</title></circle>
+            
+            
+            <circle class="fchart__dot fchart__dot--total" cx="93.8" cy="158.8" r="4"/>
+            
+            <circle class="fchart__hit" cx="93.8" cy="158.8" r="13" data-tip="Total · 11/09 · 101%" tabindex="0"><title>Total · 11/09 · 101%</title></circle>
+            
+            
+            <circle class="fchart__dot fchart__dot--total" cx="145.6" cy="143.9" r="4"/>
+            
+            <circle class="fchart__hit" cx="145.6" cy="143.9" r="13" data-tip="Total · 14/09 · 106%" tabindex="0"><title>Total · 14/09 · 106%</title></circle>
+            
+            
+            <circle class="fchart__dot fchart__dot--total" cx="197.3" cy="139.9" r="4"/>
+            
+            <circle class="fchart__hit" cx="197.3" cy="139.9" r="13" data-tip="Total · 17/09 · 107%" tabindex="0"><title>Total · 17/09 · 107%</title></circle>
+            
+            
+            <circle class="fchart__dot fchart__dot--total" cx="249.1" cy="130.3" r="4"/>
+            
+            <circle class="fchart__hit" cx="249.1" cy="130.3" r="13" data-tip="Total · 20/09 · 111%" tabindex="0"><title>Total · 20/09 · 111%</title></circle>
+            
+            
+            <circle class="fchart__dot fchart__dot--total" cx="300.9" cy="118.0" r="4"/>
+            
+            <circle class="fchart__hit" cx="300.9" cy="118.0" r="13" data-tip="Total · 23/09 · 115%" tabindex="0"><title>Total · 23/09 · 115%</title></circle>
+            
+            
+            <circle class="fchart__dot fchart__dot--total" cx="352.7" cy="111.5" r="4"/>
+            
+            <circle class="fchart__hit" cx="352.7" cy="111.5" r="13" data-tip="Total · 26/09 · 117%" tabindex="0"><title>Total · 26/09 · 117%</title></circle>
+            
+            
+            <circle class="fchart__dot fchart__dot--total" cx="404.4" cy="102.3" r="4"/>
+            
+            <circle class="fchart__hit" cx="404.4" cy="102.3" r="13" data-tip="Total · 29/09 · 120%" tabindex="0"><title>Total · 29/09 · 120%</title></circle>
+            
+            
+            <circle class="fchart__dot fchart__dot--total" cx="456.2" cy="92.5" r="4"/>
+            
+            <circle class="fchart__hit" cx="456.2" cy="92.5" r="13" data-tip="Total · 02/10 · 123%" tabindex="0"><title>Total · 02/10 · 123%</title></circle>
+            
+            
+            <circle class="fchart__dot fchart__dot--total fchart__dot--last" cx="508.0" cy="83.2" r="4"/>
+            
+            <circle class="fchart__hit" cx="508.0" cy="83.2" r="13" data-tip="Total · 05/10 · 126%" tabindex="0"><title>Total · 05/10 · 126%</title></circle>
+            
+        </g>
+        
+        
+    </svg>
+    <p class="fchart__tip" aria-live="polite" data-fchart-tip>Toca un punto para ver el detalle de esa sesión.</p>
+    <ul class="fchart__legend">
+        
+        <li class="fchart__item fchart__item--total" data-line="0" tabindex="0" role="button" aria-pressed="false" style="color: var(--bone)">
+            <span class="fchart__swatch fchart__swatch--total" style="background: var(--bone)"></span><span class="fchart__name">Total</span>
+            <b class="fchart__delta fchart__delta--up" title="126% de tu base">+26%</b>
+            
+        </li>
+        
+        <li class="fchart__item" data-line="1" tabindex="0" role="button" aria-pressed="false" style="color: var(--ember)">
+            <span class="fchart__swatch" style="background: var(--ember)"></span><span class="fchart__name">Dominadas con peso</span>
+            <b class="fchart__delta fchart__delta--up" title="112% de tu base">+12%</b>
+            <span class="fchart__kg">0 → +10 kg</span>
+        </li>
+        
+        <li class="fchart__item" data-line="2" tabindex="0" role="button" aria-pressed="false" style="color: var(--gold)">
+            <span class="fchart__swatch" style="background: var(--gold)"></span><span class="fchart__name">Fondos con peso</span>
+            <b class="fchart__delta fchart__delta--up" title="113% de tu base">+13%</b>
+            <span class="fchart__kg">0 → +10 kg</span>
+        </li>
+        
+        <li class="fchart__item" data-line="3" tabindex="0" role="button" aria-pressed="false" style="color: #4FA3C7">
+            <span class="fchart__swatch" style="background: #4FA3C7"></span><span class="fchart__name">Sentadillas</span>
+            <b class="fchart__delta fchart__delta--up" title="140% de tu base">+40%</b>
+            
+        </li>
+        
+    </ul>
+    <p class="field__hint">100% = tus 2 primeras sesiones de cada ejercicio; por encima de la línea punteada has mejorado. En ejercicios con peso se mide tu fuerza estimada (la mejor serie, con sus kg y reps), así que subir peso no cuenta como retroceso aunque bajen las reps. ◆ = ese día subiste el peso. Toca un nombre para resaltar su línea.</p>
+    
+</section>
+<script>
+(function () {
+    document.querySelectorAll("[data-fchart]").forEach(function (root) {
+        if (root.dataset.bound) return;
+        root.dataset.bound = "1";
+        var tip = root.querySelector("[data-fchart-tip]");
+        var hits = root.querySelectorAll(".fchart__hit");
+        var items = root.querySelectorAll(".fchart__item");
+        var groups = root.querySelectorAll(".fchart__g");
+        var picked = null;
+        function show(h) {
+            hits.forEach(function (x) { x.classList.remove("is-on"); });
+            h.classList.add("is-on");
+            if (tip) tip.textContent = h.getAttribute("data-tip");
+        }
+        hits.forEach(function (h) {
+            h.addEventListener("click", function () { show(h); });
+            h.addEventListener("focus", function () { show(h); });
+        });
+        function focusLine(i) {
+            picked = picked === i ? null : i;
+            groups.forEach(function (g) { g.classList.toggle("is-dim", picked !== null && g.dataset.line !== String(picked)); });
+            items.forEach(function (it) {
+                it.classList.toggle("is-dim", picked !== null && it.dataset.line !== String(picked));
+                it.setAttribute("aria-pressed", String(picked !== null && it.dataset.line === String(picked)));
+            });
+        }
+        items.forEach(function (it) {
+            it.addEventListener("click", function () { focusLine(it.dataset.line); });
+            it.addEventListener("keydown", function (e) {
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); focusLine(it.dataset.line); }
+            });
+        });
+    });
+})();
+</script>
+
+
+
+
+
+
+
+
+    
+
+
+<article class="plan-item">
+    <header class="plan-item__head">
+        <h3>Dominadas con peso</h3>
+        <span class="plan-item__prog">Al fallo (series sin objetivo de repeticiones)</span>
+    </header>
+
+    <p class="plan-item__now">
+        Hoy:
+        <strong>
+            
+            3 series al fallo
+            
+            
+        </strong>
+        
+        
+    </p>
+    
+
+    
+
+    
+    <details class="plan-details">
+        <summary>Lo que has hecho (10)</summary>
+        <table class="plan-table">
+            <thead><tr><th>Día</th><th>Pedía</th><th>Hiciste</th><th>Logro</th></tr></thead>
+            <tbody>
+            
+                <tr>
+                    <td>05 Oct</td>
+                    <td>—</td>
+                    <td>19 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>02 Oct</td>
+                    <td>—</td>
+                    <td>25 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>29 Sep</td>
+                    <td>—</td>
+                    <td>22 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>26 Sep</td>
+                    <td>—</td>
+                    <td>20 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>23 Sep</td>
+                    <td>—</td>
+                    <td>24 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>20 Sep</td>
+                    <td>—</td>
+                    <td>22 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>17 Sep</td>
+                    <td>—</td>
+                    <td>19 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>14 Sep</td>
+                    <td>—</td>
+                    <td>25 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>11 Sep</td>
+                    <td>—</td>
+                    <td>23 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>08 Sep</td>
+                    <td>—</td>
+                    <td>21 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+            </tbody>
+        </table>
+    </details>
+    
+
+    
+
+    <div class="plan-item__actions">
+        
+        <form action="/tareas/planes/1/objetivo/1/mover/" method="post" class="inline-delete">
+            <input type="hidden" name="csrfmiddlewaretoken" value="XjqqzTPZ0f5wGvA58Y52XDxkYGJTgfnYkjDiqGlwDzYPrZuXh2jJQjJ87UokwjDg">
+            <input type="hidden" name="direction" value="up">
+            <button type="submit" class="ghost-btn" title="Subir un puesto" disabled>▲</button>
+        </form>
+        <form action="/tareas/planes/1/objetivo/1/mover/" method="post" class="inline-delete">
+            <input type="hidden" name="csrfmiddlewaretoken" value="XjqqzTPZ0f5wGvA58Y52XDxkYGJTgfnYkjDiqGlwDzYPrZuXh2jJQjJ87UokwjDg">
+            <input type="hidden" name="direction" value="down">
+            <button type="submit" class="ghost-btn" title="Bajar un puesto" >▼</button>
+        </form>
+        
+        <a class="ghost-btn" href="/tareas/planes/1/objetivo/1/">Editar</a>
+        <form action="/tareas/planes/1/objetivo/1/eliminar/" method="post" class="inline-delete">
+            <input type="hidden" name="csrfmiddlewaretoken" value="XjqqzTPZ0f5wGvA58Y52XDxkYGJTgfnYkjDiqGlwDzYPrZuXh2jJQjJ87UokwjDg">
+            <button type="submit" class="ghost-btn ghost-btn--danger">Quitar</button>
+        </form>
+    </div>
+</article>
+
+
+    
+
+
+<article class="plan-item">
+    <header class="plan-item__head">
+        <h3>Fondos con peso</h3>
+        <span class="plan-item__prog">Al fallo (series sin objetivo de repeticiones)</span>
+    </header>
+
+    <p class="plan-item__now">
+        Hoy:
+        <strong>
+            
+            3 series al fallo
+            
+            
+        </strong>
+        
+        
+    </p>
+    
+
+    
+
+    
+    <details class="plan-details">
+        <summary>Lo que has hecho (10)</summary>
+        <table class="plan-table">
+            <thead><tr><th>Día</th><th>Pedía</th><th>Hiciste</th><th>Logro</th></tr></thead>
+            <tbody>
+            
+                <tr>
+                    <td>05 Oct</td>
+                    <td>—</td>
+                    <td>29 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>02 Oct</td>
+                    <td>—</td>
+                    <td>28 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>29 Sep</td>
+                    <td>—</td>
+                    <td>25 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>26 Sep</td>
+                    <td>—</td>
+                    <td>33 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>23 Sep</td>
+                    <td>—</td>
+                    <td>31 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>20 Sep</td>
+                    <td>—</td>
+                    <td>29 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>17 Sep</td>
+                    <td>—</td>
+                    <td>27 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>14 Sep</td>
+                    <td>—</td>
+                    <td>36 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>11 Sep</td>
+                    <td>—</td>
+                    <td>33 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>08 Sep</td>
+                    <td>—</td>
+                    <td>31 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+            </tbody>
+        </table>
+    </details>
+    
+
+    
+
+    <div class="plan-item__actions">
+        
+        <form action="/tareas/planes/1/objetivo/2/mover/" method="post" class="inline-delete">
+            <input type="hidden" name="csrfmiddlewaretoken" value="XjqqzTPZ0f5wGvA58Y52XDxkYGJTgfnYkjDiqGlwDzYPrZuXh2jJQjJ87UokwjDg">
+            <input type="hidden" name="direction" value="up">
+            <button type="submit" class="ghost-btn" title="Subir un puesto" >▲</button>
+        </form>
+        <form action="/tareas/planes/1/objetivo/2/mover/" method="post" class="inline-delete">
+            <input type="hidden" name="csrfmiddlewaretoken" value="XjqqzTPZ0f5wGvA58Y52XDxkYGJTgfnYkjDiqGlwDzYPrZuXh2jJQjJ87UokwjDg">
+            <input type="hidden" name="direction" value="down">
+            <button type="submit" class="ghost-btn" title="Bajar un puesto" >▼</button>
+        </form>
+        
+        <a class="ghost-btn" href="/tareas/planes/1/objetivo/2/">Editar</a>
+        <form action="/tareas/planes/1/objetivo/2/eliminar/" method="post" class="inline-delete">
+            <input type="hidden" name="csrfmiddlewaretoken" value="XjqqzTPZ0f5wGvA58Y52XDxkYGJTgfnYkjDiqGlwDzYPrZuXh2jJQjJ87UokwjDg">
+            <button type="submit" class="ghost-btn ghost-btn--danger">Quitar</button>
+        </form>
+    </div>
+</article>
+
+
+    
+
+
+<article class="plan-item">
+    <header class="plan-item__head">
+        <h3>Sentadillas</h3>
+        <span class="plan-item__prog">Al fallo (series sin objetivo de repeticiones)</span>
+    </header>
+
+    <p class="plan-item__now">
+        Hoy:
+        <strong>
+            
+            3 series al fallo
+            
+            
+        </strong>
+        
+        
+    </p>
+    
+
+    
+
+    
+    <details class="plan-details">
+        <summary>Lo que has hecho (10)</summary>
+        <table class="plan-table">
+            <thead><tr><th>Día</th><th>Pedía</th><th>Hiciste</th><th>Logro</th></tr></thead>
+            <tbody>
+            
+                <tr>
+                    <td>05 Oct</td>
+                    <td>—</td>
+                    <td>75 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>02 Oct</td>
+                    <td>—</td>
+                    <td>72 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>29 Sep</td>
+                    <td>—</td>
+                    <td>70 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>26 Sep</td>
+                    <td>—</td>
+                    <td>67 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>23 Sep</td>
+                    <td>—</td>
+                    <td>65 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>20 Sep</td>
+                    <td>—</td>
+                    <td>62 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>17 Sep</td>
+                    <td>—</td>
+                    <td>60 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>14 Sep</td>
+                    <td>—</td>
+                    <td>58 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>11 Sep</td>
+                    <td>—</td>
+                    <td>54 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+                <tr>
+                    <td>08 Sep</td>
+                    <td>—</td>
+                    <td>53 reps</td>
+                    <td>
+                        —
+                    </td>
+                </tr>
+            
+            </tbody>
+        </table>
+    </details>
+    
+
+    
+
+    <div class="plan-item__actions">
+        
+        <form action="/tareas/planes/1/objetivo/3/mover/" method="post" class="inline-delete">
+            <input type="hidden" name="csrfmiddlewaretoken" value="XjqqzTPZ0f5wGvA58Y52XDxkYGJTgfnYkjDiqGlwDzYPrZuXh2jJQjJ87UokwjDg">
+            <input type="hidden" name="direction" value="up">
+            <button type="submit" class="ghost-btn" title="Subir un puesto" >▲</button>
+        </form>
+        <form action="/tareas/planes/1/objetivo/3/mover/" method="post" class="inline-delete">
+            <input type="hidden" name="csrfmiddlewaretoken" value="XjqqzTPZ0f5wGvA58Y52XDxkYGJTgfnYkjDiqGlwDzYPrZuXh2jJQjJ87UokwjDg">
+            <input type="hidden" name="direction" value="down">
+            <button type="submit" class="ghost-btn" title="Bajar un puesto" disabled>▼</button>
+        </form>
+        
+        <a class="ghost-btn" href="/tareas/planes/1/objetivo/3/">Editar</a>
+        <form action="/tareas/planes/1/objetivo/3/eliminar/" method="post" class="inline-delete">
+            <input type="hidden" name="csrfmiddlewaretoken" value="XjqqzTPZ0f5wGvA58Y52XDxkYGJTgfnYkjDiqGlwDzYPrZuXh2jJQjJ87UokwjDg">
+            <button type="submit" class="ghost-btn ghost-btn--danger">Quitar</button>
+        </form>
+    </div>
+</article>
+
+
+
+
+
+
+
+
+<div class="task-form__actions">
+    
+    <a class="primary-btn" href="/tareas/planes/1/objetivo/nuevo/">+ Añadir objetivo</a>
+    <a class="ghost-btn" href="/tareas/planes/1/objetivo/varios/">+ Añadir varios</a>
+    
+    <a class="ghost-btn" href="/tareas/planes/1/editar/">Editar plan</a>
+    
+    <a class="ghost-btn" href="/tareas/planes/1/cerrar/">Cerrar plan</a>
+    
+    <form action="/tareas/planes/1/eliminar/" method="post" class="inline-delete"
+          onsubmit="return confirm('¿Eliminar «Fuerza superior»? Esto no se puede deshacer.');">
+        <input type="hidden" name="csrfmiddlewaretoken" value="XjqqzTPZ0f5wGvA58Y52XDxkYGJTgfnYkjDiqGlwDzYPrZuXh2jJQjJ87UokwjDg">
+        <button type="submit" class="ghost-btn ghost-btn--danger">Eliminar plan</button>
+    </form>
+</div>
+
+
+    </div>
+    <p class="credits">
+        Ilustraciones de ejercicios: <strong>Everkinetic</strong> (CC BY-SA 3.0).
+    </p>
+    <script>
+        (function () {
+            var btn = document.getElementById('theme-toggle');
+            var metaTag = document.getElementById('color-scheme-meta');
+            var themeColorTag = document.getElementById('theme-color-meta');
+            function isLight() { return document.documentElement.getAttribute('data-theme') === 'light'; }
+            function updateIcon() { btn.textContent = isLight() ? '☀️' : '🌙'; }
+            updateIcon();
+            btn.addEventListener('click', function () {
+                var next = isLight() ? 'dark' : 'light';
+                if (next === 'light') {
+                    document.documentElement.setAttribute('data-theme', 'light');
+                } else {
+                    document.documentElement.removeAttribute('data-theme');
+                }
+                metaTag?.setAttribute('content', next);
+                themeColorTag?.setAttribute('content', next === 'light' ? '#F1E0BE' : '#171310');
+                localStorage.setItem('theme', next);
+                updateIcon();
+            });
+        })();
+    </script>
+    <script type="module" src="/static/js/camera-fullscreen.js"></script>
+</body>
+</html>

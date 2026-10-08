@@ -1210,7 +1210,12 @@ class Task(models.Model):
             # Objetivo 0 (no quedaba nada por leer cuando se generó el
             # día) -- cualquier página leída ya es "de más".
             pct = 100 if pages_today else 0
+        # Pasado el plazo del plan no se enseña el objetivo diario (ni la
+        # barra "Hoy") -- las plantillas lo ocultan con is_overdue (decisión
+        # con Alex, 2026-10-08). El pct sigue calculándose igual aquí.
+        pace = self._reading_pace(timezone.localtime(timezone.now()).date())
         return {
+            "is_overdue": bool(pace and pace["days_left"] < 0),
             "pages_today": pages_today,
             "goal": goal,
             "pct": pct,  # sin tope -- puede pasar de 100 si se lee de más
@@ -2210,6 +2215,12 @@ class Exercise(models.Model):
     config = models.JSONField(
         default=dict, blank=True,
         help_text="Umbrales/ajustes propios de este ejercicio para el contador (opcional).",
+    )
+    met = models.FloatField(
+        null=True, blank=True,
+        help_text="Intensidad en METs para estimar calorías (kcal = MET × kg × horas). "
+                   "Vacío = valor por defecto según el tipo (ver tasks/calories.py). "
+                   "En running no aplica: se calcula con la velocidad.",
     )
     is_active = models.BooleanField(default=True)
     order = models.PositiveIntegerField(default=0)
@@ -4326,6 +4337,44 @@ class PlanItem(models.Model):
         return min(100, round(100 * successes / total_sessions))
 
 
+class TrainingSession(models.Model):
+    """
+    Una sesión de entreno COMPLETA (plan o circuito), con su cronómetro
+    total: del primer ejercicio al último, descansos incluidos. Cada
+    ejercicio hecho en ella sigue siendo un WorkoutSession (con sus
+    series y el tiempo de cada repetición), enlazado por
+    WorkoutSession.training_session -- para sumar tiempos de sesión usa
+    ESTA tabla, no la suma de session_duration_seconds de los ejercicios
+    (esa deja fuera los descansos y el tiempo entre ejercicios).
+
+    total_seconds es tiempo activo en la app: si se sale a medias y se
+    retoma después, el rato fuera no cuenta.
+    """
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="training_sessions",
+    )
+    task = models.ForeignKey(
+        Task, on_delete=models.SET_NULL, null=True, blank=True, related_name="training_sessions",
+    )
+    plan = models.ForeignKey(
+        Plan, on_delete=models.SET_NULL, null=True, blank=True, related_name="training_sessions",
+    )
+    routine = models.ForeignKey(
+        Routine, on_delete=models.SET_NULL, null=True, blank=True, related_name="training_sessions",
+    )
+    total_seconds = models.PositiveIntegerField(default=0)
+    recorded_at = models.DateTimeField(auto_now_add=True)
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+
+    class Meta:
+        ordering = ["-recorded_at"]
+
+    def __str__(self):
+        m, s = divmod(self.total_seconds, 60)
+        return f"Sesión {self.recorded_at:%Y-%m-%d} · {m}:{s:02d}"
+
+
 class WorkoutSession(models.Model):
     """
     Estadísticas de una sesión de entreno. La mayoría se graban con la
@@ -4346,6 +4395,11 @@ class WorkoutSession(models.Model):
     plan = models.ForeignKey(
         Plan, on_delete=models.SET_NULL, null=True, blank=True, related_name="workout_sessions",
         help_text="Plan al que contaba esta sesión, si había uno activo.",
+    )
+    training_session = models.ForeignKey(
+        "TrainingSession", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="workouts",
+        help_text="Sesión completa (con su cronómetro total) a la que pertenece este ejercicio.",
     )
     # Objetivo que estaba vigente en ESE momento. Se guarda en la sesión
     # en vez de recalcularlo después, porque el objetivo sube con las
@@ -4382,6 +4436,11 @@ class WorkoutSession(models.Model):
     )
     distance_km = models.FloatField(null=True, blank=True, help_text="Solo running: km recorridos.")
     steps = models.PositiveIntegerField(null=True, blank=True, help_text="Solo running: pasos, si los tienes (cinta, reloj…).")
+    calories_kcal = models.FloatField(
+        null=True, blank=True,
+        help_text="Calorías aproximadas gastadas en este ejercicio (MET × peso × tiempo, ver "
+                   "tasks/calories.py). Se calcula al guardar la sesión con el peso de ese momento.",
+    )
 
     # De dónde salió el dato. Importa para dos cosas: saber si el
     # número es de fiar (un reloj mide mejor que un dedo escribiendo), y
@@ -4409,6 +4468,28 @@ class WorkoutSession(models.Model):
 
     class Meta:
         ordering = ["-recorded_at"]
+
+    def save(self, *args, **kwargs):
+        # Todas las vías que crean sesiones (cámara, manual, circuitos,
+        # importación de carreras...) pasan por aquí: así las calorías se
+        # calculan en un único sitio. Con update_fields (p. ej. el borrado
+        # suave) no se toca nada.
+        # El peso con el que se entrena (dominadas/fondos/sentadillas con
+        # lastre) no lo manda ninguna pantalla, así que si la sesión es de
+        # un plan y no trae `added_weight_kg`, se guarda el peso que el plan
+        # pedía en ese momento. Sin esto la gráfica del plan no tendría de
+        # dónde sacar el aumento de kg. Solo al crear, y solo ejercicios con
+        # lastre (Exercise.WEIGHTED_SLUGS); si alguna pantalla manda su
+        # propio peso, manda el suyo.
+        if self._state.adding and self.added_weight_kg is None and self.plan_id and self.exercise in Exercise.WEIGHTED_SLUGS:
+            item = PlanItem.objects.filter(plan_id=self.plan_id, exercise__slug=self.exercise).first()
+            planned = item.current_target().get("weight_kg") if item else None
+            if planned:
+                self.added_weight_kg = float(planned)
+        if self.calories_kcal is None and kwargs.get("update_fields") is None:
+            from .calories import estimate_workout_calories
+            self.calories_kcal = estimate_workout_calories(self)
+        super().save(*args, **kwargs)
 
     @property
     def pace_seconds_per_km(self):
@@ -5304,6 +5385,52 @@ class Occurrence(models.Model):
             "total": total,
             "pct": round(100 * done / total) if total else None,
         }
+
+
+class UserSettings(models.Model):
+    """
+    Ajustes personales y perfil del usuario. El peso corporal se usa para
+    estimar las calorías de cada ejercicio (ver tasks/calories.py); el resto
+    (nombre, avatar, nacimiento, altura, peso objetivo) es el perfil — ver
+    tasks/profile.py.
+    """
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="app_settings",
+    )
+    body_weight_kg = models.FloatField(
+        null=True, blank=True,
+        help_text="Peso corporal en kg, para estimar las calorías de cada ejercicio.",
+    )
+    # --- Perfil (ver tasks/profile.py: validación, catálogos y estadísticas) ---
+    display_name = models.CharField(max_length=40, blank=True, default="")
+    avatar_emoji = models.CharField(max_length=16, blank=True, default="💪")
+    avatar_color = models.CharField(max_length=7, blank=True, default="#FF6A1F")
+    birth_date = models.DateField(null=True, blank=True)
+    height_cm = models.PositiveSmallIntegerField(
+        null=True, blank=True, help_text="Altura en cm (solo informativa).",
+    )
+    goal_weight_kg = models.FloatField(null=True, blank=True, help_text="Peso objetivo en kg.")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Ajustes de {self.user}"
+
+
+class WeightLog(models.Model):
+    """Un peso por día (el último guardado ese día gana). Historial del perfil."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="weight_logs")
+    date = models.DateField()
+    weight_kg = models.FloatField()
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-date"]
+        constraints = [
+            models.UniqueConstraint(fields=["user", "date"], name="unique_weightlog_per_user_day"),
+        ]
+
+    def __str__(self):
+        return f"{self.date}: {self.weight_kg:g} kg"
 
 
 class DebugLog(models.Model):

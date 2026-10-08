@@ -23,6 +23,12 @@
         <span class="stamp__number">{{ success_rate }}%</span>
         <span class="stamp__label">cumplido</span>
     </div>
+    {% if total_kcal %}
+    <div class="stamp stamp--rate">
+        <span class="stamp__number">{{ total_kcal }}</span>
+        <span class="stamp__label">kcal (aprox.)</span>
+    </div>
+    {% endif %}
 </div>
 
 <div class="streak-row">
@@ -65,7 +71,7 @@
             <span class="history-dot"></span>
             <span class="history-date">{{ occ.recorded_at|date:"d \d\e F, Y · H:i" }}</span>
             <span class="history-result">
-                {{ occ.get_result_display }}{% if occ.auto_expired %} (auto){% endif %} · {{ occ.pct }}%
+                {{ occ.get_result_display }}{% if occ.auto_expired %} (auto){% endif %} · {{ occ.pct }}%{% if occ.kcal %} · ≈{{ occ.kcal }} kcal{% endif %}
             </span>
         </li>
         {% endfor %}
@@ -193,13 +199,14 @@
         if (p.pct > 100) status += ' · superaste el objetivo';
         tip.appendChild(div('chart-tip__status', status));
         if (p.minutes_watched) tip.appendChild(div('chart-tip__line', 'Vistos ' + p.minutes_watched + ' min'));
+        if (p.kcal) tip.appendChild(div('chart-tip__line', '≈ ' + p.kcal + ' kcal'));
         if (p.exercises && p.exercises.length) {
             var ul = document.createElement('ul');
             ul.className = 'chart-tip__list';
             p.exercises.forEach(function (e) {
                 var li = document.createElement('li');
                 li.appendChild(div('chart-tip__ex', e.name));
-                var detail = e.done + (e.target ? ' / ' + e.target : '');
+                var detail = e.done + (e.target ? ' / ' + e.target : '') + (e.kcal ? ' · ≈' + e.kcal + ' kcal' : '');
                 li.appendChild(div('chart-tip__ex-detail', detail));
                 li.appendChild(div('chart-tip__ex-pct' + (e.pct < 100 ? ' is-short' : ''), e.pct + '%'));
                 ul.appendChild(li);

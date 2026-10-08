@@ -87,6 +87,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   let sequence = [];
   let index = 0;
   let breakdown = [];
+  const sessionStartedAt = Date.now(); // cronómetro total de la sesión (se manda al guardar)
   let timerId = null;
   let paused = false;
   let workoutSession = null;
@@ -193,7 +194,9 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     setSeconds = [];
     // Dice el nombre del ejercicio al empezar (tren superior o inferior).
     if (isVoiceEnabled()) {
-      speakOut(setsTotal > 1 ? `Ahora toca ${item.name}. Serie 1 de ${setsTotal}` : `Ahora toca ${item.name}`, { flush: true });
+      // El primero del plan dice "Toca ..."; los siguientes, "Ahora toca ...".
+      const toca = index === 0 ? "Toca" : "Ahora toca";
+      speakOut(setsTotal > 1 ? `${toca} ${item.name}. Serie 1 de ${setsTotal}` : `${toca} ${item.name}`, { flush: true });
     }
     runSet(item);
   }
@@ -730,6 +733,8 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         reps: payload.total_reps || 0,
         sets: payload.total_sets || 0,
         set_reps: (payload.sets || []).map((s) => s.reps || 0).filter((r) => r > 0),
+        // Tiempo de cada rep por serie (paralelo a set_reps).
+        set_durations: (payload.sets || []).filter((s) => (s.reps || 0) > 0).map((s) => s.durations || []),
         seconds: payload.session_duration_seconds || 0,
       });
       beep(880, 0.2);
@@ -763,7 +768,9 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     // pantalla de descanso del siguiente (ver progressLabel).
     setsTotal = 1;
     setNo = 1;
-    const rest = item?.rest ?? 0;
+    // Descanso entre ejercicios = el de entre series (90 s, a petición de
+    // Alex 2026-10-08).
+    const rest = SET_REST_SECONDS;
     if (rest > 0) runRest(rest);
     else runCurrent();
   }
@@ -867,6 +874,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         <button type="button" class="primary-btn" id="run-save">Guardar y volver</button>
       </div>`;
 
+    const sessionSeconds = Math.round((Date.now() - sessionStartedAt) / 1000);
     document.getElementById("run-save").addEventListener("click", async (e) => {
       e.target.disabled = true;
       e.target.textContent = "Guardando…";
@@ -874,7 +882,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         const resp = await fetch(saveUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
-          body: JSON.stringify({ breakdown }),
+          body: JSON.stringify({ breakdown, session_seconds: sessionSeconds }),
         });
         const data = await resp.json();
         window.location.href = (data && data.redirect_url) || cancelUrl;

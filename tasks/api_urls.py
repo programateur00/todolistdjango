@@ -11,6 +11,7 @@ app_name = "api"
 
 urlpatterns = [
     path("meta/", api.meta, name="meta"),
+    path("profile/", api.profile, name="profile"),
     path("warmup/", api.warmup, name="warmup"),
     path("tasks/<uuid:uuid>/warmup-routine/", api.task_warmup_routine, name="task_warmup_routine"),
 

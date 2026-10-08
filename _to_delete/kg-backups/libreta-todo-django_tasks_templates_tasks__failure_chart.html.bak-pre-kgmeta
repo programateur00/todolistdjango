@@ -1,0 +1,108 @@
+{% comment %}
+Progreso de un plan con ejercicios "al fallo" (ver views._failure_chart).
+100% = media de las 2 primeras sesiones de cada ejercicio; por encima has
+mejorado. Sin lastre cuenta reps; con peso, la fuerza estimada de la mejor
+serie (reps y kg a la vez), así que subir kg no se ve como un retroceso.
+La línea gruesa es el total de la sesión; ◆ marca el día que subiste peso.
+{% endcomment %}
+{% load l10n %}
+{# localize off: con LANGUAGE_CODE=es los floats salen con coma (y1="230,0") y el SVG se rompe. #}
+{% localize off %}
+{% if chart %}
+<section class="fchart" data-fchart>
+    <h3 class="fchart__title">Progreso{% if chart.has_weight %} de repeticiones y peso{% else %} de repeticiones{% endif %}</h3>
+    {% if chart.ready %}
+    <svg class="fchart__svg" viewBox="0 0 {{ chart.w }} {{ chart.h }}" role="img"
+         aria-label="Progreso por sesión, en % de la base de cada ejercicio">
+        <rect class="fchart__zone" x="{{ chart.left }}" y="{{ chart.top }}" width="{{ chart.zone_w }}" height="{{ chart.zone_h }}"/>
+        {% for t in chart.yticks %}
+        <line class="fchart__grid" x1="{{ chart.left }}" x2="{{ chart.right }}" y1="{{ t.y }}" y2="{{ t.y }}"/>
+        <text class="fchart__tick{% if t.base %} fchart__tick--base{% endif %}" x="{{ chart.left|add:'-6' }}" y="{{ t.y }}" text-anchor="end" dominant-baseline="middle">{{ t.label }}</text>
+        {% endfor %}
+        <line class="fchart__ref" x1="{{ chart.left }}" x2="{{ chart.right }}" y1="{{ chart.ref_y }}" y2="{{ chart.ref_y }}"/>
+        {% for t in chart.xticks %}
+        <text class="fchart__tick" x="{{ t.x }}" y="{{ chart.bottom|add:'18' }}" text-anchor="middle">{{ t.label }}</text>
+        {% endfor %}
+        {% if chart.strip %}
+        {# Franja de peso añadido: una barra por sesión y ejercicio, mismas fechas que las líneas. #}
+        <line class="fchart__axis" x1="{{ chart.left }}" x2="{{ chart.right }}" y1="{{ chart.strip.base }}" y2="{{ chart.strip.base }}"/>
+        <text class="fchart__tick" x="{{ chart.left|add:'-6' }}" y="{{ chart.strip.label_y }}" text-anchor="end" dominant-baseline="middle">kg</text>
+        {% for g in chart.strip.groups %}
+        <g class="fchart__g" data-line="{{ g.line }}" style="color: {{ g.color }}">
+            {% for b in g.bars %}
+            <rect class="fchart__bar{% if b.zero %} fchart__bar--zero{% endif %}{% if b.up %} fchart__bar--up{% endif %}" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="1.5"/>
+            <rect class="fchart__hit" x="{{ b.hit_x }}" y="{{ chart.strip.top }}" width="{{ b.hit_w }}" height="{{ chart.strip.h }}" data-tip="{{ b.tip }}" tabindex="0"><title>{{ b.tip }}</title></rect>
+            {% endfor %}
+        </g>
+        {% endfor %}
+        {% endif %}
+        {# Total al final: se dibuja encima de las demás líneas. #}
+        {% for pass_total in "01" %}
+        {% for l in chart.lines %}{% if pass_total == "1" and l.thick or pass_total == "0" and not l.thick %}
+        <g class="fchart__g" data-line="{{ forloop.counter0 }}" style="color: {{ l.color }}">
+            <polyline class="fchart__line{% if l.thick %} fchart__line--total{% endif %}" points="{{ l.points }}"/>
+            {% for d in l.dots %}
+            {% if d.up %}
+            <path class="fchart__up" d="M{{ d.x }} {{ d.y_up }} l5.5 6 l-5.5 6 l-5.5 -6 z"/>
+            {% else %}
+            <circle class="fchart__dot{% if l.thick %} fchart__dot--total{% endif %}{% if d.last %} fchart__dot--last{% endif %}" cx="{{ d.x }}" cy="{{ d.y }}" r="{% if l.thick %}4{% else %}3{% endif %}"/>
+            {% endif %}
+            <circle class="fchart__hit" cx="{{ d.x }}" cy="{{ d.y }}" r="13" data-tip="{{ d.tip }}" tabindex="0"><title>{{ d.tip }}</title></circle>
+            {% endfor %}
+        </g>
+        {% endif %}{% endfor %}
+        {% endfor %}
+    </svg>
+    <p class="fchart__tip" aria-live="polite" data-fchart-tip>Toca un punto para ver el detalle de esa sesión.</p>
+    <ul class="fchart__legend">
+        {% for l in chart.lines %}
+        <li class="fchart__item{% if l.thick %} fchart__item--total{% endif %}" data-line="{{ forloop.counter0 }}" tabindex="0" role="button" aria-pressed="false" style="color: {{ l.color }}">
+            <span class="fchart__swatch{% if l.thick %} fchart__swatch--total{% endif %}" style="background: {{ l.color }}"></span><span class="fchart__name">{{ l.name }}</span>
+            <b class="fchart__delta fchart__delta--{{ l.trend }}" title="{{ l.last }}% de tu base">{{ l.delta }}</b>
+            {% if l.kg_label %}<span class="fchart__kg">{{ l.kg_label }}</span>{% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+    <p class="field__hint">100% = tus 2 primeras sesiones de cada ejercicio; por encima de la línea punteada has mejorado.{% if chart.has_weight %} En ejercicios con peso se mide tu fuerza estimada (la mejor serie, con sus kg y reps), así que subir peso no cuenta como retroceso aunque bajen las reps.{% endif %}{% if chart.has_weight %} Las barras de abajo son los kg añadidos en cada sesión (barra llena = tu meta de peso, o tu máximo si no hay meta).{% endif %}{% if chart.has_up %} ◆ = ese día subiste el peso.{% endif %} Toca un nombre para resaltar su línea.</p>
+    {% else %}
+    <p class="field__hint">La gráfica aparece a partir de la 2ª sesión con ejercicios al fallo.</p>
+    {% endif %}
+</section>
+<script>
+(function () {
+    document.querySelectorAll("[data-fchart]").forEach(function (root) {
+        if (root.dataset.bound) return;
+        root.dataset.bound = "1";
+        var tip = root.querySelector("[data-fchart-tip]");
+        var hits = root.querySelectorAll(".fchart__hit");
+        var items = root.querySelectorAll(".fchart__item");
+        var groups = root.querySelectorAll(".fchart__g");
+        var picked = null;
+        function show(h) {
+            hits.forEach(function (x) { x.classList.remove("is-on"); });
+            h.classList.add("is-on");
+            if (tip) tip.textContent = h.getAttribute("data-tip");
+        }
+        hits.forEach(function (h) {
+            h.addEventListener("click", function () { show(h); });
+            h.addEventListener("focus", function () { show(h); });
+        });
+        function focusLine(i) {
+            picked = picked === i ? null : i;
+            groups.forEach(function (g) { g.classList.toggle("is-dim", picked !== null && g.dataset.line !== String(picked)); });
+            items.forEach(function (it) {
+                it.classList.toggle("is-dim", picked !== null && it.dataset.line !== String(picked));
+                it.setAttribute("aria-pressed", String(picked !== null && it.dataset.line === String(picked)));
+            });
+        }
+        items.forEach(function (it) {
+            it.addEventListener("click", function () { focusLine(it.dataset.line); });
+            it.addEventListener("keydown", function (e) {
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); focusLine(it.dataset.line); }
+            });
+        });
+    });
+})();
+</script>
+{% endif %}
+{% endlocalize %}

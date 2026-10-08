@@ -11,6 +11,18 @@
 
 {% include "tasks/_progress_bars.html" %}
 
+{% if kcal.week or kcal.today %}
+<section class="week-summary" aria-label="Calorías aproximadas">
+    <div class="week-summary__top">
+        <span class="week-summary__label">Calorías (aprox.)</span>
+        <span class="week-summary__pct">{{ kcal.week }} kcal</span>
+    </div>
+    <p class="week-summary__meta">
+        Hoy {{ kcal.today }} kcal · esta semana {{ kcal.week }} kcal · estimado con {{ kcal.weight }} kg{% if kcal.default_weight %} (por defecto — pon el tuyo en <a href="{% url 'tasks:settings' %}">Ajustes</a>){% endif %}
+    </p>
+</section>
+{% endif %}
+
 {% if time_buckets %}
 <section class="time-totals" aria-label="Tiempo acumulado">
     <h2 class="time-totals__heading">Tiempo acumulado</h2>

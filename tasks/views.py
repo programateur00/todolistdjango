@@ -16,8 +16,9 @@ from . import ai, api
 from . import time_stats
 from .models import (
     CourseQuiz, Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, SavedVideo, Task,
-    TimerSession, WarmupStatus, WorkoutSession, last_set_reps, last_set_seconds,
+    TimerSession, UserSettings, WarmupStatus, WorkoutSession, last_set_reps, last_set_seconds,
 )
+from . import calories
 from .utils import get_current_user, read_mobile_release, resolve_plan_target
 from urllib.parse import quote
 
@@ -772,6 +773,9 @@ def task_workout_save(request, pk):
         resumen += f", ritmo medio {avg_rep_seconds}s/rep."
     else:
         resumen += "."
+
+    if ws.calories_kcal:
+        resumen += f" ≈{round(ws.calories_kcal)} kcal."
 
     if ws.target_met:
         # La tarea no se marca hecha aquí — falta el enfriamiento
@@ -1657,7 +1661,10 @@ def routine_save(request, pk, routine_pk):
             sets = int(b.get("sets", 0)) if isinstance(b.get("sets"), (int, float)) else 0
             if not slug:
                 continue
-            entries.append({"exercise": slug, "seconds": seconds, "reps": reps, "sets": sets})
+            entries.append({
+                "exercise": slug, "seconds": seconds, "reps": reps, "sets": sets,
+                "timing": api._breakdown_timing(b),
+            })
             total_seconds += seconds
 
     if not entries:
@@ -1673,7 +1680,10 @@ def routine_save(request, pk, routine_pk):
             exercise=e["exercise"],
             total_reps=e["reps"], total_sets=e["sets"],
             session_duration_seconds=e["seconds"],
+            **e["timing"],
         ))
+
+    api._save_training_session(task, data, created, routine=routine)
 
     cortas = [w for w in created if not w.target_met]
     resumen = f"Circuito «{routine.name}» completado: {len(created)} ejercicio(s), {total_seconds}s."
@@ -1716,6 +1726,85 @@ def stats_list(request):
         "weekly": Occurrence.weekly_completion(get_current_user()),
         "daily": Occurrence.daily_completion(get_current_user()),
         "time_buckets": time_stats.time_totals(get_current_user()),
+        "kcal": _kcal_totals(get_current_user()),
+    })
+
+
+def _kcal_totals(user):
+    """Calorías aproximadas de hoy y de esta semana (lunes-domingo), sumando
+    WorkoutSession.calories_kcal, más el peso con el que se estiman."""
+    today = timezone.localtime(timezone.now()).date()
+    week_start = today - _dt.timedelta(days=today.weekday())
+    qs = WorkoutSession.objects.filter(
+        user=user, deleted_at__isnull=True, calories_kcal__isnull=False,
+        recorded_at__date__gte=week_start, recorded_at__date__lte=week_start + _dt.timedelta(days=6),
+    )
+    week = today_kcal = 0.0
+    for recorded_at, kcal in qs.values_list("recorded_at", "calories_kcal"):
+        week += kcal
+        if timezone.localtime(recorded_at).date() == today:
+            today_kcal += kcal
+    weight, is_default = calories.body_weight_for(user)
+    return {
+        "today": round(today_kcal), "week": round(week),
+        "weight": f"{weight:g}", "default_weight": is_default,
+    }
+
+
+def settings_page(request):
+    """Ajustes personales: de momento el peso corporal (para las calorías)."""
+    user = get_current_user()
+    if request.method == "POST":
+        raw = (request.POST.get("body_weight_kg") or "").strip().replace(",", ".")
+        if raw == "":
+            UserSettings.objects.update_or_create(user=user, defaults={"body_weight_kg": None})
+            messages.success(request, "Peso borrado — se usarán 70 kg por defecto.")
+            return redirect(reverse("tasks:settings"))
+        try:
+            kg = float(raw)
+        except ValueError:
+            kg = None
+        if kg is None or not (30 <= kg <= 300):
+            messages.error(request, "Pon un peso válido en kg (entre 30 y 300).")
+            return redirect(reverse("tasks:settings"))
+        from . import profile as _profile
+        if kg != _profile.get_settings(user).body_weight_kg:
+            _profile.log_weight(user, kg)
+        UserSettings.objects.update_or_create(user=user, defaults={"body_weight_kg": kg})
+        messages.success(request, f"Peso guardado: {kg:g} kg. Se usará en las sesiones nuevas "
+                                  "(las antiguas se recalculan con «manage.py backfill_calories --all»).")
+        return redirect(reverse("tasks:settings"))
+    weight, is_default = calories.body_weight_for(user)
+    return render(request, "tasks/settings.html", {
+        "body_weight_kg": "" if is_default else f"{weight:g}",
+        "default_weight_kg": f"{calories.DEFAULT_BODY_WEIGHT_KG:g}",
+    })
+
+
+def profile_page(request):
+    """Perfil: nombre, avatar y datos corporales (nacimiento, altura, peso, peso objetivo)."""
+    from . import profile
+    user = get_current_user()
+    if request.method == "POST":
+        posted = {k: request.POST.get(k, "") for k in profile.FORM_FIELDS}
+        ok, errors = profile.apply_profile(user, posted)
+        if ok:
+            messages.success(request, "Perfil guardado.")
+            return redirect(reverse("tasks:profile"))
+        for msg in errors.values():
+            messages.error(request, msg)
+        data = profile.profile_data(user)
+        # Que no se pierda lo escrito al fallar la validación.
+        data.update({k: v for k, v in posted.items() if v != "" or k not in ("avatar_emoji", "avatar_color")})
+    else:
+        data = profile.profile_data(user)
+    return render(request, "tasks/profile.html", {
+        "p": data,
+        "emojis": profile.AVATAR_EMOJIS,
+        "colors": profile.AVATAR_COLORS,
+        "name_max": profile.DISPLAY_NAME_MAX,
+        "default_weight_kg": f"{calories.DEFAULT_BODY_WEIGHT_KG:g}",
+        "today": timezone.localdate().isoformat(),
     })
 
 
@@ -1731,8 +1820,14 @@ def _stats_chart_points(occurrences, limit=60):
     task_ids = {o.task_id for o in occs if o.task_id}
     by_task = {}
     names = {}
+    kcal_by_task = {}   # kcal del día: se SUMAN todas las sesiones (a diferencia del %, que usa la mejor)
+    kcal_by_exercise = {}
     if task_ids:
-        for ws in WorkoutSession.objects.filter(task_id__in=task_ids).order_by("recorded_at"):
+        for ws in WorkoutSession.objects.filter(task_id__in=task_ids, deleted_at__isnull=True).order_by("recorded_at"):
+            if ws.calories_kcal:
+                kcal_by_task[ws.task_id] = kcal_by_task.get(ws.task_id, 0) + ws.calories_kcal
+                key = (ws.task_id, ws.exercise)
+                kcal_by_exercise[key] = kcal_by_exercise.get(key, 0) + ws.calories_kcal
             pct = ws.achievement_pct
             if pct is None:
                 continue
@@ -1749,6 +1844,7 @@ def _stats_chart_points(occurrences, limit=60):
                 row[ws.exercise] = {
                     "name": names[ws.exercise], "pct": pct, "done": hecho,
                     "target": ws.target_label or "",
+                    "slug": ws.exercise,
                 }
         timers = {}
         for ts in TimerSession.objects.filter(task_id__in=task_ids, deleted_at__isnull=True).select_related("task"):
@@ -1762,10 +1858,15 @@ def _stats_chart_points(occurrences, limit=60):
                 "name": group[0].subcategory_label, "pct": round(100 * total / target),
                 "done": f"{total} min", "target": f"{target} min",
             }
+    for task_id, row in by_task.items():
+        for ex in row.values():
+            kcal = kcal_by_exercise.get((task_id, ex.get("slug")))
+            ex["kcal"] = round(kcal) if kcal else None
     points = []
     for o in occs:
         day = o.due_date or timezone.localtime(o.recorded_at).date()
         points.append({
+            "kcal": round(kcal_by_task[o.task_id]) if o.task_id in kcal_by_task else None,
             "label": day.strftime("%d/%m"),
             "date": day.isoformat(),
             "pct": o.pct,
@@ -1791,12 +1892,23 @@ def stats_detail(request, series_id):
     success_rate = Occurrence.average_pct(occurrences)
     streaks = Occurrence.streak_stats(series_id)
     chart_points = _stats_chart_points(occurrences)
+    occurrences = list(occurrences)
+    kcal_by_task = {}
+    for task_id, kcal in WorkoutSession.objects.filter(
+        task_id__in=[o.task_id for o in occurrences if o.task_id],
+        deleted_at__isnull=True, calories_kcal__isnull=False,
+    ).values_list("task_id", "calories_kcal"):
+        kcal_by_task[task_id] = kcal_by_task.get(task_id, 0) + kcal
+    for o in occurrences:
+        o.kcal = round(kcal_by_task[o.task_id]) if o.task_id in kcal_by_task else None
+    total_kcal = sum(o.kcal for o in occurrences if o.kcal)
 
     return render(request, "tasks/stats_detail.html", {
         "chart_points": chart_points,
         "title": title,
         "series_id": series_id,
         "occurrences": occurrences,
+        "total_kcal": total_kcal,
         "done_count": done_count,
         "not_done_count": not_done_count,
         "success_rate": success_rate,
@@ -1879,6 +1991,17 @@ def plan_list(request):
         {"key": key, "label": label, "items": closed_by_type[key]}
         for key, label in Plan.PLAN_TYPE_CHOICES if closed_by_type[key]
     ]
+    # Planes borrados (borrado suave, deleted_at): solo para que se vea
+    # cuántos se han borrado y con qué progreso. Sin enlace a la ficha
+    # (plan_detail solo abre planes no borrados).
+    deleted_by_type = {key: [] for key, _ in Plan.PLAN_TYPE_CHOICES}
+    for p in Plan.objects.filter(user=get_current_user(), deleted_at__isnull=False).order_by("-deleted_at"):
+        progress = p.final_progress_pct if p.closed_at else p.progress_pct()
+        deleted_by_type[p.plan_type].append({"plan": p, "progress": progress})
+    deleted_plan_groups = [
+        {"key": key, "label": label, "items": deleted_by_type[key]}
+        for key, label in Plan.PLAN_TYPE_CHOICES if deleted_by_type[key]
+    ]
     # Lectura no es un Plan de verdad (vive aparte en Task.reading_mode=
     # 'plan', ver el comentario junto a ese campo en models.py) -- pero
     # para quien lo crea, es un plan igual que los demás, y no aparecía
@@ -1911,6 +2034,8 @@ def plan_list(request):
     ]
     return render(request, "tasks/plan_list.html", {
         "plan_groups": plan_groups, "closed_plan_groups": closed_plan_groups,
+        "deleted_plan_groups": deleted_plan_groups,
+        "deleted_plans_count": sum(len(g["items"]) for g in deleted_plan_groups),
         "reading_plans": reading_plans, "closed_reading_plans": closed_reading_plans,
         "closed_plans_count": (
             sum(len(g["items"]) for g in closed_plan_groups) + len(closed_reading_plans)
@@ -1988,6 +2113,92 @@ _CHART_COLORS = [
 ]
 
 
+def _epley(load_kg, reps):
+    """
+    Fuerza estimada (1RM de Epley): carga × (1 + reps / 30). Pondera peso
+    y repeticiones a la vez, así que 8 reps con +5 kg puntúan más que 8
+    reps sin lastre, y 6 reps con +10 kg más que 8 con +5 kg si la carga
+    extra compensa las reps perdidas. Se aplica a las reps medias por
+    serie de la sesión, para que mejorar en cualquier serie se note.
+    """
+    return load_kg * (1 + reps / 30.0)
+
+
+def _fmt_kg(x):
+    return f"{x:g}"
+
+
+# Alto de cada fila de la franja: título, barras (kg) y la línea de números (reps).
+_STRIP_LABEL_Z, _STRIP_BAR_Z, _STRIP_NUM_Z, _STRIP_ROW_GAP = 11, 26, 13, 9
+_STRIP_ROW_H = _STRIP_LABEL_Z + _STRIP_BAR_Z + _STRIP_NUM_Z
+
+
+def _weight_strip(lines, X, xi, pw, n, top):
+    """
+    Franja de "peso" dentro de la misma gráfica de progreso: bajo las
+    líneas, una fila por ejercicio con peso, con el mismo eje x (fechas)
+    que las líneas. En cada sesión, una barra con los kg que tocaban (los
+    del plan en ese momento) y encima el número de reps que hiciste con
+    ellos. Así se ve a la vez la subida de kg y cómo mejoran las reps con
+    cada peso (caen al subir el peso y vuelven a subir).
+
+    Cada fila usa su propia escala: la barra llena es su peso objetivo (o,
+    sin meta, el máximo que has usado), porque dominadas con +10 kg y
+    sentadillas con +60 kg no caben en la misma escala. Una línea
+    punteada marca el peso objetivo y el título de la fila lo dice.
+
+    "line" es la posición del ejercicio en chart["lines"] (el Total es la
+    0), para que tocar su nombre en la leyenda resalte también su fila.
+    """
+    weighted = [(pos, l) for pos, l in enumerate(lines, start=1) if l["weighted"]]
+    bw = round(max(6.0, min(22.0, pw / max(n, 1) * 0.55)), 1)
+    hit_w = max(bw, 10.0)
+    show_all = (pw / max(n - 1, 1)) >= 20  # caben todos los números sin pisarse
+    groups = []
+    for k, (pos, l) in enumerate(weighted):
+        row_top = top + k * (_STRIP_ROW_H + _STRIP_ROW_GAP)
+        base = round(row_top + _STRIP_LABEL_Z + _STRIP_BAR_Z, 1)
+        dates = sorted(l["pts"])
+        kgs = [l["pts"][d]["kg"] for d in dates]
+        goal = l["goal_kg"]
+        ymax = max(max(kgs), goal or 0, 1.0)
+        bars, prev = [], None
+        for d in dates:
+            p = l["pts"][d]
+            kg = p["kg"]
+            bh = max(2.5, _STRIP_BAR_Z * kg / ymax) if kg > 0 else 1.5
+            tip = f"{l['name']} · {d.strftime('%d/%m')} — "
+            tip += f"{'-'.join(str(r) for r in p['sets'])} ({p['reps']} reps)" if p["sets"] else f"{p['reps']} reps"
+            tip += f" con +{_fmt_kg(kg)} kg" if kg > 0 else " sin lastre"
+            if goal:
+                tip += f" · meta +{_fmt_kg(goal)} kg"
+            if p["up"]:
+                tip += f" · subiste el peso (+{_fmt_kg(round(kg - prev, 2))} kg)"
+            x = X(xi[d])
+            bars.append({
+                "x": round(x - bw / 2, 1), "cx": x, "y": round(base - bh, 1), "h": round(bh, 1), "w": bw,
+                "hit_x": round(x - hit_w / 2, 1), "hit_w": hit_w,
+                "zero": kg <= 0, "up": p["up"], "tip": tip,
+                "label": str(p["reps"]) if (show_all or p["up"] or d in (dates[0], dates[-1])) else None,
+                "label_y": round(base + 11, 1),
+            })
+            prev = kg
+        name = l["name"] if len(l["name"]) <= 24 else l["name"][:23] + "…"
+        groups.append({
+            "line": pos, "color": l["color"], "bars": bars,
+            "top": round(row_top, 1), "base": base, "bar_zone": _STRIP_BAR_Z,
+            "zone_top": round(base - _STRIP_BAR_Z, 1),
+            "title": f"{name} · meta +{_fmt_kg(goal)} kg" if goal else name,
+            "title_y": round(row_top + 8, 1), "nums_y": round(base + 11, 1),
+            "ymax_label": _fmt_kg(ymax), "has_goal": bool(goal),
+        })
+    return {
+        "top": round(top, 1), "h": len(weighted) * _STRIP_ROW_H + (len(weighted) - 1) * _STRIP_ROW_GAP,
+        "base": groups[-1]["base"], "groups": groups, "row_h": _STRIP_ROW_H,
+        "has_goal": any(l["goal_kg"] for _, l in weighted),
+    }
+
+
 def _failure_chart(plan):
     """
     Gráfica de progreso de un plan con ejercicios "al fallo": en estos
@@ -1996,10 +2207,22 @@ def _failure_chart(plan):
 
     Cada ejercicio es una línea en % de SU propia base (100% = media de
     sus 2 primeras sesiones, para que un mal primer día no falsee todo),
-    así dominadas (8 reps) y sentadillas (40) caben en el mismo eje. La
-    línea gruesa es el total de la sesión: reps hechas / base de los
-    ejercicios que se hicieron ESE día (si un día faltó uno, no se
-    compara contra reps que nunca se pidieron).
+    así dominadas (8 reps) y sentadillas (40) caben en el mismo eje.
+
+    Qué se mide en cada línea:
+      - Ejercicio sin lastre: las repeticiones totales del día.
+      - Ejercicio CON peso (alguna sesión con kg añadidos): la fuerza
+        estimada de la sesión (_epley, con peso corporal +
+        kg añadidos) con las reps medias por serie de la sesión. Contar
+        solo reps o reps × kg haría caer la línea
+        cada vez que el plan sube el peso (al subir kg las reps vuelven
+        a la parte baja del rango aunque estés más fuerte).
+
+    La línea gruesa es el total: media de los % de los ejercicios que se
+    hicieron ESE día, ponderada por las reps base de cada uno (si un día
+    faltó uno, no se compara contra lo que nunca se pidió).
+
+    Cada punto sabe si ese día subiste el peso (up) para marcarlo.
 
     Devuelve None si no hay objetivos al fallo. Si hay menos de 2 días
     con sesión devuelve {"ready": False, ...} (con una sola sesión todo
@@ -2011,17 +2234,25 @@ def _failure_chart(plan):
     if not items:
         return None
 
-    # {item.pk: {date: {"reps": int, "sets": [reps por serie]}}}
+    body_kg, _ = calories.body_weight_for(plan.user)
+
+    # {item.pk: {date: {"reps": int, "kg": float, "score": float, "sets": [reps por serie]}}}
+    # "kg" = mayor peso añadido ese día; "score" = mejor fuerza estimada.
     per_item = {}
     for it in items:
         days = {}
         for s in it._sessions():
             d = s.recorded_at.astimezone(timezone.get_current_timezone()).date() if timezone.is_aware(s.recorded_at) else s.recorded_at.date()
-            slot = days.setdefault(d, {"reps": 0, "sets": []})
-            slot["reps"] += s.total_reps or 0
+            slot = days.setdefault(d, {"reps": 0, "kg": 0.0, "score": 0.0, "sets": []})
+            added = max(0.0, float(s.added_weight_kg or 0))
             # Solo series de repeticiones: las de aguante ({"reps": 0,
             # "durations": [...]}) no pintan "0-0" en el tooltip.
-            slot["sets"] += [x.get("reps", 0) for x in (s.sets or []) if isinstance(x, dict) and (x.get("reps") or 0) > 0]
+            reps_sets = [x.get("reps", 0) for x in (s.sets or []) if isinstance(x, dict) and (x.get("reps") or 0) > 0]
+            slot["reps"] += s.total_reps or 0
+            slot["kg"] = max(slot["kg"], added)
+            slot["sets"] += reps_sets
+            avg_reps = sum(reps_sets) / len(reps_sets) if reps_sets else ((s.total_reps or 0) / max(1, s.total_sets or 1))
+            slot["score"] = max(slot["score"], _epley(body_kg + added, avg_reps))
         if days:
             per_item[it.pk] = days
 
@@ -2033,15 +2264,36 @@ def _failure_chart(plan):
     for idx, it in enumerate(i for i in items if i.pk in per_item):
         days = per_item[it.pk]
         ds = sorted(days)
-        first = [days[d]["reps"] for d in ds[:2]]
-        base = sum(first) / len(first)
+        weighted = any(days[d]["kg"] > 0 for d in ds)
+        key = "score" if weighted else "reps"
+        base = sum(days[d][key] for d in ds[:2]) / len(ds[:2])
         if base <= 0:
             continue
+        base_reps = sum(days[d]["reps"] for d in ds[:2]) / len(ds[:2])
+        pts, prev_kg = {}, None
+        for d in ds:
+            p = days[d]
+            pts[d] = {
+                "pct": 100.0 * p[key] / base, "reps": p["reps"], "kg": p["kg"], "sets": p["sets"],
+                "up": bool(weighted and prev_kg is not None and p["kg"] > prev_kg + 1e-9),
+            }
+            prev_kg = p["kg"]
+        kg_label = None
+        if weighted:
+            first, last = days[ds[0]]["kg"], days[ds[-1]]["kg"]
+            end = f"+{_fmt_kg(last)}" if last > 0 else "0"
+            if first != last:
+                kg_label = f"{'+' + _fmt_kg(first) if first > 0 else '0'} → {end} kg"
+            elif last > 0:
+                kg_label = f"{end} kg"
         lines.append({
             "name": it.display_name,
             "color": _CHART_COLORS[idx % len(_CHART_COLORS)],
-            "base": base,
-            "pts": {d: {"pct": 100.0 * days[d]["reps"] / base, "reps": days[d]["reps"], "sets": days[d]["sets"]} for d in ds},
+            "base_reps": max(base_reps, 1.0),
+            "weighted": weighted, "kg_label": kg_label, "pts": pts,
+            "goal_kg": it.goal_weight_kg if (weighted and it.goal_weight_kg) else None,
+            "start_kg": it.start_weight_kg or 0.0,
+            "last_kg": days[ds[-1]]["kg"],
         })
     if not lines:
         return {"ready": False, "n_dates": len(all_dates)}
@@ -2051,17 +2303,27 @@ def _failure_chart(plan):
         done = [l for l in lines if d in l["pts"]]
         if not done:
             continue
-        num = sum(l["pts"][d]["reps"] for l in done)
-        den = sum(l["base"] for l in done)
-        total[d] = {"pct": 100.0 * num / den, "reps": num, "sets": []}
+        den = sum(l["base_reps"] for l in done)
+        total[d] = {
+            "pct": sum(l["pts"][d]["pct"] * l["base_reps"] for l in done) / den,
+            "reps": sum(l["pts"][d]["reps"] for l in done), "kg": 0.0, "sets": [], "up": False,
+        }
 
     vals = [p["pct"] for l in lines for p in l["pts"].values()] + [p["pct"] for p in total.values()]
-    lo = min(80, int(min(vals) // 10) * 10)
+    lo = min(90, int(min(vals) // 10) * 10)
     hi = max(120, int(-(-max(vals) // 10)) * 10)
 
-    W, H = 640, 260
-    L, R, T, B = 46, 14, 14, 30
-    pw, ph = W - L - R, H - T - B
+    # Si hay ejercicios con peso, bajo las líneas va una franja con los kg
+    # añadidos en cada sesión (mismas fechas, mismo eje x).
+    has_weight = any(l["weighted"] for l in lines)
+    n_rows = sum(1 for l in lines if l["weighted"])
+    strip_h = n_rows * _STRIP_ROW_H + max(0, n_rows - 1) * _STRIP_ROW_GAP
+    strip_gap = 12 if has_weight else 0
+    W = 520
+    L, R, T, B = 42, 12, 12, 28
+    ph = 250 - T - B  # alto del área de líneas
+    H = T + ph + strip_gap + strip_h + B
+    pw = W - L - R
     n = len(all_dates)
 
     def X(i):
@@ -2072,32 +2334,58 @@ def _failure_chart(plan):
 
     xi = {d: i for i, d in enumerate(all_dates)}
 
-    def build(name, color, pts, thick):
+    def build(name, color, pts, thick, weighted=False, kg_label=None, goal_kg=None, start_kg=0.0, last_kg=0.0):
         dots = []
+        last_d = max(pts)
         for d in sorted(pts):
             p = pts[d]
-            tip = f"{name} · {d.strftime('%d/%m')}: {p['reps']} reps ({round(p['pct'])}%)"
+            tip = f"{name} · {d.strftime('%d/%m')}"
             if p["sets"]:
-                tip += " — " + "-".join(str(r) for r in p["sets"])
-            dots.append({"x": X(xi[d]), "y": Y(p["pct"]), "tip": tip})
+                tip += f" — {'-'.join(str(r) for r in p['sets'])} ({p['reps']} reps)"
+            if p["kg"] > 0:
+                tip += f" · +{_fmt_kg(p['kg'])} kg"
+            tip += f" · {round(p['pct'])}%"
+            if p["up"]:
+                tip += " · subiste el peso"
+            y = Y(p["pct"])
+            dots.append({"x": X(xi[d]), "y": y, "y_up": round(y - 6, 1), "tip": tip, "up": p["up"], "last": d == last_d})
+        delta = round(pts[last_d]["pct"]) - 100
+        # Progreso hacia el peso objetivo: del peso de partida de ese
+        # objetivo (start_weight_kg) a la meta (goal_weight_kg), con el
+        # último peso usado. None si no hay meta.
+        progress = goal_text = None
+        if goal_kg:
+            span = goal_kg - start_kg
+            progress = 100 if last_kg >= goal_kg else max(0, min(99, int(100 * (last_kg - start_kg) / span))) if span > 0 else 0
+            goal_text = (f"✓ meta +{_fmt_kg(goal_kg)} kg conseguida" if progress >= 100
+                         else f"{progress}% · faltan {_fmt_kg(round(goal_kg - last_kg, 2))} kg para +{_fmt_kg(goal_kg)}")
         return {
             "name": name, "color": color, "thick": thick, "dots": dots,
             "points": " ".join(f"{q['x']},{q['y']}" for q in dots),
-            "last": round(pts[max(pts)]["pct"]),
+            "last": round(pts[last_d]["pct"]),
+            "delta": f"{'+' if delta > 0 else '−' if delta < 0 else ''}{abs(delta)}%",
+            "trend": "up" if delta > 0 else "down" if delta < 0 else "flat",
+            "kg_label": kg_label,
+            "goal_kg": _fmt_kg(goal_kg) if goal_kg else None,
+            "progress": progress, "goal_text": goal_text,
         }
 
     out_lines = [build("Total", "var(--bone)", total, True)]
-    out_lines += [build(l["name"], l["color"], l["pts"], False) for l in lines]
+    out_lines += [build(l["name"], l["color"], l["pts"], False, l["weighted"], l["kg_label"], l["goal_kg"], l["start_kg"], l["last_kg"]) for l in lines]
 
     step = 20 if hi - lo > 60 else 10
-    yticks = [{"y": Y(v), "label": f"{v}%"} for v in range(lo, hi + 1, step)]
+    yticks = [{"y": Y(v), "label": f"{v}%", "base": v == 100} for v in range(lo, hi + 1, step)]
     # Como mucho ~6 etiquetas de fecha para que no se pisen.
     every = max(1, -(-n // 6))
     xticks = [{"x": X(i), "label": all_dates[i].strftime("%d/%m")} for i in range(0, n, every)]
 
+    strip = _weight_strip(lines, X, xi, pw, n, T + ph + strip_gap) if has_weight else None
+
     return {
-        "ready": True, "w": W, "h": H, "left": L, "right": W - R, "bottom": H - B,
-        "ref_y": Y(100), "yticks": yticks, "xticks": xticks, "lines": out_lines,
+        "ready": True, "w": W, "h": H, "left": L, "right": W - R, "top": T, "bottom": H - B,
+        "ref_y": Y(100), "zone_w": pw, "zone_h": max(0, round(Y(100) - T, 1)), "yticks": yticks, "xticks": xticks, "lines": out_lines,
+        "has_weight": has_weight, "strip": strip,
+        "has_up": any(p["up"] for l in lines for p in l["pts"].values()),
     }
 
 
@@ -3406,7 +3694,7 @@ def plan_session_save(request, pk, plan_pk):
         if it.exercise:
             targets[it.exercise.slug] = it.current_target()
 
-    created = 0
+    created = []
     for b in data.get("breakdown", []) or []:
         if not isinstance(b, dict):
             continue
@@ -3415,28 +3703,23 @@ def plan_session_save(request, pk, plan_pk):
             continue
         t = targets.get(slug, {})
         num = lambda k: int(b[k]) if isinstance(b.get(k), (int, float)) else 0
-        WorkoutSession.objects.create(
+        created.append(WorkoutSession.objects.create(
             task=task, user=get_current_user(), plan=plan, series_id=task.series_id,
             exercise=slug,
-            sets=[
-                {"reps": int(r)} for r in (b.get("set_reps") if isinstance(b.get("set_reps"), list) else [])[:50]
-                if isinstance(r, (int, float)) and not isinstance(r, bool) and 0 < r <= 1000
-            ] or [
-                # Ejercicios cronometrados: segundos aguantados por serie
-                # (mismo formato que la cámara, ver last_set_seconds).
-                {"reps": 0, "durations": [round(float(x), 1)]}
-                for x in (b.get("set_seconds") if isinstance(b.get("set_seconds"), list) else [])[:50]
-                if isinstance(x, (int, float)) and not isinstance(x, bool) and 0 < x <= 36000
-            ],
+            # Series con el tiempo de cada rep, o (aguantes) segundos por
+            # serie -- ver api._breakdown_timing.
+            **api._breakdown_timing(b),
             total_reps=num("reps"), total_sets=num("sets"),
             session_duration_seconds=num("seconds"),
             target_sets=t.get("sets"), target_reps=t.get("reps"),
             target_seconds=t.get("seconds"),
-        )
-        created += 1
+        ))
 
     if not created:
         return JsonResponse({"ok": False, "error": "Sin datos que guardar"}, status=400)
+
+    # Cronómetro total de la sesión (si la página lo manda).
+    api._save_training_session(task, data, created, plan=plan)
 
     messages.success(request, f"Sesión de «{plan.name}» guardada.")
     # La tarea se marca hecha en task_cooldown — falta el enfriamiento

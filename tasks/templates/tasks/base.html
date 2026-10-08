@@ -1,4 +1,4 @@
-{% load static %}
+{% load static profile_tags %}
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -34,6 +34,9 @@
                 <a href="{% url 'tasks:plan_list' %}" class="{% if '/planes' in request.path %}is-active{% endif %}">Planes</a>
                 <a href="{% url 'tasks:weekly_review' %}" class="{% if request.resolver_match.url_name == 'weekly_review' %}is-active{% endif %}">Revisión</a>
                 <a href="{% url 'tasks:stats_list' %}" class="{% if '/estadisticas' in request.path %}is-active{% endif %}">Estadísticas</a>
+                <a href="{% url 'tasks:settings' %}" class="{% if request.resolver_match.url_name == 'settings' %}is-active{% endif %}">Ajustes</a>
+                {% nav_profile as me %}
+                <a href="{% url 'tasks:profile' %}" class="nav-avatar{% if request.resolver_match.url_name == 'profile' %} is-active{% endif %}" title="Mi perfil" aria-label="Mi perfil"><span class="avatar avatar--sm" style="--avatar-color: {{ me.avatar_color }}">{{ me.avatar_emoji }}</span></a>
                 <button type="button" class="theme-toggle" id="theme-toggle" title="Cambiar a modo claro/oscuro" aria-label="Cambiar de tema">🌙</button>
             </div>
         </div>

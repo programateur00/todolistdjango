@@ -31,7 +31,7 @@
     </div>
     <div class="stats-bar"><div class="stats-bar__done" id="reading-progress-bar" style="width:{{ status.pct|default:0 }}%"></div></div>
 
-    {% if today_status %}
+    {% if today_status and not today_status.is_overdue %}
     <div id="reading-today-status" class="reading-status">
         <span id="reading-today-label">Hoy: {{ today_status.pages_today }}/{{ today_status.goal }} pág. · {{ today_status.pct }}%</span>
     </div>
@@ -525,7 +525,7 @@
         // Objetivo de HOY -- fijo durante el día (ver Task.reading_today_status),
         // así que a diferencia de la barra de arriba esta sí puede pasar del
         // 100% con un color distinto en vez de recortarse.
-        if (data.today && todayBar) {
+        if (data.today && !data.today.is_overdue && todayBar) {
             todayBar.style.width = data.today.bar_pct + '%';
             todayBar.classList.toggle('stats-bar__done--over', data.today.pct > 100);
             if (todayLabel) {

@@ -1032,6 +1032,13 @@ class PlanViewTests(TestCase):
         # sin ningún plan activo, la lista de grupos está vacía sin más.
         self.assertEqual(r.context["plan_groups"], [])
 
+    def test_deleted_plan_shows_in_borrados_section(self):
+        plan = self._create_plan()
+        self.client.post(reverse("tasks:plan_delete", args=[plan.pk]))
+        r = self.client.get(reverse("tasks:plan_list"))
+        self.assertEqual(r.context["deleted_plans_count"], 1)
+        self.assertContains(r, "Planes borrados")
+
 
 class NotificationSeriesTests(TestCase):
     """
@@ -2601,3 +2608,531 @@ class ReadingPlanDayPctTests(TestCase):
 
     def test_reading_extra_goes_over_100(self):
         self.assertEqual(self._pct(self._plan(15)), 150)
+
+
+class RepTimingAndTrainingSessionTests(TestCase):
+    """Tiempo de cada rep + cronómetro total de la sesión (plan y circuito)."""
+
+    def setUp(self):
+        from .models import Exercise, Plan, PlanItem, Routine, RoutineItem
+        self.user = get_current_user()
+        self.ex, _ = Exercise.objects.get_or_create(
+            slug="pullup", defaults=dict(name="Dominadas", mode="pose", counter_key="pullup"),
+        )
+        self.plan = Plan.objects.create(name="P", user=self.user)
+        PlanItem.objects.create(
+            plan=self.plan, exercise=self.ex, progression=PlanItem.PROG_FAILURE, start_sets=2, order=0,
+        )
+        self.routine = Routine.objects.create(name="R", user=self.user)
+        RoutineItem.objects.create(routine=self.routine, exercise=self.ex, order=0)
+        self.task = Task.objects.create(title="Entreno", user=self.user)
+
+    def _post(self, url, breakdown, **extra):
+        return self.client.post(
+            url, data=json.dumps({"breakdown": breakdown, "finish": False, **extra}),
+            content_type="application/json",
+        )
+
+    def test_plan_save_keeps_rep_durations_and_total_time(self):
+        r = self._post(
+            f"/api/tasks/{self.task.uuid}/plan/{self.plan.uuid}/save/",
+            [{"exercise": "pullup", "reps": 5, "sets": 2, "seconds": 70,
+              "set_reps": [3, 2], "set_durations": [[1.2, 1.4, 1.3], [1.5, 1.7]]}],
+            session_seconds=312.4,
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["session_seconds"], 312)
+        ws = WorkoutSession.objects.get(task=self.task, exercise="pullup")
+        self.assertEqual(ws.sets, [
+            {"reps": 3, "durations": [1.2, 1.4, 1.3]}, {"reps": 2, "durations": [1.5, 1.7]},
+        ])
+        self.assertEqual(ws.rep_durations, [1.2, 1.4, 1.3, 1.5, 1.7])
+        self.assertEqual(ws.avg_rep_seconds, 1.42)
+        self.assertEqual(ws.training_session.total_seconds, 312)
+        self.assertEqual(ws.training_session.plan, self.plan)
+
+    def test_durations_stay_aligned_when_a_set_is_filtered_out(self):
+        self._post(
+            f"/api/tasks/{self.task.uuid}/plan/{self.plan.uuid}/save/",
+            [{"exercise": "pullup", "reps": 4, "sets": 2, "seconds": 40,
+              "set_reps": [0, 4], "set_durations": [[9.9], [1.0, 1.1, 1.2, 1.3]]}],
+        )
+        ws = WorkoutSession.objects.get(task=self.task, exercise="pullup")
+        self.assertEqual(ws.sets, [{"reps": 4, "durations": [1.0, 1.1, 1.2, 1.3]}])
+
+    def test_old_app_without_timing_still_saves(self):
+        r = self._post(
+            f"/api/tasks/{self.task.uuid}/plan/{self.plan.uuid}/save/",
+            [{"exercise": "pullup", "reps": 5, "sets": 1, "seconds": 30, "set_reps": [5]}],
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertIsNone(r.json()["session_seconds"])
+        ws = WorkoutSession.objects.get(task=self.task, exercise="pullup")
+        self.assertEqual(ws.sets, [{"reps": 5}])
+        self.assertEqual(ws.rep_durations, [])
+        self.assertIsNone(ws.avg_rep_seconds)
+        self.assertIsNone(ws.training_session)
+
+    def test_circuit_save_stores_total_time_and_rep_durations(self):
+        r = self._post(
+            f"/api/tasks/{self.task.uuid}/circuit/{self.routine.uuid}/",
+            [{"exercise": "pullup", "reps": 2, "sets": 1, "seconds": 20,
+              "set_reps": [2], "set_durations": [[1.0, 2.0]]}],
+            session_seconds=95,
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["session_seconds"], 95)
+        ws = WorkoutSession.objects.get(task=self.task, exercise="pullup")
+        self.assertEqual(ws.rep_durations, [1.0, 2.0])
+        self.assertEqual(ws.training_session.routine, self.routine)
+        self.assertEqual(ws.training_session.workouts.count(), 1)
+
+    def test_web_plan_save_also_stores_timing(self):
+        r = self._post(
+            reverse("tasks:plan_session_save", args=[self.task.pk, self.plan.pk]),
+            [{"exercise": "pullup", "reps": 2, "sets": 1, "seconds": 20,
+              "set_reps": [2], "set_durations": [[1.1, 1.3]]}],
+            session_seconds=60,
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        ws = WorkoutSession.objects.get(task=self.task, exercise="pullup")
+        self.assertEqual(ws.rep_durations, [1.1, 1.3])
+        self.assertEqual(ws.training_session.total_seconds, 60)
+
+
+class CaloriesTests(TestCase):
+    """Calorías aproximadas por ejercicio (MET × peso × tiempo, ver calories.py)."""
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.push = Exercise.objects.create(
+            slug="cal-push", name="Flexiones", mode=Exercise.MODE_POSE, met=6.0,
+        )
+        self.run = Exercise.objects.create(
+            slug="cal-run", name="Correr", mode=Exercise.MODE_DISTANCE,
+        )
+        self.task = Task.objects.create(
+            title="Entrenar", category=Task.CATEGORY_SPORT, user=self.user,
+        )
+
+    def _set_weight(self, kg):
+        from .models import UserSettings
+        UserSettings.objects.update_or_create(user=self.user, defaults={"body_weight_kg": kg})
+
+    def test_reps_session_is_kcal_per_rep(self):
+        self._set_weight(80)
+        # 20 reps × 3 s (por defecto) = 60 s a 6 MET con 80 kg: 6 * 80 * 60/3600 = 8 kcal
+        ws = WorkoutSession.objects.create(
+            task=self.task, user=self.user, exercise="cal-push", total_reps=20,
+            rep_durations=[30.0] * 20, session_duration_seconds=600,
+        )
+        self.assertAlmostEqual(ws.calories_kcal, 8.0, places=1)
+
+    def test_reps_do_not_depend_on_how_long_the_session_took(self):
+        self._set_weight(70)
+        slow = WorkoutSession.objects.create(
+            task=self.task, user=self.user, exercise="cal-push", total_reps=10,
+            rep_durations=[60.0] * 10, session_duration_seconds=900,
+        )
+        fast = WorkoutSession.objects.create(
+            task=self.task, user=self.user, exercise="cal-push", total_reps=10,
+            rep_durations=[1.0] * 10, session_duration_seconds=30,
+        )
+        self.assertEqual(slow.calories_kcal, fast.calories_kcal)
+
+    def test_rep_duration_override_for_slow_exercise(self):
+        self._set_weight(70)
+        self.assertEqual(Exercise.objects.get(slug="pullup").met, 8.0)  # sembrado por la migración 0096
+        ws = WorkoutSession.objects.create(
+            task=self.task, user=self.user, exercise="pullup", total_reps=10,
+            session_duration_seconds=120,
+        )
+        # 10 reps × 4 s = 40 s a 8 MET con 70 kg: 8 * 70 * 40/3600 ≈ 6.2 kcal
+        self.assertAlmostEqual(ws.calories_kcal, 6.2, places=1)
+
+    def test_timed_exercise_counts_seconds_held(self):
+        self._set_weight(70)
+        Exercise.objects.create(slug="cal-plank", name="Plancha", mode=Exercise.MODE_TIMED, met=3.8)
+        ws = WorkoutSession.objects.create(
+            task=self.task, user=self.user, exercise="cal-plank",
+            sets=[{"reps": 0, "durations": [60.0]}, {"reps": 0, "durations": [60.0]}],
+            session_duration_seconds=300,
+        )
+        # 120 s aguantados a 3.8 MET con 70 kg: 3.8 * 70 * 120/3600 ≈ 8.9 kcal
+        self.assertAlmostEqual(ws.calories_kcal, 8.9, places=1)
+
+    def test_default_weight_when_not_set(self):
+        ws = WorkoutSession.objects.create(
+            task=self.task, user=self.user, exercise="cal-push", total_reps=40,
+            session_duration_seconds=360,
+        )
+        # 40 reps × 3 s = 120 s: 6 MET * 70 kg * 120/3600 = 14 kcal
+        self.assertAlmostEqual(ws.calories_kcal, 14.0, places=1)
+
+    def test_running_uses_speed(self):
+        self._set_weight(70)
+        ws = WorkoutSession.objects.create(
+            task=self.task, user=self.user, exercise="cal-run",
+            distance_km=5.0, session_duration_seconds=30 * 60,   # 10 km/h
+        )
+        # ~10.5 MET * 70 kg * 0.5 h ≈ 368 kcal
+        self.assertTrue(340 <= ws.calories_kcal <= 400, ws.calories_kcal)
+
+    def test_session_without_data_has_no_calories(self):
+        ws = WorkoutSession.objects.create(task=self.task, user=self.user, exercise="cal-push")
+        self.assertIsNone(ws.calories_kcal)
+
+    def test_soft_delete_does_not_recompute(self):
+        self._set_weight(70)
+        ws = WorkoutSession.objects.create(
+            task=self.task, user=self.user, exercise="cal-push", total_reps=5,
+            rep_durations=[2.0] * 5, session_duration_seconds=60,
+        )
+        before = ws.calories_kcal
+        self._set_weight(100)
+        ws.deleted_at = timezone.now()
+        ws.save(update_fields=["deleted_at"])
+        ws.refresh_from_db()
+        self.assertEqual(ws.calories_kcal, before)
+
+    def test_settings_page_saves_weight(self):
+        r = self.client.post(reverse("tasks:settings"), {"body_weight_kg": "82,5"})
+        self.assertEqual(r.status_code, 302)
+        from .models import UserSettings
+        self.assertEqual(UserSettings.objects.get(user=self.user).body_weight_kg, 82.5)
+        r = self.client.post(reverse("tasks:settings"), {"body_weight_kg": "5"})
+        self.assertEqual(UserSettings.objects.get(user=self.user).body_weight_kg, 82.5)  # inválido: no cambia
+
+    def test_stats_pages_show_calories(self):
+        self._set_weight(70)
+        WorkoutSession.objects.create(
+            task=self.task, user=self.user, exercise="cal-push", total_reps=100,
+            rep_durations=[3.6] * 100, session_duration_seconds=360,
+        )
+        r = self.client.get(reverse("tasks:stats_list"))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context["kcal"]["week"], 35)
+        self.assertContains(r, "Calorías (aprox.)")
+        self.task.mark_done()
+        r = self.client.get(reverse("tasks:stats_detail", args=[self.task.series_id]))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context["total_kcal"], 35)
+        self.assertEqual(r.context["chart_points"][-1]["kcal"], 35)
+
+
+class FailureChartWeightTests(TestCase):
+    """La gráfica de "al fallo" cuenta los kg añadidos: con peso mide la
+    fuerza estimada (reps y kg a la vez), así que subir lastre no se ve
+    como un retroceso; sin lastre sigue siendo solo reps."""
+
+    def setUp(self):
+        from .models import Exercise, Plan, PlanItem, UserSettings, WorkoutSession
+        from .views import _failure_chart
+        self.chart_fn, self.WS = _failure_chart, WorkoutSession
+        self.user = get_current_user()
+        UserSettings.objects.update_or_create(user=self.user, defaults={"body_weight_kg": 70})
+        self.ex, _ = Exercise.objects.get_or_create(
+            slug="weighted-pullup", defaults=dict(name="Dominadas con peso", mode="pose", counter_key="pullup"),
+        )
+        self.plan = Plan.objects.create(name="P", user=self.user)
+        PlanItem.objects.create(
+            plan=self.plan, exercise=self.ex, progression=PlanItem.PROG_FAILURE, start_sets=3, order=0,
+        )
+
+    def _ws(self, days_ago, sets, kg=None):
+        ws = self.WS.objects.create(
+            user=self.user, plan=self.plan, exercise="weighted-pullup",
+            total_reps=sum(sets), total_sets=len(sets), sets=[{"reps": r} for r in sets], added_weight_kg=kg,
+        )
+        self.WS.objects.filter(pk=ws.pk).update(recorded_at=timezone.now() - timedelta(days=days_ago))
+
+    def _pcts(self, chart):
+        import re
+        line = chart["lines"][1]  # [0] es el total
+        return [int(re.search(r"· (\d+)%", d["tip"]).group(1)) for d in line["dots"]]
+
+    def test_more_kg_same_reps_raises_line(self):
+        self._ws(4, [8, 6], 5)
+        self._ws(3, [8, 6], 5)
+        self._ws(2, [8, 6], 10)  # mismas reps, más lastre
+        chart = self.chart_fn(self.plan)
+        pcts = self._pcts(chart)
+        self.assertEqual(pcts[:2], [100, 100])
+        self.assertGreater(pcts[2], 100)
+        self.assertTrue(chart["has_weight"])
+        self.assertIn("+10 kg", chart["lines"][1]["dots"][2]["tip"])
+
+    def test_raising_weight_is_marked_and_does_not_look_like_a_drop(self):
+        self._ws(5, [8, 7, 6], 0)
+        self._ws(4, [8, 7, 6], 0)
+        self._ws(3, [8, 6, 5], 5)  # sube el peso, mismas reps en la mejor serie
+        chart = self.chart_fn(self.plan)
+        dots = chart["lines"][1]["dots"]
+        self.assertGreater(self._pcts(chart)[2], 100)
+        self.assertEqual([d["up"] for d in dots], [False, False, True])
+        self.assertIn("subiste el peso", dots[2]["tip"])
+        self.assertTrue(chart["has_up"])
+
+    def test_fewer_reps_but_much_more_kg_still_counts_as_progress(self):
+        self._ws(4, [8], 0)
+        self._ws(3, [8], 0)
+        self._ws(2, [7], 10)  # 80 × (1 + 7/30) > 70 × (1 + 8/30)
+        self.assertGreater(self._pcts(self.chart_fn(self.plan))[2], 100)
+
+    def test_kg_label_shows_start_and_end_weight(self):
+        self._ws(4, [8], 0)
+        self._ws(3, [8], 5)
+        self._ws(2, [8], 10)
+        self.assertEqual(self.chart_fn(self.plan)["lines"][1]["kg_label"], "0 → +10 kg")
+
+    def test_without_kg_it_is_plain_reps(self):
+        self._ws(4, [8])
+        self._ws(3, [8])
+        self._ws(2, [10])
+        chart = self.chart_fn(self.plan)
+        self.assertEqual(self._pcts(chart), [100, 100, 125])
+        self.assertFalse(chart["has_weight"])
+        self.assertIsNone(chart["lines"][1]["kg_label"])
+        self.assertEqual(chart["lines"][1]["delta"], "+25%")
+
+    def test_plan_page_renders_kg_markers_and_legend(self):
+        self._ws(4, [8, 6], 0)
+        self._ws(3, [8, 6], 5)
+        self._ws(2, [8, 6], 10)
+        html = self.client.get(reverse("tasks:plan_detail", args=[self.plan.pk])).content.decode()
+        self.assertIn("Progreso de repeticiones y peso", html)
+        self.assertIn("0 → +10 kg", html)
+        self.assertIn("subiste el peso", html)
+        self.assertIn("fchart__up", html)
+
+    def test_weight_strip_one_bar_per_session_inside_the_chart(self):
+        from .models import PlanItem
+        PlanItem.objects.filter(plan=self.plan).update(goal_weight_kg=20)
+        self._ws(4, [8, 6], 0)
+        self._ws(3, [8, 6], 5)
+        self._ws(2, [8, 6], 10)
+        chart = self.chart_fn(self.plan)
+        g = chart["strip"]["groups"]
+        self.assertEqual(len(g), 1)
+        self.assertEqual(g[0]["line"], 1)  # [0] de lines es el Total
+        bars = g[0]["bars"]
+        self.assertEqual([b["up"] for b in bars], [False, True, True])
+        self.assertLess(bars[0]["h"], bars[1]["h"])
+        self.assertLess(bars[1]["h"], bars[2]["h"])
+        self.assertAlmostEqual(bars[2]["h"], g[0]["bar_zone"] * 10 / 20, places=0)  # barra llena = meta (20)
+        self.assertIn("meta +20 kg", bars[2]["tip"])
+        self.assertIn("subiste el peso (+5 kg)", bars[1]["tip"])
+        self.assertEqual(chart["lines"][1]["kg_label"], "0 → +10 kg")
+        self.assertEqual(chart["lines"][1]["progress"], 50)
+        self.assertEqual(chart["lines"][1]["goal_text"], "50% · faltan 10 kg para +20")
+        self.assertTrue(chart["strip"]["has_goal"])
+        # la franja va dentro del mismo SVG: por debajo de las líneas y antes de las fechas
+        self.assertGreater(chart["strip"]["top"], chart["ref_y"])
+        self.assertLessEqual(chart["strip"]["base"], chart["bottom"])
+
+    def test_no_strip_without_kg(self):
+        self._ws(3, [8])
+        self._ws(2, [9])
+        chart = self.chart_fn(self.plan)
+        self.assertIsNone(chart["strip"])
+        self.assertEqual(chart["h"], 250)
+
+    def test_plan_page_renders_weight_strip(self):
+        self._ws(4, [8, 6], 0)
+        self._ws(3, [8, 6], 5)
+        html = self.client.get(reverse("tasks:plan_detail", args=[self.plan.pk])).content.decode()
+        self.assertIn("fchart__bar", html)
+        self.assertNotIn("Peso añadido por sesión", html)
+
+
+    def test_session_in_plan_records_the_planned_weight(self):
+        from .models import PlanItem
+        PlanItem.objects.filter(plan=self.plan).update(start_weight_kg=5, goal_weight_kg=20)
+        ws = self.WS.objects.create(
+            user=self.user, plan=self.plan, exercise="weighted-pullup",
+            total_reps=8, total_sets=1, sets=[{"reps": 8}],
+        )
+        self.assertEqual(ws.added_weight_kg, 5)
+
+    def test_explicit_weight_wins_and_loose_sessions_stay_empty(self):
+        from .models import PlanItem
+        PlanItem.objects.filter(plan=self.plan).update(start_weight_kg=5, goal_weight_kg=20)
+        own = self.WS.objects.create(user=self.user, plan=self.plan, exercise="weighted-pullup",
+                                     total_reps=8, sets=[{"reps": 8}], added_weight_kg=7.5)
+        loose = self.WS.objects.create(user=self.user, exercise="weighted-pullup", total_reps=8, sets=[{"reps": 8}])
+        self.assertEqual(own.added_weight_kg, 7.5)
+        self.assertIsNone(loose.added_weight_kg)
+
+
+    def test_goal_progress_uses_start_weight_and_marks_completion(self):
+        from .models import PlanItem
+        PlanItem.objects.filter(plan=self.plan).update(start_weight_kg=5, goal_weight_kg=15)
+        self._ws(4, [8], 5)
+        self._ws(3, [8], 10)
+        line = self.chart_fn(self.plan)["lines"][1]
+        self.assertEqual(line["progress"], 50)  # de 5 a 15, vas por 10
+        self._ws(2, [8], 15)
+        line = self.chart_fn(self.plan)["lines"][1]
+        self.assertEqual(line["progress"], 100)
+        self.assertIn("conseguida", line["goal_text"])
+
+    def test_no_goal_no_progress(self):
+        self._ws(3, [8], 5)
+        self._ws(2, [8], 7.5)
+        chart = self.chart_fn(self.plan)
+        self.assertIsNone(chart["lines"][1]["progress"])
+        self.assertFalse(chart["strip"]["has_goal"])
+
+
+    def test_strip_bars_show_reps_done_with_each_weight_and_the_target(self):
+        from .models import PlanItem
+        PlanItem.objects.filter(plan=self.plan).update(goal_weight_kg=20)
+        self._ws(4, [8, 7, 6], 5)   # 21 reps con +5
+        self._ws(3, [9, 7, 6], 5)   # 22 reps con +5
+        self._ws(2, [7, 6, 5], 7.5)  # sube el peso: 18 reps con +7,5
+        g = self.chart_fn(self.plan)["strip"]["groups"][0]
+        self.assertEqual([b["label"] for b in g["bars"]], ["21", "22", "18"])
+        self.assertIn("8-7-6 (21 reps) con +5 kg", g["bars"][0]["tip"])
+        self.assertIn("7-6-5 (18 reps) con +7.5 kg", g["bars"][2]["tip"])
+        self.assertEqual(g["title"], "Dominadas con peso · meta +20 kg")
+
+    def test_progress_counts_every_set_not_only_the_best(self):
+        self._ws(4, [8, 6, 5], 5)
+        self._ws(3, [8, 6, 5], 5)
+        self._ws(2, [8, 8, 7], 5)  # misma mejor serie, mejores series siguientes
+        self.assertGreater(self._pcts(self.chart_fn(self.plan))[2], 100)
+
+    def test_api_plan_session_save_records_the_planned_weight(self):
+        from .models import PlanItem, Task
+        PlanItem.objects.filter(plan=self.plan).update(start_weight_kg=5, goal_weight_kg=20)
+        task = Task.objects.create(title="Fuerza", user=self.user)
+        r = self.client.post(
+            f"/api/tasks/{task.uuid}/plan/{self.plan.uuid}/save/",
+            data={"breakdown": [{"exercise": "weighted-pullup", "reps": 8, "sets": 1, "set_reps": [8]}]},
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(self.WS.objects.filter(plan=self.plan).first().added_weight_kg, 5)
+
+
+class ProfileTests(TestCase):
+    """Perfil mínimo: nombre, avatar y datos corporales (tasks/profile.py)."""
+
+    def setUp(self):
+        self.user = get_current_user()
+
+    def _settings(self):
+        from .models import UserSettings
+        return UserSettings.objects.get(user=self.user)
+
+    # --- web ---------------------------------------------------------
+    def test_page_renders_with_defaults_and_nav_icon(self):
+        r = self.client.get(reverse("tasks:profile"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "Tu nombre")
+        r = self.client.get(reverse("tasks:task_list"))
+        self.assertContains(r, 'class="nav-avatar')
+
+    def test_page_saves_profile(self):
+        r = self.client.post(reverse("tasks:profile"), {
+            "display_name": "  Alex   Test ", "avatar_emoji": "🔥", "avatar_color": "#4a8bdf",
+            "birth_date": "1999-05-04", "height_cm": "180", "body_weight_kg": "82,5", "goal_weight_kg": "78",
+        })
+        self.assertEqual(r.status_code, 302)
+        us = self._settings()
+        self.assertEqual(us.display_name, "Alex Test")
+        self.assertEqual(us.avatar_emoji, "🔥")
+        self.assertEqual(us.avatar_color, "#4A8BDF")
+        self.assertEqual(str(us.birth_date), "1999-05-04")
+        self.assertEqual(us.height_cm, 180)
+        self.assertEqual(us.body_weight_kg, 82.5)
+        self.assertEqual(us.goal_weight_kg, 78)
+        self.assertContains(self.client.get(reverse("tasks:profile")), 'value="1999-05-04"')
+
+    def test_invalid_input_saves_nothing(self):
+        r = self.client.post(reverse("tasks:profile"), {
+            "display_name": "Ok", "avatar_emoji": "🔥", "avatar_color": "#4A8BDF", "height_cm": "999",
+        })
+        self.assertEqual(r.status_code, 200)  # vuelve a pintar el formulario con el error
+        from .models import UserSettings
+        self.assertFalse(UserSettings.objects.filter(user=self.user).exists())
+
+    def test_settings_page_weight_also_logs_history(self):
+        from .models import WeightLog
+        self.client.post(reverse("tasks:settings"), {"body_weight_kg": "75"})
+        self.assertEqual(WeightLog.objects.get(user=self.user).weight_kg, 75)
+
+    def test_stats_page_is_untouched_by_the_profile(self):
+        r = self.client.get(reverse("tasks:stats_list"))
+        self.assertEqual(r.status_code, 200)
+        self.assertNotContains(r, "Mi cumplimiento")
+
+    # --- validación --------------------------------------------------
+    def test_rejects_bad_values(self):
+        from . import profile
+        future = (timezone.localdate() + timedelta(days=1)).isoformat()
+        for bad in (
+            {"avatar_emoji": "x"}, {"avatar_color": "#000000"},
+            {"birth_date": future}, {"birth_date": "1850-01-01"}, {"birth_date": "no-es-fecha"},
+            {"goal_weight_kg": 10}, {"height_cm": 20}, {"body_weight_kg": "abc"},
+            {"display_name": "x" * 41},
+        ):
+            ok, errors = profile.apply_profile(self.user, bad)
+            self.assertFalse(ok, bad)
+            self.assertEqual(len(errors), 1, bad)
+
+    def test_empty_values_clear_optional_fields(self):
+        from . import profile
+        profile.apply_profile(self.user, {"height_cm": 170, "body_weight_kg": 70, "birth_date": "2000-01-01"})
+        profile.apply_profile(self.user, {"height_cm": "", "body_weight_kg": None, "birth_date": ""})
+        us = self._settings()
+        self.assertIsNone(us.height_cm)
+        self.assertIsNone(us.body_weight_kg)
+        self.assertIsNone(us.birth_date)
+
+    # --- datos derivados ---------------------------------------------
+    def test_derives_age_bmi_and_distance_to_goal(self):
+        from . import profile
+        today = timezone.localdate()
+        born = today.replace(year=today.year - 30) - timedelta(days=1)
+        ok, errors = profile.apply_profile(self.user, {
+            "birth_date": born.isoformat(), "height_cm": "180", "body_weight_kg": "81", "goal_weight_kg": "76,5",
+        })
+        self.assertTrue(ok, errors)
+        d = profile.profile_data(self.user)
+        self.assertEqual((d["age"], d["bmi"], d["to_goal_kg"]), (30, 25.0, -4.5))
+
+    def test_age_turns_on_the_birthday(self):
+        from . import profile
+        today = timezone.localdate()
+        self.assertEqual(profile.age_from(today.replace(year=today.year - 20), today), 20)
+        self.assertEqual(profile.age_from(today.replace(year=today.year - 20) + timedelta(days=1), today), 19)
+        self.assertIsNone(profile.age_from(None))
+
+    def test_weight_history_logs_changes_once_per_day(self):
+        from . import profile
+        from .models import WeightLog
+        profile.apply_profile(self.user, {"body_weight_kg": 80})
+        profile.apply_profile(self.user, {"body_weight_kg": 80})        # mismo peso: nada nuevo
+        profile.apply_profile(self.user, {"body_weight_kg": 79.5})      # mismo día: sustituye
+        self.assertEqual(WeightLog.objects.filter(user=self.user).count(), 1)
+        self.assertEqual(WeightLog.objects.get(user=self.user).weight_kg, 79.5)
+        WeightLog.objects.create(user=self.user, date=timezone.localdate() - timedelta(days=7), weight_kg=82)
+        d = profile.profile_data(self.user)
+        self.assertEqual([w["kg"] for w in d["weight_history"]], [79.5, 82])
+        self.assertEqual(d["weight_change"], -2.5)
+
+    # --- API ---------------------------------------------------------
+    def test_api_get_and_post(self):
+        data = self.client.get("/api/profile/").json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["profile"]["shown_name"], "Tu nombre")
+        self.assertIn("emojis", data["options"])
+        r = self.client.post("/api/profile/", json.dumps({"display_name": "Alex", "height_cm": 181}),
+                             content_type="application/json")
+        self.assertEqual(r.json()["profile"]["display_name"], "Alex")
+        self.assertEqual(r.json()["profile"]["height_cm"], 181)
+        r = self.client.post("/api/profile/", json.dumps({"height_cm": 500}), content_type="application/json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("height_cm", r.json()["errors"])
+        self.assertNotIn("summary", self.client.get("/api/stats/").json())

@@ -36,8 +36,8 @@ from django.views.decorators.http import require_http_methods
 from . import ai
 from .models import (
     CourseModule, CoursePlaylist, CourseQuiz, DebugLog, Exercise, Occurrence, Plan, PlanItem,
-    Routine, RoutineItem, SavedVideo, Task, TimerSession, WarmupStatus, WorkoutSession,
-    day_average_pace, last_set_reps, last_set_seconds,
+    Routine, RoutineItem, SavedVideo, Task, TimerSession, TrainingSession, WarmupStatus,
+    WorkoutSession, day_average_pace, last_set_reps, last_set_seconds,
 )
 from .utils import get_current_user, read_mobile_release, resolve_plan_target as _plan_context
 from .youtube_search import YouTubeSearchError, get_videos_details, list_playlist_items
@@ -246,6 +246,27 @@ def meta(request):
             "notes": release["notes"],
         }
     return JsonResponse(payload)
+
+
+@api("GET", "POST")
+def profile(request):
+    """Perfil del usuario para la app móvil: GET lo lee, POST guarda los
+    campos que lleguen (ver tasks/profile.py)."""
+    from . import profile as profile_mod
+    user = _user()
+    if request.method == "POST":
+        ok, errors = profile_mod.apply_profile(user, body(request))
+        if not ok:
+            return JsonResponse({"ok": False, "error": " ".join(errors.values()), "errors": errors}, status=400)
+    return JsonResponse({
+        "ok": True,
+        "profile": profile_mod.profile_data(user),
+        "options": {
+            "emojis": profile_mod.AVATAR_EMOJIS,
+            "colors": profile_mod.AVATAR_COLORS,
+            "name_max": profile_mod.DISPLAY_NAME_MAX,
+        },
+    })
 
 
 @api("GET")
@@ -1059,7 +1080,10 @@ def workout_save(request, uuid):
     # volver e intentarlo otra vez el mismo día.
     if data.get("finish", True) and ws.target_met:
         t.mark_done()
-    return JsonResponse({"ok": True, "session_uuid": str(ws.uuid), "task": task_json(t)})
+    return JsonResponse({
+        "ok": True, "session_uuid": str(ws.uuid), "task": task_json(t),
+        "calories_kcal": round(ws.calories_kcal) if ws.calories_kcal else None,
+    })
 
 
 @api("POST")
@@ -1329,6 +1353,7 @@ def routine_result(request, uuid, routine_uuid):
                 "seconds": _num(b, "seconds"),
                 "reps": _num(b, "reps"),
                 "sets": _num(b, "sets"),
+                "timing": _breakdown_timing(b),
             })
     if not entries:
         return JsonResponse({"ok": False, "error": "Sin datos que guardar"}, status=400)
@@ -1343,8 +1368,11 @@ def routine_result(request, uuid, routine_uuid):
             exercise=e["exercise"],
             total_reps=e["reps"], total_sets=e["sets"],
             session_duration_seconds=e["seconds"],
+            **e["timing"],
         ))
         total_seconds += e["seconds"]
+
+    ts = _save_training_session(t, data, created, routine=r)
 
     # finish=false permite guardar y seguir en la misma sesion: la tarea
     # solo se cierra cuando el usuario lo dice.
@@ -1362,6 +1390,7 @@ def routine_result(request, uuid, routine_uuid):
             for w in created
         ],
         "total_seconds": total_seconds,
+        "session_seconds": ts.total_seconds if ts else None,
         "task": task_json(t),
     })
 
@@ -2513,16 +2542,67 @@ def plan_session(request, uuid, plan_uuid):
     })
 
 
-def _set_reps_to_sets(raw):
-    """[12, 10, 9] (reps de cada serie, lo manda el reproductor) ->
-    [{"reps": 12}, ...] en el formato de WorkoutSession.sets. Descarta
-    lo que no sean enteros positivos razonables; sin datos, []."""
+def _clean_rep_durations(raw):
+    """[1.2, 1.4, ...] (segundos que tardó cada repetición) -> lista de
+    floats con 2 decimales. Descarta lo que no sea un número razonable
+    (0 < s <= 600); sin datos, []."""
     if not isinstance(raw, list):
         return []
     return [
-        {"reps": int(r)} for r in raw[:50]
-        if isinstance(r, (int, float)) and not isinstance(r, bool) and 0 < r <= 1000
+        round(float(d), 2) for d in raw[:1000]
+        if isinstance(d, (int, float)) and not isinstance(d, bool) and 0 < d <= 600
     ]
+
+
+def _set_reps_to_sets(raw, raw_durations=None):
+    """[12, 10, 9] (reps de cada serie, lo manda el reproductor) ->
+    [{"reps": 12, "durations": [1.1, ...]}, ...] en el formato de
+    WorkoutSession.sets. raw_durations es paralelo a raw (el tiempo de
+    cada rep de cada serie); sin él, la serie queda solo con "reps".
+    Descarta lo que no sean enteros positivos razonables; sin datos, []."""
+    if not isinstance(raw, list):
+        return []
+    durs = raw_durations if isinstance(raw_durations, list) else []
+    out = []
+    for i, r in enumerate(raw[:50]):
+        if isinstance(r, (int, float)) and not isinstance(r, bool) and 0 < r <= 1000:
+            s = {"reps": int(r)}
+            d = _clean_rep_durations(durs[i]) if i < len(durs) else []
+            if d:
+                s["durations"] = d
+            out.append(s)
+    return out
+
+
+def _breakdown_timing(b):
+    """Del desglose de UN ejercicio (lo que manda la app al guardar un plan
+    o un circuito) saca lo que va a WorkoutSession: las series (con el
+    tiempo de cada rep si vino), rep_durations (todas las reps seguidas) y
+    avg_rep_seconds. Los ejercicios cronometrados (aguantes) guardan sus
+    segundos por serie como {"reps": 0, "durations": [s]}."""
+    sets = (
+        _set_reps_to_sets(b.get("set_reps"), b.get("set_durations"))
+        or _set_seconds_to_sets(b.get("set_seconds"))
+    )
+    rep_durations = [d for s in sets if s.get("reps") for d in s.get("durations", [])]
+    avg = round(sum(rep_durations) / len(rep_durations), 2) if rep_durations else None
+    return {"sets": sets, "rep_durations": rep_durations, "avg_rep_seconds": avg}
+
+
+def _save_training_session(task, data, workouts, plan=None, routine=None):
+    """Guarda el cronómetro TOTAL de la sesión (data["session_seconds"],
+    lo mide la app de principio a fin, descansos incluidos) y enlaza a él
+    los ejercicios recién guardados. Sin tiempo válido no crea nada y
+    devuelve None (apps antiguas que aún no lo mandan)."""
+    raw = data.get("session_seconds")
+    if not isinstance(raw, (int, float)) or isinstance(raw, bool) or raw <= 0:
+        return None
+    ts = TrainingSession.objects.create(
+        user=_user(), task=task, plan=plan, routine=routine,
+        total_seconds=min(int(round(raw)), 86400),
+    )
+    WorkoutSession.objects.filter(pk__in=[w.pk for w in workouts]).update(training_session=ts)
+    return ts
 
 
 def _set_seconds_to_sets(raw):
@@ -2565,7 +2645,7 @@ def plan_session_save(request, uuid, plan_uuid):
         created.append(WorkoutSession.objects.create(
             task=task, user=_user(), plan=plan, series_id=task.series_id,
             exercise=slug,
-            sets=_set_reps_to_sets(b.get("set_reps")) or _set_seconds_to_sets(b.get("set_seconds")),
+            **_breakdown_timing(b),
             total_reps=_num(b, "reps"), total_sets=_num(b, "sets"),
             session_duration_seconds=_num(b, "seconds"),
             target_sets=t.get("sets"), target_reps=t.get("reps"),
@@ -2575,11 +2655,14 @@ def plan_session_save(request, uuid, plan_uuid):
     if not created:
         return JsonResponse({"ok": False, "error": "Sin datos que guardar"}, status=400)
 
+    ts = _save_training_session(task, data, created, plan=plan)
+
     if data.get("finish", True):
         task.mark_done()
 
     return JsonResponse({
         "ok": True,
+        "session_seconds": ts.total_seconds if ts else None,
         "sessions": [
             {
                 "exercise": w.exercise, "name": w.exercise_name,

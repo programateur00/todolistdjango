@@ -2,7 +2,7 @@ from django.contrib import admin
 
 from .models import (
     CourseModule, CoursePlaylist, CourseQuiz, DebugLog, Exercise, Occurrence, Plan, PlanItem,
-    Routine, RoutineItem, SavedVideo, Task, WorkoutSession,
+    Routine, RoutineItem, SavedVideo, Task, TrainingSession, WorkoutSession,
 )
 
 
@@ -31,7 +31,7 @@ class OccurrenceAdmin(admin.ModelAdmin):
 
 @admin.register(Exercise)
 class ExerciseAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "mode", "counter_key", "voice_step_display", "is_active", "order")
+    list_display = ("name", "slug", "mode", "met", "counter_key", "voice_step_display", "is_active", "order")
     list_filter = ("mode", "is_active")
     search_fields = ("name", "slug")
     prepopulated_fields = {"slug": ("name",)}
@@ -65,12 +65,20 @@ class RoutineAdmin(admin.ModelAdmin):
     inlines = [RoutineItemInline]
 
 
+@admin.register(TrainingSession)
+class TrainingSessionAdmin(admin.ModelAdmin):
+    list_display = ("recorded_at", "user", "total_seconds", "plan", "routine", "task")
+    date_hierarchy = "recorded_at"
+    ordering = ("-recorded_at",)
+    list_per_page = 50
+
+
 @admin.register(WorkoutSession)
 class WorkoutSessionAdmin(admin.ModelAdmin):
     list_display = (
         "exercise", "user", "routine", "total_reps", "total_sets", "added_weight_kg",
         "distance_km", "steps", "session_duration_seconds", "avg_rep_seconds",
-        "source", "task", "series_id", "deleted_at", "recorded_at",
+        "source", "training_session", "task", "series_id", "deleted_at", "recorded_at",
     )
     list_filter = ("exercise", "source")
     date_hierarchy = "recorded_at"

@@ -1,0 +1,124 @@
+{% extends "tasks/base.html" %}
+{% block title %}Perfil — Strive{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="topbar__title">
+        <span class="topbar__eyebrow">tú</span>
+        <h1>Perfil</h1>
+    </div>
+    <a href="{% url 'tasks:settings' %}" class="stats-link">⚙️ Ajustes</a>
+</header>
+
+<section class="profile-hero">
+    <div class="avatar" id="avatar-preview" style="--avatar-color: {{ p.avatar_color }}">{{ p.avatar_emoji }}</div>
+    <div>
+        <h2 class="profile-hero__name{% if not p.display_name %} profile-hero__name--empty{% endif %}" id="name-preview">{{ p.display_name|default:"Tu nombre" }}</h2>
+        {% if p.age is not None %}<p class="profile-hero__meta">{{ p.age }} años</p>{% endif %}
+    </div>
+</section>
+
+<h2 class="section-title">Cuerpo</h2>
+<section class="profile-stats">
+    <div class="profile-stat">
+        <strong>{% if p.body_weight_kg %}{{ p.body_weight_kg|floatformat:"-1" }}{% else %}—{% endif %}</strong>
+        <span>Peso (kg){% if p.weight_change %} · {% if p.weight_change > 0 %}▲{% else %}▼{% endif %} {{ p.weight_change|floatformat:"-1" }}{% endif %}</span>
+    </div>
+    <div class="profile-stat"><strong>{% if p.bmi %}{{ p.bmi|floatformat:"-1" }}{% else %}—{% endif %}</strong><span>IMC</span></div>
+    <div class="profile-stat">
+        <strong>{% if p.to_goal_kg is None %}—{% elif p.to_goal_kg == 0 %}✓{% else %}{% if p.to_goal_kg > 0 %}+{% endif %}{{ p.to_goal_kg|floatformat:"-1" }}{% endif %}</strong>
+        <span>Hasta objetivo (kg)</span>
+    </div>
+</section>
+
+{% if p.weight_history|length > 1 %}
+<ul class="kv-list">
+    {% for w in p.weight_history %}
+    <li><span>{{ w.date }}</span><strong>{{ w.kg|floatformat:"-1" }} kg</strong></li>
+    {% endfor %}
+</ul>
+{% endif %}
+
+<form class="task-form" method="post" style="margin-top:22px">
+    {% csrf_token %}
+
+    <h3 class="form-section">Perfil</h3>
+
+    <label class="field">
+        <span class="field__label">Nombre</span>
+        <input type="text" name="display_name" id="f-name" maxlength="{{ name_max }}"
+               value="{{ p.display_name }}" placeholder="Cómo quieres que te llame" autocomplete="nickname">
+    </label>
+
+    <fieldset class="field">
+        <span class="field__label">Avatar</span>
+        <div class="pick-grid" role="radiogroup" aria-label="Emoji del avatar">
+            {% for e in emojis %}
+            <label><input type="radio" name="avatar_emoji" value="{{ e }}"{% if e == p.avatar_emoji %} checked{% endif %}><span class="pick-emoji">{{ e }}</span></label>
+            {% endfor %}
+        </div>
+    </fieldset>
+
+    <fieldset class="field">
+        <span class="field__label">Color</span>
+        <div class="pick-grid" role="radiogroup" aria-label="Color del avatar">
+            {% for c in colors %}
+            <label><input type="radio" name="avatar_color" value="{{ c }}"{% if c == p.avatar_color %} checked{% endif %}><span class="pick-color" style="--c: {{ c }}"></span></label>
+            {% endfor %}
+        </div>
+    </fieldset>
+
+    <h3 class="form-section">Cuerpo</h3>
+
+    <label class="field">
+        <span class="field__label">Fecha de nacimiento</span>
+        <input type="date" name="birth_date" min="1900-01-01" max="{{ today }}" value="{{ p.birth_date }}">
+    </label>
+
+    <div class="field-row">
+        <label class="field">
+            <span class="field__label">Altura (cm)</span>
+            <input type="number" name="height_cm" min="100" max="250" step="1" inputmode="numeric"
+                   value="{{ p.height_cm|default_if_none:''|stringformat:'s' }}" placeholder="175">
+        </label>
+        <label class="field">
+            <span class="field__label">Peso (kg)</span>
+            <input type="number" name="body_weight_kg" min="30" max="300" step="0.1" inputmode="decimal"
+                   value="{{ p.body_weight_kg|default_if_none:''|stringformat:'s' }}" placeholder="{{ default_weight_kg }}">
+        </label>
+    </div>
+    <label class="field">
+        <span class="field__label">Peso objetivo (kg)</span>
+        <input type="number" name="goal_weight_kg" min="30" max="300" step="0.1" inputmode="decimal"
+               value="{{ p.goal_weight_kg|default_if_none:''|stringformat:'s' }}" placeholder="Opcional">
+        <span class="field__hint">
+            El peso se usa para estimar las calorías de cada ejercicio (vacío = {{ default_weight_kg }} kg)
+            y cada cambio queda en tu historial. El IMC es solo una referencia aproximada.
+        </span>
+    </label>
+
+    <div class="task-form__actions">
+        <button type="submit" class="primary-btn">Guardar perfil</button>
+    </div>
+</form>
+
+<script>
+(function () {
+    var avatar = document.getElementById('avatar-preview');
+    var nameEl = document.getElementById('name-preview');
+    var nameIn = document.getElementById('f-name');
+    nameIn.addEventListener('input', function () {
+        var v = nameIn.value.trim();
+        nameEl.textContent = v || 'Tu nombre';
+        nameEl.classList.toggle('profile-hero__name--empty', !v);
+    });
+    document.querySelectorAll('input[name="avatar_emoji"]').forEach(function (r) {
+        r.addEventListener('change', function () { avatar.textContent = r.value; });
+    });
+    document.querySelectorAll('input[name="avatar_color"]').forEach(function (r) {
+        r.addEventListener('change', function () { avatar.style.setProperty('--avatar-color', r.value); });
+    });
+})();
+</script>
+
+{% endblock %}

@@ -163,7 +163,7 @@
                 {% endif %}
                 {% endwith %}
                 {% with today=task.reading_today_status %}
-                {% if today %}
+                {% if today and not today.is_overdue %}
                 <div class="task-progress" title="Progreso de hoy hacia el objetivo del día">
                     <div class="task-progress__bar"><div class="task-progress__done{% if today.pct > 100 %} task-progress__done--over{% endif %}" style="width:{{ today.bar_pct|default:0 }}%"></div></div>
                     <span class="task-progress__label">hoy: {{ today.pages_today }}/{{ today.goal }} pág. · {{ today.pct }}%</span>

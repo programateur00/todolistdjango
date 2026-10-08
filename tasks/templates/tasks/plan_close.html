@@ -70,7 +70,7 @@
 
 {% if not plan.closed_at %}
 <form action="{% url 'tasks:plan_close' plan.pk %}" method="post"
-      onsubmit="return confirm('¿Cerrar «{{ plan.name|escapejs }}»? Dejará de generarte tareas, pero se queda en Planes cerrados para poder mirarlo luego.');">
+      onsubmit="return confirm('¿Cerrar «{{ plan.name|escapejs }}»? Dejará de generarte tareas, pero se queda en Planes cerrados/finalizados para poder mirarlo luego.');">
     {% csrf_token %}
     <div class="task-form__actions">
         <button type="submit" class="primary-btn">Confirmar cierre</button>

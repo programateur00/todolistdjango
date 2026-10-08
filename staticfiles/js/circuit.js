@@ -86,6 +86,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   let sequence = [];
   let index = 0;
   let breakdown = [];
+  const sessionStartedAt = Date.now(); // cronómetro total de la sesión (se manda al guardar)
   let timerId = null;
   let paused = false;
   let workoutSession = null;
@@ -755,6 +756,9 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         exercise: item.slug,
         reps: payload.total_reps || 0,
         sets: payload.total_sets || 0,
+        set_reps: (payload.sets || []).map((s) => s.reps || 0).filter((r) => r > 0),
+        // Tiempo de cada rep por serie (paralelo a set_reps).
+        set_durations: (payload.sets || []).filter((s) => (s.reps || 0) > 0).map((s) => s.durations || []),
         seconds: payload.session_duration_seconds || 0,
       });
       beep(880, 0.2);
@@ -892,6 +896,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         <button type="button" class="primary-btn" id="run-save">Guardar y volver</button>
       </div>`;
 
+    const sessionSeconds = Math.round((Date.now() - sessionStartedAt) / 1000);
     document.getElementById("run-save").addEventListener("click", async (e) => {
       e.target.disabled = true;
       e.target.textContent = "Guardando…";
@@ -900,7 +905,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         const resp = await fetch(saveUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-CSRFToken": csrfInput ? csrfInput.value : "" },
-          body: JSON.stringify({ breakdown }),
+          body: JSON.stringify({ breakdown, session_seconds: sessionSeconds }),
         });
         const data = await resp.json();
         window.location.href = (data && data.redirect_url) || cancelUrl;

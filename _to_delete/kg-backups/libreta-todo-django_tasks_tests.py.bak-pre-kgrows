@@ -1,0 +1,3080 @@
+import json
+from datetime import date, time, timedelta
+
+from django.test import TestCase
+from django.utils import timezone
+from django.urls import reverse
+
+from .models import (
+    Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, Task, TimerSession, WarmupStatus, WorkoutSession,
+)
+from .utils import get_current_user
+
+
+class CategoryModelTests(TestCase):
+    def test_default_category_is_general(self):
+        t = Task.objects.create(title="Sin categoría")
+        self.assertEqual(t.category, Task.CATEGORY_GENERAL)
+
+    def test_create_with_explicit_category(self):
+        t = Task.objects.create(title="Ir al gym", category=Task.CATEGORY_SPORT)
+        self.assertEqual(t.category, Task.CATEGORY_SPORT)
+
+    def test_category_capabilities_study_has_timer(self):
+        t = Task(category=Task.CATEGORY_STUDY)
+        self.assertTrue(t.has_capability("timer"))
+        self.assertTrue(t.has_capability("app_usage"))
+        self.assertFalse(t.has_capability("pose_tracking"))
+
+    def test_category_capabilities_sport_has_pose(self):
+        t = Task(category=Task.CATEGORY_SPORT)
+        self.assertTrue(t.has_capability("pose_tracking"))
+        self.assertTrue(t.has_capability("timer"))
+
+    def test_category_capabilities_general_empty(self):
+        t = Task(category=Task.CATEGORY_GENERAL)
+        self.assertEqual(t.category_capabilities, [])
+
+    def test_recurrence_inherits_category(self):
+        """Al marcar como hecha, la siguiente ocurrencia hereda la categoría."""
+        t = Task.objects.create(
+            title="Estudiar calculus",
+            category=Task.CATEGORY_STUDY,
+            due_date=date.today(),
+            repeat=Task.REPEAT_DAILY,
+            interval=1,
+        )
+        t.mark_done()
+        new_task = Task.objects.exclude(pk=t.pk).get(title="Estudiar calculus")
+        self.assertEqual(new_task.category, Task.CATEGORY_STUDY)
+        self.assertEqual(
+            Occurrence.objects.filter(task__isnull=False).count(), 1
+        )
+
+
+class CategoryViewTests(TestCase):
+    def _post(self, **overrides):
+        data = {
+            "title": "Hacer sentadillas",
+            "category": Task.CATEGORY_SPORT,
+            "due_date": "2026-12-31",
+            "due_time": "08:00",
+            "repeat": Task.REPEAT_NONE,
+            "interval": 1,
+        }
+        data.update(overrides)
+        return self.client.post(reverse("tasks:task_create"), data)
+
+    def test_create_with_category_persists(self):
+        resp = self._post()
+        self.assertEqual(resp.status_code, 302)
+        t = Task.objects.get(title="Hacer sentadillas")
+        self.assertEqual(t.category, Task.CATEGORY_SPORT)
+        self.assertEqual(t.due_time, time(8, 0))
+
+    def test_create_without_category_defaults_to_general(self):
+        resp = self.client.post(
+            reverse("tasks:task_create"),
+            {"title": "Una cosa"},
+        )
+        self.assertEqual(resp.status_code, 302)
+        t = Task.objects.get(title="Una cosa")
+        self.assertEqual(t.category, Task.CATEGORY_GENERAL)
+
+    def test_create_rejects_invalid_category(self):
+        resp = self._post(category="not-a-real-category")
+        self.assertEqual(resp.status_code, 302)
+        t = Task.objects.get(title="Hacer sentadillas")
+        # Se queda con el default si el valor es inválido.
+        self.assertEqual(t.category, Task.CATEGORY_GENERAL)
+
+    def test_list_filter_by_category(self):
+        Task.objects.create(title="Hacer sentadillas", category=Task.CATEGORY_SPORT, user=get_current_user())
+        Task.objects.create(title="Estudiar cálculo", category=Task.CATEGORY_STUDY, user=get_current_user())
+
+        resp = self.client.get(reverse("tasks:task_list") + "?cat=sport")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Hacer sentadillas")
+        self.assertNotContains(resp, "Estudiar cálculo")
+
+    def test_list_renders_category_pill(self):
+        Task.objects.create(title="Ir al gym", category=Task.CATEGORY_SPORT, user=get_current_user())
+        resp = self.client.get(reverse("tasks:task_list"))
+        self.assertContains(resp, "Deporte")  # get_category_display
+        self.assertContains(resp, "meta-pill--sport")
+
+    def test_edit_updates_category(self):
+        t = Task.objects.create(title="X", category=Task.CATEGORY_GENERAL, user=get_current_user())
+        resp = self.client.post(
+            reverse("tasks:task_edit", args=[t.pk]),
+            {
+                "title": "X",
+                "category": Task.CATEGORY_WORK,
+                "repeat": Task.REPEAT_NONE,
+                "interval": 1,
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        t.refresh_from_db()
+        self.assertEqual(t.category, Task.CATEGORY_WORK)
+
+
+class AntiTaskTests(TestCase):
+    def test_normal_task_silence_is_failure(self):
+        """Una tarea normal, si pasa la hora sin tocar nada, cuenta como fallo."""
+        t = Task.objects.create(
+            title="Estudiar", due_time=time(0, 1), category=Task.CATEGORY_STUDY, user=get_current_user(),
+        )
+        t.mark_expired()
+        occ = Occurrence.objects.filter(series_id=t.series_id).latest("recorded_at")
+        self.assertEqual(occ.result, Occurrence.RESULT_NOT_DONE)
+        self.assertTrue(t.is_done)
+        self.assertTrue(t.expired)
+
+    def test_avoid_task_silence_is_success(self):
+        """Una antitarea (category='avoid'), si pasa la hora sin tocar nada,
+        cuenta como éxito (silencio = lo evitaste) — justo lo contrario de
+        una tarea normal."""
+        t = Task.objects.create(
+            title="No fumar", due_time=time(0, 1), category=Task.CATEGORY_AVOID, user=get_current_user(),
+        )
+        self.assertTrue(t.is_avoid)
+        t.mark_expired()
+        occ = Occurrence.objects.filter(series_id=t.series_id).latest("recorded_at")
+        self.assertEqual(occ.result, Occurrence.RESULT_DONE)
+        self.assertTrue(t.is_done)
+        self.assertTrue(t.expired)
+
+    def test_expire_overdue_picks_up_avoid_task(self):
+        """El barrido automático (el que se llama al abrir la lista) también
+        debe resolver en éxito una antitarea vencida, sin tocar nada a mano.
+
+        Lleva fecha de ayer a propósito: sin fecha, la hora se ancla al día
+        de creación, y una tarea creada ahora mismo aún no habría vencido.
+        """
+        yesterday = date.today() - timedelta(days=1)
+        t = Task.objects.create(
+            title="No gastar de más", due_date=yesterday, due_time=time(12, 0),
+            category=Task.CATEGORY_AVOID, user=get_current_user(),
+        )
+        expired = Task.expire_overdue()
+        self.assertIn(t, expired)
+        t.refresh_from_db()
+        self.assertTrue(t.is_done)
+        occ = Occurrence.objects.filter(series_id=t.series_id).latest("recorded_at")
+        self.assertEqual(occ.result, Occurrence.RESULT_DONE)
+
+    def test_mark_failed_spawns_next_occurrence(self):
+        """"He caído hoy" en una antitarea diaria debe seguir generando
+        mañana — si no, la serie se quedaría colgada la primera vez que caes."""
+        t = Task.objects.create(
+            title="No fumar", due_date=date.today(), repeat=Task.REPEAT_DAILY,
+            interval=1, category=Task.CATEGORY_AVOID, subcategory=Task.SUBCATEGORY_UPPER_BODY,
+            user=get_current_user(),
+        )
+        t.mark_failed()
+        occ = Occurrence.objects.filter(series_id=t.series_id).latest("recorded_at")
+        self.assertEqual(occ.result, Occurrence.RESULT_NOT_DONE)
+        self.assertTrue(t.is_done)  # se resuelve el dia, a diferencia de mark_not_done()
+
+        next_task = Task.objects.exclude(pk=t.pk).get(series_id=t.series_id)
+        self.assertEqual(next_task.due_date, date.today() + timedelta(days=1))
+        self.assertEqual(next_task.category, Task.CATEGORY_AVOID)  # se propaga a la siguiente
+        self.assertTrue(next_task.is_avoid)
+        self.assertEqual(next_task.subcategory, Task.SUBCATEGORY_UPPER_BODY)  # bonus: ya no se pierde
+
+    def test_mark_not_done_still_used_for_undo_stays_unchanged(self):
+        """mark_not_done() (el botón "Desmarcar") no debe tocarse: sigue
+        dejando is_done=False y sin generar la siguiente ocurrencia."""
+        t = Task.objects.create(title="X", category=Task.CATEGORY_AVOID, user=get_current_user())
+        t.mark_done()
+        t.mark_not_done()
+        self.assertFalse(t.is_done)
+
+    def test_create_form_saves_avoid_category(self):
+        resp = self.client.post(reverse("tasks:task_create"), {
+            "title": "No fumar", "category": "avoid", "repeat": Task.REPEAT_NONE, "interval": 1,
+        })
+        self.assertEqual(resp.status_code, 302)
+        t = Task.objects.get(title="No fumar")
+        self.assertEqual(t.category, Task.CATEGORY_AVOID)
+        self.assertTrue(t.is_avoid)
+
+    def test_create_form_defaults_to_general_not_avoid(self):
+        resp = self.client.post(reverse("tasks:task_create"), {
+            "title": "Tarea normal", "repeat": Task.REPEAT_NONE, "interval": 1,
+        })
+        self.assertEqual(resp.status_code, 302)
+        t = Task.objects.get(title="Tarea normal")
+        self.assertFalse(t.is_avoid)
+
+
+class StatsDetailChartTests(TestCase):
+    """Cada día guarda la media del % de sus ejercicios; la gráfica sale de ahí."""
+
+    def _session(self, task, slug, reps, sets=3, target_reps=10):
+        return WorkoutSession.objects.create(
+            task=task, user=task.user, series_id=task.series_id, exercise=slug,
+            total_reps=reps, total_sets=sets, session_duration_seconds=60,
+            target_sets=3, target_reps=target_reps,
+        )
+
+    def test_done_with_short_exercises_saves_average_not_100(self):
+        t = Task.objects.create(title="Circuito", due_date=date.today(), user=get_current_user())
+        self._session(t, "pushup", 15)    # 15/30 = 50%
+        self._session(t, "squat", 30)     # 30/30 = 100%
+        t.mark_done()                     # cerrar el circuito NO es 100%
+        self.assertEqual(Occurrence.objects.get(series_id=t.series_id).completion_pct, 75)
+
+    def test_exceeding_target_saves_over_100(self):
+        t = Task.objects.create(title="Circuito", due_date=date.today(), user=get_current_user())
+        self._session(t, "pushup", 45)    # 150%
+        self._session(t, "squat", 30)     # 100%
+        t.mark_done()
+        self.assertEqual(Occurrence.objects.get(series_id=t.series_id).completion_pct, 125)
+
+    def test_same_exercise_twice_counts_best_session(self):
+        t = Task.objects.create(title="Circuito", due_date=date.today(), user=get_current_user())
+        self._session(t, "pushup", 15)
+        self._session(t, "pushup", 30)
+        t.mark_done()
+        self.assertEqual(Occurrence.objects.get(series_id=t.series_id).completion_pct, 100)
+
+    def test_no_target_sessions_done_is_100_and_missed_is_0(self):
+        hecha = Task.objects.create(title="Leer", due_date=date.today(), user=get_current_user())
+        hecha.mark_done()
+        fallada = Task.objects.create(title="Leer", due_date=date.today() - timedelta(days=1), user=get_current_user(), series_id=hecha.series_id)
+        fallada.mark_expired()
+        pcts = sorted(o.completion_pct for o in Occurrence.objects.filter(series_id=hecha.series_id))
+        self.assertEqual(pcts, [0, 100])
+
+    def test_expired_with_partial_session_keeps_partial(self):
+        t = Task.objects.create(title="Corto", due_date=date.today(), user=get_current_user())
+        self._session(t, "pushup", 18, target_reps=8)  # 18/24 = 75%
+        t.mark_expired()
+        self.assertEqual(Occurrence.objects.get(series_id=t.series_id).completion_pct, 75)
+
+    def test_timer_sessions_are_summed_not_best_single(self):
+        """La extensión corta la sesión al cambiar de pestaña: 1+18+1+1 min de 30 = 70%, no 60%."""
+        t = Task.objects.create(
+            title="Deutsch", due_date=date.today(), user=get_current_user(),
+            category=Task.CATEGORY_STUDY, target_minutes=30,
+        )
+        for mins in (1, 18, 1, 1):
+            TimerSession.objects.create(
+                task=t, user=t.user, series_id=t.series_id, minutes=mins, target_minutes=30,
+                source=TimerSession.SOURCE_PC_USAGE,
+            )
+        t.mark_done()
+        self.assertEqual(Occurrence.objects.get(series_id=t.series_id).completion_pct, 70)
+
+    def test_old_rows_without_pct_fall_back_to_done_or_not(self):
+        t = Task.objects.create(title="Vieja", due_date=date.today(), user=get_current_user())
+        t.mark_done()
+        Occurrence.objects.filter(series_id=t.series_id).update(completion_pct=None)
+        self.assertEqual(Occurrence.objects.get(series_id=t.series_id).pct, 100)
+
+    def test_detail_page_has_toggle_and_chart_data(self):
+        from django.test import override_settings
+        from django.urls import reverse
+        t = Task.objects.create(title="H", due_date=date.today(), user=get_current_user())
+        self._session(t, "pushup", 45)
+        t.mark_done()
+        # Sin manifiesto de collectstatic: el test solo mira el HTML.
+        with override_settings(STORAGES={
+            "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+            "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+        }):
+            resp = self.client.get(reverse("tasks:stats_detail", args=[t.series_id]))
+            lst = self.client.get(reverse("tasks:stats_list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'data-hist-view="chart"')
+        self.assertContains(resp, 'id="hist-list"')
+        self.assertEqual(resp.context["chart_points"][0]["pct"], 150)
+        self.assertEqual(resp.context["success_rate"], 150)
+        self.assertEqual(lst.status_code, 200)
+        self.assertEqual(lst.context["series_list"][0]["bar_pct"], 100)
+
+
+class OccurrenceIdempotencyTests(TestCase):
+    """
+    El resultado de un día es un hecho corregible, no un log que se apila.
+    Antes, marcar/desmarcar/marcar creaba 3 filas para el mismo día y
+    streak_stats() las contaba todas — rachas infladas. Además es lo que
+    permite que web y móvil resuelvan el mismo día sin duplicarlo.
+    """
+
+    def test_mark_done_twice_keeps_one_occurrence(self):
+        t = Task.objects.create(
+            title="Estudiar", due_date=date.today(), user=get_current_user(),
+        )
+        t.mark_done()
+        t.mark_not_done()
+        t.mark_done()
+        occs = Occurrence.objects.filter(series_id=t.series_id, due_date=date.today())
+        self.assertEqual(occs.count(), 1)
+        self.assertEqual(occs.first().result, Occurrence.RESULT_DONE)
+
+    def test_streak_not_inflated_by_toggling(self):
+        """Marcar y desmarcar el mismo día no debe subir la racha."""
+        t = Task.objects.create(
+            title="Leer", due_date=date.today(), user=get_current_user(),
+        )
+        t.mark_done()
+        t.mark_not_done()
+        t.mark_done()
+        stats = Occurrence.streak_stats(t.series_id)
+        self.assertEqual(stats["current_streak"], 1)
+
+    def test_two_clients_resolving_same_day_produce_one_row(self):
+        """Simula web y móvil resolviendo el mismo día por separado."""
+        t = Task.objects.create(
+            title="No fumar", due_date=date.today(), category=Task.CATEGORY_AVOID,
+            due_time=time(0, 1), user=get_current_user(),
+        )
+        t.mark_expired()          # lo resuelve el móvil
+        t2 = Task.objects.get(pk=t.pk)
+        t2.mark_expired()         # y luego la web, sin saberlo
+        self.assertEqual(
+            Occurrence.objects.filter(series_id=t.series_id, due_date=date.today()).count(), 1
+        )
+
+    def test_tasks_without_due_date_can_have_several_occurrences(self):
+        """Sin fecha no hay 'día' al que anclar: ahí sí se apilan."""
+        t = Task.objects.create(title="Cuando pueda", user=get_current_user())
+        t.mark_done()
+        t.mark_not_done()
+        self.assertEqual(Occurrence.objects.filter(series_id=t.series_id).count(), 2)
+
+    def test_sync_fields_are_unique_and_populated(self):
+        a = Task.objects.create(title="A", user=get_current_user())
+        b = Task.objects.create(title="B", user=get_current_user())
+        self.assertIsNotNone(a.uuid)
+        self.assertNotEqual(a.uuid, b.uuid)
+        self.assertIsNotNone(a.updated_at)
+        self.assertIsNone(a.deleted_at)
+
+
+class AvoidGraceTests(TestCase):
+    """
+    Una antitarea NO debe resolverse sola en el mismo instante de la hora
+    límite: a esa hora salta el aviso, y hace falta un margen para poder
+    contestarlo. Antes se auto-completaba al segundo y contestar no
+    servía de nada.
+    """
+
+    def _avoid_task(self, hours_ago):
+        """Antitarea cuya hora límite fue hace `hours_ago` horas."""
+        now = timezone.localtime(timezone.now())
+        deadline = now - timedelta(hours=hours_ago)
+        return Task.objects.create(
+            title="No fumar", category=Task.CATEGORY_AVOID,
+            due_date=deadline.date(), due_time=deadline.time().replace(microsecond=0),
+            user=get_current_user(),
+        )
+
+    def test_not_resolved_right_at_deadline(self):
+        """Justo pasada la hora límite todavía no se resuelve: es el rato
+        que tienes para contestar la notificación."""
+        t = self._avoid_task(hours_ago=0.5)
+        self.assertFalse(t.is_overdue())
+        self.assertNotIn(t, Task.expire_overdue())
+
+    def test_resolved_after_grace(self):
+        """Pasado el margen sin contestar, sí se da por evitada."""
+        t = self._avoid_task(hours_ago=Task.AVOID_GRACE_HOURS + 1)
+        self.assertTrue(t.is_overdue())
+        self.assertIn(t, Task.expire_overdue())
+        occ = Occurrence.objects.filter(series_id=t.series_id).latest("recorded_at")
+        self.assertEqual(occ.result, Occurrence.RESULT_DONE)
+
+    def test_normal_task_has_no_grace(self):
+        """Una tarea normal sigue expirando en la hora límite, sin margen."""
+        now = timezone.localtime(timezone.now())
+        deadline = now - timedelta(minutes=30)
+        t = Task.objects.create(
+            title="Estudiar", category=Task.CATEGORY_STUDY,
+            due_date=deadline.date(), due_time=deadline.time().replace(microsecond=0),
+            user=get_current_user(),
+        )
+        self.assertTrue(t.is_overdue())
+
+    def test_answering_during_grace_wins(self):
+        """Si contestas dentro del margen, tu respuesta manda y la tarea
+        ya no se resuelve sola."""
+        t = self._avoid_task(hours_ago=0.5)
+        t.mark_failed()   # "he caído hoy"
+        t.refresh_from_db()
+        self.assertTrue(t.is_done)
+        occ = Occurrence.objects.filter(series_id=t.series_id, due_date=t.due_date).first()
+        self.assertEqual(occ.result, Occurrence.RESULT_NOT_DONE)
+
+
+class ReopenTests(TestCase):
+    """
+    Deshacer una tarea marcada debe dejarlo TODO como estaba: la racha no
+    puede quedarse contando ese día, ni puede sobrevivir la instancia
+    futura que se generó al marcarla.
+    """
+
+    def test_reopened_task_is_not_immediately_reexpired(self):
+        """
+        Regresión del fallo más molesto: expire_overdue() se ejecuta al
+        cargar la lista, así que al devolver a pendientes una tarea cuya
+        hora ya pasó, el barrido la volvía a cerrar en el acto y parecía
+        que el botón de deshacer no hacía nada.
+        """
+        now = timezone.localtime(timezone.now())
+        past = now - timedelta(hours=3)
+        t = Task.objects.create(
+            title="Estudiar", due_date=past.date(),
+            due_time=past.time().replace(microsecond=0), user=get_current_user(),
+        )
+        t.mark_done()
+        t.reopen()
+        t.refresh_from_db()
+        self.assertFalse(t.is_done)
+
+        Task.expire_overdue()          # lo que pasa al recargar la lista
+        t.refresh_from_db()
+        self.assertFalse(t.is_done)    # sigue pendiente, como pediste
+
+    def test_reopened_task_without_due_date_is_not_reexpired(self):
+        """
+        Regresión: una tarea con solo hora y sin fecha no tiene un
+        "momento límite" absoluto, así que resolve_datetime() devuelve
+        None y la protección de reapertura se saltaba por completo. El
+        botón de deshacer parecía roto justo en ese caso.
+        """
+        t = Task.objects.create(
+            title="No fumar", category=Task.CATEGORY_AVOID,
+            due_date=None, due_time=time(12, 0), user=get_current_user(),
+        )
+        # Sin fecha, la hora se ancla al día de creación. Para que esté
+        # vencida de verdad hay que simular que se creó ayer — si no, su
+        # límite sería hoy a las 12:00 y podría estar aún por llegar.
+        Task.objects.filter(pk=t.pk).update(
+            created_at=timezone.now() - timedelta(days=1)
+        )
+        t.refresh_from_db()
+        Task.expire_overdue()
+        t.refresh_from_db()
+        self.assertTrue(t.is_done)      # se resolvió sola, correcto
+
+        t.reopen()
+        Task.expire_overdue()           # lo que pasa al recargar la lista
+        t.refresh_from_db()
+        self.assertFalse(t.is_done)     # y sigue arriba
+
+    def test_dateless_deadline_survives_midnight(self):
+        """
+        Regresión encontrada a las 00:45: una tarea con hora pero sin
+        fecha se comparaba hora contra hora, y pasada la medianoche la
+        cuenta salía al revés ("21:45 < 00:45" es falso), así que no
+        vencía nunca en esa franja. Ahora la hora se ancla al día de
+        creación, que da un instante absoluto.
+        """
+        t = Task.objects.create(
+            title="Estudiar", due_date=None, due_time=time(21, 0),
+            user=get_current_user(),
+        )
+        Task.objects.filter(pk=t.pk).update(
+            created_at=timezone.now() - timedelta(days=1)
+        )
+        t.refresh_from_db()
+        # Creada ayer con límite a las 21:00 de ayer: da igual la hora a
+        # la que se mire hoy, tiene que estar vencida.
+        self.assertTrue(t.is_overdue())
+        self.assertIn(t, Task.expire_overdue())
+
+    def test_dateless_deadline_not_yet_reached(self):
+        """Y creada hoy, su límite es hoy: todavía no vence."""
+        t = Task.objects.create(
+            title="Estudiar", due_date=None, due_time=time(23, 59),
+            user=get_current_user(),
+        )
+        self.assertFalse(t.is_overdue())
+
+    def test_marking_done_twice_does_not_duplicate_future_task(self):
+        """Marcar, deshacer y volver a marcar dejaba DOS tareas idénticas
+        en el futuro."""
+        t = Task.objects.create(
+            title="Diaria", due_date=date.today(), repeat=Task.REPEAT_DAILY,
+            interval=1, user=get_current_user(),
+        )
+        t.mark_done()
+        t.mark_not_done()
+        t.mark_done()
+        tomorrow = date.today() + timedelta(days=1)
+        self.assertEqual(
+            Task.objects.filter(series_id=t.series_id, due_date=tomorrow).count(), 1
+        )
+
+    def test_reopen_removes_occurrence_and_restores_stats(self):
+        t = Task.objects.create(
+            title="Leer", due_date=date.today(), user=get_current_user(),
+        )
+        t.mark_done()
+        self.assertEqual(Occurrence.objects.filter(series_id=t.series_id).count(), 1)
+
+        t.reopen()
+        t.refresh_from_db()
+        self.assertFalse(t.is_done)
+        # La ocurrencia se borra, no se marca como fallo: si se quedara,
+        # la racha seguiría contando ese día.
+        self.assertEqual(Occurrence.objects.filter(series_id=t.series_id).count(), 0)
+        self.assertEqual(Occurrence.streak_stats(t.series_id)["current_streak"], 0)
+
+    def test_reopen_deletes_spawned_future_task(self):
+        """Marcar una tarea diaria genera la de mañana. Deshacer debe
+        borrarla, o quedaría una tarea duplicada en el futuro."""
+        t = Task.objects.create(
+            title="No fumar", due_date=date.today(), repeat=Task.REPEAT_DAILY,
+            interval=1, user=get_current_user(),
+        )
+        t.mark_done()
+        self.assertEqual(Task.objects.filter(series_id=t.series_id).count(), 2)
+
+        t.reopen()
+        self.assertEqual(Task.objects.filter(series_id=t.series_id).count(), 1)
+
+    def test_reopen_keeps_workout_sessions(self):
+        """Las repeticiones se hicieron de verdad: no se borran por
+        deshacer el marcado."""
+        t = Task.objects.create(
+            title="Dominadas", due_date=date.today(),
+            category=Task.CATEGORY_SPORT, user=get_current_user(),
+        )
+        WorkoutSession.objects.create(task=t, user=get_current_user(), total_reps=8)
+        t.mark_done()
+        t.reopen()
+        self.assertEqual(t.workout_sessions.count(), 1)
+
+    def test_reopen_differs_from_mark_not_done(self):
+        """mark_not_done registra un fallo; reopen no registra nada."""
+        a = Task.objects.create(title="A", due_date=date.today(), user=get_current_user())
+        a.mark_done()
+        a.mark_not_done()
+        self.assertEqual(Occurrence.objects.filter(series_id=a.series_id).count(), 1)
+
+        b = Task.objects.create(title="B", due_date=date.today(), user=get_current_user())
+        b.mark_done()
+        b.reopen()
+        self.assertEqual(Occurrence.objects.filter(series_id=b.series_id).count(), 0)
+
+    def test_reopen_via_api(self):
+        r = self.client.post(
+            "/api/tasks/create/",
+            data=json.dumps({"title": "X", "due_date": date.today().isoformat()}),
+            content_type="application/json",
+        )
+        uuid_ = r.json()["task"]["uuid"]
+        self.client.post(f"/api/tasks/{uuid_}/mark/done/")
+        self.assertTrue(Task.objects.get(uuid=uuid_).is_done)
+
+        r2 = self.client.post(f"/api/tasks/{uuid_}/mark/reopen/")
+        self.assertEqual(r2.status_code, 200)
+        self.assertFalse(Task.objects.get(uuid=uuid_).is_done)
+
+
+class CatchUpTests(TestCase):
+    """
+    Si pasas varios días sin abrir la app, TODOS deben quedar
+    registrados. Antes solo se registraba uno por recarga: el barrido
+    cerraba una tarea, generaba la siguiente, y ahí paraba. Los huecos
+    aparecían justo cuando peor lo habías hecho.
+    """
+
+    def test_missed_days_are_all_recorded_in_one_sweep(self):
+        four_days_ago = date.today() - timedelta(days=4)
+        now_time = timezone.localtime(timezone.now()).time().replace(microsecond=0)
+        t = Task.objects.create(
+            title="Estudiar", due_date=four_days_ago, due_time=now_time,
+            repeat=Task.REPEAT_DAILY, interval=1, user=get_current_user(),
+        )
+        Task.expire_overdue()
+        occs = Occurrence.objects.filter(series_id=t.series_id)
+        self.assertGreaterEqual(occs.count(), 4)
+        self.assertTrue(all(o.result == Occurrence.RESULT_NOT_DONE for o in occs))
+
+    def test_avoid_task_catch_up_counts_as_success(self):
+        """Lo mismo para antitareas, pero cada día cuenta como evitado."""
+        four_days_ago = date.today() - timedelta(days=4)
+        now_time = timezone.localtime(timezone.now()).time().replace(microsecond=0)
+        t = Task.objects.create(
+            title="No fumar", category=Task.CATEGORY_AVOID,
+            due_date=four_days_ago, due_time=now_time,
+            repeat=Task.REPEAT_DAILY, interval=1, user=get_current_user(),
+        )
+        Task.expire_overdue()
+        occs = Occurrence.objects.filter(series_id=t.series_id)
+        self.assertGreaterEqual(occs.count(), 3)
+        self.assertTrue(all(o.result == Occurrence.RESULT_DONE for o in occs))
+
+
+class AvoidLabelTests(TestCase):
+    def test_custom_labels_are_exposed_with_defaults(self):
+        t = Task.objects.create(
+            title="No fumar", category=Task.CATEGORY_AVOID, user=get_current_user(),
+        )
+        r = self.client.get(f"/api/tasks/{t.uuid}/")
+        data = r.json()["task"]
+        self.assertEqual(data["avoid_success_label"], "Sigo con la racha")
+        self.assertEqual(data["avoid_question"], "¿Has caído hoy?")
+
+    def test_custom_labels_round_trip(self):
+        r = self.client.post("/api/tasks/create/", data=json.dumps({
+            "title": "No fumar", "category": "avoid",
+            "avoid_question": "¿Has fumado hoy?",
+            "avoid_success_label": "Ni uno",
+            "avoid_fail_label": "He fumado",
+        }), content_type="application/json")
+        data = r.json()["task"]
+        self.assertEqual(data["avoid_question"], "¿Has fumado hoy?")
+        self.assertEqual(data["avoid_success_label"], "Ni uno")
+
+    def test_labels_propagate_to_next_occurrence(self):
+        """Si no se propagan, mañana la notificación vuelve a los textos
+        genéricos."""
+        t = Task.objects.create(
+            title="No fumar", category=Task.CATEGORY_AVOID, due_date=date.today(),
+            repeat=Task.REPEAT_DAILY, interval=1, avoid_success_label="Ni uno",
+            user=get_current_user(),
+        )
+        t.mark_done()
+        nxt = Task.objects.exclude(pk=t.pk).get(series_id=t.series_id)
+        self.assertEqual(nxt.avoid_success_label, "Ni uno")
+
+
+class WorkoutKindTests(TestCase):
+    """
+    El botón de la lista debe prometer lo que la sesión va a hacer de
+    verdad. Antes cualquier tarea de Deporte enseñaba una cámara, aunque
+    fuera un circuito a cronómetro o una salida a correr que se rellena
+    a mano — incongruente.
+    """
+
+    def _kind(self, subcategory, category=Task.CATEGORY_SPORT):
+        return Task(category=category, subcategory=subcategory).workout_kind
+
+    def test_upper_body_uses_camera(self):
+        self.assertEqual(self._kind(Task.SUBCATEGORY_UPPER_BODY), "camera")
+
+    def test_lower_body_uses_timer(self):
+        self.assertEqual(self._kind(Task.SUBCATEGORY_LOWER_BODY), "timer")
+
+    def test_running_is_manual(self):
+        self.assertEqual(self._kind(Task.SUBCATEGORY_RUNNING), "distance")
+
+    def test_non_sport_has_no_workout_button(self):
+        self.assertIsNone(self._kind("", category=Task.CATEGORY_STUDY))
+        self.assertIsNone(self._kind("", category=Task.CATEGORY_AVOID))
+
+    def test_api_exposes_workout_kind(self):
+        t = Task.objects.create(
+            title="Abdos", category=Task.CATEGORY_SPORT,
+            subcategory=Task.SUBCATEGORY_LOWER_BODY, user=get_current_user(),
+        )
+        r = self.client.get(f"/api/tasks/{t.uuid}/")
+        self.assertEqual(r.json()["task"]["workout_kind"], "timer")
+
+
+class PlanProgressionTests(TestCase):
+    """
+    Tres formas de progresar, porque no todo progresa igual. Y ninguna
+    puede diverger: una progresión lineal pediría 3x47 dominadas a los
+    seis meses.
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.plan = Plan.objects.create(name="En forma", user=self.user)
+        self.pull = Exercise.objects.create(
+            slug="pull-p", name="Dominadas", mode=Exercise.MODE_POSE,
+        )
+        self.task = Task.objects.create(
+            title="Entrenar", category=Task.CATEGORY_SPORT, user=self.user,
+        )
+
+    def _session(self, reps, target_reps):
+        return WorkoutSession.objects.create(
+            task=self.task, plan=self.plan, user=self.user, exercise=self.pull.slug,
+            total_reps=reps, total_sets=3, target_sets=3, target_reps=target_reps,
+        )
+
+    # ---------------------------------------------------- cumplimiento
+
+    def test_completion_never_climbs(self):
+        """Estudiar 2 horas no se convierte en 2 y media hasta reventar."""
+        item = PlanItem.objects.create(
+            plan=self.plan, series_id=self.task.series_id, label="Estudiar",
+            progression=PlanItem.PROG_COMPLETION, start_reps=1,
+        )
+        reps = [r["reps"] for r in item.schedule(5)]
+        self.assertEqual(reps, [1, 1, 1, 1, 1])
+
+    # ----------------------------------------------------- repeticiones
+
+    def test_reps_stops_at_goal(self):
+        item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_REPS,
+            start_reps=8, goal_reps=11, reps_increment=1, sessions_per_step=1,
+        )
+        rows = item.schedule(10)
+        self.assertEqual([r["reps"] for r in rows], [8, 9, 10, 11])
+        self.assertTrue(rows[-1]["done"])   # y el plan TERMINA
+
+    # ------------------------------------------------------------ doble
+
+    def test_double_resets_reps_and_adds_weight(self):
+        """La clave para no diverger: al llegar arriba del rango, sube el
+        peso y las repeticiones vuelven al suelo."""
+        item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_DOUBLE,
+            start_sets=4, start_weight_kg=0, goal_sets=4, goal_reps=8,
+            goal_weight_kg=10, rep_range_low=6, weight_increment_kg=5,
+        )
+        rows = item.schedule(12)
+        self.assertEqual(rows[0]["reps"], 6)
+        self.assertEqual(rows[2]["reps"], 8)        # techo del rango
+        self.assertEqual(rows[3]["reps"], 6)        # vuelve abajo...
+        self.assertEqual(rows[3]["weight_kg"], 5)   # ...con más peso
+
+    def test_double_reaches_the_goal_and_stops(self):
+        item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_DOUBLE,
+            start_sets=4, start_weight_kg=0, goal_sets=4, goal_reps=12,
+            goal_weight_kg=20, rep_range_low=6, weight_increment_kg=5,
+        )
+        rows = item.schedule(60)
+        self.assertTrue(rows[-1]["done"])
+        self.assertEqual(rows[-1]["weight_kg"], 20)
+        self.assertEqual(rows[-1]["reps"], 12)
+        self.assertIsNotNone(item.sessions_to_goal())
+
+    # ------------------------------------------------- series proporcionales
+
+    def test_sets_climb_proportionally_with_reps(self):
+        """Regresión: antes las series saltaban a la meta desde el
+        primer escalón (2x5 -> destino 4x12 enseñaba "4x5" nada más
+        empezar). Ahora suben poco a poco, en la misma proporción que
+        las repeticiones."""
+        item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_REPS,
+            start_sets=2, start_reps=5, goal_sets=4, goal_reps=12,
+            reps_increment=1, sessions_per_step=1,
+        )
+        rows = item.schedule(10)
+        self.assertEqual(rows[0]["sets"], 2)     # punto de partida, no la meta
+        self.assertEqual(rows[0]["reps"], 5)
+        self.assertEqual(rows[-1]["sets"], 4)    # llega a la meta justo cuando
+        self.assertEqual(rows[-1]["reps"], 12)   # las reps llegan a la suya
+        self.assertTrue(rows[-1]["done"])
+        # y sube de forma monótona, nunca de golpe ni hacia atrás
+        sets_seen = [r["sets"] for r in rows]
+        self.assertEqual(sets_seen, sorted(sets_seen))
+
+    def test_sets_stay_fixed_without_a_goal(self):
+        """Sin meta de series no hay con qué interpolar: se quedan en
+        las de partida durante todo el plan."""
+        item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_REPS,
+            start_sets=3, start_reps=8, goal_reps=20, sessions_per_step=1,
+        )
+        rows = item.schedule(15)
+        self.assertTrue(all(r["sets"] == 3 for r in rows))
+
+    def test_double_progression_climbs_sets_with_weight(self):
+        """En progresión doble el peso es lo que mide el progreso de
+        verdad (las reps solo oscilan dentro del rango), así que las
+        series interpolan contra el peso, no contra las reps."""
+        item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_DOUBLE,
+            start_sets=2, start_weight_kg=0, goal_sets=4, goal_reps=12,
+            goal_weight_kg=20, rep_range_low=6, weight_increment_kg=5,
+        )
+        rows = item.schedule(60)
+        self.assertEqual(rows[0]["sets"], 2)
+        self.assertTrue(rows[-1]["done"])
+        self.assertEqual(rows[-1]["sets"], 4)
+
+    # --------------------------------------------------- el entrenador
+
+    def test_does_not_climb_if_you_fall_short(self):
+        item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_REPS,
+            start_reps=8, goal_reps=15, sessions_per_step=2, deload_after_failures=3,
+        )
+        self._session(15, 8)      # 15 de 24 = no cumplida
+        self._session(15, 8)
+        self.assertEqual(item.current_target()["reps"], 8)
+
+    def test_deloads_after_repeated_failures(self):
+        """Un entrenador no te deja atascado para siempre en un número
+        que hoy no puedes: baja un escalón y reconstruyes."""
+        item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_REPS,
+            start_reps=8, goal_reps=15, sessions_per_step=2, deload_after_failures=3,
+        )
+        self._session(24, 8)
+        self._session(24, 8)
+        self.assertEqual(item.current_target()["reps"], 9)   # subió
+        for _ in range(3):
+            self._session(15, 9)                              # tres fallos
+        self.assertEqual(item.current_target()["reps"], 8)    # bajó
+
+    def test_timed_progression_uses_seconds(self):
+        plank = Exercise.objects.create(
+            slug="plank-p", name="Plancha", mode=Exercise.MODE_TIMED,
+        )
+        item = PlanItem.objects.create(
+            plan=self.plan, exercise=plank, progression=PlanItem.PROG_REPS,
+            start_seconds=30, goal_seconds=45, reps_increment=5, sessions_per_step=1,
+        )
+        self.assertEqual([r["seconds"] for r in item.schedule(6)], [30, 35, 40, 45])
+
+
+class PlanHeadlineTests(TestCase):
+    """
+    El objetivo de verdad ("estar en forma") es difuso y no se mide. Lo
+    que se mide es una prueba concreta de que vas hacia él — 4x12 con 20
+    kg. Esa es la medida principal; el resto de ejercicios son el camino.
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.plan = Plan.objects.create(name="Ponerme en forma", user=self.user)
+        self.wp = Exercise.objects.create(
+            slug="wp-h", name="Dominadas con peso", mode=Exercise.MODE_POSE,
+        )
+        self.plank = Exercise.objects.create(
+            slug="pl-h", name="Plancha", mode=Exercise.MODE_TIMED,
+        )
+
+    def _headline(self):
+        return PlanItem.objects.create(
+            plan=self.plan, exercise=self.wp, is_headline=True,
+            progression=PlanItem.PROG_DOUBLE, start_sets=4, start_weight_kg=0,
+            goal_sets=4, goal_reps=12, goal_weight_kg=20,
+            rep_range_low=6, weight_increment_kg=5, order=0,
+        )
+
+    def _support(self):
+        return PlanItem.objects.create(
+            plan=self.plan, exercise=self.plank, progression=PlanItem.PROG_REPS,
+            start_seconds=30, goal_seconds=90, reps_increment=5, order=1,
+        )
+
+    def test_headline_is_the_marked_one(self):
+        self._support()
+        head = self._headline()
+        self.assertEqual(self.plan.headline, head)
+
+    def test_support_items_exclude_the_headline(self):
+        head = self._headline()
+        sup = self._support()
+        self.assertEqual(list(self.plan.support_items), [sup])
+        self.assertNotIn(head, self.plan.support_items)
+
+    def test_weighted_exercises_go_first_within_their_family(self):
+        """Dominadas, dominadas con peso, fondos, fondos con peso ->
+        dominadas con peso, dominadas, fondos con peso, fondos."""
+        def ex(slug, name):
+            return Exercise.objects.get_or_create(
+                slug=slug, defaults=dict(name=name, mode="pose", counter_key=slug),
+            )[0]
+        made = {}
+        for slug, name in [
+            ("pullup", "Dominadas"), ("weighted-pullup", "Dominadas con peso"),
+            ("dips", "Fondos"), ("weighted-dips", "Fondos con peso"),
+        ]:
+            made[slug] = PlanItem.objects.create(
+                plan=self.plan, exercise=ex(slug, name),
+                progression=PlanItem.PROG_FAILURE, order=len(made),
+            )
+        got = [i.exercise.slug for i in self.plan.ordered_items()]
+        self.assertEqual(got, ["weighted-pullup", "pullup", "weighted-dips", "dips"])
+        self.assertEqual(
+            [i["slug"] for i in self.plan.session_items()],
+            ["weighted-pullup", "pullup", "weighted-dips", "dips"],
+        )
+
+    def test_no_star_exercise_order_is_only_order_field(self):
+        """Ya no hay ejercicio "estrella": aunque is_headline esté a True,
+        manda solo `order` -- así el primero se puede bajar."""
+        a = PlanItem.objects.create(
+            plan=self.plan, exercise=self.plank, progression=PlanItem.PROG_REPS,
+            start_seconds=30, goal_seconds=90, reps_increment=5, order=0,
+        )
+        b = PlanItem.objects.create(
+            plan=self.plan, exercise=self.wp, is_headline=True,
+            progression=PlanItem.PROG_DOUBLE, start_sets=4, start_weight_kg=0,
+            goal_sets=4, goal_reps=12, goal_weight_kg=20,
+            rep_range_low=6, weight_increment_kg=5, order=1,
+        )
+        self.assertEqual(list(self.plan.items.all()), [a, b])
+
+    def test_new_item_goes_to_the_end(self):
+        """Un objetivo nuevo (order por defecto) no se cuela en 2º sitio
+        por empatar con el 0 de un plan ya renumerado."""
+        a = self._headline()   # order=0
+        b = self._support()    # order=1
+        c = PlanItem.objects.create(
+            plan=self.plan, exercise=self.plank, progression=PlanItem.PROG_REPS,
+            start_seconds=30, goal_seconds=90, reps_increment=5,
+        )
+        self.assertEqual(list(self.plan.items.all()), [a, b, c])
+
+    def test_first_exercise_can_be_moved_down(self):
+        a = self._headline()
+        b = self._support()
+        resp = self.client.post(
+            reverse("tasks:plan_item_move", args=[self.plan.pk, a.pk]),
+            {"direction": "down"},
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(list(self.plan.items.all()), [b, a])
+
+    def test_falls_back_to_first_when_none_marked(self):
+        """Sin marcar ninguna, la pantalla debe seguir teniendo algo que
+        destacar en vez de quedarse vacía."""
+        sup = self._support()
+        self.assertEqual(self.plan.headline, sup)
+
+    def test_progress_measured_on_headline_not_calendar(self):
+        """El plan avanza con lo que haces, no con lo que pasa el
+        calendario: recién creado va al 0% aunque el reloj corra."""
+        self._headline()
+        self.assertEqual(self.plan.progress_pct(), 0)
+
+    def test_a_plan_holds_several_exercises(self):
+        self._headline()
+        self._support()
+        self.assertEqual(self.plan.items.count(), 2)
+
+
+class PlanViewTests(TestCase):
+    """Las pantallas de plan en la web."""
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.wp = Exercise.objects.create(
+            slug="wp-v", name="Dominadas con peso", mode=Exercise.MODE_POSE,
+        )
+
+    def _create_plan(self):
+        self.client.post(reverse("tasks:plan_create"), {
+            "name": "Ponerme en forma", "weeks": 12, "is_active": "on", "due_time": "18:00",
+        })
+        return Plan.objects.get(name="Ponerme en forma")
+
+    def test_create_plan_from_web(self):
+        plan = self._create_plan()
+        self.assertTrue(plan.is_active)
+        self.assertEqual(plan.user, self.user)
+
+    def test_add_item_ignores_star_flag(self):
+        """Ya no hay ejercicio "estrella": aunque llegue is_headline en el
+        POST (formulario viejo en caché), no se marca nada."""
+        plan = self._create_plan()
+        r = self.client.post(reverse("tasks:plan_item_create", args=[plan.pk]), {
+            "exercise": self.wp.slug, "progression": "double", "is_headline": "on", "sport_mode": "camera",
+            "start_sets": 4, "start_reps": 6, "start_weight_kg": 0,
+            "goal_sets": 4, "goal_reps": 12, "goal_weight_kg": 20,
+            "rep_range_low": 6, "weight_increment_kg": 5, "sessions_per_step": 2,
+        })
+        self.assertEqual(r.status_code, 302)
+        item = plan.items.get()
+        self.assertFalse(item.is_headline)
+        self.assertEqual(item.goal_weight_kg, 20)
+
+    def test_no_item_is_marked_as_headline(self):
+        plan = self._create_plan()
+        other = Exercise.objects.create(slug="ot-v", name="Otro", mode=Exercise.MODE_POSE)
+        for slug in (self.wp.slug, other.slug):
+            self.client.post(reverse("tasks:plan_item_create", args=[plan.pk]), {
+                "exercise": slug, "progression": "reps", "is_headline": "on", "sport_mode": "camera",
+                "start_sets": 3, "start_reps": 8, "goal_reps": 12,
+            })
+        self.assertEqual(plan.items.filter(is_headline=True).count(), 0)
+        # y salen en el orden en que se añadieron
+        self.assertEqual([i.exercise.slug for i in plan.items.all()], [self.wp.slug, other.slug])
+
+    def test_detail_shows_path_to_the_goal(self):
+        """La tabla tiene que llegar al destino: con un número fijo de
+        filas se cortaba antes y no se veía el final."""
+        plan = self._create_plan()
+        self.client.post(reverse("tasks:plan_item_create", args=[plan.pk]), {
+            "exercise": self.wp.slug, "progression": "double", "is_headline": "on", "sport_mode": "camera",
+            "start_sets": 4, "start_reps": 6, "start_weight_kg": 0,
+            "goal_sets": 4, "goal_reps": 12, "goal_weight_kg": 20,
+            "rep_range_low": 6, "weight_increment_kg": 5, "sessions_per_step": 2,
+        })
+        html = self.client.get(reverse("tasks:plan_detail", args=[plan.pk])).content.decode()
+        self.assertIn("El camino completo", html)
+        self.assertIn("con 20 kg", html)     # el destino aparece
+        self.assertIn("destino", html)
+
+    def test_plan_list_renders(self):
+        self._create_plan()
+        html = self.client.get(reverse("tasks:plan_list")).content.decode()
+        self.assertIn("Ponerme en forma", html)
+
+    def test_delete_plan_is_soft(self):
+        plan = self._create_plan()
+        self.client.post(reverse("tasks:plan_delete", args=[plan.pk]))
+        plan.refresh_from_db()
+        self.assertIsNotNone(plan.deleted_at)
+        r = self.client.get(reverse("tasks:plan_list"))
+        # (no se mira el HTML: los mensajes flash de "guardado"/"eliminado"
+        # también llevan el nombre del plan) -- desde que plan_list agrupa
+        # por categoría (ver esa vista), "plans" pasó a ser "plan_groups";
+        # sin ningún plan activo, la lista de grupos está vacía sin más.
+        self.assertEqual(r.context["plan_groups"], [])
+
+    def test_deleted_plan_shows_in_borrados_section(self):
+        plan = self._create_plan()
+        self.client.post(reverse("tasks:plan_delete", args=[plan.pk]))
+        r = self.client.get(reverse("tasks:plan_list"))
+        self.assertEqual(r.context["deleted_plans_count"], 1)
+        self.assertContains(r, "Planes borrados")
+
+
+class NotificationSeriesTests(TestCase):
+    """
+    Una notificación local recurrente (Android la repite sola cada día, sin
+    reabrir la app) se programa una vez y mantiene siempre el mismo
+    contenido. Si apuntara al uuid de la tarea de un día concreto, dejaría
+    de servir en cuanto esa tarea se resolviera y naciera la del día
+    siguiente. Apuntando a la serie, la misma notificación sigue
+    resolviendo el día que toque, sin importar cuántos días hayan pasado
+    sin abrir la app.
+    """
+
+    def test_marks_current_pending_task_of_the_series(self):
+        t = Task.objects.create(
+            title="No fumar", category=Task.CATEGORY_AVOID, due_date=date.today(),
+            due_time=time(22, 0), repeat=Task.REPEAT_DAILY, interval=1,
+            user=get_current_user(),
+        )
+        r = self.client.post(f"/api/series/{t.series_id}/mark/done/")
+        self.assertTrue(r.json()["ok"])
+        # confirma la tarea que ACABA de resolver...
+        self.assertEqual(r.json()["task"]["uuid"], str(t.uuid))
+        # ...y ya existe una nueva pendiente para mañana en la misma serie.
+        tomorrow = Task.objects.get(series_id=t.series_id, is_done=False)
+        self.assertNotEqual(tomorrow.uuid, t.uuid)
+
+    def test_keeps_working_across_many_unopened_days(self):
+        """Simula varios toques seguidos sin reabrir la app entre medias:
+        cada uno debe encontrar y avanzar la tarea pendiente de ese
+        momento, aunque su uuid cambie cada vez."""
+        t = Task.objects.create(
+            title="No fumar", category=Task.CATEGORY_AVOID, due_date=date.today(),
+            due_time=time(22, 0), repeat=Task.REPEAT_DAILY, interval=1,
+            user=get_current_user(),
+        )
+        for _ in range(4):
+            pending = Task.objects.get(series_id=t.series_id, is_done=False)
+            r = self.client.post(f"/api/series/{t.series_id}/mark/done/")
+            self.assertEqual(r.json()["task"]["uuid"], str(pending.uuid))
+        self.assertEqual(Task.objects.filter(series_id=t.series_id).count(), 5)
+
+    def test_unknown_series_gives_clean_404(self):
+        r = self.client.post(
+            "/api/series/00000000-0000-0000-0000-000000000000/mark/done/"
+        )
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(r["Content-Type"], "application/json")
+
+    def test_failed_action_records_it_as_a_relapse(self):
+        t = Task.objects.create(
+            title="No fumar", category=Task.CATEGORY_AVOID, due_date=date.today(),
+            due_time=time(22, 0), repeat=Task.REPEAT_DAILY, interval=1,
+            user=get_current_user(),
+        )
+        self.client.post(f"/api/series/{t.series_id}/mark/failed/")
+        occ = Occurrence.objects.filter(series_id=t.series_id).latest("recorded_at")
+        self.assertEqual(occ.result, Occurrence.RESULT_NOT_DONE)
+
+
+class PlanTaskFlowTests(TestCase):
+    """
+    Lo que hace la app entendible: creas un plan y te aparece la tarea.
+    Le das al play y entrenas. Sin elegir circuito ni ejercicio — el plan
+    ya lo decidió, que es para lo que existe.
+    """
+
+    def setUp(self):
+        WarmupStatus.mark_done(get_current_user())   # si no, el play manda a /calentamiento/
+        self.wp = Exercise.objects.create(
+            slug="wp-f", name="Dominadas con peso", mode=Exercise.MODE_POSE,
+        )
+
+    def _plan_with_exercise(self):
+        self.client.post(reverse("tasks:plan_create"), {
+            "name": "Ponerme en forma", "weeks": 12, "is_active": "on",
+            "custom_days": ["0", "2", "4"], "due_time": "18:00",
+        })
+        plan = Plan.objects.get(name="Ponerme en forma")
+        self.client.post(reverse("tasks:plan_item_create", args=[plan.pk]), {
+            "exercise": self.wp.slug, "progression": "double", "is_headline": "on", "sport_mode": "camera",
+            "start_sets": 4, "start_reps": 6, "start_weight_kg": 0,
+            "goal_sets": 4, "goal_reps": 12, "goal_weight_kg": 20,
+            "rep_range_low": 6, "weight_increment_kg": 5, "sessions_per_step": 2,
+        })
+        return plan
+
+    def test_creating_a_plan_creates_its_task(self):
+        plan = self._plan_with_exercise()
+        self.assertIsNotNone(plan.task)
+        self.assertEqual(plan.task.title, "Ponerme en forma")
+        self.assertEqual(plan.task.category, Task.CATEGORY_SPORT)
+
+    def test_task_appears_in_the_list(self):
+        self._plan_with_exercise()
+        html = self.client.get(reverse("tasks:task_list")).content.decode()
+        self.assertIn("Ponerme en forma", html)
+
+    def test_play_goes_straight_to_the_session(self):
+        """Sin selector de ejercicio: el plan ya decidió."""
+        plan = self._plan_with_exercise()
+        r = self.client.get(reverse("tasks:task_workout", args=[plan.task.pk]))
+        self.assertEqual(r.status_code, 302)
+        self.assertIn(f"/plan/{plan.pk}/", r.url)
+
+    def test_session_shows_todays_target(self):
+        plan = self._plan_with_exercise()
+        html = self.client.get(
+            reverse("tasks:plan_session", args=[plan.task.pk, plan.pk])
+        ).content.decode()
+        self.assertIn("Dominadas con peso", html)
+        self.assertIn("4 × 6", html)
+
+    def test_saving_completes_task_and_records_per_exercise(self):
+        plan = self._plan_with_exercise()
+        task = plan.task
+        r = self.client.post(
+            reverse("tasks:plan_session_save", args=[task.pk, plan.pk]),
+            data=json.dumps({"breakdown": [
+                {"exercise": self.wp.slug, "reps": 24, "sets": 4, "seconds": 200},
+            ]}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(WorkoutSession.objects.filter(plan=plan).count(), 1)
+        # la tarea se cierra al pasar por el enfriamiento, no al guardar
+        task.refresh_from_db()
+        self.assertFalse(task.is_done)
+        self.client.post(reverse("tasks:task_cooldown", args=[task.pk]))
+        task.refresh_from_db()
+        self.assertTrue(task.is_done)
+
+    def test_pausing_the_plan_removes_its_pending_task(self):
+        plan = self._plan_with_exercise()
+        self.assertIsNotNone(plan.task)
+        plan.is_active = False
+        plan.save()
+        plan.sync_task()
+        self.assertIsNone(plan.task)
+
+    def test_deleting_the_plan_removes_its_task(self):
+        plan = self._plan_with_exercise()
+        self.client.post(reverse("tasks:plan_delete", args=[plan.pk]))
+        plan.refresh_from_db()
+        self.assertIsNone(plan.task)
+
+
+class PostureCameraWorkoutTests(TestCase):
+    """
+    Plancha / plancha lateral ahora se pueden entrenar sueltas (fuera de
+    un circuito): antes, al ser mode="timed", task_workout las excluía
+    del todo y las trataba como "no soportadas". Ver POSTURE_COUNTERS en
+    views.py.
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+        WarmupStatus.mark_done(self.user)   # si no, task_workout manda a /calentamiento/
+        self.task = Task.objects.create(title="Plancha", category=Task.CATEGORY_SPORT, user=self.user)
+
+    def test_standalone_plank_renders_the_camera_workout_screen(self):
+        r = self.client.get(
+            reverse("tasks:task_workout", args=[self.task.pk]) + "?exercise=plank"
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertTemplateUsed(r, "tasks/task_workout.html")
+        self.assertEqual(r.context["exercise"].counter_key, "plank")
+
+    def test_standalone_side_plank_renders_the_camera_workout_screen(self):
+        r = self.client.get(
+            reverse("tasks:task_workout", args=[self.task.pk]) + "?exercise=side-plank"
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertTemplateUsed(r, "tasks/task_workout.html")
+        self.assertEqual(r.context["exercise"].counter_key, "sideplank")
+
+    def test_standalone_wall_sit_renders_the_camera_workout_screen(self):
+        r = self.client.get(
+            reverse("tasks:task_workout", args=[self.task.pk]) + "?exercise=wall-sit"
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertTemplateUsed(r, "tasks/task_workout.html")
+        self.assertEqual(r.context["exercise"].counter_key, "wallsit")
+
+
+class PlanAndFreestyleTests(TestCase):
+    """
+    Plan y "a mi aire" conviviendo: si el ejercicio está en un plan
+    activo manda el plan; si no, mandan los objetivos fijos del circuito.
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.pull = Exercise.objects.create(
+            slug="pull-x", name="Dominadas", mode=Exercise.MODE_POSE, counter_key="pullup",
+        )
+        self.routine = Routine.objects.create(name="Circuito", user=self.user)
+        self.item = RoutineItem.objects.create(
+            routine=self.routine, exercise=self.pull, target_sets=3, target_reps=8,
+        )
+        self.task = Task.objects.create(
+            title="Entrenar", category=Task.CATEGORY_SPORT, user=self.user,
+        )
+
+    def _plan(self, **kw):
+        plan = Plan.objects.create(name="En forma", user=self.user)
+        PlanItem.objects.create(
+            plan=plan, exercise=self.pull,
+            **{"start_sets": 4, "start_reps": 6, "reps_increment": 1,
+               "sessions_per_step": 2, **kw},
+        )
+        return plan
+
+    def test_without_plan_uses_routine_target(self):
+        t = self.item.resolved_target(self.user)
+        self.assertEqual((t["sets"], t["reps"], t["source"]), (3, 8, "routine"))
+
+    def test_plan_overrides_routine_target(self):
+        self._plan()
+        t = self.item.resolved_target(self.user)
+        self.assertEqual((t["sets"], t["reps"], t["source"]), (4, 6, "plan"))
+
+    def test_inactive_plan_falls_back_to_routine(self):
+        plan = self._plan()
+        plan.is_active = False
+        plan.save()
+        self.assertEqual(self.item.resolved_target(self.user)["source"], "routine")
+
+    def test_circuit_saves_one_session_per_exercise(self):
+        """Con una sola sesión conjunta, la progresión del plan nunca
+        avanzaría (cuenta sesiones por ejercicio) y se perdían las reps."""
+        plank = Exercise.objects.create(slug="plank-x", name="Plancha", mode=Exercise.MODE_TIMED)
+        RoutineItem.objects.create(routine=self.routine, exercise=plank, order=1)
+        r = self.client.post(
+            f"/api/tasks/{self.task.uuid}/circuit/{self.routine.uuid}/",
+            data=json.dumps({"breakdown": [
+                {"exercise": "pull-x", "reps": 18, "sets": 3, "seconds": 120},
+                {"exercise": "plank-x", "seconds": 30},
+            ]}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.json()["sessions"]), 2)
+        self.assertEqual(WorkoutSession.objects.filter(task=self.task).count(), 2)
+        # y las repeticiones ya no se pierden
+        ws = WorkoutSession.objects.get(task=self.task, exercise="pull-x")
+        self.assertEqual(ws.total_reps, 18)
+
+    def test_session_records_plan_and_target(self):
+        plan = self._plan()
+        self.client.post(
+            f"/api/tasks/{self.task.uuid}/circuit/{self.routine.uuid}/",
+            data=json.dumps({"breakdown": [{"exercise": "pull-x", "reps": 18, "sets": 3}]}),
+            content_type="application/json",
+        )
+        ws = WorkoutSession.objects.get(task=self.task, exercise="pull-x")
+        self.assertEqual(ws.plan, plan)
+        self.assertEqual((ws.target_sets, ws.target_reps), (4, 6))
+        self.assertEqual(ws.achievement_pct, 75)   # 18 de 24
+
+    def test_plan_climbs_after_enough_sessions(self):
+        self._plan()
+        for _ in range(2):
+            self.client.post(
+                f"/api/tasks/{self.task.uuid}/circuit/{self.routine.uuid}/",
+                data=json.dumps({"breakdown": [{"exercise": "pull-x", "reps": 24, "sets": 4}]}),
+                content_type="application/json",
+            )
+        self.assertEqual(self.item.resolved_target(self.user)["reps"], 7)
+
+
+class SingleExerciseCompletionTests(TestCase):
+    """
+    Regla desde el 2026-09-04 (decisión explícita del usuario, ver el
+    comentario largo junto a la resolución de ctx en task_workout_save/
+    workout_save): un ejercicio SUELTO (freestyle, no generado por un
+    plan) NUNCA engancha el objetivo ni la progresión de un plan activo
+    que entrene el mismo ejercicio, aunque coincida el slug — se guarda
+    sin objetivo y la tarea se completa siempre, igual que un ejercicio
+    freestyle sin ningún plan relacionado. Antes de este cambio pasaba
+    lo contrario a propósito (ver el historial en git blame de este
+    archivo si hace falta el porqué original); se cambió porque
+    confundía, mostrando en pantalla el objetivo/nombre de un plan como
+    si la tarea perteneciera a él sin serlo. Solo una tarea que SÍ
+    generó un plan (task.plan, ver plan_session/plan_session_save) sigue
+    atada a su objetivo — eso no ha cambiado y no lo cubre esta clase.
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.pull = Exercise.objects.create(
+            slug="pull-c", name="Dominadas", mode=Exercise.MODE_POSE, counter_key="pullup",
+        )
+        self.task = Task.objects.create(
+            title="Dominadas sueltas", category=Task.CATEGORY_SPORT,
+            subcategory=Task.SUBCATEGORY_UPPER_BODY, user=self.user,
+        )
+        self.plan = Plan.objects.create(name="Fuerza", user=self.user)
+        PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_REPS,
+            start_sets=3, start_reps=8, reps_increment=1, sessions_per_step=2,
+        )
+
+    # ---------------------------------------------------------- API
+
+    def test_api_freestyle_ignores_unrelated_active_plan(self):
+        """Aunque haya un plan activo (self.plan) siguiendo pull-c, esta
+        tarea no la generó ese plan — se guarda sin objetivo/plan y se
+        completa siempre, con pocas o muchas reps."""
+        r = self.client.post(
+            f"/api/tasks/{self.task.uuid}/workout/",
+            data=json.dumps({"exercise": "pull-c", "total_reps": 10, "total_sets": 3}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.task.refresh_from_db()
+        self.assertTrue(self.task.is_done)
+        ws = WorkoutSession.objects.get(task=self.task)
+        self.assertIsNone(ws.plan)
+        self.assertIsNone(ws.target_sets)
+        self.assertIsNone(ws.target_reps)
+
+    def test_api_without_plan_always_completes(self):
+        """Entreno libre (sin ningún plan, ni activo ni relacionado): no
+        hay objetivo, se completa como siempre."""
+        Exercise.objects.create(slug="free-c", name="Sentadillas", mode=Exercise.MODE_POSE)
+        r = self.client.post(
+            f"/api/tasks/{self.task.uuid}/workout/",
+            data=json.dumps({"exercise": "free-c", "total_reps": 5, "total_sets": 1}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.task.refresh_from_db()
+        self.assertTrue(self.task.is_done)
+
+    # ---------------------------------------------------------- web
+
+    def test_web_freestyle_ignores_unrelated_active_plan(self):
+        """Mismo criterio que la API (ver arriba) — antes esto SÍ
+        enganchaba el objetivo del plan a propósito; ya no. La tarea se
+        marca hecha en task_cooldown, no en task_workout_save (ver el
+        docstring de task_cooldown en views.py) — se sigue el flujo
+        completo en vez de comprobar is_done a medio camino."""
+        r = self.client.post(
+            reverse("tasks:task_workout_save", args=[self.task.pk]) + "?exercise=pull-c",
+            data=json.dumps({"total_reps": 10, "total_sets": 3}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        ws = WorkoutSession.objects.get(task=self.task)
+        self.assertIsNone(ws.plan)
+        self.assertIsNone(ws.target_sets)
+        self.assertTrue(ws.target_met)  # sin objetivo, se da por cumplido
+        self.assertIn(reverse("tasks:task_cooldown", args=[self.task.pk]), r.json()["redirect_url"])
+        self.client.post(reverse("tasks:task_cooldown", args=[self.task.pk]))
+        self.task.refresh_from_db()
+        self.assertTrue(self.task.is_done)
+
+
+class MultiExerciseCompletionTests(TestCase):
+    """
+    Regla contraria para sesiones con varios ejercicios (circuito o
+    plan): la tarea se completa siempre que entrenes, lleguen o no todos
+    los ejercicios a su objetivo. El % de cada uno se guarda igual.
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.plank = Exercise.objects.create(slug="plank-c", name="Plancha", mode=Exercise.MODE_TIMED)
+        self.routine = Routine.objects.create(name="Core", user=self.user)
+        RoutineItem.objects.create(routine=self.routine, exercise=self.plank, order=0)
+        self.task = Task.objects.create(
+            title="Circuito core", category=Task.CATEGORY_SPORT, user=self.user,
+        )
+
+    def test_web_routine_save_records_one_session_per_exercise(self):
+        """Regresión: antes se guardaba UNA sesión combinada
+        (exercise='ab-circuit'), y ningún plan por ejercicio la veía."""
+        plan = Plan.objects.create(name="Aguante", user=self.user)
+        PlanItem.objects.create(
+            plan=plan, exercise=self.plank, progression=PlanItem.PROG_REPS,
+            start_sets=3, start_seconds=30, reps_increment=5, sessions_per_step=2,
+        )
+        r = self.client.post(
+            reverse("tasks:routine_save", args=[self.task.pk, self.routine.pk]),
+            data=json.dumps({"breakdown": [{"exercise": "plank-c", "seconds": 15}]}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        ws = WorkoutSession.objects.get(task=self.task)
+        self.assertEqual(ws.exercise, "plank-c")   # no "ab-circuit"
+        self.assertEqual(ws.plan, plan)
+        self.assertFalse(ws.target_met)            # 15s de 90s (3x30) pedidos
+        # pero la tarea se completa igualmente (al pasar por el
+        # enfriamiento): es una sesión con varios ejercicios en potencia,
+        # y aquí lo que cuenta es que entrenaste.
+        self.client.post(reverse("tasks:task_cooldown", args=[self.task.pk]))
+        self.task.refresh_from_db()
+        self.assertTrue(self.task.is_done)
+
+    def test_web_routine_save_without_plan_still_completes(self):
+        r = self.client.post(
+            reverse("tasks:routine_save", args=[self.task.pk, self.routine.pk]),
+            data=json.dumps({"breakdown": [{"exercise": "plank-c", "seconds": 40}]}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.client.post(reverse("tasks:task_cooldown", args=[self.task.pk]))
+        self.task.refresh_from_db()
+        self.assertTrue(self.task.is_done)
+        ws = WorkoutSession.objects.get(task=self.task)
+        self.assertIsNone(ws.plan)
+        self.assertEqual(ws.exercise, "plank-c")
+
+
+class ExerciseCatalogTests(TestCase):
+    """
+    Estado del catálogo tras 0002_seed_exercise_catalog (ya editada) +
+    0011_camera_exercise_updates (por si alguna base de datos ya había
+    corrido la 0002 vieja) — decisión del usuario: Superman y Circuito
+    de abdominales fuera del todo; crunch y elevación de piernas con
+    cámara; plancha y plancha lateral cronometradas pero con
+    counter_key para la comprobación de postura.
+    """
+
+    def test_ab_circuit_is_gone(self):
+        self.assertFalse(Exercise.objects.filter(slug="ab-circuit").exists())
+        # Superman se borró en la 0011 pero volvió (con cámara) en la 0069 -- ver test_superman_variants.
+
+    def test_crunch_and_leg_raise_are_camera_exercises(self):
+        crunch = Exercise.objects.get(slug="crunch")
+        leg_raise = Exercise.objects.get(slug="leg-raise")
+        self.assertEqual(crunch.mode, Exercise.MODE_POSE)
+        self.assertEqual(crunch.counter_key, "crunch")
+        self.assertEqual(leg_raise.mode, Exercise.MODE_POSE)
+        self.assertEqual(leg_raise.counter_key, "legraise")
+
+    def test_situp_already_has_its_own_counter(self):
+        situp = Exercise.objects.get(slug="situp")
+        self.assertEqual(situp.mode, Exercise.MODE_POSE)
+        self.assertEqual(situp.counter_key, "situp")
+
+    def test_plank_and_side_plank_stay_timed_with_counter_key(self):
+        plank = Exercise.objects.get(slug="plank")
+        side_plank = Exercise.objects.get(slug="side-plank")
+        self.assertEqual(plank.mode, Exercise.MODE_TIMED)
+        self.assertEqual(plank.counter_key, "plank")
+        self.assertEqual(side_plank.mode, Exercise.MODE_TIMED)
+        self.assertEqual(side_plank.counter_key, "sideplank")
+
+    def test_bicycle_crunch_stays_plain_timed(self):
+        """No todos los cronometrados llevan cámara — bicicleta no tiene
+        contador propio y se queda como cronómetro a secas."""
+        bicycle = Exercise.objects.get(slug="bicycle-crunch")
+        self.assertEqual(bicycle.mode, Exercise.MODE_TIMED)
+        self.assertEqual(bicycle.counter_key, "")
+
+    def test_default_routine_no_longer_includes_superman(self):
+        routine = Routine.objects.get(name="Abdominales completo")
+        slugs = list(routine.items.values_list("exercise__slug", flat=True))
+        self.assertNotIn("superman", slugs)
+        self.assertNotIn("ab-circuit", slugs)
+        self.assertIn("plank", slugs)
+
+    def test_double_crunch_is_a_camera_exercise(self):
+        double_crunch = Exercise.objects.get(slug="double-crunch")
+        self.assertEqual(double_crunch.mode, Exercise.MODE_POSE)
+        self.assertEqual(double_crunch.counter_key, "doublecrunch")
+
+    def test_scissor_kick_is_a_camera_exercise(self):
+        scissor = Exercise.objects.get(slug="scissor-kick")
+        self.assertEqual(scissor.mode, Exercise.MODE_POSE)
+        self.assertEqual(scissor.counter_key, "scissor")
+
+    def test_wall_sit_stays_timed_with_counter_key(self):
+        """Silla en pared se aguanta, igual que plancha/plancha lateral
+        — no se cuenta en repeticiones, así que va como mode="timed" con
+        counter_key puesto, no mode="pose"."""
+        wall_sit = Exercise.objects.get(slug="wall-sit")
+        self.assertEqual(wall_sit.mode, Exercise.MODE_TIMED)
+        self.assertEqual(wall_sit.counter_key, "wallsit")
+        self.assertEqual(wall_sit.body_area, "lower_body")
+
+    def test_l_sit_parallel_bars_variants(self):
+        """L-sit en paralelas: repeticiones (pose, "lsit") y aguante
+        (timed con counter_key, "lsithold", como plancha/silla en pared).
+        Los dos tienen que estar en los sets de contadores de views.py
+        para poder abrirse sueltos con cámara."""
+        from tasks.views import COUNTERS, POSTURE_COUNTERS
+        reps = Exercise.objects.get(slug="l-sit")
+        hold = Exercise.objects.get(slug="l-sit-hold")
+        self.assertEqual(reps.mode, Exercise.MODE_POSE)
+        self.assertEqual(reps.counter_key, "lsit")
+        self.assertEqual(hold.mode, Exercise.MODE_TIMED)
+        self.assertEqual(hold.counter_key, "lsithold")
+        self.assertIn("lsit", COUNTERS)
+        self.assertIn("lsithold", POSTURE_COUNTERS)
+
+    def test_superman_variants(self):
+        """Superman (2026-09-20): repeticiones (pose, "superman") y aguante
+        (timed con counter_key, "supermanhold", como plancha/L-sit hold).
+        Los dos tienen que estar en los sets de contadores de views.py."""
+        from tasks.views import COUNTERS, POSTURE_COUNTERS
+        reps = Exercise.objects.get(slug="superman")
+        hold = Exercise.objects.get(slug="superman-hold")
+        self.assertEqual(reps.mode, Exercise.MODE_POSE)
+        self.assertEqual(reps.counter_key, "superman")
+        self.assertEqual(hold.mode, Exercise.MODE_TIMED)
+        self.assertEqual(hold.counter_key, "supermanhold")
+        self.assertIn("superman", COUNTERS)
+        self.assertIn("supermanhold", POSTURE_COUNTERS)
+
+    def test_archer_pullup_is_a_camera_exercise(self):
+        """Dominadas de arquero: mismo criterio de subida/bajada que las
+        dominadas normales, con su propio counter_key porque además hace
+        falta medir el ángulo de cada brazo (ver processArcherPullup en
+        workout.js) — por eso no comparte "pullup" como sí hacen
+        wide-pullup/chinup/etc."""
+        archer = Exercise.objects.get(slug="archer-pullup")
+        self.assertEqual(archer.mode, Exercise.MODE_POSE)
+        self.assertEqual(archer.counter_key, "archerpullup")
+        self.assertEqual(archer.body_area, "upper_body")
+
+    def test_archer_pullup_counter_key_is_registered_as_supported(self):
+        """0013 añade el ejercicio al catálogo, pero task_workout solo lo
+        trata como soportado por cámara si su counter_key también está en
+        views.COUNTERS (ver is_pose_supported) — sin esto, el ejercicio
+        existiría pero la pantalla de entreno lo trataría como "no
+        soportado"."""
+        from tasks.views import COUNTERS
+        self.assertIn("archerpullup", COUNTERS)
+
+    def test_incline_push_up_is_a_camera_exercise(self):
+        """Flexiones inclinadas: mismo gesto de brazo que push-up, pero
+        con su PROPIO counter_key ("inclinepushup", no "pushup") porque el
+        contador de cámara tiene que aceptar cualquier inclinación de pies
+        sin techo (ver processInclinePushup en workout.js y el porqué en
+        0023_add_incline_push_up) — a diferencia de weighted-squat, que sí
+        reutiliza el counter_key de squat porque ahí no cambia nada del
+        gesto que MediaPipe mide."""
+        incline_push_up = Exercise.objects.get(slug="incline-push-up")
+        self.assertEqual(incline_push_up.mode, Exercise.MODE_POSE)
+        self.assertEqual(incline_push_up.counter_key, "inclinepushup")
+        self.assertEqual(incline_push_up.body_area, "upper_body")
+
+    def test_incline_push_up_counter_key_is_registered_as_supported(self):
+        """Igual que test_archer_pullup_counter_key_is_registered_as_supported:
+        sin "inclinepushup" en views.COUNTERS, task_workout trataría el
+        ejercicio como no soportado por cámara aunque exista en el
+        catálogo."""
+        from tasks.views import COUNTERS
+        self.assertIn("inclinepushup", COUNTERS)
+
+    def test_pike_push_up_is_a_camera_exercise(self):
+        """Pike push-ups (0070): pose con su propio counter_key ("pikepushup",
+        ver processPikePushup en workout.js), tren superior, registrado en COUNTERS."""
+        from tasks.views import COUNTERS
+        pike = Exercise.objects.get(slug="pike-push-up")
+        self.assertEqual(pike.mode, Exercise.MODE_POSE)
+        self.assertEqual(pike.counter_key, "pikepushup")
+        self.assertEqual(pike.body_area, "upper_body")
+        self.assertIn("pikepushup", COUNTERS)
+
+    def test_mountain_climber_was_removed(self):
+        """Mountain climbers (0071) se retiró en 0072: ya no está en el catálogo ni en COUNTERS."""
+        from tasks.views import COUNTERS
+        self.assertFalse(Exercise.objects.filter(slug="mountain-climber").exists())
+        self.assertNotIn("mountainclimber", COUNTERS)
+
+    def test_dumbbell_curl_is_a_camera_exercise(self):
+        """Curl con mancuernas (0024_add_dumbbell_curl): counter_key propio
+        ("dumbbellcurl") porque el contador mide el ángulo de codo de
+        FRENTE a la cámara (como dominadas), no de perfil como push-up/
+        squat/dip, y necesita comprobar que el codo se queda pegado al
+        costado y la muñeca no sube a la altura de la cara — ver
+        processDumbbellCurl en workout.js y el porqué en la migración."""
+        curl = Exercise.objects.get(slug="dumbbell-curl")
+        self.assertEqual(curl.mode, Exercise.MODE_POSE)
+        self.assertEqual(curl.counter_key, "dumbbellcurl")
+        self.assertEqual(curl.body_area, "upper_body")
+
+    def test_dumbbell_curl_counter_key_is_registered_as_supported(self):
+        """Igual que test_archer_pullup_counter_key_is_registered_as_supported:
+        sin "dumbbellcurl" en views.COUNTERS, task_workout trataría el
+        ejercicio como no soportado por cámara aunque exista en el
+        catálogo."""
+        from tasks.views import COUNTERS
+        self.assertIn("dumbbellcurl", COUNTERS)
+
+
+class WebCircuitBuilderTests(TestCase):
+    """
+    El constructor de circuitos de la web aceptaba solo ejercicios
+    mode="timed" — se relaja para admitir cualquier ejercicio activo
+    (cámara incluida), igual que ya hacía la API para la app móvil (ver
+    ApiTests.test_routine_accepts_any_active_exercise).
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.plank = Exercise.objects.create(slug="plank-w", name="Plancha", mode=Exercise.MODE_TIMED)
+        self.crunch = Exercise.objects.create(
+            slug="crunch-w", name="Crunch", mode=Exercise.MODE_POSE, counter_key="crunch",
+        )
+
+    def test_camera_exercises_appear_in_the_available_list(self):
+        r = self.client.get(reverse("tasks:routine_create"))
+        self.assertContains(r, "Crunch")
+        self.assertContains(r, "Plancha")
+
+    def test_saving_a_mixed_routine_keeps_both_items(self):
+        r = self.client.post(reverse("tasks:routine_create"), {
+            "name": "Mixto", "subcategory": "lower_body",
+            "default_work_seconds": 40, "default_rest_seconds": 20,
+            "items": f"{self.plank.pk},{self.crunch.pk}",
+        })
+        self.assertEqual(r.status_code, 302)
+        routine = Routine.objects.get(name="Mixto")
+        self.assertEqual(
+            list(routine.items.order_by("order").values_list("exercise_id", flat=True)),
+            [self.plank.pk, self.crunch.pk],
+        )
+
+
+class WebCircuitPlayAndSaveTests(TestCase):
+    def setUp(self):
+        self.user = get_current_user()
+        self.plank = Exercise.objects.create(
+            slug="plank-play", name="Plancha", mode=Exercise.MODE_TIMED, counter_key="plank",
+        )
+        self.crunch = Exercise.objects.create(
+            slug="crunch-play", name="Crunch", mode=Exercise.MODE_POSE, counter_key="crunch",
+        )
+        self.routine = Routine.objects.create(name="Circuito mixto", user=self.user)
+        RoutineItem.objects.create(routine=self.routine, exercise=self.plank, order=0)
+        RoutineItem.objects.create(routine=self.routine, exercise=self.crunch, order=1)
+        self.task = Task.objects.create(title="Circuito", category=Task.CATEGORY_SPORT, user=self.user)
+        WarmupStatus.mark_done(self.user)   # si no, routine_play manda a /calentamiento/
+
+    def test_items_json_carries_mode_and_counter_key(self):
+        r = self.client.get(reverse("tasks:routine_play", args=[self.task.pk, self.routine.pk]))
+        self.assertEqual(r.status_code, 200)
+        items = json.loads(r.context["items_json"])
+        by_slug = {i["slug"]: i for i in items}
+        self.assertEqual(by_slug["plank-play"]["mode"], Exercise.MODE_TIMED)
+        self.assertEqual(by_slug["plank-play"]["counter_key"], "plank")
+        self.assertEqual(by_slug["crunch-play"]["mode"], Exercise.MODE_POSE)
+        self.assertEqual(by_slug["crunch-play"]["counter_key"], "crunch")
+
+    def test_routine_save_records_reps_for_camera_items(self):
+        r = self.client.post(
+            reverse("tasks:routine_save", args=[self.task.pk, self.routine.pk]),
+            data=json.dumps({"breakdown": [
+                {"exercise": "plank-play", "seconds": 40},
+                {"exercise": "crunch-play", "reps": 15, "sets": 3, "seconds": 60},
+            ]}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        crunch_session = WorkoutSession.objects.get(task=self.task, exercise="crunch-play")
+        self.assertEqual(crunch_session.total_reps, 15)
+        self.assertEqual(crunch_session.total_sets, 3)
+        plank_session = WorkoutSession.objects.get(task=self.task, exercise="plank-play")
+        self.assertEqual(plank_session.session_duration_seconds, 40)
+
+
+class PlanMissedDayTests(TestCase):
+    """
+    Sin hora límite, una tarea de plan no expiraba nunca sola — se
+    quedaba pendiente indefinidamente y se podía completar días después
+    como si tal cosa, sin que contara como fallo. Y aunque expirase, sin
+    ninguna WorkoutSession ese día quedaba invisible para el plan: no
+    contaba ni como fallo ni movía la racha de cara al deload.
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.pull = Exercise.objects.create(slug="pull-miss", name="Dominadas", mode=Exercise.MODE_POSE)
+        self.plan = Plan.objects.create(name="Constancia", user=self.user)
+        self.item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_REPS,
+            start_sets=2, start_reps=5, goal_sets=4, goal_reps=12,
+        )
+
+    def test_plan_task_defaults_to_end_of_day_deadline(self):
+        task = self.plan.sync_task()
+        self.assertEqual(task.due_time, time(23, 59))
+
+    def test_unplayed_day_resolves_as_failed_with_zero_percent(self):
+        task = self.plan.sync_task()
+        task.due_date = timezone.localtime(timezone.now()).date() - timedelta(days=1)
+        task.save()
+
+        expired = Task.expire_overdue()
+        self.assertIn(task.pk, [t.pk for t in expired])
+
+        task.refresh_from_db()
+        self.assertTrue(task.is_done)
+        self.assertTrue(task.expired)
+
+        ws = WorkoutSession.objects.get(task=task)
+        self.assertEqual(ws.achievement_pct, 0)
+        self.assertEqual(ws.plan, self.plan)
+
+        successes, streak = self.item.successes_and_streak()
+        self.assertEqual(successes, 0)
+        self.assertEqual(streak, 1)  # el día perdido ya cuenta
+
+    def test_does_not_double_record_if_something_was_actually_played(self):
+        """Si sí jugaste algo (aunque no llegaras a marcarla a tiempo),
+        no se inventa una sesión de 0% encima de la real."""
+        task = self.plan.sync_task()
+        WorkoutSession.objects.create(
+            task=task, user=self.user, plan=self.plan, exercise="pull-miss",
+            total_reps=6, total_sets=2, target_sets=2, target_reps=5,
+        )
+        task.due_date = timezone.localtime(timezone.now()).date() - timedelta(days=1)
+        task.save()
+
+        Task.expire_overdue()
+
+        self.assertEqual(WorkoutSession.objects.filter(task=task).count(), 1)
+
+
+class ListFilteringTests(TestCase):
+    """
+    Regresiones de dos molestias reales:
+
+    Al resolver una tarea repetida se genera ya la del día siguiente, y
+    aparecía en la lista al instante — podías marcarla otra vez el mismo
+    día y contaba dos veces en las estadísticas.
+
+    Y las hechas se acumulaban para siempre: a los treinta días tenías
+    treinta "No fumar" en la lista.
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+
+    def test_tomorrows_task_is_not_shown_today(self):
+        t = Task.objects.create(
+            title="No fumar", category=Task.CATEGORY_AVOID, due_date=date.today(),
+            due_time=time(22, 0), repeat=Task.REPEAT_DAILY, interval=1, user=self.user,
+        )
+        t.mark_done()
+        # existe, pero no se enseña hasta que le toque
+        tomorrow = Task.objects.get(series_id=t.series_id, is_done=False)
+        self.assertEqual(tomorrow.due_date, date.today() + timedelta(days=1))
+
+        html = self.client.get(reverse("tasks:task_list")).content.decode()
+        self.assertEqual(html.count("No fumar"), 1)   # solo en Hechas
+
+        api = self.client.get("/api/tasks/").json()
+        self.assertEqual(api["pending"], [])
+
+    def test_overdue_tasks_are_auto_closed_not_pending(self):
+        """Toda tarea tiene hora límite (Task.save pone 23:59 si no hay):
+        una vencida se cierra sola como no hecha en vez de quedarse
+        pendiente."""
+        t = Task.objects.create(
+            title="Atrasada", due_date=date.today() - timedelta(days=2), user=self.user,
+        )
+        api = self.client.get("/api/tasks/").json()
+        self.assertEqual(api["pending"], [])
+        t.refresh_from_db()
+        self.assertTrue(t.is_done and t.expired)
+
+    def test_tasks_without_date_are_always_shown(self):
+        Task.objects.create(title="Cuando pueda", user=self.user)
+        api = self.client.get("/api/tasks/").json()
+        self.assertIn("Cuando pueda", [t["title"] for t in api["pending"]])
+
+    def test_completed_list_only_shows_today(self):
+        old = Task.objects.create(title="Vieja", user=self.user)
+        old.mark_done()
+        Task.objects.filter(pk=old.pk).update(
+            completed_at=timezone.now() - timedelta(days=5)
+        )
+        recent = Task.objects.create(title="De hoy", user=self.user)
+        recent.mark_done()
+
+        api = self.client.get("/api/tasks/").json()
+        titles = [t["title"] for t in api["completed"]]
+        self.assertIn("De hoy", titles)
+        self.assertNotIn("Vieja", titles)
+
+
+class ApiTests(TestCase):
+    """API JSON que consume la app móvil."""
+
+    def _post(self, url, payload):
+        return self.client.post(url, data=json.dumps(payload), content_type="application/json")
+
+    def _patch(self, url, payload):
+        return self.client.patch(url, data=json.dumps(payload), content_type="application/json")
+
+    def test_create_and_list(self):
+        # category="general" a propósito: category="study" ahora exige
+        # algo enlazado (ver Task.study_link_error) y no es lo que este
+        # test comprueba -- eso lo cubren los tests de más abajo.
+        r = self._post("/api/tasks/create/", {"title": "Desde la app", "category": "general"})
+        self.assertEqual(r.status_code, 201)
+        self.assertTrue(r.json()["ok"])
+        r = self.client.get("/api/tasks/")
+        self.assertEqual(len(r.json()["pending"]), 1)
+
+    def test_create_study_task_requires_something_linked(self):
+        """Igual que en el formulario web: la API tampoco debe dejar crear
+        una tarea de Estudio "hueca" (sin vídeo, sin playlist, sin ser
+        Udemy) -- si no, no hay forma de saber qué estudiar ni de detectar
+        cuándo se ha terminado."""
+        r = self._post("/api/tasks/create/", {"title": "Estudiar algo", "category": "study"})
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertFalse(r.json()["ok"])
+
+    def test_create_study_task_udemy_ignores_watch_keyword(self):
+        r = self._post("/api/tasks/create/", {
+            "title": "Udemy suelto", "category": "study", "subcategory": "udemy",
+            "watch_keyword": "Excel",
+        })
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["task"]["watch_keyword"], "")
+
+    def test_create_study_task_with_youtube_video_is_allowed(self):
+        r = self._post("/api/tasks/create/", {
+            "title": "Ver este vídeo", "category": "study",
+            "youtube_video_id": "dQw4w9WgXcQ",
+        })
+        self.assertEqual(r.status_code, 201, r.content)
+
+    def test_dates_are_parsed_not_passed_through(self):
+        """Regresión: asignar la fecha como cadena rompía el serializador."""
+        r = self._post("/api/tasks/create/", {"title": "Con fecha", "due_date": "2026-07-27", "due_time": "22:00"})
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.json()["task"]["due_date"], "2026-07-27")
+        self.assertEqual(r.json()["task"]["due_time"], "22:00")
+
+    def test_invalid_date_is_rejected_cleanly(self):
+        r = self._post("/api/tasks/create/", {"title": "X", "due_date": "27-07-2026"})
+        self.assertEqual(r.status_code, 400)
+
+    def test_invalid_category_falls_back(self):
+        """La app no debe poder meter valores fuera de los choices."""
+        r = self._post("/api/tasks/create/", {"title": "X", "category": "inventada"})
+        self.assertEqual(r.json()["task"]["category"], Task.CATEGORY_GENERAL)
+
+    def test_empty_title_rejected(self):
+        r = self._post("/api/tasks/create/", {"title": "   "})
+        self.assertEqual(r.status_code, 400)
+
+    def test_delete_is_soft_and_hides_task(self):
+        r = self._post("/api/tasks/create/", {"title": "Borrame"})
+        uuid_ = r.json()["task"]["uuid"]
+        self.client.delete(f"/api/tasks/{uuid_}/")
+        t = Task.objects.get(uuid=uuid_)
+        self.assertIsNotNone(t.deleted_at)  # la fila sigue existiendo
+        listed = self.client.get("/api/tasks/").json()
+        self.assertEqual(len(listed["pending"]) + len(listed["completed"]), 0)
+
+    def test_mark_actions(self):
+        r = self._post("/api/tasks/create/", {"title": "Marcame"})
+        uuid_ = r.json()["task"]["uuid"]
+        self.assertEqual(self.client.post(f"/api/tasks/{uuid_}/mark/done/").status_code, 200)
+        self.assertEqual(self.client.post(f"/api/tasks/{uuid_}/mark/inventada/").status_code, 400)
+
+    def test_routine_accepts_any_active_exercise(self):
+        """Un circuito puede mezclar cronometrados y de cámara: una serie
+        de tren superior (dominadas, anchas...) es tan válida como un
+        circuito de abdominales."""
+        Exercise.objects.create(slug="plank-t", name="Plancha", mode=Exercise.MODE_TIMED)
+        Exercise.objects.create(slug="pullup-t", name="Dominadas", mode=Exercise.MODE_POSE)
+        r = self._post("/api/routines/", {"name": "Mixto", "items": ["plank-t", "pullup-t"]})
+        self.assertEqual(r.status_code, 201)
+        slugs = [i["slug"] for i in r.json()["routine"]["items"]]
+        self.assertEqual(slugs, ["plank-t", "pullup-t"])
+
+    def test_routine_ignores_inactive_exercises(self):
+        Exercise.objects.create(slug="ok-t", name="Ok", mode=Exercise.MODE_TIMED)
+        Exercise.objects.create(slug="off-t", name="Off", mode=Exercise.MODE_TIMED, is_active=False)
+        r = self._post("/api/routines/", {"name": "X", "items": ["ok-t", "off-t"]})
+        self.assertEqual([i["slug"] for i in r.json()["routine"]["items"]], ["ok-t"])
+
+    def test_routine_needs_at_least_one_exercise(self):
+        r = self._post("/api/routines/", {"name": "Vacio", "items": []})
+        self.assertEqual(r.status_code, 400)
+
+    def test_cors_allows_capacitor_origin_only(self):
+        r = self.client.get("/api/tasks/", HTTP_ORIGIN="https://localhost")
+        self.assertEqual(r.headers.get("Access-Control-Allow-Origin"), "https://localhost")
+        r = self.client.get("/api/tasks/", HTTP_ORIGIN="https://evil.example.com")
+        self.assertIsNone(r.headers.get("Access-Control-Allow-Origin"))
+
+    def test_cors_not_applied_outside_api(self):
+        """La web normal no debe aceptar peticiones de otros orígenes."""
+        r = self.client.get(reverse("tasks:task_list"), HTTP_ORIGIN="https://localhost")
+        self.assertIsNone(r.headers.get("Access-Control-Allow-Origin"))
+
+    def test_malformed_json_returns_json_not_html(self):
+        """Si la app manda basura, debe recibir JSON — no una página de
+        error HTML que no sabría interpretar."""
+        r = self.client.post("/api/tasks/create/", data="{no es json", content_type="application/json")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.json()["ok"], False)
+
+    def test_not_found_returns_json_not_html(self):
+        """Regresión: pedir algo inexistente devolvía la página HTML de
+        Django, la app hacía resp.json(), reventaba, y el usuario veía un
+        error incomprensible en vez de saber qué había pasado."""
+        r = self.client.delete("/api/tasks/00000000-0000-0000-0000-000000000000/")
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(r["Content-Type"], "application/json")
+        self.assertFalse(r.json()["ok"])
+
+    def test_deleting_twice_gives_clean_json_error(self):
+        """Borrar dos veces (p.ej. reintento de la cola sin conexión) no
+        debe soltar HTML."""
+        uuid_ = self._post("/api/tasks/create/", {"title": "Doble borrado"}).json()["task"]["uuid"]
+        self.assertEqual(self.client.delete(f"/api/tasks/{uuid_}/").status_code, 200)
+        r2 = self.client.delete(f"/api/tasks/{uuid_}/")
+        self.assertEqual(r2.status_code, 404)
+        self.assertEqual(r2["Content-Type"], "application/json")
+
+
+class UdemyTrackingTests(TestCase):
+    """
+    Fase 2 del tracking de tiempo en Udemy (ver docs/plan-tracking-tiempo.md):
+    subtipo "Curso de Udemy" dentro de Estudio, TimerSession.SOURCE_PC_USAGE,
+    y el cierre de la serie entera cuando la extensión de Chrome detecta el
+    curso al 100%.
+    """
+    def setUp(self):
+        self.user = get_current_user()
+        self.task = Task.objects.create(
+            title="Curso de Linux", category=Task.CATEGORY_STUDY,
+            subcategory=Task.SUBCATEGORY_UDEMY, watch_keyword="Linux",
+            repeat=Task.REPEAT_DAILY, user=self.user,
+        )
+
+    def test_capability_and_meta_expose_udemy(self):
+        self.assertTrue(self.task.has_capability("app_usage"))
+        r = self.client.get(reverse("api:meta"))
+        values = {c["value"] for c in r.json()["study_subcategories"]}
+        self.assertIn("udemy", values)
+
+    def test_task_list_exposes_watch_keyword(self):
+        r = self.client.get(reverse("api:task_list"))
+        mine = [t for t in r.json()["pending"] if t["uuid"] == str(self.task.uuid)]
+        self.assertEqual(len(mine), 1)
+        self.assertEqual(mine[0]["watch_keyword"], "Linux")
+        self.assertEqual(mine[0]["subcategory"], "udemy")
+
+    def test_focus_save_with_pc_usage_creates_session(self):
+        r = self.client.post(
+            reverse("api:focus_save", args=[self.task.uuid]),
+            data=json.dumps({"minutes": 15, "source": "pc_usage", "app_package": "udemy.com"}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        ts = TimerSession.objects.get(task=self.task)
+        self.assertEqual(ts.source, TimerSession.SOURCE_PC_USAGE)
+        self.assertEqual(ts.app_package, "udemy.com")
+        self.assertEqual(ts.minutes, 15)
+
+    def test_course_complete_stops_the_series(self):
+        r = self.client.post(reverse("api:task_mark", args=[self.task.uuid, "course-complete"]))
+        self.assertEqual(r.status_code, 200, r.content)
+        self.task.refresh_from_db()
+        self.assertTrue(self.task.is_done)
+        self.assertEqual(self.task.repeat, Task.REPEAT_NONE)
+        # No debe haber nacido una instancia de mañana: finish_recurring_series
+        # pone repeat=NONE ANTES de mark_done(), así que _spawn_next() no crea nada.
+        self.assertEqual(Task.objects.filter(series_id=self.task.series_id).count(), 1)
+
+    def test_time_stats_picks_up_udemy_sessions(self):
+        from .time_stats import time_totals
+        TimerSession.objects.create(
+            task=self.task, user=self.user, subcategory=self.task.subcategory,
+            source=TimerSession.SOURCE_PC_USAGE, app_package="udemy.com", minutes=120,
+        )
+        buckets = time_totals(self.user)
+        self.assertIn("study_udemy", buckets)
+        self.assertEqual(buckets["study_udemy"]["all_time_hours"], 2.0)
+
+    # ---------------------------------------------------- Fase 3 (formulario web)
+
+    def test_web_create_freestyle_udemy_ignores_watch_keyword(self):
+        """Udemy suelta (freestyle) es un hábito genérico -- nunca lleva
+        palabra clave, eso es justo lo que la distingue de un Udemy de
+        Plan (curso concreto, con cierre por contenido). Aunque el
+        formulario mande una, task_create la descarta."""
+        r = self.client.post(reverse("tasks:task_create"), {
+            "title": "Udemy en general", "category": "study", "subcategory": "udemy",
+            "watch_keyword": "Excel completo", "target_minutes": "45",
+            "due_date": "2026-09-10", "due_time": "20:00", "repeat": "daily",
+        })
+        self.assertEqual(r.status_code, 302, r.content)
+        t = Task.objects.get(title="Udemy en general")
+        self.assertEqual(t.watch_keyword, "")
+        self.assertEqual(t.target_minutes, 45)
+        self.assertEqual(t.category, Task.CATEGORY_STUDY)
+        self.assertEqual(t.subcategory, Task.SUBCATEGORY_UDEMY)
+
+    def test_web_edit_clears_watch_keyword_for_freestyle_udemy(self):
+        """Igual al crear: si una tarea suelta de Udemy tenía una palabra
+        clave de antes (p.ej. creada directo en el admin), editarla desde
+        el formulario web la limpia -- freestyle nunca la lleva."""
+        r = self.client.post(reverse("tasks:task_edit", args=[self.task.pk]), {
+            "title": self.task.title, "category": "study", "subcategory": "udemy",
+            "watch_keyword": "Linux avanzado", "target_minutes": "30",
+            "due_date": "2026-09-10", "due_time": "20:00", "repeat": "daily",
+        })
+        self.assertEqual(r.status_code, 302, r.content)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.watch_keyword, "")
+
+    def test_web_form_renders_with_udemy_task(self):
+        """La página de editar no debe romperse con una tarea de Udemy ya guardada."""
+        r = self.client.get(reverse("tasks:task_edit", args=[self.task.pk]))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "watch_keyword")
+
+    # -------------------------------------------- completado automático
+
+    def test_workout_kind_is_auto_for_udemy_task(self):
+        """Igual que running (workout_kind='distance'): no se ofrece
+        NINGÚN botón manual, ni el check de 'hecha' ni un temporizador —
+        se completa ella sola cuando llegan minutos suficientes."""
+        self.assertEqual(self.task.workout_kind, "auto")
+
+    def test_web_list_hides_manual_done_button_for_udemy_task(self):
+        # Como las tareas de correr: nada que pulsar. Se resuelve sola al
+        # llegar a los minutos objetivo, o queda como no hecha ella sola a
+        # medianoche si no se cumple (Task.mark_expired) — sin iconos.
+        r = self.client.get(reverse("tasks:task_list"))
+        self.assertNotContains(r, reverse("tasks:task_mark_done", args=[self.task.pk]))
+        self.assertNotContains(r, reverse("tasks:task_mark_not_done", args=[self.task.pk]))
+        self.assertNotContains(r, reverse("tasks:task_focus", args=[self.task.pk]))
+        self.assertNotContains(r, "task-card__waiting")
+
+    def test_focus_save_pc_usage_accumulates_across_short_sessions(self):
+        """La extensión corta la sesión en cada cambio de pestaña: dos
+        sesiones cortas que SUMADAS llegan al objetivo deben completar
+        la tarea, aunque ninguna de las dos sola lo consiga."""
+        self.task.target_minutes = 45
+        self.task.save(update_fields=["target_minutes"])
+
+        self.client.post(
+            reverse("api:focus_save", args=[self.task.uuid]),
+            data=json.dumps({"minutes": 20, "source": "pc_usage"}),
+            content_type="application/json",
+        )
+        self.task.refresh_from_db()
+        self.assertFalse(self.task.is_done)
+
+        self.client.post(
+            reverse("api:focus_save", args=[self.task.uuid]),
+            data=json.dumps({"minutes": 25, "source": "pc_usage"}),
+            content_type="application/json",
+        )
+        self.task.refresh_from_db()
+        self.assertTrue(self.task.is_done)
+
+    def test_focus_save_pc_usage_does_not_double_complete(self):
+        """Una vez hecha, una sesión de la extensión que llegue tarde no
+        debe volver a completarla (ni duplicar la instancia de mañana)."""
+        self.task.target_minutes = 10
+        self.task.save(update_fields=["target_minutes"])
+
+        self.client.post(
+            reverse("api:focus_save", args=[self.task.uuid]),
+            data=json.dumps({"minutes": 15, "source": "pc_usage"}),
+            content_type="application/json",
+        )
+        count_before = Task.objects.filter(series_id=self.task.series_id).count()
+
+        self.client.post(
+            reverse("api:focus_save", args=[self.task.uuid]),
+            data=json.dumps({"minutes": 5, "source": "pc_usage"}),
+            content_type="application/json",
+        )
+        self.assertEqual(
+            Task.objects.filter(series_id=self.task.series_id).count(),
+            count_before,
+        )
+
+
+class UdemyPlanTests(TestCase):
+    """
+    Fase 6: un Plan de Estudio · Hábito simple con palabra clave en su
+    objetivo se comporta EXACTAMENTE como la tarea suelta de Udemy —
+    misma tarea generada, mismo cierre al detectar el 100%, y de propina
+    el plan se cierra solo (con su recompensa, si la tiene) al terminar
+    el curso, en vez de esperar a que se cumplan las semanas.
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.plan = Plan.objects.create(
+            name="Terminar Excel", user=self.user, plan_type=Plan.PLAN_TYPE_STUDY,
+            study_subtype=Plan.STUDY_SUBTYPE_GENERAL, reward="unas zapatillas nuevas",
+            repeat="daily", due_time=time(20, 0),
+        )
+        PlanItem.objects.create(
+            plan=self.plan, is_headline=True, progression=PlanItem.PROG_COMPLETION,
+            watch_keyword="Excel", target_minutes=30,
+        )
+
+    def test_sync_task_creates_udemy_task_with_keyword(self):
+        task = self.plan.sync_task()
+        self.assertEqual(task.category, Task.CATEGORY_STUDY)
+        self.assertEqual(task.subcategory, Task.SUBCATEGORY_UDEMY)
+        self.assertEqual(task.watch_keyword, "Excel")
+        self.assertEqual(task.target_minutes, 30)
+
+    def test_removing_keyword_clears_it_from_the_task(self):
+        task = self.plan.sync_task()
+        self.assertEqual(task.subcategory, Task.SUBCATEGORY_UDEMY)
+
+        head = self.plan.headline
+        head.watch_keyword = ""
+        head.youtube_video_id = ""
+        head.save()
+        task = self.plan.sync_task()
+        self.assertEqual(task.watch_keyword, "")
+        self.assertEqual(task.subcategory, "")
+
+    def test_course_complete_closes_the_plan_with_its_reward(self):
+        task = self.plan.sync_task()
+        task.finish_recurring_series()
+        self.assertIsNotNone(task.course_completed_at)
+
+        Plan.auto_close_expired(user=self.user)
+        self.plan.refresh_from_db()
+        self.assertIsNotNone(self.plan.closed_at)
+        self.assertEqual(self.plan.reward, "unas zapatillas nuevas")
+
+    def test_plan_stays_open_while_course_not_finished(self):
+        self.plan.sync_task()
+        Plan.auto_close_expired(user=self.user)
+        self.plan.refresh_from_db()
+        self.assertIsNone(self.plan.closed_at)
+
+    def test_web_create_udemy_plan_saves_watch_keyword(self):
+        r = self.client.post(reverse("tasks:plan_create"), {
+            "plan_type": "study", "study_subtype": "general", "is_active": "on",
+            "name": "Terminar Linux", "watch_keyword": "Linux",
+            "target_minutes": "20", "due_time": "20:00", "repeat": "daily",
+            "custom_days": ["0", "2", "4"],
+        })
+        self.assertEqual(r.status_code, 302, r.content)
+        plan = Plan.objects.get(name="Terminar Linux")
+        head = plan.headline
+        self.assertEqual(head.watch_keyword, "Linux")
+        task = Task.objects.get(series_id=plan.task_series_id)
+        self.assertEqual(task.subcategory, Task.SUBCATEGORY_UDEMY)
+
+
+class IlernaClassesTests(TestCase):
+    """
+    Clases de Ilerna (Zoom): un hábito de "ver X minutos de clase al día"
+    que cuenta la extensión de Chrome en ilernaonline.zoom.us. A
+    diferencia de un curso de Udemy NO tiene "100% completado" (el plan
+    se cierra por semanas) y la palabra clave (asignatura) es opcional.
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+
+    def _create_plan(self, **extra):
+        data = {
+            "plan_type": "study", "study_subtype": "general", "is_active": "on",
+            "name": "Clases DAM", "study_source": "ilerna",
+            "target_minutes": "45", "due_time": "20:00", "repeat": "daily",
+            "custom_days": ["0", "2", "4"], "weeks": "8",
+        }
+        data.update(extra)
+        data = {k: v for k, v in data.items() if v is not None}
+        return self.client.post(reverse("tasks:plan_create"), data)
+
+    def test_web_create_ilerna_plan(self):
+        r = self._create_plan(ilerna_keyword="Programación")
+        self.assertEqual(r.status_code, 302, r.content)
+        plan = Plan.objects.get(name="Clases DAM")
+        head = plan.headline
+        self.assertEqual(head.watch_site, PlanItem.SITE_ILERNA)
+        self.assertEqual(head.watch_keyword, "Programación")
+        self.assertEqual(head.target_minutes, 45)
+        self.assertFalse(head.is_udemy_course)
+        self.assertEqual(head.display_target_text(), "45 min de clase")
+        self.assertIsNone(head.course_progress())
+        task = Task.objects.get(series_id=plan.task_series_id)
+        self.assertEqual(task.subcategory, Task.SUBCATEGORY_ILERNA)
+        self.assertEqual(task.watch_keyword, "Programación")
+        self.assertEqual(task.target_minutes, 45)
+        self.assertEqual(task.workout_kind, "auto")
+
+    def test_ilerna_plan_without_keyword_is_a_generic_habit(self):
+        r = self._create_plan(ilerna_keyword="")
+        self.assertEqual(r.status_code, 302, r.content)
+        plan = Plan.objects.get(name="Clases DAM")
+        task = Task.objects.get(series_id=plan.task_series_id)
+        self.assertEqual(task.subcategory, Task.SUBCATEGORY_ILERNA)
+        self.assertEqual(task.watch_keyword, "")
+
+    def test_ilerna_plan_needs_minutes(self):
+        r = self._create_plan(target_minutes=None)
+        self.assertEqual(r.status_code, 302, r.content)
+        self.assertFalse(PlanItem.objects.filter(watch_site=PlanItem.SITE_ILERNA).exists())
+
+    def test_ilerna_plan_does_not_close_like_a_udemy_course(self):
+        self._create_plan(ilerna_keyword="Bases de datos")
+        plan = Plan.objects.get(name="Clases DAM")
+        task = Task.objects.get(series_id=plan.task_series_id)
+        # Un Udemy con palabra clave se cierra al marcar el curso completo;
+        # las clases de Ilerna nunca: solo cierran por semanas.
+        task.finish_recurring_series()
+        Plan.auto_close_expired(user=self.user)
+        plan.refresh_from_db()
+        self.assertIsNone(plan.closed_at)
+
+    def test_switching_ilerna_plan_back_to_udemy_clears_the_site(self):
+        self._create_plan(ilerna_keyword="Redes")
+        plan = Plan.objects.get(name="Clases DAM")
+        r = self.client.post(reverse("tasks:plan_edit", args=[plan.pk]), {
+            "plan_type": "study", "study_subtype": "general", "is_active": "on",
+            "name": "Clases DAM", "study_source": "udemy", "watch_keyword": "Excel",
+            "target_minutes": "30", "due_time": "20:00", "repeat": "daily",
+            "custom_days": ["0", "2", "4"],
+        })
+        self.assertEqual(r.status_code, 302, r.content)
+        head = Plan.objects.get(pk=plan.pk).headline
+        self.assertEqual(head.watch_site, "")
+        self.assertTrue(head.is_udemy_course)
+        task = Task.objects.get(series_id=plan.task_series_id)
+        self.assertEqual(task.subcategory, Task.SUBCATEGORY_UDEMY)
+
+    def test_plan_form_renders_with_ilerna_headline(self):
+        self._create_plan(ilerna_keyword="Redes")
+        plan = Plan.objects.get(name="Clases DAM")
+        r = self.client.get(reverse("tasks:plan_edit", args=[plan.pk]))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "Clases de Ilerna (Zoom)")
+        self.assertContains(r, 'value="Redes"')
+        r = self.client.get(reverse("tasks:plan_detail", args=[plan.pk]))
+        self.assertEqual(r.status_code, 200)
+        self.assertNotContains(r, "Sin datos todavía")
+        r = self.client.get(reverse("tasks:plan_list"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "45 min de clase")
+
+    def test_ilerna_is_not_listed_as_a_udemy_course_for_the_extension(self):
+        self._create_plan(ilerna_keyword="Redes")
+        r = self.client.get(reverse("api:plan_udemy_courses"))
+        self.assertEqual(r.json()["courses"], [])
+
+    def test_freestyle_ilerna_task_keeps_keyword_and_needs_minutes(self):
+        base = {
+            "title": "Clases", "category": "study", "subcategory": "ilerna",
+            "watch_keyword": "Entornos", "due_date": "2026-09-10",
+            "due_time": "20:00", "repeat": "daily",
+        }
+        r = self.client.post(reverse("tasks:task_create"), dict(base))
+        self.assertEqual(r.status_code, 200, r.content)  # error: faltan minutos
+        self.assertFalse(Task.objects.filter(title="Clases").exists())
+        r = self.client.post(reverse("tasks:task_create"), dict(base, target_minutes="60"))
+        self.assertEqual(r.status_code, 302, r.content)
+        t = Task.objects.get(title="Clases")
+        self.assertEqual(t.watch_keyword, "Entornos")
+        self.assertEqual(t.workout_kind, "auto")
+
+    def test_pc_usage_minutes_complete_the_day_and_show_in_stats(self):
+        self._create_plan(ilerna_keyword="")
+        plan = Plan.objects.get(name="Clases DAM")
+        task = Task.objects.get(series_id=plan.task_series_id)
+        url = reverse("api:focus_save", args=[task.uuid])
+        payload = {"source": "pc_usage", "app_package": "ilernaonline.zoom.us"}
+        r = self.client.post(url, data=json.dumps(dict(payload, minutes=20)), content_type="application/json")
+        self.assertEqual(r.status_code, 200, r.content)
+        task.refresh_from_db()
+        self.assertFalse(task.is_done)
+        self.assertEqual(task.auto_progress["label"], "20/45 min")
+        r = self.client.post(url, data=json.dumps(dict(payload, minutes=30)), content_type="application/json")
+        task.refresh_from_db()
+        self.assertTrue(task.is_done)
+
+        from .time_stats import time_totals
+        buckets = time_totals(self.user)
+        self.assertEqual(buckets["study_ilerna"]["all_time_hours"], round(50 / 60, 1))
+
+    def test_meta_exposes_ilerna(self):
+        r = self.client.get(reverse("api:meta"))
+        values = {c["value"] for c in r.json()["study_subcategories"]}
+        self.assertIn("ilerna", values)
+
+
+class DailyCompletionTests(TestCase):
+    """La barra de hoy/semana tiene que contar también las pendientes."""
+
+    def test_pendientes_cuentan_en_el_total(self):
+        u = get_current_user()
+        hoy = date.today()
+        a = Task.objects.create(title="A", due_date=hoy, user=u)
+        b = Task.objects.create(title="B", due_date=hoy, user=u)
+        Task.objects.create(title="C", due_date=hoy, user=u)
+        Task.objects.create(title="No fumar", due_date=hoy, category=Task.CATEGORY_AVOID, user=u)
+        a.mark_done()
+        b.mark_done()
+        d = Occurrence.daily_completion(u)
+        self.assertEqual((d["done"], d["total"], d["pct"]), (2, 4, 50))
+        w = Occurrence.weekly_completion(u)
+        self.assertEqual((w["done"], w["total"]), (2, 4))
+
+    def test_desmarcar_no_cuenta_doble(self):
+        u = get_current_user()
+        t = Task.objects.create(title="A", due_date=date.today(), user=u)
+        t.mark_done()
+        t.mark_not_done()
+        d = Occurrence.daily_completion(u)
+        self.assertEqual((d["done"], d["total"]), (0, 1))
+
+    def test_tarea_suelta_no_cuenta_doble_al_reintentar(self):
+        """Marcar/desmarcar/marcar una tarea SIN fecha (sí se apilan las
+        Occurrence, ver test_tasks_without_due_date_can_have_several_occurrences)
+        no debe contar como si fueran completados distintos."""
+        u = get_current_user()
+        t = Task.objects.create(title="Cuando pueda", user=u)
+        t.mark_done()
+        t.mark_not_done()
+        t.mark_done()
+        d = Occurrence.daily_completion(u)
+        self.assertEqual((d["done"], d["total"]), (1, 1))
+
+
+class CompletedListDoesNotLeakForeverTests(TestCase):
+    """
+    Una tarea hecha SIN completed_at (creada a mano, por fixture, o un
+    resto de pruebas) antes se colaba en el "Hoy" de CUALQUIER día para
+    siempre (ver completed_today/completed_in_range antes del fix) --
+    ahora cuenta por created_at, como cualquier otra, y se va al día
+    siguiente igual que las demás.
+    """
+
+    def _task_done_without_completed_at(self, user, created_on):
+        t = Task.objects.create(title="Suelto de prueba", is_done=True, user=user)
+        Task.objects.filter(pk=t.pk).update(
+            created_at=timezone.make_aware(
+                timezone.datetime.combine(created_on, time(12, 0))
+            ),
+            completed_at=None,
+        )
+        return Task.objects.get(pk=t.pk)
+
+    def test_no_aparece_en_hoy_si_se_creo_otro_dia(self):
+        u = get_current_user()
+        ayer = date.today() - timedelta(days=1)
+        self._task_done_without_completed_at(u, ayer)
+        self.assertEqual(Task.completed_today(Task.objects.filter(user=u)).count(), 0)
+        self.assertEqual(
+            Task.completed_in_range(Task.objects.filter(user=u), Task.RANGE_TODAY).count(), 0
+        )
+
+    def test_aparece_solo_el_dia_de_su_created_at(self):
+        u = get_current_user()
+        hoy = date.today()
+        self._task_done_without_completed_at(u, hoy)
+        self.assertEqual(Task.completed_today(Task.objects.filter(user=u)).count(), 1)
+        self.assertEqual(
+            Task.completed_in_range(Task.objects.filter(user=u), Task.RANGE_TODAY).count(), 1
+        )
+
+
+class WeeklyProjectionTests(TestCase):
+    """
+    El total semanal no puede depender de lo que ya se ha generado: una
+    tarea diaria solo genera la instancia de mañana cuando se resuelve
+    la de hoy (ver Task._spawn_next), así que el lunes por la mañana el
+    total subía día a día (10, 11, 13...) en vez de conocerse de
+    entrada. Ver Occurrence.weekly_completion / Task.project_pending_series.
+    """
+
+    MONDAY = date(2026, 9, 28)  # lunes real, ver next_due_date/custom_days
+
+    def test_weekly_total_known_upfront_for_daily_task(self):
+        u = get_current_user()
+        Task.objects.create(
+            title="Beber agua", due_date=self.MONDAY, repeat=Task.REPEAT_DAILY, user=u,
+        )
+        w = Occurrence.weekly_completion(u, reference_date=self.MONDAY)
+        self.assertEqual(w["total"], 7)
+
+    def test_weekly_total_stable_as_days_pass(self):
+        u = get_current_user()
+        t = Task.objects.create(
+            title="Beber agua", due_date=self.MONDAY, repeat=Task.REPEAT_DAILY, user=u,
+        )
+        total_monday = Occurrence.weekly_completion(u, reference_date=self.MONDAY)["total"]
+        t.mark_done()  # genera la instancia del martes
+        tuesday = self.MONDAY + timedelta(days=1)
+        w_tuesday = Occurrence.weekly_completion(u, reference_date=tuesday)
+        self.assertEqual(w_tuesday["total"], total_monday)
+        self.assertEqual(w_tuesday["done"], 1)
+
+    def test_weekly_total_for_custom_days(self):
+        u = get_current_user()
+        Task.objects.create(
+            title="Entrenar", due_date=self.MONDAY, repeat=Task.REPEAT_CUSTOM,
+            custom_days="0,2,4", user=u,  # lunes, miércoles, viernes
+        )
+        w = Occurrence.weekly_completion(u, reference_date=self.MONDAY)
+        self.assertEqual(w["total"], 3)
+
+    def test_weekly_total_ignores_non_repeating_tasks_beyond_their_day(self):
+        u = get_current_user()
+        Task.objects.create(title="Suelta", due_date=self.MONDAY, user=u)
+        w = Occurrence.weekly_completion(u, reference_date=self.MONDAY)
+        self.assertEqual(w["total"], 1)
+
+
+class LastSetRepsTests(TestCase):
+    """"Serie 2: la última vez hiciste 7" -- historial de reps por serie,
+    también en entrenos sueltos (sin plan) y cayendo a lo hecho en otro
+    sitio cuando el plan aún no tiene nada de ese ejercicio."""
+
+    def setUp(self):
+        from .models import Exercise, Plan, PlanItem, Routine, WorkoutSession, last_set_reps
+        self.last_set_reps = last_set_reps
+        self.WS, self.Routine = WorkoutSession, Routine
+        self.user = get_current_user()
+        self.ex, _ = Exercise.objects.get_or_create(
+            slug="pullup", defaults=dict(name="Dominadas", mode="pose", counter_key="pullup"),
+        )
+        self.plan = Plan.objects.create(name="P", user=self.user)
+        self.item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.ex, progression=PlanItem.PROG_FAILURE, start_sets=3, order=0,
+        )
+
+    def _ws(self, reps, **kw):
+        return self.WS.objects.create(
+            user=self.user, exercise="pullup", total_reps=sum(reps),
+            sets=[{"reps": r} for r in reps], **kw,
+        )
+
+    def test_none_without_history(self):
+        self.assertIsNone(self.last_set_reps(self.user, "pullup"))
+        self.assertIsNone(self.item.last_session_set_reps())
+
+    def test_loose_session_without_plan_counts(self):
+        self._ws([9, 6])
+        self.assertEqual(self.last_set_reps(self.user, "pullup"), [9, 6])
+
+    def test_same_plan_wins_over_other_places(self):
+        self._ws([5, 5, 5], plan=self.plan)
+        self._ws([9, 6])  # más reciente, pero suelta
+        self.assertEqual(self.item.last_session_set_reps(), [5, 5, 5])
+
+    def test_plan_without_history_falls_back_to_last_time_anywhere(self):
+        self._ws([9, 6])
+        self.assertEqual(self.item.last_session_set_reps(), [9, 6])
+
+    def test_routine_sessions_do_not_count_in_fallback(self):
+        self._ws([9, 6])
+        self._ws([3], routine=self.Routine.objects.create(name="warm", user=self.user))
+        self.assertEqual(self.item.last_session_set_reps(), [9, 6])
+
+    def test_api_exercise_target_returns_last_sets(self):
+        self._ws([9, 6])
+        data = self.client.get("/api/exercises/pullup/target/").json()
+        self.assertEqual(data["last_sets"], [9, 6])
+
+
+class LastSetSecondsTests(TestCase):
+    """"Serie 2: la última vez aguantaste 40 segundos" -- lo mismo que
+    LastSetRepsTests pero para ejercicios cronometrados."""
+
+    def setUp(self):
+        from .models import Exercise, Plan, PlanItem, Routine, WorkoutSession, last_set_seconds
+        self.last_set_seconds = last_set_seconds
+        self.WS, self.Routine = WorkoutSession, Routine
+        self.user = get_current_user()
+        self.ex, _ = Exercise.objects.get_or_create(
+            slug="plank", defaults=dict(name="Plancha", mode="timed", counter_key="plank"),
+        )
+        self.plan = Plan.objects.create(name="P", user=self.user)
+        self.item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.ex, progression=PlanItem.PROG_FAILURE, start_sets=3, order=0,
+        )
+
+    def _ws(self, secs, **kw):
+        return self.WS.objects.create(
+            user=self.user, exercise="plank", session_duration_seconds=sum(secs),
+            sets=[{"reps": 0, "durations": [s]} for s in secs], **kw,
+        )
+
+    def test_none_without_history(self):
+        self.assertIsNone(self.last_set_seconds(self.user, "plank"))
+        self.assertIsNone(self.item.last_session_set_seconds())
+
+    def test_returns_seconds_per_set_rounded(self):
+        self._ws([45.4, 40.6])
+        self.assertEqual(self.last_set_seconds(self.user, "plank"), [45, 41])
+        self.assertEqual(self.item.last_session_set_seconds(), [45, 41])
+
+    def test_old_session_with_only_totals_is_ignored(self):
+        self.WS.objects.create(user=self.user, exercise="plank", session_duration_seconds=90, total_sets=3)
+        self.assertIsNone(self.last_set_seconds(self.user, "plank"))
+
+    def test_routine_sessions_do_not_count_in_fallback(self):
+        self._ws([45, 40])
+        self._ws([10], routine=self.Routine.objects.create(name="warm", user=self.user))
+        self.assertEqual(self.item.last_session_set_seconds(), [45, 40])
+
+    def test_rep_exercise_gets_no_seconds(self):
+        from .models import Exercise, PlanItem
+        pull, _ = Exercise.objects.get_or_create(
+            slug="pullup", defaults=dict(name="Dominadas", mode="pose", counter_key="pullup"),
+        )
+        it = PlanItem.objects.create(plan=self.plan, exercise=pull, progression=PlanItem.PROG_FAILURE, start_sets=3, order=1)
+        self.assertIsNone(it.last_session_set_seconds())
+
+    def test_api_exercise_target_returns_last_seconds(self):
+        self._ws([45, 40])
+        data = self.client.get("/api/exercises/plank/target/").json()
+        self.assertEqual(data["last_seconds"], [45, 40])
+
+    def test_plan_session_save_stores_set_seconds(self):
+        from .models import Task
+        task = Task.objects.create(title="Plancha", user=self.user)
+        resp = self.client.post(
+            f"/api/tasks/{task.uuid}/plan/{self.plan.uuid}/save/",
+            data={"breakdown": [{"exercise": "plank", "seconds": 85, "sets": 2, "set_seconds": [45, 40]}]},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(self.last_set_seconds(self.user, "plank", plan=self.plan), [45, 40])
+
+
+class ReadingPlanDayPctTests(TestCase):
+    """"Terminar sesión de hoy" no debe dar 100% si no se llegó al objetivo del día."""
+
+    def _plan(self, pages_today):
+        today = timezone.localtime(timezone.now()).date()
+        t = Task.objects.create(
+            title="Libro", user=get_current_user(),
+            category=Task.CATEGORY_WORK, subcategory=Task.SUBCATEGORY_READING,
+            reading_mode=Task.READING_MODE_PLAN, reading_last_page=300,
+            reading_target_weeks=10, reading_started_on=today,
+            reading_day_start_page=0, reading_day_goal=10,
+            reading_current_page=pages_today,
+            repeat=Task.REPEAT_DAILY, due_date=today,
+        )
+        # Tiempo de lectura volcado a un TimerSession SIN minutos objetivo:
+        # antes esto bastaba para caer en el 100% por defecto.
+        TimerSession.objects.create(
+            task=t, user=t.user, series_id=t.series_id,
+            subcategory=t.subcategory, source=TimerSession.SOURCE_MANUAL, minutes=20,
+        )
+        return t
+
+    def _pct(self, task):
+        task.mark_done()
+        return Occurrence.objects.get(series_id=task.series_id, due_date=task.due_date).completion_pct
+
+    def test_partial_day_is_not_100(self):
+        self.assertEqual(self._pct(self._plan(4)), 40)
+
+    def test_zero_pages_is_0(self):
+        self.assertEqual(self._pct(self._plan(0)), 0)
+
+    def test_reading_extra_goes_over_100(self):
+        self.assertEqual(self._pct(self._plan(15)), 150)
+
+
+class RepTimingAndTrainingSessionTests(TestCase):
+    """Tiempo de cada rep + cronómetro total de la sesión (plan y circuito)."""
+
+    def setUp(self):
+        from .models import Exercise, Plan, PlanItem, Routine, RoutineItem
+        self.user = get_current_user()
+        self.ex, _ = Exercise.objects.get_or_create(
+            slug="pullup", defaults=dict(name="Dominadas", mode="pose", counter_key="pullup"),
+        )
+        self.plan = Plan.objects.create(name="P", user=self.user)
+        PlanItem.objects.create(
+            plan=self.plan, exercise=self.ex, progression=PlanItem.PROG_FAILURE, start_sets=2, order=0,
+        )
+        self.routine = Routine.objects.create(name="R", user=self.user)
+        RoutineItem.objects.create(routine=self.routine, exercise=self.ex, order=0)
+        self.task = Task.objects.create(title="Entreno", user=self.user)
+
+    def _post(self, url, breakdown, **extra):
+        return self.client.post(
+            url, data=json.dumps({"breakdown": breakdown, "finish": False, **extra}),
+            content_type="application/json",
+        )
+
+    def test_plan_save_keeps_rep_durations_and_total_time(self):
+        r = self._post(
+            f"/api/tasks/{self.task.uuid}/plan/{self.plan.uuid}/save/",
+            [{"exercise": "pullup", "reps": 5, "sets": 2, "seconds": 70,
+              "set_reps": [3, 2], "set_durations": [[1.2, 1.4, 1.3], [1.5, 1.7]]}],
+            session_seconds=312.4,
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["session_seconds"], 312)
+        ws = WorkoutSession.objects.get(task=self.task, exercise="pullup")
+        self.assertEqual(ws.sets, [
+            {"reps": 3, "durations": [1.2, 1.4, 1.3]}, {"reps": 2, "durations": [1.5, 1.7]},
+        ])
+        self.assertEqual(ws.rep_durations, [1.2, 1.4, 1.3, 1.5, 1.7])
+        self.assertEqual(ws.avg_rep_seconds, 1.42)
+        self.assertEqual(ws.training_session.total_seconds, 312)
+        self.assertEqual(ws.training_session.plan, self.plan)
+
+    def test_durations_stay_aligned_when_a_set_is_filtered_out(self):
+        self._post(
+            f"/api/tasks/{self.task.uuid}/plan/{self.plan.uuid}/save/",
+            [{"exercise": "pullup", "reps": 4, "sets": 2, "seconds": 40,
+              "set_reps": [0, 4], "set_durations": [[9.9], [1.0, 1.1, 1.2, 1.3]]}],
+        )
+        ws = WorkoutSession.objects.get(task=self.task, exercise="pullup")
+        self.assertEqual(ws.sets, [{"reps": 4, "durations": [1.0, 1.1, 1.2, 1.3]}])
+
+    def test_old_app_without_timing_still_saves(self):
+        r = self._post(
+            f"/api/tasks/{self.task.uuid}/plan/{self.plan.uuid}/save/",
+            [{"exercise": "pullup", "reps": 5, "sets": 1, "seconds": 30, "set_reps": [5]}],
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertIsNone(r.json()["session_seconds"])
+        ws = WorkoutSession.objects.get(task=self.task, exercise="pullup")
+        self.assertEqual(ws.sets, [{"reps": 5}])
+        self.assertEqual(ws.rep_durations, [])
+        self.assertIsNone(ws.avg_rep_seconds)
+        self.assertIsNone(ws.training_session)
+
+    def test_circuit_save_stores_total_time_and_rep_durations(self):
+        r = self._post(
+            f"/api/tasks/{self.task.uuid}/circuit/{self.routine.uuid}/",
+            [{"exercise": "pullup", "reps": 2, "sets": 1, "seconds": 20,
+              "set_reps": [2], "set_durations": [[1.0, 2.0]]}],
+            session_seconds=95,
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["session_seconds"], 95)
+        ws = WorkoutSession.objects.get(task=self.task, exercise="pullup")
+        self.assertEqual(ws.rep_durations, [1.0, 2.0])
+        self.assertEqual(ws.training_session.routine, self.routine)
+        self.assertEqual(ws.training_session.workouts.count(), 1)
+
+    def test_web_plan_save_also_stores_timing(self):
+        r = self._post(
+            reverse("tasks:plan_session_save", args=[self.task.pk, self.plan.pk]),
+            [{"exercise": "pullup", "reps": 2, "sets": 1, "seconds": 20,
+              "set_reps": [2], "set_durations": [[1.1, 1.3]]}],
+            session_seconds=60,
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        ws = WorkoutSession.objects.get(task=self.task, exercise="pullup")
+        self.assertEqual(ws.rep_durations, [1.1, 1.3])
+        self.assertEqual(ws.training_session.total_seconds, 60)
+
+
+class CaloriesTests(TestCase):
+    """Calorías aproximadas por ejercicio (MET × peso × tiempo, ver calories.py)."""
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.push = Exercise.objects.create(
+            slug="cal-push", name="Flexiones", mode=Exercise.MODE_POSE, met=6.0,
+        )
+        self.run = Exercise.objects.create(
+            slug="cal-run", name="Correr", mode=Exercise.MODE_DISTANCE,
+        )
+        self.task = Task.objects.create(
+            title="Entrenar", category=Task.CATEGORY_SPORT, user=self.user,
+        )
+
+    def _set_weight(self, kg):
+        from .models import UserSettings
+        UserSettings.objects.update_or_create(user=self.user, defaults={"body_weight_kg": kg})
+
+    def test_reps_session_is_kcal_per_rep(self):
+        self._set_weight(80)
+        # 20 reps × 3 s (por defecto) = 60 s a 6 MET con 80 kg: 6 * 80 * 60/3600 = 8 kcal
+        ws = WorkoutSession.objects.create(
+            task=self.task, user=self.user, exercise="cal-push", total_reps=20,
+            rep_durations=[30.0] * 20, session_duration_seconds=600,
+        )
+        self.assertAlmostEqual(ws.calories_kcal, 8.0, places=1)
+
+    def test_reps_do_not_depend_on_how_long_the_session_took(self):
+        self._set_weight(70)
+        slow = WorkoutSession.objects.create(
+            task=self.task, user=self.user, exercise="cal-push", total_reps=10,
+            rep_durations=[60.0] * 10, session_duration_seconds=900,
+        )
+        fast = WorkoutSession.objects.create(
+            task=self.task, user=self.user, exercise="cal-push", total_reps=10,
+            rep_durations=[1.0] * 10, session_duration_seconds=30,
+        )
+        self.assertEqual(slow.calories_kcal, fast.calories_kcal)
+
+    def test_rep_duration_override_for_slow_exercise(self):
+        self._set_weight(70)
+        self.assertEqual(Exercise.objects.get(slug="pullup").met, 8.0)  # sembrado por la migración 0096
+        ws = WorkoutSession.objects.create(
+            task=self.task, user=self.user, exercise="pullup", total_reps=10,
+            session_duration_seconds=120,
+        )
+        # 10 reps × 4 s = 40 s a 8 MET con 70 kg: 8 * 70 * 40/3600 ≈ 6.2 kcal
+        self.assertAlmostEqual(ws.calories_kcal, 6.2, places=1)
+
+    def test_timed_exercise_counts_seconds_held(self):
+        self._set_weight(70)
+        Exercise.objects.create(slug="cal-plank", name="Plancha", mode=Exercise.MODE_TIMED, met=3.8)
+        ws = WorkoutSession.objects.create(
+            task=self.task, user=self.user, exercise="cal-plank",
+            sets=[{"reps": 0, "durations": [60.0]}, {"reps": 0, "durations": [60.0]}],
+            session_duration_seconds=300,
+        )
+        # 120 s aguantados a 3.8 MET con 70 kg: 3.8 * 70 * 120/3600 ≈ 8.9 kcal
+        self.assertAlmostEqual(ws.calories_kcal, 8.9, places=1)
+
+    def test_default_weight_when_not_set(self):
+        ws = WorkoutSession.objects.create(
+            task=self.task, user=self.user, exercise="cal-push", total_reps=40,
+            session_duration_seconds=360,
+        )
+        # 40 reps × 3 s = 120 s: 6 MET * 70 kg * 120/3600 = 14 kcal
+        self.assertAlmostEqual(ws.calories_kcal, 14.0, places=1)
+
+    def test_running_uses_speed(self):
+        self._set_weight(70)
+        ws = WorkoutSession.objects.create(
+            task=self.task, user=self.user, exercise="cal-run",
+            distance_km=5.0, session_duration_seconds=30 * 60,   # 10 km/h
+        )
+        # ~10.5 MET * 70 kg * 0.5 h ≈ 368 kcal
+        self.assertTrue(340 <= ws.calories_kcal <= 400, ws.calories_kcal)
+
+    def test_session_without_data_has_no_calories(self):
+        ws = WorkoutSession.objects.create(task=self.task, user=self.user, exercise="cal-push")
+        self.assertIsNone(ws.calories_kcal)
+
+    def test_soft_delete_does_not_recompute(self):
+        self._set_weight(70)
+        ws = WorkoutSession.objects.create(
+            task=self.task, user=self.user, exercise="cal-push", total_reps=5,
+            rep_durations=[2.0] * 5, session_duration_seconds=60,
+        )
+        before = ws.calories_kcal
+        self._set_weight(100)
+        ws.deleted_at = timezone.now()
+        ws.save(update_fields=["deleted_at"])
+        ws.refresh_from_db()
+        self.assertEqual(ws.calories_kcal, before)
+
+    def test_settings_page_saves_weight(self):
+        r = self.client.post(reverse("tasks:settings"), {"body_weight_kg": "82,5"})
+        self.assertEqual(r.status_code, 302)
+        from .models import UserSettings
+        self.assertEqual(UserSettings.objects.get(user=self.user).body_weight_kg, 82.5)
+        r = self.client.post(reverse("tasks:settings"), {"body_weight_kg": "5"})
+        self.assertEqual(UserSettings.objects.get(user=self.user).body_weight_kg, 82.5)  # inválido: no cambia
+
+    def test_stats_pages_show_calories(self):
+        self._set_weight(70)
+        WorkoutSession.objects.create(
+            task=self.task, user=self.user, exercise="cal-push", total_reps=100,
+            rep_durations=[3.6] * 100, session_duration_seconds=360,
+        )
+        r = self.client.get(reverse("tasks:stats_list"))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context["kcal"]["week"], 35)
+        self.assertContains(r, "Calorías (aprox.)")
+        self.task.mark_done()
+        r = self.client.get(reverse("tasks:stats_detail", args=[self.task.series_id]))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context["total_kcal"], 35)
+        self.assertEqual(r.context["chart_points"][-1]["kcal"], 35)
+
+
+class FailureChartWeightTests(TestCase):
+    """La gráfica de "al fallo" cuenta los kg añadidos: con peso mide la
+    fuerza estimada (reps y kg a la vez), así que subir lastre no se ve
+    como un retroceso; sin lastre sigue siendo solo reps."""
+
+    def setUp(self):
+        from .models import Exercise, Plan, PlanItem, UserSettings, WorkoutSession
+        from .views import _failure_chart
+        self.chart_fn, self.WS = _failure_chart, WorkoutSession
+        self.user = get_current_user()
+        UserSettings.objects.update_or_create(user=self.user, defaults={"body_weight_kg": 70})
+        self.ex, _ = Exercise.objects.get_or_create(
+            slug="weighted-pullup", defaults=dict(name="Dominadas con peso", mode="pose", counter_key="pullup"),
+        )
+        self.plan = Plan.objects.create(name="P", user=self.user)
+        PlanItem.objects.create(
+            plan=self.plan, exercise=self.ex, progression=PlanItem.PROG_FAILURE, start_sets=3, order=0,
+        )
+
+    def _ws(self, days_ago, sets, kg=None):
+        ws = self.WS.objects.create(
+            user=self.user, plan=self.plan, exercise="weighted-pullup",
+            total_reps=sum(sets), total_sets=len(sets), sets=[{"reps": r} for r in sets], added_weight_kg=kg,
+        )
+        self.WS.objects.filter(pk=ws.pk).update(recorded_at=timezone.now() - timedelta(days=days_ago))
+
+    def _pcts(self, chart):
+        import re
+        line = chart["lines"][1]  # [0] es el total
+        return [int(re.search(r"· (\d+)%", d["tip"]).group(1)) for d in line["dots"]]
+
+    def test_more_kg_same_reps_raises_line(self):
+        self._ws(4, [8, 6], 5)
+        self._ws(3, [8, 6], 5)
+        self._ws(2, [8, 6], 10)  # mismas reps, más lastre
+        chart = self.chart_fn(self.plan)
+        pcts = self._pcts(chart)
+        self.assertEqual(pcts[:2], [100, 100])
+        self.assertGreater(pcts[2], 100)
+        self.assertTrue(chart["has_weight"])
+        self.assertIn("+10 kg", chart["lines"][1]["dots"][2]["tip"])
+
+    def test_raising_weight_is_marked_and_does_not_look_like_a_drop(self):
+        self._ws(5, [8, 7, 6], 0)
+        self._ws(4, [8, 7, 6], 0)
+        self._ws(3, [8, 6, 5], 5)  # sube el peso, mismas reps en la mejor serie
+        chart = self.chart_fn(self.plan)
+        dots = chart["lines"][1]["dots"]
+        self.assertGreater(self._pcts(chart)[2], 100)
+        self.assertEqual([d["up"] for d in dots], [False, False, True])
+        self.assertIn("subiste el peso", dots[2]["tip"])
+        self.assertTrue(chart["has_up"])
+
+    def test_fewer_reps_but_much_more_kg_still_counts_as_progress(self):
+        self._ws(4, [8], 0)
+        self._ws(3, [8], 0)
+        self._ws(2, [7], 10)  # 80 × (1 + 7/30) > 70 × (1 + 8/30)
+        self.assertGreater(self._pcts(self.chart_fn(self.plan))[2], 100)
+
+    def test_kg_label_shows_start_and_end_weight(self):
+        self._ws(4, [8], 0)
+        self._ws(3, [8], 5)
+        self._ws(2, [8], 10)
+        self.assertEqual(self.chart_fn(self.plan)["lines"][1]["kg_label"], "0 → +10 kg")
+
+    def test_without_kg_it_is_plain_reps(self):
+        self._ws(4, [8])
+        self._ws(3, [8])
+        self._ws(2, [10])
+        chart = self.chart_fn(self.plan)
+        self.assertEqual(self._pcts(chart), [100, 100, 125])
+        self.assertFalse(chart["has_weight"])
+        self.assertIsNone(chart["lines"][1]["kg_label"])
+        self.assertEqual(chart["lines"][1]["delta"], "+25%")
+
+    def test_plan_page_renders_kg_markers_and_legend(self):
+        self._ws(4, [8, 6], 0)
+        self._ws(3, [8, 6], 5)
+        self._ws(2, [8, 6], 10)
+        html = self.client.get(reverse("tasks:plan_detail", args=[self.plan.pk])).content.decode()
+        self.assertIn("Progreso de repeticiones y peso", html)
+        self.assertIn("0 → +10 kg", html)
+        self.assertIn("subiste el peso", html)
+        self.assertIn("fchart__up", html)
+
+    def test_weight_strip_one_bar_per_session_inside_the_chart(self):
+        from .models import PlanItem
+        PlanItem.objects.filter(plan=self.plan).update(goal_weight_kg=20)
+        self._ws(4, [8, 6], 0)
+        self._ws(3, [8, 6], 5)
+        self._ws(2, [8, 6], 10)
+        chart = self.chart_fn(self.plan)
+        g = chart["strip"]["groups"]
+        self.assertEqual(len(g), 1)
+        self.assertEqual(g[0]["line"], 1)  # [0] de lines es el Total
+        bars = g[0]["bars"]
+        self.assertEqual([b["up"] for b in bars], [False, True, True])
+        self.assertLess(bars[0]["h"], bars[1]["h"])
+        self.assertLess(bars[1]["h"], bars[2]["h"])
+        self.assertAlmostEqual(bars[2]["h"], chart["strip"]["h"] * 10 / 20, places=0)  # barra llena = meta (20)
+        self.assertIn("meta +20 kg", bars[2]["tip"])
+        self.assertIn("subiste el peso (+5 kg)", bars[1]["tip"])
+        self.assertEqual(chart["lines"][1]["kg_label"], "0 → +10 kg")
+        self.assertEqual(chart["lines"][1]["progress"], 50)
+        self.assertEqual(chart["lines"][1]["goal_text"], "50% · faltan 10 kg para +20")
+        self.assertTrue(chart["strip"]["has_goal"])
+        # la franja va dentro del mismo SVG: por debajo de las líneas y antes de las fechas
+        self.assertGreater(chart["strip"]["top"], chart["ref_y"])
+        self.assertLessEqual(chart["strip"]["base"], chart["bottom"])
+
+    def test_no_strip_without_kg(self):
+        self._ws(3, [8])
+        self._ws(2, [9])
+        chart = self.chart_fn(self.plan)
+        self.assertIsNone(chart["strip"])
+        self.assertEqual(chart["h"], 250)
+
+    def test_plan_page_renders_weight_strip(self):
+        self._ws(4, [8, 6], 0)
+        self._ws(3, [8, 6], 5)
+        html = self.client.get(reverse("tasks:plan_detail", args=[self.plan.pk])).content.decode()
+        self.assertIn("fchart__bar", html)
+        self.assertNotIn("Peso añadido por sesión", html)
+
+
+    def test_session_in_plan_records_the_planned_weight(self):
+        from .models import PlanItem
+        PlanItem.objects.filter(plan=self.plan).update(start_weight_kg=5, goal_weight_kg=20)
+        ws = self.WS.objects.create(
+            user=self.user, plan=self.plan, exercise="weighted-pullup",
+            total_reps=8, total_sets=1, sets=[{"reps": 8}],
+        )
+        self.assertEqual(ws.added_weight_kg, 5)
+
+    def test_explicit_weight_wins_and_loose_sessions_stay_empty(self):
+        from .models import PlanItem
+        PlanItem.objects.filter(plan=self.plan).update(start_weight_kg=5, goal_weight_kg=20)
+        own = self.WS.objects.create(user=self.user, plan=self.plan, exercise="weighted-pullup",
+                                     total_reps=8, sets=[{"reps": 8}], added_weight_kg=7.5)
+        loose = self.WS.objects.create(user=self.user, exercise="weighted-pullup", total_reps=8, sets=[{"reps": 8}])
+        self.assertEqual(own.added_weight_kg, 7.5)
+        self.assertIsNone(loose.added_weight_kg)
+
+
+class ProfileTests(TestCase):
+    """Perfil: página web, endpoint de la API y estadísticas (tasks/profile.py)."""
+
+    def setUp(self):
+        self.user = get_current_user()
+
+    def _settings(self):
+        from .models import UserSettings
+        return UserSettings.objects.get(user=self.user)
+
+    def test_page_renders_with_defaults_and_nav_icon(self):
+        r = self.client.get(reverse("tasks:profile"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "Tu nombre")
+        self.assertContains(r, reverse("tasks:profile"))  # el icono de la nav apunta aquí
+        r = self.client.get(reverse("tasks:task_list"))
+        self.assertContains(r, 'class="nav-avatar')
+
+    def test_page_saves_profile_and_weight(self):
+        r = self.client.post(reverse("tasks:profile"), {
+            "display_name": "  Alex   Test ", "bio": "Hola", "avatar_emoji": "🔥",
+            "avatar_color": "#4a8bdf", "height_cm": "180", "body_weight_kg": "82,5",
+        })
+        self.assertEqual(r.status_code, 302)
+        us = self._settings()
+        self.assertEqual(us.display_name, "Alex Test")
+        self.assertEqual(us.bio, "Hola")
+        self.assertEqual(us.avatar_emoji, "🔥")
+        self.assertEqual(us.avatar_color, "#4A8BDF")
+        self.assertEqual(us.height_cm, 180)
+        self.assertEqual(us.body_weight_kg, 82.5)
+
+    def test_invalid_input_saves_nothing(self):
+        r = self.client.post(reverse("tasks:profile"), {
+            "display_name": "Ok", "avatar_emoji": "🔥", "avatar_color": "#4A8BDF",
+            "height_cm": "999", "body_weight_kg": "70",
+        })
+        self.assertEqual(r.status_code, 200)  # vuelve a pintar el formulario con el error
+        from .models import UserSettings
+        self.assertFalse(UserSettings.objects.filter(user=self.user).exists())
+
+    def test_rejects_unknown_emoji_and_color(self):
+        from . import profile
+        ok, errors = profile.apply_profile(self.user, {"avatar_emoji": "x", "avatar_color": "#000000"})
+        self.assertFalse(ok)
+        self.assertEqual(set(errors), {"avatar_emoji", "avatar_color"})
+
+    def test_empty_height_and_weight_clear_them(self):
+        from . import profile
+        profile.apply_profile(self.user, {"height_cm": 170, "body_weight_kg": 70})
+        profile.apply_profile(self.user, {"height_cm": "", "body_weight_kg": None})
+        us = self._settings()
+        self.assertIsNone(us.height_cm)
+        self.assertIsNone(us.body_weight_kg)
+
+    def test_api_get_and_post(self):
+        r = self.client.get("/api/profile/")
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["profile"]["shown_name"], "Tu nombre")
+        self.assertIn("emojis", data["options"])
+        r = self.client.post("/api/profile/", json.dumps({"display_name": "Alex", "bio": "x"}),
+                             content_type="application/json")
+        self.assertEqual(r.json()["profile"]["display_name"], "Alex")
+        r = self.client.post("/api/profile/", json.dumps({"bio": "x" * 500}), content_type="application/json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("bio", r.json()["errors"])
+
+    def test_stats_count_done_and_streak(self):
+        import uuid
+        from .models import Occurrence
+        today = timezone.localdate()
+        for back in (0, 1, 2, 4):
+            Occurrence.objects.create(
+                user=self.user, series_id=uuid.uuid4(), title="t",
+                result=Occurrence.RESULT_DONE, due_date=today - timedelta(days=back),
+            )
+        Occurrence.objects.create(
+            user=self.user, series_id=uuid.uuid4(), title="no",
+            result=Occurrence.RESULT_NOT_DONE, due_date=today - timedelta(days=3),
+        )
+        from . import profile
+        stats = profile.profile_stats(self.user)
+        self.assertEqual(stats["done_total"], 4)
+        self.assertEqual(stats["streak_days"], 3)  # hoy, ayer, anteayer; el día 3 no se hizo
+        self.assertEqual(stats["active_days"], 4)
+
+    def test_streak_survives_if_today_not_done_yet(self):
+        from . import profile
+        today = timezone.localdate()
+        days = {today - timedelta(days=1), today - timedelta(days=2)}
+        self.assertEqual(profile._streak(days, today), 2)
+        self.assertEqual(profile._streak(set(), today), 0)
+
+
+    def test_goal_progress_uses_start_weight_and_marks_completion(self):
+        from .models import PlanItem
+        PlanItem.objects.filter(plan=self.plan).update(start_weight_kg=5, goal_weight_kg=15)
+        self._ws(4, [8], 5)
+        self._ws(3, [8], 10)
+        line = self.chart_fn(self.plan)["lines"][1]
+        self.assertEqual(line["progress"], 50)  # de 5 a 15, vas por 10
+        self._ws(2, [8], 15)
+        line = self.chart_fn(self.plan)["lines"][1]
+        self.assertEqual(line["progress"], 100)
+        self.assertIn("conseguida", line["goal_text"])
+
+    def test_no_goal_no_progress(self):
+        self._ws(3, [8], 5)
+        self._ws(2, [8], 7.5)
+        chart = self.chart_fn(self.plan)
+        self.assertIsNone(chart["lines"][1]["progress"])
+        self.assertFalse(chart["strip"]["has_goal"])

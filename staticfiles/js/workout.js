@@ -290,6 +290,9 @@ const CAMERA_POSTURE_COUNTERS = new Set(["supermanhold", "lsithold", "plank", "s
 // Ejercicios de cabeza (inclinacion y giro): al llegar a target_reps pasan SIEMPRE al siguiente ejercicio del circuito,
 // aunque el plan aun tenga target_sets > 1 (pedido por Alex: "no me cambia automaticamente en cuanto he hecho 30").
 const SINGLE_GOAL_AUTO_ADVANCE_COUNTERS = new Set(["necklateral", "neckturn"]);
+// Al llegar al objetivo y pasar solo al siguiente ejercicio, se espera esto para que se oiga ENTERO el numero de la ultima repeticion
+// (finish() -> stopCamera() corta la voz). No se dice ningun otro mensaje en ese momento.
+const GOAL_VOICE_GRACE_MS = 1500;
 const NO_REST_COUNTERS = new Set(["pushupfront", "squatfront", "jumpingjack", "armcrossstretch", "tricepsoverheadstretch", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "highlegraise", "seatedhamstringstretch", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "standingquadstretch", "hipforwardback"]);
 
 // --- Contadores DE FRENTE (Cindy workout) -- primera versión, sin probar en cámara real (2026-09-19) ---
@@ -1840,6 +1843,24 @@ const LEG_RAISE_OFF_GROUND_STABLE_MS = 900;
 // coger aire no llega a esto.
 const CRUNCH_IDLE_CLOSE_MS = 8000;
 const LEG_RAISE_IDLE_CLOSE_MS = 8000;
+// Doble crunch: mismo cierre por inactividad -- 7s sin completar ninguna
+// rep (ya con la serie empezada, y con las piernas estiradas esperando) da
+// la serie por terminada. Pedido por Alex (2026-10-08).
+const DOUBLECRUNCH_IDLE_CLOSE_MS = 7000;
+
+// Ejercicios tumbados con la cámara EN VERTICAL (reportado 2026-10-08:
+// crunch y tijeras no encontraban la posición inicial, el doble crunch
+// también va con estos ratios). Las landmarks de MediaPipe vienen
+// normalizadas por separado en x (por el ancho) e y (por el alto), y todos
+// los umbrales de estos ejercicios son cocientes (altura de hombro o tobillo
+// / largo del muslo, ángulos de inclinación...) calibrados con el vídeo
+// APAISADO 16:9. Con el móvil en vertical (9:16) esos cocientes salen ~3
+// veces más pequeños con el mismo movimiento (el muslo tumbado ocupa mucho
+// "x normalizada" y la subida de la pierna/hombro muy poca "y normalizada"),
+// y no se llega nunca al umbral de armar. landscapeLm() reescala x para que
+// la geometría sea idéntica a la de un vídeo 16:9; en apaisado 16:9 no hace
+// nada (los umbrales ya calibrados siguen valiendo tal cual).
+const LYING_REF_ASPECT = 16 / 9;
 
 // Elevación de pierna alta (estiramiento dinámico -- ver processHighLegRaise
 // más abajo para el detalle de cada umbral). Mismo ángulo de cadera
@@ -3196,6 +3217,26 @@ const DEADHANG_KNEE_HIP_LOOSE_GAP_FACTOR = 0.75;     // ya aguantando
 const DEADHANG_HIP_ANGLE_MAX_DEG = 145;           // al ARMAR -- de pie sujetando la barra, medido en vídeo real: nunca baja de ~153°
 const DEADHANG_HIP_ANGLE_LOOSE_MAX_DEG = 160;     // ya aguantando
 
+// (2026-10-08) SEGUNDA postura válida del Dead Hang, la que hace Alex de
+// verdad: colgado con las piernas DOBLADAS HACIA ATRÁS (talones hacia los
+// glúteos) -- el muslo queda vertical, rodillas por debajo de la cadera,
+// y de frente a la cámara los tobillos/pies quedan tapados por los muslos,
+// "solo se ven las rodillas". La versión anterior (solo rodillas hacia
+// el pecho + cadera doblada) era literalmente Kneehold Bar, así que esta
+// postura nunca daba OK. Aquí la señal es la AUSENCIA de tobillos: ambos
+// con visibilidad baja, o con la espinilla "colapsada" (tobillo no
+// claramente por debajo de la rodilla). Colgado con las rodillas bien
+// arriba sigue valiendo por la vía antigua.
+// Si el tobillo cae FUERA del encuadre por abajo (y > 1) también cuenta
+// como ausente: es justo "desaparecen los tobillos del encuadre". Lo que
+// evita validar de pie es el paso 1 (primero hay que estar colgado, muñecas
+// por encima de los hombros) + que las rodillas se vean por debajo de la
+// cadera + que los tobillos NO se vean.
+const DEADHANG_ANKLE_ABSENT_MAX_VIS = 0.6;         // al ARMAR: ambos tobillos por debajo de esto = ausentes (de pie/colgado con el pie visible suele dar >0.8)
+const DEADHANG_ANKLE_ABSENT_LOOSE_MAX_VIS = 0.75;  // ya aguantando (la visibilidad parpadea)
+const DEADHANG_SHIN_COLLAPSED_FACTOR = 0.8;        // (tobilloY - rodillaY) / ancho hombros por debajo de esto = espinilla doblada hacia atrás
+const DEADHANG_OUT_OF_FRAME_Y = 1.0;
+
 export function checkDeadHangPosture(lm, holding = false) {
   const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
   const lH = lm[L_HIP], rH = lm[R_HIP];
@@ -3226,7 +3267,7 @@ export function checkDeadHangPosture(lm, holding = false) {
 
   const kneeMinVis = holding ? DEADHANG_KNEE_LOOSE_MIN_VISIBILITY : DEADHANG_KNEE_MIN_VISIBILITY;
   if ([lK, rK].some((p) => (p.visibility ?? 1) < kneeMinVis)) {
-    return { ok: false, reason: "Dobla más las rodillas, subiéndolas -- no se te ven bien.", debug: { ...debug, fail: "vis_rodilla" } };
+    return { ok: false, reason: "No se te ven bien las rodillas -- ponte de frente a la cámara y algo alejada/o.", debug: { ...debug, fail: "vis_rodilla" } };
   }
 
   // Y crece hacia abajo en la imagen: positivo = la rodilla queda por
@@ -3245,10 +3286,37 @@ export function checkDeadHangPosture(lm, holding = false) {
   const gapMax = holding ? DEADHANG_KNEE_HIP_LOOSE_GAP_FACTOR : DEADHANG_KNEE_HIP_MAX_GAP_FACTOR;
   const hipAngleMax = holding ? DEADHANG_HIP_ANGLE_LOOSE_MAX_DEG : DEADHANG_HIP_ANGLE_MAX_DEG;
 
-  if (kneeHipGap > gapMax || hipAngle === null || hipAngle > hipAngleMax) {
-    return { ok: false, reason: "Dobla más las rodillas y la cadera, subiéndolas hacia el pecho.", debug };
+  // Postura A: rodillas subidas hacia el pecho (como Kneehold Bar).
+  if (kneeHipGap <= gapMax && hipAngle !== null && hipAngle <= hipAngleMax) {
+    debug.mode = "rodillas_arriba";
+    return { ok: true, debug };
   }
-  return { ok: true, debug };
+
+  // Postura B: piernas dobladas hacia atrás -- tobillos ausentes.
+  const lA = lm[L_ANKLE], rA = lm[R_ANKLE];
+  const vis = (p) => (p ? (p.visibility ?? 1) : 0);
+  const ankleVisMax = Math.max(vis(lA), vis(rA));
+  const ankleMidY = lA && rA ? (lA.y + rA.y) / 2 : lA ? lA.y : rA ? rA.y : null;
+  const shinGap = ankleMidY === null ? null : (ankleMidY - kneeMidY) / shoulderWidth;
+  const absentMaxVis = holding ? DEADHANG_ANKLE_ABSENT_LOOSE_MAX_VIS : DEADHANG_ANKLE_ABSENT_MAX_VIS;
+  const cropped = ankleMidY !== null && ankleMidY > DEADHANG_OUT_OF_FRAME_Y;
+  const absentByVis = ankleVisMax < absentMaxVis;
+  const collapsedShin = shinGap !== null && shinGap < DEADHANG_SHIN_COLLAPSED_FACTOR && ankleVisMax >= absentMaxVis;
+  debug.ankleVis = ankleVisMax.toFixed(2);
+  debug.shinGap = shinGap === null ? null : shinGap.toFixed(2);
+  debug.cropped = cropped ? "sí" : "no";
+
+  // Las rodillas tienen que estar POR DEBAJO de la cadera (muslo colgando):
+  // si no, ni es la postura B ni es la A y no hay nada que validar.
+  if ((absentByVis || collapsedShin) && kneeHipGap > 0) {
+    debug.mode = absentByVis ? "tobillos_ausentes" : "espinilla_colapsada";
+    return { ok: true, debug };
+  }
+  return {
+    ok: false,
+    reason: "Cuélgate con las piernas dobladas hacia atrás (que no se vean los tobillos) o con las rodillas subidas hacia el pecho.",
+    debug,
+  };
 }
 // Igual que kneehold en barra/tuck lever: margen más largo que el resto
 // para el parpadeo/cierre (ver POSTURE_FLICKER_STABLE_MS/PLANK_INVALID_STABLE_MS)
@@ -4961,6 +5029,9 @@ class WorkoutSession {
     this.setsEl = el("workout-sets");
     this.timerEl = el("workout-timer");
     this.restEl = el("workout-rest");
+    // Tiempo de la última repetición (opcional: solo si la pantalla trae
+    // el stat "workout-last-rep"). Ver countRep.
+    this.lastRepEl = el("workout-last-rep");
     this.finishBtn = el("workout-finish");
     this.cancelBtn = el("workout-cancel");
     this.debugEl = {
@@ -6718,6 +6789,7 @@ class WorkoutSession {
     const d = Math.round(duration * 100) / 100;
     this.reps += 1;
     this.repDurations.push(d);
+    if (this.lastRepEl) this.lastRepEl.textContent = `${d.toFixed(1)}s`;
     this.currentSetReps += 1;
     this.currentSetDurations.push(d);
     this.lastRepTime = now;
@@ -6780,7 +6852,7 @@ class WorkoutSession {
           ? (this.armCircleForwardTotal + this.armCircleBackwardTotal) >= this.targetReps
           : (this.armCircleForwardTotal >= this.targetReps && this.armCircleBackwardTotal >= this.targetReps))) {
       this.targetAnnounced = true;
-      if (this.voiceEnabled) speakOut("Has llegado al objetivo de series y repeticiones de este ejercicio. Puedes seguir si quieres, o terminar la sesión.", { flush: false });
+      if (this.voiceEnabled && !((NO_REST_COUNTERS.has(this.counterKey) || this.counterKey === "pushup") && typeof window.__workoutSubmit === "function")) speakOut("Has llegado al objetivo de series y repeticiones de este ejercicio. Puedes seguir si quieres, o terminar la sesión.", { flush: false });
       if (this.goalBannerEl) {
         this.goalBannerEl.hidden = false;
         this.goalBannerEl.textContent = `🎯 ¡Has llegado al objetivo de series y repeticiones de este ejercicio! (${this.armCircleLockedPhase ? `${this.targetReps} ${this.armCircleLockedPhase === "forward" ? "hacia delante" : "hacia atrás"}` : this.armCircleAnyDirection ? `${this.targetReps}` : `${this.targetReps} de cada sentido`}) Puedes seguir si quieres, o terminar la sesión.`;
@@ -6807,7 +6879,7 @@ class WorkoutSession {
       // circuito (window.__workoutSubmit no existe) esto no se toca:
       // ahi "objetivo cumplido" solo avisa, decides tu cuando terminar.
       if (NO_REST_COUNTERS.has(this.counterKey) && typeof window.__workoutSubmit === "function") {
-        setTimeout(() => this.finish(), 700);
+        setTimeout(() => this.finish(), GOAL_VOICE_GRACE_MS);
       }
       return true;
     }
@@ -6820,7 +6892,7 @@ class WorkoutSession {
     if (this.counterKey === "legrotation" && this.targetSets && this.targetReps && !this.targetAnnounced &&
         this.legRotationLeftTotal >= this.targetReps && this.legRotationRightTotal >= this.targetReps) {
       this.targetAnnounced = true;
-      if (this.voiceEnabled) speakOut("Has llegado al objetivo de series y repeticiones de este ejercicio. Puedes seguir si quieres, o terminar la sesión.", { flush: false });
+      if (this.voiceEnabled && !((NO_REST_COUNTERS.has(this.counterKey) || this.counterKey === "pushup") && typeof window.__workoutSubmit === "function")) speakOut("Has llegado al objetivo de series y repeticiones de este ejercicio. Puedes seguir si quieres, o terminar la sesión.", { flush: false });
       if (this.goalBannerEl) {
         this.goalBannerEl.hidden = false;
         this.goalBannerEl.textContent = `🎯 ¡Has llegado al objetivo de series y repeticiones de este ejercicio! (${this.targetReps} de cada pierna) Puedes seguir si quieres, o terminar la sesión.`;
@@ -6847,7 +6919,7 @@ class WorkoutSession {
       // circuito (window.__workoutSubmit no existe) esto no se toca:
       // ahi "objetivo cumplido" solo avisa, decides tu cuando terminar.
       if (NO_REST_COUNTERS.has(this.counterKey) && typeof window.__workoutSubmit === "function") {
-        setTimeout(() => this.finish(), 700);
+        setTimeout(() => this.finish(), GOAL_VOICE_GRACE_MS);
       }
       return true;
     }
@@ -6877,7 +6949,7 @@ class WorkoutSession {
         this.reps >= this.targetSets * this.targetReps) {
       this.targetAnnounced = true;
       const inCircuit = typeof window.__workoutSubmit === "function";
-      if (this.voiceEnabled) speakOut(inCircuit ? "Objetivo cumplido. Siguiente ejercicio." : "Has llegado al objetivo de este ejercicio. Puedes seguir si quieres, o terminar la sesión.", { flush: false });
+      if (this.voiceEnabled && !inCircuit) speakOut("Has llegado al objetivo de este ejercicio. Puedes seguir si quieres, o terminar la sesión.", { flush: false }); // en circuito pasa solo al siguiente: sin voz, se cortaba
       if (this.goalBannerEl) {
         this.goalBannerEl.hidden = false;
         this.goalBannerEl.textContent = inCircuit
@@ -6898,7 +6970,7 @@ class WorkoutSession {
           osc.stop(ctx.currentTime + t + 0.13);
         });
       } catch (e) { /* si el navegador bloquea audio, no pasa nada */ }
-      if (inCircuit) setTimeout(() => this.finish(), 700);
+      if (inCircuit) setTimeout(() => this.finish(), GOAL_VOICE_GRACE_MS);
       return true;
     }
     if (this.counterKey !== "armcircles" && this.counterKey !== "legrotation" && this.counterKey !== "forearmrotation" && this.targetSets && this.targetReps && this.currentSetReps >= this.targetReps &&
@@ -6910,7 +6982,7 @@ class WorkoutSession {
         // Al número ya dicho justo antes le sigue el aviso de meta, sin
         // cancelarlo (flush:false) — cancel() en speakRep() ya se encargó
         // de que no se pisen entre sí.
-        if (this.voiceEnabled) speakOut("Has llegado al objetivo de series y repeticiones de este ejercicio. Puedes seguir si quieres, o terminar la sesión.", { flush: false });
+        if (this.voiceEnabled && !((NO_REST_COUNTERS.has(this.counterKey) || this.counterKey === "pushup") && typeof window.__workoutSubmit === "function")) speakOut("Has llegado al objetivo de series y repeticiones de este ejercicio. Puedes seguir si quieres, o terminar la sesión.", { flush: false });
         if (this.goalBannerEl) {
           this.goalBannerEl.hidden = false;
           this.goalBannerEl.textContent = "🎯 ¡Has llegado al objetivo de series y repeticiones de este ejercicio! Puedes seguir si quieres, o terminar la sesión.";
@@ -6945,7 +7017,7 @@ class WorkoutSession {
         // Aqui solo se auto-avanza al terminar la ULTIMA serie (isLastSet),
         // que es lo unico que hacia falta para el calentamiento (target_sets=1).
         if ((NO_REST_COUNTERS.has(this.counterKey) || this.counterKey === "pushup") && typeof window.__workoutSubmit === "function") {
-          setTimeout(() => this.finish(), 700);
+          setTimeout(() => this.finish(), GOAL_VOICE_GRACE_MS);
         }
         return true;
       } else {
@@ -11959,7 +12031,7 @@ class WorkoutSession {
     // paso 2 pide también doblar la cadera, no solo la rodilla.
     if (this.counterKey === "deadhang") {
       return this.postureGroundConfirmed
-        ? "Dobla las rodillas y la cadera, subiéndolas hacia el pecho."
+        ? "Cuelga el cuerpo con las piernas dobladas hacia atrás (que solo se te vean las rodillas) o con las rodillas subidas hacia el pecho."
         : "Ve y agárrate a la barra, con los brazos estirados, de frente a la cámara y algo alejada/o (para que quepa el cuerpo entero).";
     }
     // Tuck lever en barra: mismo paso 1 que kneehold en barra (colgarte
@@ -12212,7 +12284,7 @@ class WorkoutSession {
           : this.counterKey === "kneeholdbar"
           ? "Postura correcta. ¡Listo! Aguanta con las rodillas arriba, sin balancearte. Para terminar una serie, suelta la barra o sal del encuadre."
           : this.counterKey === "deadhang"
-          ? "Postura correcta. ¡Listo! Aguanta con las rodillas y la cadera dobladas, sin balancearte. Para terminar una serie, suelta la barra o sal del encuadre."
+          ? "Postura correcta. ¡Listo! Aguanta colgado con las piernas dobladas hacia atrás (o las rodillas hacia el pecho), sin balancearte. Para terminar una serie, suelta la barra o sal del encuadre."
           : this.counterKey === "tucklever"
           ? "Postura correcta. ¡Listo! Aguanta con las piernas dobladas muy por encima de la cabeza, cerca de la barra, sin balancearte. Para terminar una serie, baja las piernas, suelta la barra o sal del encuadre."
           : this.counterKey === "handstand"
@@ -12663,7 +12735,7 @@ class WorkoutSession {
           const flipMessage = isKneeHoldStep1
             ? "¡Listo! Ya puedes subir las rodillas, doblándolas, hasta dejarlas más o menos a la altura de la cadera."
             : isDeadHangStep1
-            ? "¡Listo! Ya puedes subir las rodillas y la cadera, doblándolas hacia el pecho."
+            ? "¡Listo! Ya puedes doblar las piernas hacia atrás (que no se te vean los tobillos) o subir las rodillas hacia el pecho."
             : isTuckLeverStep1
             ? "¡Listo! Ahora dobla las piernas y súbelas muy por encima de la cabeza, cerca de la barra, hasta dejarlas por encima de la altura del hombro."
             : isWallsitStep1
@@ -12679,7 +12751,7 @@ class WorkoutSession {
           const flipSpeech = isKneeHoldStep1
             ? "Listo. Sube las rodillas."
             : isDeadHangStep1
-            ? "Listo. Sube las rodillas y la cadera."
+            ? "Listo. Dobla las piernas hacia atrás."
             : isTuckLeverStep1
             ? "Listo. Sube las piernas por encima de la cabeza."
             : isWallsitStep1
@@ -12872,8 +12944,8 @@ class WorkoutSession {
    * moverte fuera del suelo, cuenta como actividad y reinicia el reloj.
    * Devuelve true si ha cerrado la serie (el llamador debe hacer return).
    */
-  checkIdleSetClose(now, idleMs, moving = false) {
-    if (moving || this.currentSetReps === 0 || this.state !== "down") {
+  checkIdleSetClose(now, idleMs, moving = false, restState = "down") {
+    if (moving || this.currentSetReps === 0 || this.state !== restState) {
       this.idleSince = null;
       return false;
     }
@@ -13317,6 +13389,16 @@ class WorkoutSession {
         `ángulo cadera (${useLeft ? "izq" : "der"}): ${hipAngle.toFixed(0)}° | tilt: ${tilt.toFixed(0)}° (${onGround ? "en el suelo" : "fuera del suelo"}) | estado: ${this.state ?? "esperando"} ` +
         `(abajo ≥${HIGHLEGRAISE_DOWN_ANGLE_DEG}°, arriba ≤${HIGHLEGRAISE_UP_ANGLE_DEG}°)`;
     }
+  }
+
+  /** Landmarks con la x reescalada a la geometría de un vídeo 16:9 (ver LYING_REF_ASPECT).
+   *  Idéntico (mismo array) si el vídeo ya es 16:9 o no se conoce el aspecto. */
+  landscapeLm(lm) {
+    const ar = this.videoAspect();
+    if (!ar) return lm;
+    const k = ar / LYING_REF_ASPECT;
+    if (Math.abs(k - 1) < 0.02) return lm;
+    return lm.map((p) => ({ ...p, x: p.x * k }));
   }
 
   /** Proporción ancho/alto del vídeo (para SupermanTracker); undefined si aún no hay medidas. */
@@ -14316,6 +14398,10 @@ class WorkoutSession {
     } else {
       this.torsoOutOfBandSince = null;
     }
+
+    // Cierre por inactividad (DOUBLECRUNCH_IDLE_CLOSE_MS): piernas estiradas
+    // (estado "extended" = en reposo entre reps) sin hacer ninguna rep.
+    if (this.checkIdleSetClose(now, DOUBLECRUNCH_IDLE_CLOSE_MS, activeOutOfBand, "extended")) return;
 
     if (this.state === "extended") {
       if (kneeToShoulder <= DOUBLECRUNCH_TUCK_MAX_FACTOR && back.onBack) {
@@ -15360,7 +15446,7 @@ class WorkoutSession {
       return;
     }
     if (this.counterKey === "crunch") {
-      this.processCrunch(lm, now);
+      this.processCrunch(this.landscapeLm(lm), now);
       return;
     }
     if (this.counterKey === "legraise") {
@@ -15392,11 +15478,11 @@ class WorkoutSession {
       return;
     }
     if (this.counterKey === "scissor") {
-      this.processScissor(lm, now);
+      this.processScissor(this.landscapeLm(lm), now);
       return;
     }
     if (this.counterKey === "doublecrunch") {
-      this.processDoubleCrunch(lm, now);
+      this.processDoubleCrunch(this.landscapeLm(lm), now);
       return;
     }
     if (this.counterKey === "archerpullup") {
