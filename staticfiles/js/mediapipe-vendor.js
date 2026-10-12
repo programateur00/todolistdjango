@@ -45,3 +45,6 @@ export const MEDIAPIPE_WASM_BASE_URL = new URL("wasm/", MEDIAPIPE_VENDOR_BASE).h
 // modelo fallará (se verá como "No se pudo cargar el modelo de
 // seguimiento" en pantalla).
 export const MODEL_URL = new URL("models/pose_landmarker_full.task", MEDIAPIPE_VENDOR_BASE).href;
+// Detector de personas (2026-10-10): OPCIONAL. Si colocas efficientdet_lite0.tflite en models/ se usa ese; si no está,
+// workout.js lo pide a storage.googleapis.com (ver initPersonDetector) y, si tampoco se puede, sigue sin detector.
+export const OBJECT_MODEL_URL = new URL("models/efficientdet_lite0.tflite", MEDIAPIPE_VENDOR_BASE).href;

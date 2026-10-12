@@ -24,6 +24,10 @@ _YOUTUBE_ID_RE = re.compile(
 # que aparezca list=algo ya vale.
 _YOUTUBE_PLAYLIST_ID_RE = re.compile(r"[?&]list=([A-Za-z0-9_-]+)")
 
+# ID de playlist pegado "a pelo" (sin URL) en el campo del vídeo. Los de
+# vídeo miden siempre 11 caracteres; los de playlist, bastantes más.
+_YOUTUBE_BARE_PLAYLIST_RE = re.compile(r"^(?:PL|UU|FL|OL|RD|LL)[A-Za-z0-9_-]{10,}$")
+
 # Niveles MCER (A1→C2), a nivel de módulo porque tanto Task (el nivel del
 # vídeo concreto de hoy) como Plan (el rango de nivel del curso entero) lo
 # necesitan, y Task se define antes que Plan en este archivo.
@@ -759,11 +763,7 @@ class Task(models.Model):
         if kind == "auto":
             if not self.target_minutes:
                 return None
-            minutos_hoy = TimerSession.objects.filter(
-                user=self.user, series_id=self.series_id,
-                source=TimerSession.SOURCE_PC_USAGE,
-                recorded_at__date=hoy, deleted_at__isnull=True,
-            ).aggregate(m=Sum("minutes"))["m"] or 0
+            minutos_hoy = TimerSession.auto_minutes_today(self.user, self.series_id, hoy)
             pct = min(100, round(100 * minutos_hoy / self.target_minutes))
             return {
                 "pct": pct,
@@ -970,6 +970,24 @@ class Task(models.Model):
         now = timezone.localtime(timezone.now()).replace(tzinfo=None)
         return int((dl - now).total_seconds() / 60)
 
+    @staticmethod
+    def first_custom_date(start, custom_days):
+        """
+        Primer día, desde `start` (incluido), que cae en uno de los
+        `custom_days` marcados (0=lunes ... 6=domingo). Sirve para saber
+        cuándo EMPIEZA a tocar una tarea personalizada recién creada: si
+        se crea un domingo con "de lunes a viernes", no toca hoy sino el
+        lunes. Sin días marcados devuelve None.
+        """
+        marked = {int(d) for d in custom_days if str(d).strip().isdigit()}
+        if not marked:
+            return None
+        for i in range(7):
+            candidate = start + timedelta(days=i)
+            if candidate.weekday() in marked:
+                return candidate
+        return None
+
     def next_due_date(self):
         if not self.due_date:
             return None
@@ -1019,15 +1037,61 @@ class Task(models.Model):
             self.due_time = _dt.time(23, 59)
         if self.series_start_date is None and self.due_date is not None:
             self.series_start_date = self.due_date
+        self.normalize_youtube_fields()
+        super().save(*args, **kwargs)
+
+    def normalize_youtube_fields(self):
+        """
+        Deja youtube_video_id / youtube_playlist_id como IDs limpios.
+
+        Además de sacar el ID de un enlace pegado, rescata el caso más
+        típico de "el vídeo no está disponible": pegar el enlace (o el ID)
+        de una PLAYLIST en el campo de VÍDEO. Sin esto, el enlace entero
+        se guardaba como si fuera un ID de vídeo y el reproductor de
+        YouTube respondía "el vídeo no está disponible". Si el campo de
+        playlist ya está relleno, manda ese y no se toca nada.
+
+        Devuelve True si ha cambiado algo (lo usa repair_youtube_fields
+        para arreglar también tareas ya creadas mal).
+        """
+        before = (self.youtube_video_id, self.youtube_playlist_id)
         raw = (self.youtube_video_id or "").strip()
+        raw_pl = (self.youtube_playlist_id or "").strip()
         if raw:
             m = _YOUTUBE_ID_RE.search(raw)
-            self.youtube_video_id = m.group(1) if m else raw
-        raw_pl = (self.youtube_playlist_id or "").strip()
+            if m:
+                raw = m.group(1)
+            elif not raw_pl:
+                pm = _YOUTUBE_PLAYLIST_ID_RE.search(raw)
+                if pm:
+                    raw_pl, raw = pm.group(1), ""
+                elif len(raw) > 11 and _YOUTUBE_BARE_PLAYLIST_RE.match(raw):
+                    raw_pl, raw = raw, ""
         if raw_pl:
             m = _YOUTUBE_PLAYLIST_ID_RE.search(raw_pl)
-            self.youtube_playlist_id = m.group(1) if m else raw_pl
-        super().save(*args, **kwargs)
+            raw_pl = m.group(1) if m else raw_pl
+        self.youtube_video_id = raw
+        self.youtube_playlist_id = raw_pl
+        return before != (self.youtube_video_id, self.youtube_playlist_id)
+
+    def repair_youtube_fields(self):
+        """
+        Arregla en la base de datos una tarea ya guardada con la playlist
+        en el campo equivocado (ver normalize_youtube_fields) y refresca
+        la caché de la playlist si hace falta. Barato cuando no hay nada
+        que arreglar: solo compara strings. Si la caché está vacía con
+        playlist puesta (p. ej. la API de YouTube falló al crearla), lo
+        reintenta una vez por visita.
+        """
+        if self.normalize_youtube_fields():
+            self.save(update_fields=["youtube_video_id", "youtube_playlist_id"])
+            self.sync_playlist_videos()
+        elif self.youtube_playlist_id and not self.playlist_videos_cache:
+            self.sync_playlist_videos()
+
+    def playlist_video_ids(self):
+        """IDs de vídeo (ya filtrados por sync_playlist_videos) para el reproductor."""
+        return [e["video_id"] for e in (self.playlist_videos_cache or []) if e.get("video_id")]
 
     def sync_playlist_videos(self):
         """
@@ -1064,7 +1128,10 @@ class Task(models.Model):
         cache = []
         for vid in video_ids:
             d = details.get(vid) or {}
-            if d.get("embeddable") is False:
+            # Vídeo privado/borrado: videos.list ni lo devuelve (d vacío).
+            # Se salta igual que uno no incrustable, o el reproductor
+            # se atascaría en un "vídeo no disponible".
+            if (details and not d) or d.get("embeddable") is False:
                 continue
             cache.append({"video_id": vid, "duration_seconds": d.get("duration_seconds")})
 
@@ -4739,6 +4806,30 @@ class TimerSession(models.Model):
         (SOURCE_APP_USAGE, "Tiempo en la app"),
         (SOURCE_PC_USAGE, "Tiempo en el PC"),
     ]
+
+    # app_package con el que la app móvil marca las sesiones medidas por su
+    # PROPIO visor de PDF (www/js/reading-view.js), con source=app_usage.
+    # Se reutiliza app_usage en vez de una fuente nueva para no tocar
+    # SOURCE_CHOICES (= migración sin cambio real de BD). Esas sesiones se
+    # tratan igual que las de la extensión de Chrome (pc_usage): un libro
+    # leído a ratos suma todo lo de HOY antes de compararse con el objetivo.
+    VIEWER_PACKAGE = "libreta.visor-pdf"
+
+    @classmethod
+    def auto_minutes_today(cls, user, series_id, day):
+        """
+        Minutos de HOY que cuentan para una tarea que se completa sola
+        (Lectura con extensión de Chrome o con el visor de la app, Udemy,
+        Ilerna): extensión (pc_usage) + visor de la app móvil. Un solo
+        sitio para api.focus_save y Task.auto_progress, para que la barra
+        y el completado no se contradigan.
+        """
+        return cls.objects.filter(
+            models.Q(source=cls.SOURCE_PC_USAGE)
+            | models.Q(source=cls.SOURCE_APP_USAGE, app_package=cls.VIEWER_PACKAGE),
+            user=user, series_id=series_id,
+            recorded_at__date=day, deleted_at__isnull=True,
+        ).aggregate(m=Sum("minutes"))["m"] or 0
 
     task = models.ForeignKey(
         Task, on_delete=models.SET_NULL, null=True, blank=True, related_name="timer_sessions"

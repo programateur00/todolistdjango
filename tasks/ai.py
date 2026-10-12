@@ -69,8 +69,8 @@ DEFAULT_TIMEOUT = 30
 # único que falta en muchas casas. El resto del catálogo (core, pierna,
 # running) es peso corporal / aire libre.
 _NEEDS_BAR_EQUIPMENT = {
-    "pullup", "wide-pullup", "chinup", "weighted-pullup", "wide-weighted-pullup", "jumping-pullup",
-    "dips", "weighted-dips", "l-sit", "l-sit-hold",
+    "pullup", "wide-pullup", "chinup", "commando-pullup", "weighted-pullup", "wide-weighted-pullup", "jumping-pullup",
+    "dips", "weighted-dips", "l-sit", "l-sit-hold", "toes-to-bar",
 }
 
 # Ejercicios cuyo contador de cámara existe en la web (static/js/workout.js)
@@ -428,7 +428,7 @@ def _select_sport_exercises(fitness_level, focus_area, no_bar_equipment, selecte
 
 # Dominadas/fondos a peso corporal — más duros por repetición que el
 # resto del catálogo pose (sentadillas, flexiones...), empiezan más bajo.
-_LOW_REP_STRENGTH_SLUGS = {"pullup", "wide-pullup", "chinup", "dips"}
+_LOW_REP_STRENGTH_SLUGS = {"pullup", "wide-pullup", "chinup", "commando-pullup", "dips", "archer-push-up", "one-arm-push-up", "clap-push-up", "pseudo-planche-push-up"}
 # Variantes con lastre — llevan progresión 'reps' con peso objetivo
 # (reps dentro de un rango y, al llegar arriba, más peso — antes esto
 # era una progresión 'double' aparte, ver PlanItem.PROGRESSION_CHOICES),

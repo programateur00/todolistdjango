@@ -112,3 +112,20 @@ document.addEventListener("webkitfullscreenchange", onNativeChange);
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && isFull() && !nativeElement()) exitFull();
 });
+
+// Encuadre fijo: la caja de la cámara toma la proporción real del vídeo
+// (variable CSS --cam-ar, ver styles.css) y el vídeo se muestra entero, sin
+// recortes, así el campo de visión es el mismo en todos los ejercicios y en
+// pantalla completa. 'loadedmetadata' y 'resize' no burbujean: se captura.
+function syncCamAspect(video) {
+  try {
+    if (!video || !video.videoWidth || !video.videoHeight) return;
+    const cam = video.closest(".workout__camera");
+    if (cam) cam.style.setProperty("--cam-ar", `${video.videoWidth} / ${video.videoHeight}`);
+  } catch (_) { /* extra visual, nunca debe romper el entreno */ }
+}
+for (const ev of ["loadedmetadata", "resize"]) {
+  document.addEventListener(ev, (e) => {
+    if (e.target && e.target.tagName === "VIDEO") syncCamAspect(e.target);
+  }, true);
+}

@@ -19,7 +19,7 @@ import {
   NOSE, L_SHOULDER, R_SHOULDER, L_HIP, R_HIP, L_ANKLE, R_ANKLE, L_WRIST, R_WRIST,
   angle,
   checkPlankPosture, checkSidePlankPosture, checkWallSitPosture,
-  checkKneeHoldBarPosture, checkDeadHangPosture, checkTuckLeverPosture, checkHandstandPosture, createLSitHoldChecker, createSupermanHoldChecker, checkArmCrossStretch, checkTricepsOverheadStretch,
+  checkKneeHoldBarPosture, checkDeadHangPosture, checkTuckLeverPosture, checkHandstandPosture, checkFrogStandPosture, createLSitHoldChecker, createSupermanHoldChecker, checkArmCrossStretch, checkTricepsOverheadStretch,
   checkSeatedHamstringStretch, createStandingQuadStretchChecker, checkElephantStepsHold,
   speakOut, numeroEnPalabras, isVoiceEnabled, REP_VOICE_RATE, clearVoiceTransitionMute,
 } from "./workout.js";
@@ -27,6 +27,7 @@ import { PersonGate } from "./workout.js";
 // De dónde sale MediaPipe (versión + rutas a los ficheros locales)
 // vive en un único sitio — ver static/js/mediapipe-vendor.js.
 import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./mediapipe-vendor.js";
+import { openCameraStream } from "./camera-stream.js";
 
 (function () {
   "use strict";
@@ -126,7 +127,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   // postura en vez de contar repeticiones. Ver checkPlankPosture /
   // checkSidePlankPosture / checkWallSitPosture / checkKneeHoldBarPosture /
   // checkHandstandPosture más abajo.
-  const POSTURE_COUNTERS = new Set(["supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "tucklever", "deadhang", "handstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch", "elephantstepshold"]);
+  const POSTURE_COUNTERS = new Set(["supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "tucklever", "deadhang", "handstand", "frogstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch", "elephantstepshold"]);
 
   // Estiramientos bilaterales cronometrados (armcrossstretch/
   // tricepsoverheadstretch: un brazo y luego el otro; seatedhamstringstretch/
@@ -157,6 +158,12 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   // workout.js) -- ahora son dos pantallas seguidas, como los estiramientos.
   const REP_SIDE_COUNTERS = new Set(["forearmrotation"]);
   const REP_SIDE_LABEL = { forearmrotation: "brazo" };
+
+  // "Ahora el otro brazo / la otra pierna / el otro lado" -- aviso corto de la 2ª vez
+  // de un ejercicio por lados (antes era una frase larga en cada pantalla).
+  function otherSideText(label) {
+    return label === "pierna" ? "la otra pierna" : `el otro ${label}`;
+  }
   // Círculos de brazos (2026-09-29, a petición de Alex): DOS pantallas seguidas
   // (arm-circles listado 2 veces en seed_warmup_routines.py), la 1ª hacia
   // delante y la 2ª hacia atrás; el sentido se fija por aparición (impar =
@@ -384,6 +391,8 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         ? checkDeadHangPosture
         : item.counter_key === "tucklever"
         ? checkTuckLeverPosture
+        : item.counter_key === "frogstand"
+        ? checkFrogStandPosture
         : item.counter_key === "handstand"
         ? checkHandstandPosture
         : item.counter_key === "supermanhold"
@@ -426,8 +435,8 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         ${
           occ
             ? occ.occurrence > 1
-              ? `<p class="circuit__side-hint">🔁 Lado ${occ.occurrence} de ${occ.total} -- usa el ${sideLabel} contrario al de la vez anterior.</p>`
-              : `<p class="circuit__side-hint">Lado ${occ.occurrence} de ${occ.total} -- elige un ${sideLabel} para empezar; el siguiente será con el contrario.</p>`
+              ? `<p class="circuit__side-hint">🔁 Ahora ${otherSideText(sideLabel)}</p>`
+              : ""
             : ""
         }
         <div class="workout__camera">
@@ -511,12 +520,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     });
 
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        // Misma resolución que workout.js (ver ahí el porqué): 1280x720
-        // en vez de 640x480, para que el seguimiento no se degrade a
-        // cierta distancia de la cámara.
-        video: { facingMode: "user", width: 1280, height: 720 }, audio: false,
-      });
+      stream = await openCameraStream();
     } catch (err) {
       statusEl.textContent = "No se pudo acceder a la cámara — revisa los permisos del navegador. La cuenta atrás sigue sin comprobar la postura.";
       postureOk = true; // sin cámara, no bloquea el ejercicio — degrada a cronómetro normal
@@ -566,6 +570,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
           const frameNow = performance.now();
           const result = poseLandmarker.detectForVideo(video, frameNow);
           const hasPoseNow = !!(result.landmarks && result.landmarks.length);
+          personGate.noteFrame(hasPoseNow, frameNow); // 2026-10-10: cuenta también los frames sin esqueleto (ver PersonGate.noteFrame)
           if (hasPoseNow) personGate.sampleMask(result, frameNow);
           const person = hasPoseNow ? personGate.check(result.landmarks[0], frameNow) : null;
           if (typeof result.close === "function") result.close(); // libera las máscaras de persona
@@ -717,12 +722,12 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         ${
           circleDir
             ? circleOcc.occurrence > 1
-              ? `<p class="circuit__side-hint">🔁 Vez ${circleOcc.occurrence} de ${circleOcc.total} -- gira los dos brazos en el sentido contrario al de la vez anterior. Al llegar al objetivo pasa solo al siguiente.</p>`
-              : `<p class="circuit__side-hint">Vez ${circleOcc.occurrence} de ${circleOcc.total} -- gira los dos brazos en el sentido que quieras; la siguiente vez será en el contrario. Al llegar al objetivo pasa solo a la siguiente.</p>`
+              ? `<p class="circuit__side-hint">🔁 Ahora el otro sentido</p>`
+              : ""
             : occ
             ? occ.occurrence > 1
-              ? `<p class="circuit__side-hint">🔁 Lado ${occ.occurrence} de ${occ.total} -- usa el ${sideLabel} contrario al de la vez anterior.</p>`
-              : `<p class="circuit__side-hint">Lado ${occ.occurrence} de ${occ.total} -- elige un ${sideLabel} para empezar; el siguiente será con el contrario.</p>`
+              ? `<p class="circuit__side-hint">🔁 Ahora ${otherSideText(sideLabel)}</p>`
+              : ""
             : ""
         }
         <div class="workout__camera">

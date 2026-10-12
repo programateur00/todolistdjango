@@ -19,11 +19,12 @@
  */
 import {
   checkPlankPosture, checkSidePlankPosture, checkWallSitPosture,
-  checkKneeHoldBarPosture, checkHandstandPosture, createLSitHoldChecker, createSupermanHoldChecker,
+  checkKneeHoldBarPosture, checkHandstandPosture, checkFrogStandPosture, createLSitHoldChecker, createSupermanHoldChecker,
   speakOut, numeroEnPalabras, isVoiceEnabled, REP_VOICE_RATE, exportDebugLogText, clearVoiceTransitionMute,
 } from "./workout.js";
 import { PersonGate } from "./workout.js";
 import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./mediapipe-vendor.js";
+import { openCameraStream } from "./camera-stream.js";
 
 (function () {
   "use strict";
@@ -123,12 +124,40 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     const mm = `${m} ${m === 1 ? "minuto" : "minutos"}`;
     return s ? `${mm} y ${s} ${s === 1 ? "segundo" : "segundos"}` : mm;
   }
+  // Segundos de cada serie la última vez que se hizo un ejercicio de un PLAN, guardados en
+  // el propio navegador (2026-10-10, igual que session-runner.js en la app): el historial
+  // del servidor solo se guarda al terminar la sesión entera. Solo se usa si el servidor
+  // no manda last_seconds.
+  const LOCAL_LAST_SECONDS_PREFIX = "libreta.lastSeconds.";
+  function loadLocalLastSeconds(slug) {
+    try {
+      const raw = localStorage.getItem(LOCAL_LAST_SECONDS_PREFIX + slug);
+      const arr = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(arr) && arr.length && arr.every((n) => typeof n === "number" && n > 0)) return arr;
+    } catch {
+      /* sin almacenamiento: simplemente no hay aviso */
+    }
+    return null;
+  }
+  function saveLocalLastSeconds(slug, seconds) {
+    try {
+      localStorage.setItem(LOCAL_LAST_SECONDS_PREFIX + slug, JSON.stringify(seconds));
+    } catch {
+      /* cuota llena o sin almacenamiento: no es grave */
+    }
+  }
+  function lastSecondsOf(item) {
+    if (!item) return null;
+    if (Array.isArray(item.last_seconds) && item.last_seconds.length) return item.last_seconds;
+    if (item.target_source === "plan" && item.mode !== "pose") return loadLocalLastSeconds(item.slug);
+    return null;
+  }
   /** Lo que aguantaste en ESTA serie la última vez (item.last_seconds,
    *  [45, 40, 38]) o null si no hay historial. Sin parte "Serie N" si el
    *  ejercicio solo tiene una serie. */
   function lastSecondsText(item, { spoken = false } = {}) {
-    const last = item && item.last_seconds;
-    if (!Array.isArray(last) || !last.length) return null;
+    const last = lastSecondsOf(item);
+    if (!last) return null;
     const i = setNo - 1; // serie en curso, base 0
     const sep = spoken ? ". " : ": ";
     const cap = spoken ? "La" : "la";
@@ -180,7 +209,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
 
   // Ver checkPlankPosture/etc. importadas arriba — mismo set que
   // circuit.js.
-  const POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "lsithold", "supermanhold"]);
+  const POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "frogstand", "lsithold", "supermanhold"]);
 
   const STRETCH_FIXED_COUNTERS = new Set(["armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
 
@@ -257,6 +286,9 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
   }
 
   function recordTimed(item, recordEmpty = false) {
+    if (item.target_source === "plan" && setSeconds.length) {
+      saveLocalLastSeconds(item.slug, setSeconds.map((n) => Math.round(n)).filter((n) => n > 0));
+    }
     if (heldTotal <= 0 && !recordEmpty) return;
     const entry = { exercise: item.slug, seconds: heldTotal };
     // "sets" solo en ejercicios de plan (el % de los "al fallo" se mide en
@@ -427,6 +459,8 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
         ? checkWallSitPosture
         : item.counter_key === "kneeholdbar"
         ? checkKneeHoldBarPosture
+        : item.counter_key === "frogstand"
+        ? checkFrogStandPosture
         : item.counter_key === "handstand"
         ? checkHandstandPosture
         : item.counter_key === "supermanhold"
@@ -541,12 +575,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
     });
 
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        // Misma resolución que workout.js (ver ahí el porqué): 1280x720
-        // en vez de 640x480, para que el seguimiento no se degrade a
-        // cierta distancia de la cámara.
-        video: { facingMode: "user", width: 1280, height: 720 }, audio: false,
-      });
+      stream = await openCameraStream();
     } catch (err) {
       statusEl.textContent = "No se pudo acceder a la cámara — revisa los permisos del navegador. La cuenta atrás sigue sin comprobar la postura.";
       postureOk = true; // sin cámara, no bloquea el ejercicio — degrada a cronómetro normal
@@ -596,6 +625,7 @@ import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./medi
           const frameNow = performance.now();
           const result = poseLandmarker.detectForVideo(video, frameNow);
           const hasPoseNow = !!(result.landmarks && result.landmarks.length);
+          personGate.noteFrame(hasPoseNow, frameNow); // 2026-10-10: cuenta también los frames sin esqueleto (ver PersonGate.noteFrame)
           if (hasPoseNow) personGate.sampleMask(result, frameNow);
           const person = hasPoseNow ? personGate.check(result.landmarks[0], frameNow) : null;
           if (typeof result.close === "function") result.close(); // libera las máscaras de persona

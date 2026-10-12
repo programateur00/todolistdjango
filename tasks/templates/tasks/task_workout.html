@@ -67,13 +67,35 @@
         <button type="button" id="workout-finish" class="workout__btn workout__btn--primary">Terminar sesión</button>
     </div>
 
-    {% if exercise.counter_key == "squat" %}
+    {% if exercise.counter_key == "squat" or exercise.counter_key == "jumpsquat" %}
     <p class="workout__note">
         📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti), no de frente —
         así se ve bien cuánto doblas la rodilla. Encuadra toda la pierna, de la cadera al tobillo.
     </p>
     <p class="workout__note">
         Si pasan más de 1:00 sin contar ninguna repetición (un descanso), la serie se cierra sola y empieza la siguiente.
+    </p>
+    {% elif exercise.counter_key == "cossacksquat" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de frente</strong> a ti, algo alejado, para que se vean las
+        <strong>dos piernas enteras</strong>, de la cadera a los pies. Empieza de pie, quieto, con los
+        <strong>pies muy separados</strong> (el doble de ancho que los hombros, o más) y las piernas estiradas, y espera
+        al «Listo». Una repetición es <strong>bajar hacia un lado</strong>: doblas esa rodilla a fondo con el pie entero en el
+        suelo y la otra pierna se queda <strong>estirada</strong> (pie girado sobre el talón, puntas hacia arriba), con el tronco
+        erguido; luego vuelves al centro o pasas al otro lado. Cada lado cuenta una repetición.
+    </p>
+    <p class="workout__note">
+        Si pasan 8 segundos sin hacer ninguna repetición, la serie se cierra sola.
+    </p>
+    {% elif exercise.counter_key == "heelraise" %}
+    <p class="workout__note">
+        📐 Ponte de pie con los <strong>pies enteros</strong> (talones y puntas) a la vista de la cámara — vale de frente o de
+        perfil. Empieza quieto, con los <strong>talones apoyados en el suelo</strong>, y espera al «Listo». Una repetición es
+        <strong>subir sobre la punta de los pies</strong> (los talones se despegan del suelo, con las piernas estiradas) y
+        <strong>volver a bajar los talones</strong>.
+    </p>
+    <p class="workout__note">
+        Si pasan 8 segundos sin hacer ninguna repetición, la serie se cierra sola.
     </p>
     {% elif exercise.counter_key == "pushup" %}
     <p class="workout__note">
@@ -85,6 +107,52 @@
     </p>
     <p class="workout__note">
         Si pasan más de 1:00 sin contar ninguna repetición (un descanso), la serie se cierra sola y empieza la siguiente.
+    </p>
+    {% elif exercise.counter_key == "kneepushup" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti) y encuadra el cuerpo
+        entero, de la cabeza a los pies. Ponte a cuatro patas: <strong>rodillas en el suelo</strong>,
+        <strong>tobillos en el aire</strong> (piernas dobladas hacia arriba), brazos estirados, manos a la altura del
+        pecho y el cuerpo en línea recta de la cabeza a las rodillas. Quédate quieto un momento y empieza.
+        Para terminar una serie, ponte de pie o sal del encuadre.
+    </p>
+    {% elif exercise.counter_key == "kneedeclinepushup" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti) y encuadra el cuerpo
+        entero, de la cabeza a los pies. Apoya las <strong>rodillas en una silla o banco</strong> y las
+        <strong>manos en el suelo</strong>, con los <strong>tobillos en el aire</strong>, los brazos estirados y el
+        cuerpo en línea recta de la cabeza a las rodillas. Quédate quieto un momento y empieza.
+        Para terminar una serie, baja las rodillas de la silla, ponte de pie o sal del encuadre.
+    </p>
+    {% elif exercise.counter_key == "archerpushup" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>delante de ti</strong>, a la altura del suelo, <strong>mirando hacia ti</strong>
+        (de frente, no de perfil: así se ven los dos brazos). Túmbate boca abajo con las <strong>manos muy separadas</strong>
+        (más anchas que los hombros) y los dos brazos estirados. En cada repetición <strong>dobla un solo brazo</strong> mientras
+        el otro queda <strong>estirado</strong> hacia el lado, y vuelve a estirar los dos. Si doblas los dos a la vez cuenta como
+        flexión normal y no se suma. Para terminar una serie, ponte de pie o sal del encuadre.
+    </p>
+    {% elif exercise.counter_key == "onearmpushup" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti) y encuadra el cuerpo entero. Ponte en
+        posición de flexión con <strong>una sola mano apoyada</strong>; la otra, <strong>a la vista</strong> (en la cadera o detrás
+        de la espalda) y <strong>bien separada del suelo</strong>. Si apoyas la otra mano, la serie se cierra. Para terminar,
+        ponte de pie o sal del encuadre.
+    </p>
+    {% elif exercise.counter_key == "clappushup" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti) y encuadra el cuerpo entero, de los
+        hombros a los pies. Túmbate boca abajo, brazos estirados y cuerpo recto, y quédate quieto un momento. Baja y empuja
+        <strong>fuerte</strong> para <strong>despegar las manos del suelo</strong> y dar la palmada: solo cuentan las
+        repeticiones en las que las manos se separan del suelo. Para terminar una serie, ponte de pie o sal del encuadre.
+    </p>
+    {% elif exercise.counter_key == "pseudoplanchepushup" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti) y encuadra el cuerpo entero. Ponte en
+        posición de flexión con las <strong>manos junto a la cintura</strong> (dedos hacia atrás o hacia fuera) y el cuerpo
+        <strong>inclinado hacia delante</strong>: los <strong>hombros bien por delante de las manos</strong>, brazos estirados y
+        cuerpo recto. Si pones las manos bajo los hombros (flexión normal), la serie no empieza o se cierra. Para terminar,
+        ponte de pie o sal del encuadre.
     </p>
     {% elif exercise.counter_key == "pikepushup" %}
     <p class="workout__note">
@@ -111,6 +179,16 @@
         así se ve bien cuánto te incorporas. Encuadra el hombro y la cadera — no hace falta que se vean ni las
         piernas ni los pies.
     </p>
+    {% elif exercise.counter_key == "vup" %}
+    <p class="workout__note">
+        🛏️ Túmbate boca arriba y coloca el móvil o el portátil <strong>a un lado</strong> (de perfil respecto a ti) —
+        así se ve bien el movimiento. Encuadra el cuerpo entero, de la cabeza a los tobillos y las manos.
+    </p>
+    <p class="workout__note">
+        Empieza con los brazos estirados por encima de la cabeza y las piernas estiradas. Sube <strong>a la vez</strong>
+        el torso y las piernas rectas hasta formar una V, toca los talones con las manos y baja con control. Solo cuenta
+        si suben las dos mitades, las rodillas quedan casi rectas y las manos llegan a los talones.
+    </p>
     {% elif exercise.counter_key == "doublecrunch" %}
     <p class="workout__note">
         🛏️ Túmbate boca arriba y coloca el móvil o el portátil <strong>a un lado</strong> (de perfil respecto a ti) —
@@ -128,6 +206,37 @@
     <p class="workout__note">
         Las piernas se quedan levantadas <strong>a un palmo</strong> del suelo, sin llegar a apoyarlas, alternando
         cuál de las dos sube más — como unas tijeras.
+    </p>
+    {% elif exercise.counter_key == "plankshouldertaps" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti) y encuadra el cuerpo entero,
+        de la cabeza a los pies. Ponte en <strong>plancha</strong> (manos bajo los hombros, cuerpo en línea recta) y
+        espera al «Listo».
+    </p>
+    <p class="workout__note">
+        Cada vez que <strong>levantas una mano</strong> del suelo para tocarte el hombro contrario y la <strong>vuelves a
+        apoyar</strong> cuenta un toque (los de la mano derecha y los de la izquierda suman). Si pasan 10 segundos sin
+        ningún toque, la serie se cierra sola.
+    </p>
+    {% elif exercise.counter_key == "dynamicplank" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti) y encuadra el cuerpo entero,
+        de la cabeza a los pies. Empieza en <strong>plancha alta</strong> (brazos estirados) y espera al «Listo».
+    </p>
+    <p class="workout__note">
+        Baja a los <strong>antebrazos</strong> y vuelve a subir a las <strong>manos</strong>: eso cuenta una repetición
+        (da igual qué brazo bajes primero). Si pasan 10 segundos sin ninguna repetición, la serie se cierra sola.
+    </p>
+    {% elif exercise.counter_key == "sideplankhipdips" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil igual que para la plancha lateral y encuadra el cuerpo entero, de la cabeza a
+        los pies. Apóyate en el <strong>antebrazo</strong>, con el codo justo debajo del hombro y la cadera bien
+        alzada, y espera al «Listo».
+    </p>
+    <p class="workout__note">
+        <strong>Baja la cadera</strong> casi hasta el suelo y <strong>vuelve a subirla</strong>: cada vez que subes
+        cuenta una repetición. Haz un lado y luego el otro (cada lado, una serie). Si te quedas abajo 6 segundos o
+        pasan 10 sin ninguna repetición, la serie se cierra sola.
     </p>
     {% elif exercise.counter_key == "plank" %}
     <p class="workout__note">
@@ -195,6 +304,14 @@
     <p class="workout__note">
         <span style="color:var(--amber);">━</span> línea amarilla = altura de la barra (medida por tus muñecas al calibrar).
         Si no coincide con tu barra real, pulsa «Recalibrar» estando ya colgado.
+    </p>
+    {% elif exercise.counter_key == "toestobar" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de frente o de perfil</strong>, algo alejado, para que se te vea
+        <strong>entero colgado</strong>, de las manos a los pies. Agárrate a la barra con los brazos estirados, quédate
+        quieto un momento y espera al «Listo». Una repetición es <strong>subir las piernas hasta tocar la barra con los
+        pies</strong> y bajarlas con control (vale estricto o con kipping). Subir solo las rodillas o las piernas sin
+        llegar a la barra no cuenta. Soltar la barra o salir del encuadre un par de segundos cierra la serie sola.
     </p>
     {% elif exercise.counter_key == "archerpullup" %}
     <p class="workout__note">

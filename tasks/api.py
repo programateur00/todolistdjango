@@ -372,10 +372,15 @@ def stats_detail(request, series_id):
     total = done_count + not_done_count
     streaks = Occurrence.streak_stats(series_id)
     success_rate = Occurrence.average_pct(occurrences)
+    # Puntos de la gráfica por día: mismo cálculo que la web (views.stats_detail).
+    # Import dentro de la función: views importa api, así que arriba sería circular.
+    from .views import _stats_chart_points
+    chart_points = _stats_chart_points(occurrences)
 
     return JsonResponse({
         "title": title,
         "series_id": str(series_id),
+        "chart_points": chart_points,
         "done_count": done_count,
         "not_done_count": not_done_count,
         "success_rate": success_rate,
@@ -516,6 +521,18 @@ def _apply_task_fields(t, data):
     for field, limit in (("avoid_question", 120), ("avoid_success_label", 32), ("avoid_fail_label", 32)):
         if field in data:
             setattr(t, field, (data.get(field) or "").strip()[:limit])
+    # Personalizada sin fecha: sin esto se quedaba con due_date=None, que
+    # for_today trata como "cuando pueda" y la enseña TODOS los días, también
+    # los que no están marcados (p. ej. un domingo con "lunes a viernes").
+    # Se le da como primera fecha su primer día marcado desde hoy.
+    if (
+        t.repeat == Task.REPEAT_CUSTOM
+        and t.due_date is None
+        and (t.pk is None or "due_date" in data)
+    ):
+        t.due_date = Task.first_custom_date(
+            timezone.localtime(timezone.now()).date(), t.custom_days_list()
+        )
     return None
 
 
@@ -560,13 +577,27 @@ def task_detail(request, uuid):
     t = get_object_or_404(tasks_qs(), uuid=uuid)
 
     if request.method == "GET":
-        return JsonResponse({"task": task_json(t)})
+        # Arregla tareas guardadas con la playlist en el campo del vídeo
+        # (o sin caché de la playlist) — ver Task.repair_youtube_fields.
+        t.repair_youtube_fields()
+        data = task_json(t)
+        # IDs ya verificados de la playlist (incrustables, no borrados):
+        # video-view.js los reproduce directamente en vez de fiarse de que
+        # YouTube acepte la lista por su ID. Solo en el detalle, no en el
+        # listado (pesa). [] = playlist sin sincronizar.
+        data["playlist_video_ids"] = t.playlist_video_ids() if t.youtube_playlist_id else []
+        return JsonResponse({"task": data})
 
     if request.method == "PATCH":
+        old_playlist_id = t.youtube_playlist_id
         error = _apply_task_fields(t, body(request))
         if error:
             return JsonResponse({"ok": False, "error": error}, status=400)
         t.save()
+        # Igual que al crear: si la playlist ha cambiado, la caché de
+        # vídeos de la anterior ya no sirve.
+        if t.youtube_playlist_id != old_playlist_id:
+            t.sync_playlist_videos()
         return JsonResponse({"ok": True, "task": task_json(t)})
 
     # DELETE — borrado suave, no se borra la fila. Si se borrara de
@@ -966,22 +997,188 @@ def focus_save(request, uuid):
         subcategory=t.subcategory, source=source, app_package=app_package,
         minutes=minutes, target_minutes=t.target_minutes,
     )
-    if source == TimerSession.SOURCE_PC_USAGE:
+    # El visor de PDF de la app móvil (reading-view.js) manda su tiempo en
+    # trozos (cada pocos minutos y al salir), igual que la extensión: se
+    # suma lo de HOY en vez de mirar cada trozo suelto.
+    is_viewer = (
+        source == TimerSession.SOURCE_APP_USAGE
+        and app_package == TimerSession.VIEWER_PACKAGE
+    )
+    if source == TimerSession.SOURCE_PC_USAGE or is_viewer:
         # La extensión de Chrome corta la sesión cada vez que cambias de
         # pestaña/ventana, así que un curso de Udemy visto a ratos llega
         # al objetivo en varias sesiones cortas, ninguna de ellas sola —
         # aquí se suma lo de HOY para esta tarea, igual que running suma
         # los pasos del día en vez de mirar cada carrera por separado.
         hoy = timezone.localtime(timezone.now()).date()
-        minutos_hoy = TimerSession.objects.filter(
-            user=_user(), series_id=t.series_id, source=TimerSession.SOURCE_PC_USAGE,
-            recorded_at__date=hoy, deleted_at__isnull=True,
-        ).aggregate(m=Sum("minutes"))["m"] or 0
+        minutos_hoy = TimerSession.auto_minutes_today(_user(), t.series_id, hoy)
         if not t.is_done and (not t.target_minutes or minutos_hoy >= t.target_minutes):
             t.mark_done()
     elif ts.target_met:
         t.mark_done()
     return JsonResponse({"ok": True, "session_uuid": str(ts.uuid), "task": task_json(t)})
+
+
+# ------------------------------------------------- lectura (visor en la app)
+#
+# El visor de PDF de la app móvil (www/js/reading-view.js) hace lo mismo que
+# tasks/task_reading.html en la web. El PDF NUNCA pasa por aquí (vive en el
+# IndexedDB de cada dispositivo, bajo reading_pdf_key); lo que se comparte
+# entre PC y móvil es el plan y la página por la que vas.
+
+def _reading_task(uuid_, plan_only=False):
+    qs = tasks_qs().filter(category=Task.CATEGORY_WORK, subcategory=Task.SUBCATEGORY_READING)
+    if plan_only:
+        qs = qs.filter(reading_mode=Task.READING_MODE_PLAN)
+    return get_object_or_404(qs, uuid=uuid_)
+
+
+def _reading_state_json(t):
+    out = {
+        "ok": True,
+        "uuid": str(t.uuid),
+        # Cambia el uuid de la tarea cada día; la serie no -- el visor la usa
+        # para recordar el PDF de un freestyle en el móvil.
+        "series_id": str(t.series_id),
+        "title": t.title,
+        "mode": t.reading_mode,
+        "is_done": t.is_done,
+        "target_minutes": t.target_minutes,
+        "viewer_package": TimerSession.VIEWER_PACKAGE,
+    }
+    if t.reading_mode == Task.READING_MODE_PLAN:
+        out.update({
+            "pdf_key": t.reading_pdf_key,
+            "first_page": t.reading_first_page or 1,
+            "last_page": t.reading_last_page,
+            "current_page": t.reading_current_page,
+            "target_weeks": t.reading_target_weeks,
+            "custom_days": t.custom_days_list(),
+            "completed": bool(t.reading_completed_at),
+            "session_ready": t.reading_session_ready,
+            "status": t.reading_plan_status,
+            "today": t.reading_today_status,
+        })
+    else:
+        hoy = timezone.localtime(timezone.now()).date()
+        out["minutes_today"] = TimerSession.auto_minutes_today(_user(), t.series_id, hoy)
+    return out
+
+
+@api("GET")
+def reading_state(request, uuid):
+    """Todo lo que necesita el visor para arrancar (plan o freestyle)."""
+    t = _reading_task(uuid)
+    if t.reading_mode == Task.READING_MODE_PLAN:
+        # Mismo orden que la vista web task_reading.
+        t.mark_started()
+        t.ensure_reading_day_goal()
+    return JsonResponse(_reading_state_json(t))
+
+
+@api("POST")
+def reading_progress(request, uuid):
+    """Página por la que va el visor -- equivale a views.task_reading_progress."""
+    t = _reading_task(uuid, plan_only=True)
+    data = body(request)
+    try:
+        page = int(data.get("page"))
+    except (TypeError, ValueError):
+        return JsonResponse({"ok": False, "error": "Falta 'page'"}, status=400)
+    finished = t.record_reading_page(page)
+    return JsonResponse({
+        "ok": True, "finished": finished,
+        "current_page": t.reading_current_page,
+        "status": t.reading_plan_status,
+        "today": t.reading_today_status,
+        "final_pct": t.reading_final_pct if finished else None,
+    })
+
+
+@api("POST")
+def reading_session_save(request, uuid):
+    """"Terminar sesión de hoy" -- equivale a views.task_reading_save."""
+    t = _reading_task(uuid, plan_only=True)
+    if t.reading_completed_at:
+        return JsonResponse({"ok": True, "finished": True})
+    t._flush_reading_time()
+    if not t.reading_session_ready:
+        return JsonResponse({
+            "ok": True, "early": True,
+            "message": (
+                f"Vas adelantado — esta sesión es del {t.due_date.strftime('%d/%m')}. "
+                "Tu progreso de página ya está guardado; se completará sola ese día."
+            ),
+        })
+    t.mark_done()
+    return JsonResponse({"ok": True})
+
+
+def _reading_plan_fields(data):
+    """Valida el formulario del plan (mismas reglas que views.reading_plan_form)."""
+    def to_int(v, default=0):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return default
+    last_page = to_int(data.get("last_page"))
+    target_weeks = to_int(data.get("target_weeks"))
+    first_page = max(1, to_int(data.get("first_page"), 1))
+    if last_page < 1 or target_weeks < 1:
+        return None, "Pon la última página real del libro y en cuántas semanas quieres terminarlo."
+    if first_page > last_page:
+        return None, "La página donde empieza el libro no puede ser mayor que la última página real."
+    days = [str(d) for d in (data.get("custom_days") or []) if str(d) in "0123456"]
+    return {
+        "title": (data.get("title") or "").strip()[:255] or "Plan de lectura",
+        "pdf_key": (data.get("pdf_key") or "").strip()[:64],
+        "first_page": first_page, "last_page": last_page, "target_weeks": target_weeks,
+        "custom_days": ",".join(days) or "0,2,4",
+    }, None
+
+
+@api("POST")
+def reading_plan_create(request):
+    """Crea un Plan de lectura desde la app (equivale a views.reading_plan_form)."""
+    f, err = _reading_plan_fields(body(request))
+    if err:
+        return JsonResponse({"ok": False, "error": err}, status=400)
+    today = timezone.localtime(timezone.now()).date()
+    t = Task.objects.create(
+        user=_user(), title=f["title"],
+        category=Task.CATEGORY_WORK, subcategory=Task.SUBCATEGORY_READING,
+        reading_mode=Task.READING_MODE_PLAN,
+        reading_pdf_key=f["pdf_key"], reading_first_page=f["first_page"],
+        reading_last_page=f["last_page"], reading_target_weeks=f["target_weeks"],
+        reading_started_on=today,
+        repeat=Task.REPEAT_CUSTOM, custom_days=f["custom_days"],
+        due_date=today, series_start_date=today,
+    )
+    t.ensure_reading_day_goal()
+    return JsonResponse({"ok": True, "task": task_json(t), **_reading_state_json(t)})
+
+
+@api("POST")
+def reading_plan_update(request, uuid):
+    """Edita un Plan de lectura (no reinicia lo ya leído, igual que en la web)."""
+    t = _reading_task(uuid, plan_only=True)
+    f, err = _reading_plan_fields(body(request))
+    if err:
+        return JsonResponse({"ok": False, "error": err}, status=400)
+    t.title = f["title"]
+    t.reading_first_page = f["first_page"]
+    t.reading_last_page = f["last_page"]
+    t.reading_target_weeks = f["target_weeks"]
+    t.repeat = Task.REPEAT_CUSTOM
+    t.custom_days = f["custom_days"]
+    if f["pdf_key"]:
+        t.reading_pdf_key = f["pdf_key"]
+    t.recompute_reading_day_goal()
+    t.save(update_fields=[
+        "title", "reading_first_page", "reading_last_page", "reading_target_weeks",
+        "reading_pdf_key", "repeat", "custom_days", "reading_day_goal",
+    ])
+    return JsonResponse({"ok": True, "task": task_json(t), **_reading_state_json(t)})
 
 
 @api("GET", "POST")
@@ -1491,6 +1688,10 @@ def plan_json(p, detail=False):
     }
     if detail:
         data["items"] = [_item(i) for i in p.ordered_items()]
+        # Gráfica de progreso "al fallo": la misma geometría SVG que dibuja la
+        # web (views._failure_chart); la app solo la pinta (ver www/js/charts.js).
+        from .views import _failure_chart
+        data["failure_chart"] = _failure_chart(p)
         # Mismo criterio que la web (ver plan_detail en views.py): sin
         # destino y con el objetivo fijo (running "sin progresión", o
         # cualquier progresión sin meta puesta), una fila basta — 60

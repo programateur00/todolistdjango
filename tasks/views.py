@@ -386,8 +386,14 @@ def task_create(request):
                 # _spawn_next) — sin fecha se queda pillada la primera
                 # vez que se resuelve, aunque diga "se repite". Si no se
                 # pone ninguna, se usa hoy como punto de partida en vez
-                # de dejarla coja.
+                # de dejarla coja. Si es personalizada, "hoy" solo vale si
+                # hoy es uno de los días marcados; si no, empieza el
+                # primero que toque (un domingo con lunes-viernes -> lunes).
                 due_date = timezone.localtime(timezone.now()).date()
+                if repeat == Task.REPEAT_CUSTOM:
+                    due_date = Task.first_custom_date(
+                        due_date, request.POST.getlist("custom_days")
+                    ) or due_date
             task = Task(
                 title=title,
                 notes=request.POST.get("notes", "").strip(),
@@ -431,7 +437,18 @@ def task_create(request):
                 task.save()
                 if task.youtube_playlist_id:
                     task.sync_playlist_videos()
-                messages.success(request, "Tarea creada.")
+                created_msg = "Tarea creada."
+                today_ = timezone.localtime(timezone.now()).date()
+                start_ = task.due_date
+                if isinstance(start_, str):
+                    start_ = _dt.date.fromisoformat(start_)
+                if task.repeat == Task.REPEAT_CUSTOM and start_ and start_ > today_:
+                    dias = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+                    created_msg = (
+                        f"Tarea creada. No toca hoy: te saldrá el "
+                        f"{dias[start_.weekday()]} {start_.strftime('%d/%m')}."
+                    )
+                messages.success(request, created_msg)
                 return redirect(reverse("tasks:task_list"))
 
     initial_title = title if request.method == "POST" else request.GET.get("title", "")
@@ -482,6 +499,10 @@ def task_edit(request, pk):
             # fecha se queda pillada en cuanto se resuelve una vez, así
             # que si no se pone ninguna se usa hoy como punto de partida.
             due_date = timezone.localtime(timezone.now()).date()
+            if task.repeat == Task.REPEAT_CUSTOM:
+                due_date = Task.first_custom_date(
+                    due_date, request.POST.getlist("custom_days")
+                ) or due_date
         task.due_date = due_date
         task.due_time = request.POST.get("due_time") or "23:59"
         task.interval = request.POST.get("interval") or 1
@@ -1383,6 +1404,11 @@ def task_video(request, pk):
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
     task.mark_started()
     override_video_id = request.GET.get("video")
+    if not override_video_id:
+        # Tareas guardadas con la playlist en el campo del vídeo (o sin
+        # caché de la playlist) se arreglan aquí, al abrirlas — ver
+        # Task.repair_youtube_fields.
+        task.repair_youtube_fields()
     video_id = override_video_id or task.youtube_video_id
     plan = None if override_video_id else task.plan
     is_language_session = bool(
@@ -1393,6 +1419,10 @@ def task_video(request, pk):
         "task": task,
         "video_id": video_id,
         "playlist_id": "" if override_video_id else task.youtube_playlist_id,
+        # IDs ya verificados (incrustables, no borrados) de la playlist: el
+        # reproductor los reproduce directamente en vez de fiarse de que
+        # YouTube acepte la lista por su ID — ver task_video.html.
+        "playlist_video_ids_json": json.dumps([] if override_video_id else task.playlist_video_ids()),
         "target_minutes": None if override_video_id else task.target_minutes,
         "target_video_count": None if override_video_id else task.target_video_count,
         "playlist_start_index": None if override_video_id else task.playlist_start_index,
@@ -1951,7 +1981,7 @@ def stats_delete_series(request, series_id):
 # ─────────────────────────────────────────────────────────────────────
 
 # Contadores que existen de verdad en workout.js.
-COUNTERS = {"superman", "lsit", "elephantsteps", "burpee", "pullup", "dip", "pushup", "squat", "splitsquat", "crunch", "legraise", "highlegraise", "situp", "doublecrunch", "scissor", "archerpullup", "inclinepushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "hipforwardback", "scapularpull", "handstandpushup", "pistolsquat"}
+COUNTERS = {"superman", "lsit", "elephantsteps", "burpee", "pullup", "dip", "pushup", "squat", "jumpsquat", "splitsquat", "crunch", "legraise", "highlegraise", "situp", "doublecrunch", "vup", "scissor", "archerpullup", "inclinepushup", "kneepushup", "kneedeclinepushup", "archerpushup", "onearmpushup", "clappushup", "pseudoplanchepushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "hipforwardback", "scapularpull", "handstandpushup", "pistolsquat", "cossacksquat", "plankshouldertaps", "dynamicplank", "sideplankhipdips", "heelraise", "toestobar"}
 
 # Ejercicios "timed" (se aguantan, no se cuentan en repeticiones) que
 # workout.js sabe seguir con cámara comprobando la postura — plancha,
@@ -1959,7 +1989,7 @@ COUNTERS = {"superman", "lsit", "elephantsteps", "burpee", "pullup", "dip", "pus
 # task_workout: a estos, a diferencia del resto de "timed" (bicicleta…),
 # sí se les deja entrar en el entreno individual de una tarea con cámara
 # encendida, no solo dentro de un circuito.
-POSTURE_COUNTERS = {"supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "tucklever", "deadhang", "handstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch", "elephantstepshold"}
+POSTURE_COUNTERS = {"supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "tucklever", "deadhang", "handstand", "frogstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch", "elephantstepshold"}
 
 
 def _plans_qs():

@@ -1601,6 +1601,111 @@ class ExerciseCatalogTests(TestCase):
         self.assertEqual(pike.body_area, "upper_body")
         self.assertIn("pikepushup", COUNTERS)
 
+    def test_knee_push_ups_are_camera_exercises(self):
+        """Flexiones de rodillas / de rodillas declinadas (0101): cada una con su
+        PROPIO counter_key (no "pushup": allí la línea del cuerpo es
+        hombro-cadera-tobillo y con las piernas dobladas hacia arriba no se
+        cumple, ver processKneePushup en workout.js), tren superior, registrados
+        en COUNTERS."""
+        from tasks.views import COUNTERS
+        for slug, key in (("knee-push-up", "kneepushup"), ("decline-knee-push-up", "kneedeclinepushup")):
+            ex = Exercise.objects.get(slug=slug)
+            self.assertEqual(ex.mode, Exercise.MODE_POSE)
+            self.assertEqual(ex.counter_key, key)
+            self.assertEqual(ex.body_area, "upper_body")
+            self.assertIn(key, COUNTERS)
+
+    def test_archer_onearm_clap_push_ups_are_camera_exercises(self):
+        """Flexiones arquero / a una mano / con palmada (0102): cada una con su
+        PROPIO counter_key (ver processArcherPushup / processOneArmPushup /
+        processClapPushup en workout.js), tren superior, registradas en COUNTERS
+        y con arranque de pocas repeticiones (_LOW_REP_STRENGTH_SLUGS)."""
+        from tasks.views import COUNTERS
+        from tasks.ai import _LOW_REP_STRENGTH_SLUGS
+        for slug, key in (("archer-push-up", "archerpushup"), ("one-arm-push-up", "onearmpushup"), ("clap-push-up", "clappushup")):
+            ex = Exercise.objects.get(slug=slug)
+            self.assertEqual(ex.mode, Exercise.MODE_POSE)
+            self.assertEqual(ex.counter_key, key)
+            self.assertEqual(ex.body_area, "upper_body")
+            self.assertIn(key, COUNTERS)
+            self.assertIn(slug, _LOW_REP_STRENGTH_SLUGS)
+
+    def test_pseudo_planche_push_up_is_a_camera_exercise(self):
+        """Flexiones pseudo planche (0103): counter_key propio ("pseudoplanchepushup",
+        ver processPseudoPlanchePushup en workout.js), tren superior, en COUNTERS y
+        con arranque de pocas repeticiones (_LOW_REP_STRENGTH_SLUGS)."""
+        from tasks.views import COUNTERS
+        from tasks.ai import _LOW_REP_STRENGTH_SLUGS
+        ex = Exercise.objects.get(slug="pseudo-planche-push-up")
+        self.assertEqual(ex.mode, Exercise.MODE_POSE)
+        self.assertEqual(ex.counter_key, "pseudoplanchepushup")
+        self.assertEqual(ex.body_area, "upper_body")
+        self.assertIn("pseudoplanchepushup", COUNTERS)
+        self.assertIn("pseudo-planche-push-up", _LOW_REP_STRENGTH_SLUGS)
+
+    def test_squat_variants_share_base_counters(self):
+        """Sentadillas búlgaras / sumo / con salto (0104): tren inferior, cámara,
+        y la búlgara y la sumo comparten el contador del ejercicio base (splitsquat / squat); la de
+        salto tiene el suyo ("jumpsquat", processSquat exigiendo ver el salto) — migración 0108."""
+        from tasks.views import COUNTERS
+        for slug, key in (("bulgarian-split-squat", "splitsquat"), ("sumo-squat", "squat"), ("jump-squat", "jumpsquat")):
+            ex = Exercise.objects.get(slug=slug)
+            self.assertEqual(ex.mode, Exercise.MODE_POSE)
+            self.assertEqual(ex.counter_key, key)
+            self.assertEqual(ex.body_area, "lower_body")
+            self.assertIn(key, COUNTERS)
+
+    def test_cossack_squat_is_a_front_camera_exercise(self):
+        """Cossack squat (0111): sentadilla lateral profunda DE FRENTE, contador propio
+        ("cossacksquat", processCossackSquat en workout.js), tren inferior, nivel intermedio."""
+        from tasks.views import COUNTERS
+        ex = Exercise.objects.get(slug="cossack-squat")
+        self.assertEqual(ex.mode, Exercise.MODE_POSE)
+        self.assertEqual(ex.counter_key, "cossacksquat")
+        self.assertEqual(ex.body_area, "lower_body")
+        self.assertEqual(ex.level, "intermediate")
+        self.assertIn("cossacksquat", COUNTERS)
+
+    def test_heel_raise_is_a_standing_rep_exercise(self):
+        """Elevación de talones (0112): de pie, contador propio ("heelraise", processHeelRaise en
+        workout.js), tren inferior, nivel principiante."""
+        from tasks.views import COUNTERS
+        ex = Exercise.objects.get(slug="heel-raise")
+        self.assertEqual(ex.mode, Exercise.MODE_POSE)
+        self.assertEqual(ex.counter_key, "heelraise")
+        self.assertEqual(ex.body_area, "lower_body")
+        self.assertEqual(ex.level, "beginner")
+        self.assertIn("heelraise", COUNTERS)
+
+    def test_toes_to_bar_is_a_hanging_rep_exercise(self):
+        """Toes to bar (0113): colgado de la barra, contador propio ("toestobar", processToesToBar en
+        workout.js), tren inferior / core, nivel avanzado, necesita barra."""
+        from tasks.views import COUNTERS
+        from tasks.ai import _NEEDS_BAR_EQUIPMENT
+        ex = Exercise.objects.get(slug="toes-to-bar")
+        self.assertEqual(ex.mode, Exercise.MODE_POSE)
+        self.assertEqual(ex.counter_key, "toestobar")
+        self.assertEqual(ex.body_area, "lower_body")
+        self.assertEqual(ex.level, "advanced")
+        self.assertIn("toestobar", COUNTERS)
+        self.assertIn("toes-to-bar", _NEEDS_BAR_EQUIPMENT)
+
+    def test_plank_variants_count_reps_with_their_own_counters(self):
+        """Plancha con toques de hombro / dinámica / lateral con cadera (0106): no son aguantes
+        cronometrados sino de repeticiones, cada una con su contador (migración 0110)."""
+        from tasks.views import COUNTERS, POSTURE_COUNTERS
+        for slug, key in (
+            ("plank-shoulder-taps", "plankshouldertaps"),
+            ("dynamic-plank", "dynamicplank"),
+            ("side-plank-hip-dips", "sideplankhipdips"),
+        ):
+            ex = Exercise.objects.get(slug=slug)
+            self.assertEqual(ex.mode, Exercise.MODE_POSE)
+            self.assertEqual(ex.counter_key, key)
+            self.assertEqual(ex.body_area, "lower_body")
+            self.assertIn(key, COUNTERS)
+            self.assertNotIn(key, POSTURE_COUNTERS)
+
     def test_mountain_climber_was_removed(self):
         """Mountain climbers (0071) se retiró en 0072: ya no está en el catálogo ni en COUNTERS."""
         from tasks.views import COUNTERS
@@ -3136,3 +3241,115 @@ class ProfileTests(TestCase):
         self.assertEqual(r.status_code, 400)
         self.assertIn("height_cm", r.json()["errors"])
         self.assertNotIn("summary", self.client.get("/api/stats/").json())
+
+
+class ReadingViewerApiTests(TestCase):
+    """API del visor de PDF de la app móvil (reading_state/progress/save, planes, freestyle)."""
+
+    def _post(self, name, args=(), data=None):
+        return self.client.post(reverse(name, args=list(args)), data=json.dumps(data or {}), content_type="application/json")
+
+    def _plan(self, **over):
+        data = {"title": "Libro", "pdf_key": "reading-abc", "first_page": 1, "last_page": 100,
+                "target_weeks": 4, "custom_days": ["0", "2", "4"]}
+        data.update(over)
+        r = self._post("api:reading_plan_create", data=data)
+        self.assertEqual(r.status_code, 200, r.content)
+        return Task.objects.get(uuid=r.json()["uuid"])
+
+    def test_create_plan_returns_state_and_goal(self):
+        t = self._plan()
+        self.assertEqual(t.reading_mode, Task.READING_MODE_PLAN)
+        self.assertEqual(t.workout_kind, "reading")
+        self.assertEqual(t.reading_pdf_key, "reading-abc")
+        self.assertEqual(t.custom_days, "0,2,4")
+        st = self.client.get(reverse("api:reading_state", args=[t.uuid])).json()
+        self.assertEqual(st["mode"], "plan")
+        self.assertEqual(st["pdf_key"], "reading-abc")
+        self.assertEqual(st["last_page"], 100)
+        self.assertIsNotNone(st["today"]["goal"])
+
+    def test_create_plan_validates(self):
+        r = self._post("api:reading_plan_create", data={"title": "x", "last_page": 0, "target_weeks": 4})
+        self.assertEqual(r.status_code, 400)
+        r = self._post("api:reading_plan_create", data={"title": "x", "first_page": 50, "last_page": 10, "target_weeks": 4})
+        self.assertEqual(r.status_code, 400)
+
+    def test_progress_saves_page_and_returns_status(self):
+        t = self._plan()
+        r = self._post("api:reading_progress", [t.uuid], {"page": 1})
+        self.assertEqual(r.status_code, 200, r.content)
+        t.refresh_from_db()
+        self.assertEqual(t.reading_current_page, 1)
+        self.assertIn("status", r.json())
+        self.assertEqual(self._post("api:reading_progress", [t.uuid], {}).status_code, 400)
+
+    def test_progress_cannot_jump_to_the_end(self):
+        """Mismo tope de ritmo que la web: arrastrar al final no cuenta como leído."""
+        t = self._plan()
+        self._post("api:reading_progress", [t.uuid], {"page": 1})
+        r = self._post("api:reading_progress", [t.uuid], {"page": 100})
+        self.assertFalse(r.json()["finished"])
+        t.refresh_from_db()
+        self.assertLess(t.reading_current_page, 100)
+
+    def test_save_session_marks_today_done(self):
+        t = self._plan()
+        r = self._post("api:reading_session_save", [t.uuid])
+        self.assertEqual(r.status_code, 200, r.content)
+        t.refresh_from_db()
+        self.assertTrue(t.is_done)
+
+    def test_update_plan_keeps_progress(self):
+        t = self._plan()
+        Task.objects.filter(pk=t.pk).update(reading_current_page=30)
+        r = self._post("api:reading_plan_update", [t.uuid], {
+            "title": "Libro 2", "pdf_key": "", "first_page": 3, "last_page": 120,
+            "target_weeks": 8, "custom_days": ["1"],
+        })
+        self.assertEqual(r.status_code, 200, r.content)
+        t.refresh_from_db()
+        self.assertEqual((t.title, t.reading_last_page, t.reading_target_weeks, t.reading_current_page),
+                         ("Libro 2", 120, 8, 30))
+        self.assertEqual(t.reading_pdf_key, "reading-abc")  # clave vacía no la borra
+        self.assertEqual(t.custom_days, "1")
+
+    def test_plan_endpoints_reject_freestyle_task(self):
+        t = Task.objects.create(
+            user=get_current_user(), title="Leer",
+            category=Task.CATEGORY_WORK, subcategory=Task.SUBCATEGORY_READING,
+        )
+        self.assertEqual(self._post("api:reading_progress", [t.uuid], {"page": 2}).status_code, 404)
+        st = self.client.get(reverse("api:reading_state", args=[t.uuid])).json()
+        self.assertEqual(st["mode"], "freestyle")
+        self.assertEqual(st["minutes_today"], 0)
+
+    def test_viewer_sessions_sum_today_and_complete_freestyle_with_keyword(self):
+        t = Task.objects.create(
+            user=get_current_user(), title="Leer", category=Task.CATEGORY_WORK, subcategory=Task.SUBCATEGORY_READING,
+            watch_keyword="clean", target_minutes=30,
+        )
+        self.assertEqual(t.workout_kind, "auto")
+        url = reverse("api:focus_save", args=[t.uuid])
+        payload = {"source": "app_usage", "app_package": TimerSession.VIEWER_PACKAGE}
+        for minutes in (10, 10):
+            self.client.post(url, data=json.dumps(dict(payload, minutes=minutes)), content_type="application/json")
+        t.refresh_from_db()
+        self.assertFalse(t.is_done)
+        self.assertEqual(t.auto_progress["label"], "20/30 min")
+        # Un trozo de la extensión del PC suma con los del visor.
+        self.client.post(url, data=json.dumps({"source": "pc_usage", "minutes": 10}), content_type="application/json")
+        t.refresh_from_db()
+        self.assertTrue(t.is_done)
+
+    def test_other_app_usage_is_not_summed(self):
+        """Adobe/Kindle (plugin nativo) sigue comparando cada sesión por separado, como siempre."""
+        t = Task.objects.create(
+            user=get_current_user(), title="Leer", category=Task.CATEGORY_WORK, subcategory=Task.SUBCATEGORY_READING, target_minutes=30,
+        )
+        url = reverse("api:focus_save", args=[t.uuid])
+        for minutes in (15, 15):
+            self.client.post(url, data=json.dumps({"source": "app_usage", "app_package": "com.adobe.reader", "minutes": minutes}),
+                             content_type="application/json")
+        t.refresh_from_db()
+        self.assertFalse(t.is_done)

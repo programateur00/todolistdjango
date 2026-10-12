@@ -44,6 +44,13 @@
 
     var videoId = "{{ video_id }}";
     var playlistId = "{{ playlist_id }}";
+    // IDs verificados de la playlist (incrustables, no borrados). Con ellos
+    // se reproduce la lista directamente, sin depender de que YouTube
+    // acepte `list=` en el embed. Vacío = playlist sin sincronizar: se
+    // cae al modo clásico (listType=playlist).
+    var playlistVideoIds = [];
+    try { playlistVideoIds = JSON.parse('{{ playlist_video_ids_json|default:"[]"|escapejs }}'); } catch (e) { playlistVideoIds = []; }
+    if (!Array.isArray(playlistVideoIds)) playlistVideoIds = [];
     // Solo con un objetivo de Estudio con seguimiento de progreso (ver
     // Plan._study_playlist_progress) — en qué posición de la playlist
     // hay que empezar hoy, para no volver siempre al vídeo 1.
@@ -95,7 +102,10 @@
     // que el vídeo en sí. Sin este caché, isLastInPlaylist() confundía
     // "todavía no sé cuántos hay" con "no hay ninguno más" y daba la
     // tarea por hecha nada más ver el primero. null = aún sin dato.
-    var knownPlaylistLength = null;
+    var knownPlaylistLength = playlistVideoIds.length || null;
+    // Vídeos de la lista que YouTube ha rechazado (privado, borrado, no
+    // incrustable...) y se han saltado solos; nunca cuentan como vistos.
+    var skippedVideos = 0;
 
     function fmtMin(s) {
         return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
@@ -185,16 +195,22 @@
 
             var playerVars = { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1 };
             var config = { playerVars: playerVars };
-            if (playlistId) {
+            var useIdList = !!(playlistId && playlistVideoIds.length);
+            if (playlistId && !useIdList) {
                 playerVars.listType = 'playlist';
                 playerVars.list = playlistId;
                 if (playlistStartIndex !== null) playerVars.index = playlistStartIndex;
-            } else {
+            } else if (!playlistId) {
                 config.videoId = videoId;
             }
 
             config.events = {
                 onReady: function () {
+                    if (useIdList) {
+                        var startAt = playlistStartIndex === null ? 0 : playlistStartIndex;
+                        if (startAt < 0 || startAt >= playlistVideoIds.length) startAt = 0;
+                        player.loadPlaylist({ playlist: playlistVideoIds, index: startAt });
+                    }
                     pollId = setInterval(function () {
                         if (!player || typeof player.getPlayerState !== 'function') return;
                         // Se aprovecha cada segundo de sondeo (con la
@@ -245,9 +261,24 @@
                         // nada aquí.
                     }
                 },
-                onError: function () {
+                onError: function (e) {
+                    // 100 = borrado/privado, 101/150 = el dueño no deja
+                    // incrustarlo. En una playlist eso no debe parar la
+                    // sesión: se salta al siguiente que sí se pueda ver.
+                    var code = e && e.data;
+                    var skippable = code === 100 || code === 101 || code === 150 || code === 5;
+                    if (playlistId && skippable && player && typeof player.nextVideo === 'function'
+                        && typeof player.getPlaylistIndex === 'function') {
+                        var total = knownPlaylistLength || (player.getPlaylist() || []).length;
+                        if (total && player.getPlaylistIndex() + 1 < total && skippedVideos < 50) {
+                            skippedVideos += 1;
+                            hint.textContent = 'Un vídeo de la playlist no está disponible — pasando al siguiente…';
+                            player.nextVideo();
+                            return;
+                        }
+                    }
                     clearInterval(pollId);
-                    hint.textContent = 'Este vídeo no se pudo cargar.';
+                    hint.textContent = 'Este vídeo no se pudo cargar' + (code !== undefined ? ' (error ' + code + ')' : '') + '.';
                 },
             };
 

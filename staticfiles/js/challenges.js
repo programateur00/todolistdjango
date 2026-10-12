@@ -26,6 +26,7 @@ import {
 } from "./workout.js";
 import { PersonGate } from "./workout.js";
 import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./mediapipe-vendor.js";
+import { openCameraStream } from "./camera-stream.js";
 
 const fmt = (s) => {
   const m = Math.floor(s / 60);
@@ -172,9 +173,7 @@ async function runSallyPushups(host) {
   });
 
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "user", width: 1280, height: 720 }, audio: false,
-    });
+    stream = await openCameraStream();
   } catch {
     statusEl.textContent = "No se pudo acceder a la cámara — revisa los permisos del navegador.";
     return;
@@ -205,6 +204,7 @@ async function runSallyPushups(host) {
     const frameNow = performance.now();
     const result = poseLandmarker.detectForVideo(video, frameNow);
     const hasPoseNow = !!(result.landmarks && result.landmarks.length);
+    personGate.noteFrame(hasPoseNow, frameNow); // 2026-10-10: cuenta también los frames sin esqueleto (ver PersonGate.noteFrame)
     if (hasPoseNow) personGate.sampleMask(result, frameNow);
     const person = hasPoseNow ? personGate.check(result.landmarks[0], frameNow) : null;
     if (typeof result.close === "function") result.close(); // libera las máscaras de persona

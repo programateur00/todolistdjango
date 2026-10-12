@@ -38,10 +38,14 @@ SECONDS_PER_REP = {
     "neck-turn-side": 2.0, "hip-forward-back": 2.0, "hip-lateral-mobility": 2.0,
     "forearm-rotation-elbow-hold": 2.0,
     # lentos / exigentes
-    "pullup": 4.0, "wide-pullup": 4.0, "chinup": 4.0, "weighted-pullup": 4.5,
+    "pullup": 4.0, "wide-pullup": 4.0, "chinup": 4.0, "commando-pullup": 4.5, "weighted-pullup": 4.5,
     "wide-weighted-pullup": 4.5, "archer-pullup": 5.0, "jumping-pullup": 3.0,
     "dips": 4.0, "weighted-dips": 4.5, "handstand-push-up": 5.0,
-    "burpee": 4.0, "pistol-squat": 5.0, "l-sit": 4.0, "weighted-squat": 4.0, "weighted-crunch": 2.5,
+    "burpee": 4.0, "pistol-squat": 5.0, "cossack-squat": 4.0, "heel-raise": 3.0, "toes-to-bar": 3.5, "l-sit": 4.0, "weighted-squat": 4.0, "weighted-crunch": 2.5,
+    "archer-push-up": 4.0, "one-arm-push-up": 5.0, "clap-push-up": 2.5,
+    "pseudo-planche-push-up": 4.0,
+    "jump-squat": 2.5, "bulgarian-split-squat": 4.0,
+    "v-up": 2.5, "dynamic-plank": 3.0,
 }
 
 # MET por defecto cuando Exercise.met está vacío.
