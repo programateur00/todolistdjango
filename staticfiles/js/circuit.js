@@ -19,7 +19,7 @@ import {
   NOSE, L_SHOULDER, R_SHOULDER, L_HIP, R_HIP, L_ANKLE, R_ANKLE, L_WRIST, R_WRIST,
   angle,
   checkPlankPosture, checkSidePlankPosture, checkWallSitPosture,
-  checkKneeHoldBarPosture, checkDeadHangPosture, checkTuckLeverPosture, checkHandstandPosture, checkFrogStandPosture, createLSitHoldChecker, createSupermanHoldChecker, checkArmCrossStretch, checkTricepsOverheadStretch,
+  checkKneeHoldBarPosture, checkDeadHangPosture, checkTuckLeverPosture, checkHandstandPosture, checkFrogStandPosture, createLSitHoldChecker, createSupermanHoldChecker, createHollowBodyChecker, checkArmCrossStretch, checkTricepsOverheadStretch,
   checkSeatedHamstringStretch, createStandingQuadStretchChecker, checkElephantStepsHold,
   speakOut, numeroEnPalabras, isVoiceEnabled, REP_VOICE_RATE, clearVoiceTransitionMute,
 } from "./workout.js";
@@ -127,7 +127,7 @@ import { openCameraStream } from "./camera-stream.js";
   // postura en vez de contar repeticiones. Ver checkPlankPosture /
   // checkSidePlankPosture / checkWallSitPosture / checkKneeHoldBarPosture /
   // checkHandstandPosture más abajo.
-  const POSTURE_COUNTERS = new Set(["supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "tucklever", "deadhang", "handstand", "frogstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch", "elephantstepshold"]);
+  const POSTURE_COUNTERS = new Set(["hollowbodyhold", "supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "tucklever", "deadhang", "handstand", "frogstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch", "elephantstepshold"]);
 
   // Estiramientos bilaterales cronometrados (armcrossstretch/
   // tricepsoverheadstretch: un brazo y luego el otro; seatedhamstringstretch/
@@ -395,6 +395,8 @@ import { openCameraStream } from "./camera-stream.js";
         ? checkFrogStandPosture
         : item.counter_key === "handstand"
         ? checkHandstandPosture
+        : item.counter_key === "hollowbodyhold"
+        ? createHollowBodyChecker()
         : item.counter_key === "supermanhold"
         ? createSupermanHoldChecker()
         : item.counter_key === "lsithold"

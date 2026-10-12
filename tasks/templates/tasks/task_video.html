@@ -51,6 +51,10 @@
     var playlistVideoIds = [];
     try { playlistVideoIds = JSON.parse('{{ playlist_video_ids_json|default:"[]"|escapejs }}'); } catch (e) { playlistVideoIds = []; }
     if (!Array.isArray(playlistVideoIds)) playlistVideoIds = [];
+    // Duración (s) de cada vídeo de la lista, mismo orden — para detectar anuncios.
+    var playlistVideoDurations = [];
+    try { playlistVideoDurations = JSON.parse('{{ playlist_video_durations_json|default:"[]"|escapejs }}'); } catch (e) { playlistVideoDurations = []; }
+    if (!Array.isArray(playlistVideoDurations)) playlistVideoDurations = [];
     // Solo con un objetivo de Estudio con seguimiento de progreso (ver
     // Plan._study_playlist_progress) — en qué posición de la playlist
     // hay que empezar hoy, para no volver siempre al vídeo 1.
@@ -186,6 +190,65 @@
         return courseQueue.length > 0 && queueIndex + 1 < courseQueue.length;
     }
 
+    var skipWatchdog = null;
+    /** Error definitivo: no queda nada reproducible. Un vídeo con error
+     *  150/101 NO se puede incrustar en ninguna web (lo decide su dueño),
+     *  así que lo único posible es abrirlo en YouTube. */
+    function showUnavailable(code) {
+        clearInterval(pollId);
+        hint.textContent = 'No se pudo reproducir aquí' + (code !== undefined ? ' (error ' + code + ')' : '') +
+            (code === 150 || code === 101 ? ': el dueño del vídeo no permite verlo fuera de YouTube. ' : '. ');
+        var a = document.createElement('a');
+        a.href = playlistId ? 'https://www.youtube.com/playlist?list=' + encodeURIComponent(playlistId)
+                            : 'https://www.youtube.com/watch?v=' + encodeURIComponent(videoId);
+        a.target = '_blank'; a.rel = 'noopener';
+        a.textContent = 'Abrir en YouTube';
+        hint.appendChild(a);
+    }
+
+    // ---- Anuncios de YouTube -------------------------------------------
+    // La IFrame API no avisa de los anuncios: durante uno el estado sigue
+    // siendo PLAYING, así que el contador sumaba segundos como si fueran
+    // del vídeo. Se detecta con tres señales y, si alguna salta, ese
+    // segundo NO cuenta:
+    //  1. el vídeo que dice el reproductor no es el esperado,
+    //  2. la duración no es la del vídeo (la de cada vídeo de la playlist
+    //     la da el servidor),
+    //  3. el tiempo del vídeo no avanza aunque esté "reproduciendo".
+    var lastContentTime = null;
+    var adShown = false;
+    function isAdPlaying() {
+        if (!player || typeof player.getCurrentTime !== 'function') return false;
+        var t = player.getCurrentTime() || 0;
+        var dur = typeof player.getDuration === 'function' ? (player.getDuration() || 0) : 0;
+        var vd = typeof player.getVideoData === 'function' ? (player.getVideoData() || {}) : {};
+        var idx = (playlistId && typeof player.getPlaylistIndex === 'function') ? player.getPlaylistIndex() : -1;
+        var expectedId = '';
+        if (playlistVideoIds.length && idx >= 0) expectedId = playlistVideoIds[idx] || '';
+        else if (!playlistId) expectedId = courseQueue.length ? (courseQueue[queueIndex] || {}).video_id : videoId;
+        var expectedDur = (idx >= 0 && playlistVideoDurations[idx]) || 0;
+        var frozen = lastContentTime !== null && Math.abs(t - lastContentTime) < 0.1;
+        lastContentTime = t;
+        if (expectedId && vd.video_id && vd.video_id !== expectedId) return true;
+        if (expectedDur && dur && Math.abs(dur - expectedDur) > 3) return true;
+        return frozen;
+    }
+    function restoreHint() {
+        adShown = false;
+        updateProgressLabel();
+        if (!targetMinutes && !targetVideoCount) {
+            hint.textContent = 'Al terminar el vídeo, la tarea se marca hecha sola.';
+        }
+    }
+    /** ENDED "falso": un anuncio puede cerrar con ese estado cuando el
+     *  vídeo aún está lejos de su final. */
+    function isFakeEnd() {
+        if (!player || typeof player.getCurrentTime !== 'function') return false;
+        var t = player.getCurrentTime() || 0;
+        var d = player.getDuration() || 0;
+        return d > 0 && t > 0 && d - t > 10;
+    }
+
     function startYouTube() {
         window.onYouTubeIframeAPIReady = function () {
             updateProgressLabel();
@@ -222,7 +285,12 @@
                             var currentList = player.getPlaylist() || [];
                             if (currentList.length) knownPlaylistLength = currentList.length;
                         }
-                        if (player.getPlayerState() === YT.PlayerState.PLAYING) {
+                        if (player.getPlayerState() !== YT.PlayerState.PLAYING) {
+                            lastContentTime = null;
+                        } else if (isAdPlaying()) {
+                            if (!adShown) { adShown = true; hint.textContent = 'Anuncio en curso — este tiempo no cuenta.'; }
+                        } else {
+                            if (adShown) restoreHint();
                             elapsedSeconds += 1;
                             if (targetMinutes) {
                                 updateProgressLabel();
@@ -238,6 +306,7 @@
                 },
                 onStateChange: function (e) {
                     if (e.data === YT.PlayerState.ENDED) {
+                        if (isFakeEnd()) return; // fin de un anuncio, no del vídeo
                         videosWatched += 1;
                         updateProgressLabel();
                         if (targetVideoCount && videosWatched >= targetVideoCount) {
@@ -269,16 +338,24 @@
                     var skippable = code === 100 || code === 101 || code === 150 || code === 5;
                     if (playlistId && skippable && player && typeof player.nextVideo === 'function'
                         && typeof player.getPlaylistIndex === 'function') {
+                        var idx = player.getPlaylistIndex();
                         var total = knownPlaylistLength || (player.getPlaylist() || []).length;
-                        if (total && player.getPlaylistIndex() + 1 < total && skippedVideos < 50) {
+                        // Sin longitud conocida se intenta igual: si ya era el
+                        // último, nextVideo() no hace nada y el vigilante de
+                        // abajo da el error definitivo a los 4 s.
+                        var hasMore = total ? idx + 1 < total : true;
+                        if (hasMore && skippedVideos < 50) {
                             skippedVideos += 1;
                             hint.textContent = 'Un vídeo de la playlist no está disponible — pasando al siguiente…';
                             player.nextVideo();
+                            clearTimeout(skipWatchdog);
+                            skipWatchdog = setTimeout(function () {
+                                if (player.getPlaylistIndex() === idx) showUnavailable(code);
+                            }, 4000);
                             return;
                         }
                     }
-                    clearInterval(pollId);
-                    hint.textContent = 'Este vídeo no se pudo cargar' + (code !== undefined ? ' (error ' + code + ')' : '') + '.';
+                    showUnavailable(code);
                 },
             };
 

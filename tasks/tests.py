@@ -1,12 +1,17 @@
 import json
 from datetime import date, time, timedelta
 
-from django.test import TestCase
+import shutil
+import tempfile
+
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from django.urls import reverse
 
 from .models import (
-    Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, Task, TimerSession, WarmupStatus, WorkoutSession,
+    Exercise, Occurrence, Plan, PlanItem, ReadingPdf, Routine, RoutineItem, Task, TimerSession, WarmupStatus,
+    WorkoutSession,
 )
 from .utils import get_current_user
 
@@ -1677,6 +1682,17 @@ class ExerciseCatalogTests(TestCase):
         self.assertEqual(ex.level, "beginner")
         self.assertIn("heelraise", COUNTERS)
 
+    def test_step_up_is_a_camera_exercise(self):
+        """Step ups (0116): subir a una superficie y bajar, contador propio ("stepup", ver processStepUp en
+        workout.js: pie en alto + cadera que sube + vuelta al suelo), tren inferior, nivel principiante."""
+        from tasks.views import COUNTERS
+        ex = Exercise.objects.get(slug="step-up")
+        self.assertEqual(ex.mode, Exercise.MODE_POSE)
+        self.assertEqual(ex.counter_key, "stepup")
+        self.assertEqual(ex.body_area, "lower_body")
+        self.assertEqual(ex.level, "beginner")
+        self.assertIn("stepup", COUNTERS)
+
     def test_toes_to_bar_is_a_hanging_rep_exercise(self):
         """Toes to bar (0113): colgado de la barra, contador propio ("toestobar", processToesToBar en
         workout.js), tren inferior / core, nivel avanzado, necesita barra."""
@@ -1689,6 +1705,84 @@ class ExerciseCatalogTests(TestCase):
         self.assertEqual(ex.level, "advanced")
         self.assertIn("toestobar", COUNTERS)
         self.assertIn("toes-to-bar", _NEEDS_BAR_EQUIPMENT)
+
+    def test_tuck_jump_is_a_standing_plyometric_rep_exercise(self):
+        """Tuck jumps (0117): de pie, contador propio ("tuckjump", processTuckJump en workout.js, web y app), tren
+        inferior, nivel avanzado, sin material."""
+        from tasks.views import COUNTERS
+        from tasks.ai import _NEEDS_BAR_EQUIPMENT
+        ex = Exercise.objects.get(slug="tuck-jump")
+        self.assertEqual(ex.mode, Exercise.MODE_POSE)
+        self.assertEqual(ex.counter_key, "tuckjump")
+        self.assertEqual(ex.body_area, "lower_body")
+        self.assertEqual(ex.level, "advanced")
+        self.assertIn("tuckjump", COUNTERS)
+        self.assertNotIn("tuck-jump", _NEEDS_BAR_EQUIPMENT)
+
+    def test_switchblade_jump_is_a_standing_plyometric_rep_exercise_with_its_own_counter(self):
+        """Switchblade jumps (0121): de pie y de perfil, contador propio ("switchblade", processSwitchblade en workout.js,
+        web y app), tren inferior, nivel avanzado, sin material."""
+        from tasks.views import COUNTERS
+        from tasks.ai import _NEEDS_BAR_EQUIPMENT
+        ex = Exercise.objects.get(slug="switchblade-jump")
+        self.assertEqual(ex.mode, Exercise.MODE_POSE)
+        self.assertEqual(ex.counter_key, "switchblade")
+        self.assertEqual(ex.body_area, "lower_body")
+        self.assertEqual(ex.level, "advanced")
+        self.assertIn("switchblade", COUNTERS)
+        self.assertNotIn("switchblade-jump", _NEEDS_BAR_EQUIPMENT)
+
+    def test_jump_rope_is_a_standing_rep_exercise_with_its_own_counter(self):
+        """Comba (0118): de pie, contador propio ("jumprope", processJumpRope en workout.js, web y app), tren inferior,
+        nivel principiante, sin material que la cámara tenga que ver (vale con cuerda o sin ella)."""
+        from tasks.views import COUNTERS
+        from tasks.ai import _NEEDS_BAR_EQUIPMENT
+        ex = Exercise.objects.get(slug="jump-rope")
+        self.assertEqual(ex.mode, Exercise.MODE_POSE)
+        self.assertEqual(ex.counter_key, "jumprope")
+        self.assertEqual(ex.body_area, "lower_body")
+        self.assertEqual(ex.level, "beginner")
+        self.assertIn("jumprope", COUNTERS)
+        self.assertNotIn("jump-rope", _NEEDS_BAR_EQUIPMENT)
+
+    def test_glute_bridge_is_a_lying_rep_exercise_with_its_own_counter(self):
+        """Puente de glúteo (0119): tumbado boca arriba, contador propio ("glutebridge", processGluteBridge en workout.js,
+        web y app), tren inferior, nivel principiante, sin barra."""
+        from tasks.views import COUNTERS
+        from tasks.ai import _NEEDS_BAR_EQUIPMENT
+        ex = Exercise.objects.get(slug="glute-bridge")
+        self.assertEqual(ex.mode, Exercise.MODE_POSE)
+        self.assertEqual(ex.counter_key, "glutebridge")
+        self.assertEqual(ex.body_area, "lower_body")
+        self.assertEqual(ex.level, "beginner")
+        self.assertIn("glutebridge", COUNTERS)
+        self.assertNotIn("glute-bridge", _NEEDS_BAR_EQUIPMENT)
+
+    def test_hollow_body_hold_is_a_timed_posture_exercise_with_its_own_checker(self):
+        """Hollow body (0120): aguante tumbado boca arriba, contador propio ("hollowbodyhold", createHollowBodyChecker en
+        workout.js, web y app), mode=timed con cámara (POSTURE_COUNTERS), core/tren inferior, nivel intermedio, sin barra."""
+        from tasks.views import POSTURE_COUNTERS
+        from tasks.ai import _NEEDS_BAR_EQUIPMENT
+        ex = Exercise.objects.get(slug="hollow-body-hold")
+        self.assertEqual(ex.mode, Exercise.MODE_TIMED)
+        self.assertEqual(ex.counter_key, "hollowbodyhold")
+        self.assertEqual(ex.body_area, "lower_body")
+        self.assertEqual(ex.level, "intermediate")
+        self.assertIn("hollowbodyhold", POSTURE_COUNTERS)
+        self.assertNotIn("hollow-body-hold", _NEEDS_BAR_EQUIPMENT)
+
+    def test_split_jump_is_a_standing_plyometric_rep_exercise(self):
+        """Split jumps (0120): salto desde la zancada, de perfil, contador propio ("splitjump", processSplitJump en
+        workout.js, web y app), tren inferior, nivel avanzado, sin material."""
+        from tasks.views import COUNTERS
+        from tasks.ai import _NEEDS_BAR_EQUIPMENT
+        ex = Exercise.objects.get(slug="split-jump")
+        self.assertEqual(ex.mode, Exercise.MODE_POSE)
+        self.assertEqual(ex.counter_key, "splitjump")
+        self.assertEqual(ex.body_area, "lower_body")
+        self.assertEqual(ex.level, "advanced")
+        self.assertIn("splitjump", COUNTERS)
+        self.assertNotIn("split-jump", _NEEDS_BAR_EQUIPMENT)
 
     def test_plank_variants_count_reps_with_their_own_counters(self):
         """Plancha con toques de hombro / dinámica / lateral con cadera (0106): no son aguantes
@@ -1705,6 +1799,18 @@ class ExerciseCatalogTests(TestCase):
             self.assertEqual(ex.body_area, "lower_body")
             self.assertIn(key, COUNTERS)
             self.assertNotIn(key, POSTURE_COUNTERS)
+
+    def test_rocking_push_up_is_a_camera_exercise(self):
+        """Rocking push-ups (0115): counter_key propio ("rockingpushup", ver
+        processRockingPushup en workout.js: flexión + balanceo de cadera hacia
+        los talones), tren superior, registrado en COUNTERS."""
+        from tasks.views import COUNTERS
+        ex = Exercise.objects.get(slug="rocking-push-up")
+        self.assertEqual(ex.mode, Exercise.MODE_POSE)
+        self.assertEqual(ex.counter_key, "rockingpushup")
+        self.assertEqual(ex.body_area, "upper_body")
+        self.assertEqual(ex.level, "intermediate")
+        self.assertIn("rockingpushup", COUNTERS)
 
     def test_mountain_climber_was_removed(self):
         """Mountain climbers (0071) se retiró en 0072: ya no está en el catálogo ni en COUNTERS."""
@@ -3353,3 +3459,145 @@ class ReadingViewerApiTests(TestCase):
                              content_type="application/json")
         t.refresh_from_db()
         self.assertFalse(t.is_done)
+
+
+class ReadingPdfServerTests(TestCase):
+    """PDF del plan de lectura guardado en el servidor (ReadingPdf), temporal hasta terminar el libro."""
+
+    PDF = b"%PDF-1.4\n" + b"0" * 2000
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self._override = override_settings(MEDIA_ROOT=self._tmp)
+        self._override.enable()
+        self.addCleanup(self._override.disable)
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+
+    def _upload(self, key="reading-k1", data=None, name="libro.pdf", url="api:reading_pdf"):
+        f = SimpleUploadedFile(name, self.PDF if data is None else data, content_type="application/pdf")
+        return self.client.post(reverse(url, args=[key]), {"file": f})
+
+    def _plan(self, key="reading-k1"):
+        r = self.client.post(
+            reverse("api:reading_plan_create"),
+            data=json.dumps({"title": "L", "pdf_key": key, "last_page": 10, "target_weeks": 2, "custom_days": ["0"]}),
+            content_type="application/json",
+        )
+        return Task.objects.get(uuid=r.json()["uuid"])
+
+    def test_upload_then_download_roundtrip(self):
+        self.assertEqual(self._upload().status_code, 200)
+        r = self.client.get(reverse("api:reading_pdf", args=["reading-k1"]))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r["Content-Type"], "application/pdf")
+        self.assertEqual(b"".join(r.streaming_content), self.PDF)
+        self.assertEqual(self.client.head(reverse("api:reading_pdf", args=["reading-k1"])).status_code, 200)
+
+    def test_missing_pdf_is_404(self):
+        self.assertEqual(self.client.get(reverse("api:reading_pdf", args=["nada"])).status_code, 404)
+        self.assertEqual(self.client.head(reverse("api:reading_pdf", args=["nada"])).status_code, 404)
+
+    def test_rejects_non_pdf_and_oversize_and_bad_key(self):
+        self.assertEqual(self._upload(data=b"hola, esto no es un pdf").status_code, 400)
+        old = ReadingPdf.MAX_BYTES
+        ReadingPdf.MAX_BYTES = 100
+        try:
+            self.assertEqual(self._upload().status_code, 413)
+        finally:
+            ReadingPdf.MAX_BYTES = old
+        self.assertEqual(self.client.get(reverse("api:reading_pdf", args=["a.b"])).status_code, 400)
+        self.assertFalse(ReadingPdf.objects.exists())
+
+    def test_replace_removes_previous_file_from_disk(self):
+        self._upload()
+        old_path = ReadingPdf.objects.get().file.path
+        self._upload(data=b"%PDF-1.7 otro")
+        self.assertEqual(ReadingPdf.objects.count(), 1)
+        import os
+        self.assertFalse(os.path.exists(old_path))
+        self.assertTrue(os.path.exists(ReadingPdf.objects.get().file.path))
+
+    def test_web_route_works_too(self):
+        self.assertEqual(self._upload(url="tasks:reading_pdf").status_code, 200)
+        r = self.client.get(reverse("tasks:reading_pdf", args=["reading-k1"]))
+        self.assertEqual(b"".join(r.streaming_content), self.PDF)
+
+    def test_finishing_the_book_deletes_the_pdf(self):
+        t = self._plan()
+        self._upload()
+        path = ReadingPdf.objects.get().file.path
+        # Se llega a la última página (se fuerza el estado para saltarse el tope de ritmo).
+        Task.objects.filter(pk=t.pk).update(reading_current_page=9, reading_progress_at=timezone.now() - timedelta(hours=5))
+        t.refresh_from_db()
+        self.assertTrue(t.record_reading_page(10))
+        self.assertFalse(ReadingPdf.objects.exists())
+        import os
+        self.assertFalse(os.path.exists(path))
+
+    def test_deleting_the_plan_deletes_the_pdf(self):
+        t = self._plan()
+        self._upload()
+        r = self.client.post(reverse("tasks:reading_plan_delete", args=[t.pk]))
+        self.assertEqual(r.status_code, 302)
+        self.assertFalse(ReadingPdf.objects.exists())
+
+    def test_unfinished_book_keeps_the_pdf(self):
+        t = self._plan()
+        self._upload()
+        t.record_reading_page(1)
+        self.assertTrue(ReadingPdf.objects.exists())
+
+
+class ComputerOnlyPlanApiTests(TestCase):
+    """Planes de Udemy/Ilerna: la app móvil los ve pero no los crea ni los toca."""
+
+    def setUp(self):
+        self.user = get_current_user()
+
+    def _study_plan(self, **item_fields):
+        plan = Plan.objects.create(
+            name="Curso", user=self.user, plan_type=Plan.PLAN_TYPE_STUDY,
+            study_subtype=Plan.STUDY_SUBTYPE_GENERAL, repeat="daily", due_time=time(20, 0),
+        )
+        item = PlanItem.objects.create(
+            plan=plan, is_headline=True, progression=PlanItem.PROG_COMPLETION, **item_fields,
+        )
+        return plan, item
+
+    def _json(self, method, name, args, data):
+        fn = getattr(self.client, method)
+        return fn(reverse(name, args=args), data=json.dumps(data), content_type="application/json")
+
+    def test_plan_json_flags_udemy_and_ilerna(self):
+        plan, _ = self._study_plan(watch_keyword="Excel", target_minutes=30)
+        p = self.client.get(reverse("api:plan_detail", args=[plan.uuid])).json()["plan"]
+        self.assertTrue(p["requires_computer"])
+        self.assertTrue(p["headline"]["requires_computer"])
+
+        plan2, _ = self._study_plan(watch_site=PlanItem.SITE_ILERNA, target_minutes=60)
+        p2 = self.client.get(reverse("api:plan_detail", args=[plan2.uuid])).json()["plan"]
+        self.assertTrue(p2["requires_computer"])
+
+    def test_youtube_plan_is_not_computer_only(self):
+        plan, _ = self._study_plan(youtube_video_id="abc123", target_minutes=20)
+        p = self.client.get(reverse("api:plan_detail", args=[plan.uuid])).json()["plan"]
+        self.assertFalse(p["requires_computer"])
+
+    def test_cannot_edit_or_replace_udemy_objective_from_app(self):
+        plan, item = self._study_plan(watch_keyword="Excel", target_minutes=30)
+        r = self._json("patch", "api:plan_item_detail", [plan.uuid, item.pk], {"target_minutes": 5})
+        self.assertEqual(r.status_code, 400)
+        r = self._json("post", "api:plan_item_create", [plan.uuid], {"youtube_video_id": "zzz"})
+        self.assertEqual(r.status_code, 400)
+        item.refresh_from_db()
+        self.assertEqual(item.watch_keyword, "Excel")
+        self.assertEqual(item.target_minutes, 30)
+        self.assertTrue(item.is_headline)
+        self.assertEqual(plan.items.count(), 1)
+
+    def test_youtube_objective_still_editable_from_app(self):
+        plan, item = self._study_plan(youtube_video_id="abc123", target_minutes=20)
+        r = self._json("patch", "api:plan_item_detail", [plan.uuid, item.pk], {"target_minutes": 25})
+        self.assertEqual(r.status_code, 200, r.content)
+        item.refresh_from_db()
+        self.assertEqual(item.target_minutes, 25)

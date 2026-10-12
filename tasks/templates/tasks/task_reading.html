@@ -139,6 +139,10 @@
     var saveUrl = "{% url 'tasks:task_reading_save' task.pk %}";
     var listUrl = "{% url 'tasks:task_list' %}";
     var csrfToken = "{{ csrf_token }}";
+    // PDF del libro en el servidor (ReadingPdf): punto de encuentro con el móvil.
+    var pdfUrlTpl = "{% url 'tasks:reading_pdf' 'KEYPLACEHOLDER' %}";
+    var MAX_UPLOAD_BYTES = 40 * 1024 * 1024; // mismo tope que ReadingPdf.MAX_BYTES
+    function pdfUrlFor(key) { return pdfUrlTpl.replace('KEYPLACEHOLDER', encodeURIComponent(key)); }
 
     var supportsLocal = 'showOpenFilePicker' in window;
     var pdfDoc = null;
@@ -172,6 +176,17 @@
                 var req = tx.objectStore('handles').get(key);
                 req.onsuccess = function () { resolve(req.result || null); };
                 req.onerror = function () { resolve(null); };
+            });
+        });
+    }
+    function deleteStored(key) {
+        if (!key) return Promise.resolve();
+        return openHandleDb().then(function (db) {
+            return new Promise(function (resolve) {
+                var tx = db.transaction('handles', 'readwrite');
+                tx.objectStore('handles').delete(key);
+                tx.oncomplete = function () { resolve(); };
+                tx.onerror = function () { resolve(); };
             });
         });
     }
@@ -468,7 +483,22 @@
     // quede desplazando solo para siempre.
     window.addEventListener('blur', function () { arrowScrollDirection = 0; });
 
+    // Si el servidor no tiene este libro (plan anterior a que se subieran,
+    // o recién elegido aquí), se sube en segundo plano para que el móvil
+    // también lo pueda leer. Un fallo aquí no molesta: se reintenta la
+    // próxima vez que se abra el visor.
+    function syncUpIfMissing(file) {
+        if (!pdfKey || !file || !file.size || file.size > MAX_UPLOAD_BYTES) return;
+        fetch(pdfUrlFor(pdfKey), { method: 'HEAD' }).then(function (r) {
+            if (r.status !== 404) return;
+            var fd = new FormData();
+            fd.append('file', file, 'libro.pdf');
+            return fetch(pdfUrlFor(pdfKey), { method: 'POST', headers: { 'X-CSRFToken': csrfToken }, body: fd });
+        }).catch(function () { /* se reintenta otro día */ });
+    }
+
     function openFile(file) {
+        syncUpIfMissing(file);
         hint.textContent = 'Abriendo…';
         return file.arrayBuffer().then(function (buf) {
             return loadPdfJs().then(function (pdfjsLib) {
@@ -534,6 +564,8 @@
         }
         if (data.finished) {
             finished = true;
+            // El servidor ya ha borrado su copia del PDF; esta también sobra.
+            deleteStored(pdfKey).catch(function () {});
             toolbar.hidden = true;
             sessionActions.hidden = true;
             finishBanner.hidden = false;
@@ -759,12 +791,37 @@
         reselectBtn.onclick = function () { permissionPrompt.hidden = true; pickFile(); };
     }
 
+    function offerPick(msg) {
+        if (!supportsLocal) {
+            hint.textContent = 'El libro no está en el servidor y este navegador no puede elegir archivos locales — usa Chrome o Edge.';
+            return;
+        }
+        hint.textContent = msg || 'El libro no está en el servidor todavía — elige el PDF y se subirá solo.';
+        pickActions.hidden = false;
+    }
+
+    // Sin copia en este navegador: se intenta bajar la del servidor (la que
+    // subió el formulario del plan, o la app móvil) antes de pedir el archivo.
+    function fetchFromServer() {
+        if (!pdfKey) { offerPick(); return; }
+        hint.textContent = 'Descargando el libro del servidor…';
+        fetch(pdfUrlFor(pdfKey)).then(function (r) {
+            if (r.status === 404) return null;
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.blob();
+        }).then(function (blob) {
+            if (!blob) { offerPick(); return; }
+            storeHandle(pdfKey, blob).catch(function () {});
+            openFile(blob);
+        }).catch(function () {
+            offerPick('No se pudo descargar el libro del servidor — puedes elegir el PDF aquí o volver a intentarlo recargando.');
+        });
+    }
+
     function boot() {
-        if (!supportsLocal) { return; }
         getStoredHandle(pdfKey).then(function (entry) {
             if (!entry) {
-                hint.textContent = 'No hay ningún PDF guardado en este navegador todavía.';
-                pickActions.hidden = false;
+                fetchFromServer();
                 return;
             }
             if (!isFileHandle(entry)) {

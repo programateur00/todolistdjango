@@ -29,7 +29,7 @@ const POSE_DELEGATE = "GPU";
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-19-frontpos-v1+cindy-v2+lsithold-flow-v18+superman-v2+pikepushup-v1+forearmrotation-v2+elephantsteps-v1+burpee-v1+forearmrotation-v3+hiplateral-v6+hipforwardback-v4+standingquadstretch-v2+pikepushup-v2+dips-vis-v1+dips-lastre-v1+legrotation-v5+hiplateral-v7+websync-2026-10-08+dips-v2+kneepushup-v1+archerpushup-v1+pseudoplanche-v1+kneepushup-v2+archerclap-v2+archer-v3+cossack-v1";
+const WORKOUT_JS_BUILD = "2026-09-19-frontpos-v1+cindy-v2+lsithold-flow-v18+superman-v2+pikepushup-v1+forearmrotation-v2+elephantsteps-v1+burpee-v1+forearmrotation-v3+hiplateral-v6+hipforwardback-v4+standingquadstretch-v2+pikepushup-v2+dips-vis-v1+dips-lastre-v1+legrotation-v5+hiplateral-v7+websync-2026-10-08+dips-v2+kneepushup-v1+archerpushup-v1+pseudoplanche-v1+kneepushup-v2+archerclap-v2+archer-v3+cossack-v1+rockingpushup-v1+tuckjump-v1+jumprope-v1+glutebridge-v1+switchblade-v1+splitjump-v1";
 
 // Token del registro de depuración remoto (ver settings.DEBUG_LOG_TOKEN
 // en el backend) -- exportScissorLog() lo manda junto al registro para
@@ -355,7 +355,7 @@ const OUT_OF_FRAME_STABLE_MS = 1200;
 // les aplica el cierre por salir del encuadre de arriba, y también el
 // cierre por ponerte de pie en el caso de los abdominales tumbado (ver
 // ON_GROUND_STABLE_MS más abajo).
-const GROUND_STYLE_COUNTERS = new Set(["burpee", "elephantsteps", "superman", "lsit", "pushupfront", "squatfront", "squat", "jumpsquat", "splitsquat", "pistolsquat", "cossacksquat", "heelraise", "crunch", "legraise", "highlegraise", "situp", "scissor", "doublecrunch", "vup", "plankshouldertaps", "dynamicplank", "sideplankhipdips", "pushup", "dip", "inclinepushup", "kneepushup", "kneedeclinepushup", "archerpushup", "onearmpushup", "clappushup", "pseudoplanchepushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "hipforwardback"]);
+const GROUND_STYLE_COUNTERS = new Set(["burpee", "elephantsteps", "superman", "lsit", "pushupfront", "squatfront", "squat", "jumpsquat", "splitsquat", "splitjump", "pistolsquat", "cossacksquat", "heelraise", "tuckjump", "switchblade", "jumprope", "stepup", "glutebridge", "crunch", "legraise", "highlegraise", "situp", "scissor", "doublecrunch", "vup", "plankshouldertaps", "dynamicplank", "sideplankhipdips", "pushup", "dip", "inclinepushup", "kneepushup", "kneedeclinepushup", "rockingpushup", "archerpushup", "onearmpushup", "clappushup", "pseudoplanchepushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "hipforwardback"]);
 // Plancha / plancha lateral: a diferencia del resto de GROUND_STYLE_COUNTERS
 // (que cuentan repeticiones), aquí se cuenta TIEMPO aguantando la postura
 // — el cierre de serie no es "te has puesto de pie o has salido del
@@ -365,7 +365,7 @@ const GROUND_STYLE_COUNTERS = new Set(["burpee", "elephantsteps", "superman", "l
 // las dos formas de terminar (ponerte de pie, salir del encuadre) ya
 // rompen la postura por sí solas. Por eso plank/sideplank no viven en GROUND_STYLE_COUNTERS ni
 // comparten su lógica de cierre.
-const CAMERA_POSTURE_COUNTERS = new Set(["supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "tucklever", "deadhang", "handstand", "frogstand", "elephantstepshold", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
+const CAMERA_POSTURE_COUNTERS = new Set(["hollowbodyhold", "supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "tucklever", "deadhang", "handstand", "frogstand", "elephantstepshold", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
 // Ejercicios de cabeza (inclinacion y giro): al llegar a target_reps pasan SIEMPRE al siguiente ejercicio del circuito,
 // aunque el plan aun tenga target_sets > 1 (pedido por Alex: "no me cambia automaticamente en cuanto he hecho 30").
 const SINGLE_GOAL_AUTO_ADVANCE_COUNTERS = new Set(["necklateral", "neckturn"]);
@@ -408,7 +408,7 @@ const SQUATFRONT_ARMS_UP_MS = 600;        // las dos muñecas por encima de la n
 // cámara), así que ese aviso añade "de perfil" — el resto de
 // CAMERA_POSTURE_COUNTERS (kneehold en barra, de frente; pino, sin
 // restricción de orientación) usa el genérico a secas.
-const PROFILE_POSTURE_COUNTERS = new Set(["lsithold", "plank", "sideplank", "wallsit", "elephantstepshold", "seatedhamstringstretch"]);
+const PROFILE_POSTURE_COUNTERS = new Set(["hollowbodyhold", "lsithold", "plank", "sideplank", "wallsit", "elephantstepshold", "seatedhamstringstretch"]);
 // Sentadillas: alternativa a salir del encuadre para terminar la serie
 // sin agitar la mano — ponerte de frente a la cámara (dejar de estar de
 // perfil). Se detecta con la MISMA visibilidad que ya se calcula para
@@ -1067,6 +1067,36 @@ const KNEE_DECLINE_PUSHUP_WAIT_MSG =
   "Apoya las rodillas en una silla o un banco y las manos en el suelo, de perfil a la cámara, con los " +
   "tobillos en el aire, los brazos estirados y el cuerpo recto de la cabeza a las rodillas, para empezar.";
 
+// ── Rocking push-ups (2026-10-12) ───────────────────────────────────────────────────────────────────
+// A petición de Alex. Ejercicio de Original Strength: desde plancha alta, una flexión y luego se BALANCEA
+// la cadera hacia atrás, hacia los talones (brazos estirados, pecho hundido), y se vuelve a la plancha.
+// Una repetición = flexión completa (codo <= PUSHUP_COUNT_DOWN_ANGLE_DEG y de vuelta >= PUSHUP_COUNT_UP_ANGLE_DEG)
+// + balanceo atrás (ángulo hombro-cadera-RODILLA <= ROCKPUSHUP_ROCK_BACK_DEG) + vuelta a la plancha
+// (>= ROCKPUSHUP_ROCK_RETURN_DEG con los brazos estirados). El orden no importa: se cuenta al volver a la
+// plancha con las dos cosas hechas. Solo flexiones, sin balanceo, NO cuentan (ese es otro ejercicio).
+// Contador propio y no processPushup: la línea del cuerpo se rompe a propósito en el balanceo y processPushup
+// lo trataría como "te has levantado". Se usa la RODILLA (no el tobillo) para la cadera: en el balanceo el
+// tobillo queda tapado por los glúteos y se ve peor. El codo solo se mide con el cuerpo en plancha.
+// Valores de partida, SIN probar en cámara real: si no detecta el balanceo, subir ROCK_BACK_DEG; si cuenta
+// un balanceo que no llega a ser tal, bajarlo.
+const ROCKPUSHUP_MIN_VISIBILITY = PUSHUP_MIN_VISIBILITY; // armar: hombro, codo, muñeca, cadera y rodilla del lado mejor visto
+const ROCKPUSHUP_LOOSE_VISIBILITY = 0.25;                // ya armado: en el balanceo se tapan unas a otras
+const ROCKPUSHUP_LINE_MIN_DEG = 150;                     // armar: hombro-cadera-rodilla casi recto
+const ROCKPUSHUP_PLANK_MIN_DEG = 140;                    // el codo solo cuenta con el cuerpo así de recto
+const ROCKPUSHUP_ROCK_BACK_DEG = 110;                    // hombro-cadera-rodilla <= esto = cadera atrás, hacia los talones
+const ROCKPUSHUP_ROCK_RETURN_DEG = 150;                  // >= esto = de vuelta en plancha
+const ROCKPUSHUP_SMOOTH_ALPHA = 0.5;                     // EMA del ángulo de cadera (rodilla y cadera tiemblan)
+const ROCKPUSHUP_BROKEN_TILT_DEG = 65;                   // ya armado: más vertical que esto, mucho rato = te has levantado
+const ROCKPUSHUP_BROKEN_STABLE_MS = 1500;
+const ROCKPUSHUP_PHASE_TIMEOUT_MS = 8000;                // una mitad hecha (flexión o balanceo) y la otra no llega: se descarta
+const ROCKPUSHUP_MIN_REP_SECONDS = 1.0;
+const ROCKPUSHUP_IDLE_CLOSE_MS = 15000;                  // en plancha sin ninguna repetición: serie terminada
+const ROCKPUSHUP_LOG_EVERY_MS = 1000;
+const ROCKPUSHUP_WAIT_MSG =
+  "Ponte en plancha alta de perfil a la cámara (manos bajo los hombros, brazos estirados, cuerpo recto), con " +
+  "el cuerpo entero en el encuadre. Cada repetición: una flexión, balancea la cadera hacia atrás hasta los " +
+  "talones y vuelve a la plancha.";
+
 // ── Flexiones arquero / a una mano / con palmada (2026-10-11) ───────────
 // A petición de Alex. Los tres tienen contador PROPIO (ninguno vale con processPushup tal cual):
 //  - archerpushup (arquero): DE FRENTE a la cámara, igual que pushupfront (codo con world landmarks 3D, cae
@@ -1495,6 +1525,244 @@ const HEELRAISE_IDLE_CLOSE_MS = 8000;       // 8s sin repetir cierra la serie (c
 const HEELRAISE_BASE_ALPHA = 0.04;          // la base sigue a tu postura de pie (deriva lenta)...
 const HEELRAISE_BASE_TRACK_BAND = 0.02;     // ...solo mientras estás claramente con los talones apoyados
 const HEELRAISE_WAIT_MSG = "Ponte de pie, con los pies enteros (talones y puntas) en el encuadre y los talones apoyados en el suelo.";
+
+// -- Split jumps (salto en zancada), de PERFIL ----------------------------------------------------------
+// Pedido por Alex (2026-10-12). Técnica de referencia (Bodybuilding.com "split jump", FitnessVolt "split jump" y
+// Redefining Strength "split squat jumps"): desde una zancada (una pierna delante con la rodilla flexionada, la otra
+// detrás con la rodilla casi en el suelo) y el tronco erguido, se salta lo más alto posible con los DOS pies fuera del
+// suelo y se aterriza otra vez en zancada, amortiguando. Se puede mantener la misma pierna delante o cambiarla en el aire
+// (zancada alterna): las dos cuentan como repetición, igual que las variantes que la cámara no distingue de forma fiable.
+//
+// CONTADOR PROPIO (código original, no comparte lógica con ningún otro ejercicio). Todo se mide en LARGOS DE TRONCO
+// (hombro->cadera, tomado al armar) con la geometría corregida por el aspecto del vídeo, así que no depende de la
+// distancia a la cámara. Un salto es un "valle -> pico -> valle" de la cadera:
+//   1. Valle: el punto más bajo de la cadera en la zancada. Ahí se anota dónde está CADA tobillo (el suelo de cada pie:
+//      el talón de la pierna de atrás va levantado, así que no vale una única altura de suelo).
+//   2. Pico: la cadera sube >= SPLITJUMP_MIN_RISE sobre el valle y los DOS tobillos suben a la vez >=
+//      SPLITJUMP_FEET_OFF_MIN sobre su suelo. Se usa el MÍNIMO de los dos: levantarse de la zancada sin saltar deja el pie
+//      de delante en el suelo y no cuenta.
+//   3. Caída: la cadera recorre de vuelta SPLITJUMP_FALL_FRACTION de lo que subió -> aterrizaje.
+//   4. Aterrizaje en zancada: en SPLITJUMP_LAND_WINDOW_MS tras caer, los pies tienen que quedar separados en horizontal
+//      >= SPLITJUMP_LAND_STRIDE_MIN y al menos una rodilla flexionada. Si caes con los pies juntos no cuenta.
+//   Cada rechazo dice por qué. Hay que ponerse DE PERFIL: de frente no se ve qué pierna va delante.
+// Umbrales deducidos de la geometría (tronco ~0.5 m, zancada ~0.8-1 m = 1.6-2 largos de tronco, salto de 15-40 cm =
+// 0.3-0.8 de tronco, ruido de landmarks ~0.02). PENDIENTES de afinar con un vídeo real de cámara.
+const SPLITJUMP_ARM_MIN_VISIBILITY = 0.5;       // armar: hombros, caderas, rodillas y tobillos
+const SPLITJUMP_HIPS_MIN_VISIBILITY = 0.35;     // seguir (si no, cuenta como ausencia)
+const SPLITJUMP_SHOULDER_MIN_VISIBILITY = 0.3;  // sin hombros no hay escala de tronco
+const SPLITJUMP_KNEE_MIN_VISIBILITY = 0.3;      // rodilla fiable para medir su flexión al aterrizar
+const SPLITJUMP_ANKLE_MIN_VISIBILITY = 0.25;    // tobillo fiable en el aire (el desenfoque baja la confianza)
+const SPLITJUMP_ARM_STRIDE_MIN = 1.0;           // armar: separación horizontal de los tobillos, en largos de tronco
+const SPLITJUMP_ARM_UPRIGHT_MIN = 0.8;          // armar: altura hombro->cadera / largo del tronco (1 = vertical)
+const SPLITJUMP_ARM_STABLE_MS = 700;            // en zancada y quieto antes de calibrar
+const SPLITJUMP_ARM_NOISE_TOLERANCE_MS = 250;   // un frame suelto que no cumple no reinicia la espera hasta pasar esto seguido
+const SPLITJUMP_ARM_MAX_STEP = 0.04;           // armar: movimiento de la cadera por frame, en largos de tronco
+const SPLITJUMP_TAKEOFF_RISE = 0.12;            // la cadera sube >= esto sobre el valle -> empieza el salto
+const SPLITJUMP_MIN_RISE = 0.25;                // subida mínima de la cadera (pico) para que cuente
+const SPLITJUMP_FEET_OFF_MIN = 0.12;            // los DOS tobillos tienen que subir >= esto sobre su suelo
+const SPLITJUMP_FALL_FRACTION = 0.55;           // bajada (fracción de lo subido) que se toma como aterrizaje
+const SPLITJUMP_SETTLED_RISE = 0.05;            // la cadera vuelve a <= esto sobre el valle = fin de un bache sin salto
+const SPLITJUMP_MIN_AIR_MS = 150;               // menos que esto = ruido de un frame, no un salto
+const SPLITJUMP_MAX_AIR_MS = 1500;              // más = ya no es un salto (te has levantado, fallo de seguimiento): hay que volver a armar
+const SPLITJUMP_LAND_WINDOW_MS = 500;           // tiempo para quedar en zancada tras caer
+const SPLITJUMP_LAND_STRIDE_MIN = 0.8;          // aterrizaje: separación horizontal mínima de los tobillos (largos de tronco)
+const SPLITJUMP_LAND_KNEE_MAX_DEG = 155;        // aterrizaje: al menos una rodilla más doblada que esto (amortiguar)
+const SPLITJUMP_REANCHOR_STILL_MS = 350;        // quieto este tiempo en el suelo -> el valle se recoloca en tu altura actual
+const SPLITJUMP_REANCHOR_MAX_STEP = 0.02;       // "quieto": movimiento de la cadera por frame, en largos de tronco
+const SPLITJUMP_MIN_REP_SECONDS = 0.15;         // solo ruido de un frame suelto
+const SPLITJUMP_IDLE_CLOSE_MS = 8000;           // 8 s sin saltar cierra la serie (solo si ya hay reps)
+const SPLITJUMP_OUT_OF_FRAME_MS = 3000;         // saltando se pierde visibilidad un momento: más margen que el genérico
+const SPLITJUMP_WAIT_MSG = "Colócate de PERFIL a la cámara, con el cuerpo entero (de los hombros a los pies) en el encuadre, en posición de zancada: una pierna delante y la otra detrás, el tronco erguido y espacio libre para saltar.";
+
+// -- Tuck jumps (salto con las rodillas al pecho), de pie -----------------------------------------------
+// Pedido por Alex (2026-10-12). Técnica de referencia (NASM "tuck jump", CoachWeb y el test de tuck jump de World
+// Rugby / Myer et al.): de pie, pies a la anchura de las caderas; se baja un poco y se salta lo más alto posible,
+// TIRANDO DE LAS RODILLAS HACIA EL PECHO en el punto más alto (muslos al menos paralelos al suelo, las DOS rodillas a la
+// vez), con el tronco erguido (sin inclinarse hacia las rodillas), y se aterriza suave, con las rodillas flexionadas.
+// Qué se comprueba (todo en VERTICAL y normalizado con medidas de pie tomadas al armar -> no depende de la distancia
+// a la cámara y vale de frente y de perfil):
+//   1. Salto: la cadera sube >= TUCKJUMP_MIN_HIP_RISE (en largos de pierna cadera->tobillo) sobre su altura de pie.
+//   2. Rodillas al pecho: en el punto más alto la rodilla MÁS BAJA de las dos llega al menos a TUCKJUMP_KNEE_MIN_RISE
+//      (en largos de muslo respecto a la cadera: 0 = muslo paralelo al suelo, >0 = rodilla por encima de la cadera).
+//   3. Tronco erguido: la altura hombro->cadera en ese punto es >= TUCKJUMP_TORSO_MIN_RATIO de la de pie (inclinarse
+//      hacia delante la acorta, igual de frente que de perfil).
+//   Si falla 1, 2 o 3 la repetición NO cuenta y se dice por qué.
+//   4. Aterrizaje (solo AVISO, no descuenta): al caer la cadera tiene que hundirse algo (rodillas flexionadas); si dos
+//      aterrizajes seguidos son "rígidos" se avisa.
+// Umbrales deducidos de la geometría (salto de 20-40 cm sobre pierna de ~0.9 m -> 0.22-0.44 del largo de pierna;
+// ruido de landmarks ~0.02). PENDIENTES de afinar con un vídeo real de cámara, como el resto de ejercicios nuevos.
+const TUCKJUMP_MIN_VISIBILITY = 0.5;        // armar: hombros, caderas, rodillas y tobillos
+const TUCKJUMP_HIPS_MIN_VISIBILITY = 0.35;  // seguir (si no, cuenta como ausencia)
+const TUCKJUMP_SHOULDER_MIN_VISIBILITY = 0.3; // en el aire: sin hombros no se comprueba el tronco (no bloquea)
+const TUCKJUMP_KNEE_MIN_VISIBILITY = 0.25;  // en el aire (motion blur baja la confianza): una rodilla con menos no cuenta ese frame
+const TUCKJUMP_ARM_STABLE_MS = 700;         // de pie quieto antes de calibrar
+const TUCKJUMP_ARM_SETTLE_MS = 400;         // tras armar no se cuenta el primer acomodo
+const TUCKJUMP_ARM_MAX_STEP = 0.05;         // movimiento vertical de cadera por frame al armar, en largos de pierna (mismo margen que heel raise: el ruido de pie es bastante menor)
+const TUCKJUMP_ARM_NOISE_TOLERANCE_MS = 250; // al armar, un frame suelto que no cumple no reinicia el cronómetro de estabilidad hasta pasar esto seguido
+const TUCKJUMP_ARM_KNEE_MIN_DEG = 150;      // armar: piernas estiradas (cadera-rodilla-tobillo)
+const TUCKJUMP_MIN_THIGH_Y = 0.04;          // muslo vertical mínimo (altura de imagen) para fiarse de la calibración
+const TUCKJUMP_TAKEOFF_RISE = 0.06;         // la cadera sube >=6% del largo de pierna sobre su altura de pie -> despegue
+const TUCKJUMP_LAND_RISE = 0.03;            // vuelve por debajo de esto -> aterrizaje
+const TUCKJUMP_MIN_AIR_MS = 120;            // menos que esto en el aire = ruido de un frame, no un salto
+const TUCKJUMP_MAX_AIR_MS = 1500;           // más que esto "en el aire" = ya no es un salto (subirte a algo, fallo): se descarta y se vuelve a armar
+const TUCKJUMP_MIN_HIP_RISE = 0.12;         // altura mínima del salto (largos de pierna) para que cuente
+const TUCKJUMP_KNEE_MIN_RISE = -0.10;       // rodilla más baja al menos a este nivel (largos de muslo; 0 = muslo paralelo al suelo)
+const TUCKJUMP_TORSO_MIN_RATIO = 0.70;      // altura hombro-cadera en el pico / la de pie (0.70 ~ 45° de inclinación)
+const TUCKJUMP_LAND_DIP_MIN = 0.02;         // aterrizaje amortiguado: la cadera se hunde >=2% del largo de pierna bajo su altura de pie
+const TUCKJUMP_LAND_WINDOW_MS = 300;        // cuánto se observa el aterrizaje tras tocar el suelo
+const TUCKJUMP_LAND_MIN_SAMPLES = 3;        // frames mínimos en esa ventana para fiarse (fps bajo o rebote inmediato = no se juzga)
+const TUCKJUMP_STIFF_WARN_AFTER = 2;        // aterrizajes rígidos SEGUIDOS antes de avisar
+const TUCKJUMP_MIN_REP_SECONDS = 0.15;      // solo ruido de un frame suelto
+const TUCKJUMP_IDLE_CLOSE_MS = 8000;       // 8s sin saltar cierra la serie (como heel raise); solo si ya hay reps
+const TUCKJUMP_OUT_OF_FRAME_MS = 3000;      // saltando de verdad se pierde visibilidad por el movimiento: más margen que el genérico
+const TUCKJUMP_REF_ALPHA = 0.04;            // la referencia sigue a tu postura de pie (deriva lenta)...
+const TUCKJUMP_REF_TRACK_BAND = 0.03;       // ...solo mientras la cadera está a <=3% de su altura de pie...
+const TUCKJUMP_REF_QUIET_STEP = 0.02;       // ...y quieta (no a mitad de un salto)
+const TUCKJUMP_WAIT_MSG = "Ponte de pie, de frente o de perfil a la cámara, con el cuerpo entero (de los hombros a los pies) en el encuadre y espacio libre para saltar.";
+
+// -- Switchblade jumps (salto en tijera tocándote los pies), de pie y DE PERFIL --------------------------------------
+// Pedido por Alex (2026-10-12). Contador PROPIO (no reutiliza lógica de otros ejercicios). Referencias: dos Shorts de
+// calistenia en YouTube ("How to do SWITCHBLADE jump | calisthenics workout", @fit-geek5200, y "How To Do Switchblade
+// Jumps", @arkadyefron). Lo que explican (subtítulos; los vídeos no se pudieron ver fotograma a fotograma): se aprende
+// por pasos -- 1) salto en tijera/split con un poco de impulso, 2) el mismo salto pero TOCANDO LOS PIES en el aire y
+// volviendo, 3) alternando de pierna -- y al caer vuelves a estar de pie con los pies juntos. Es decir: salto, en el aire
+// las piernas se abren una hacia delante y otra hacia atrás (estiradas, como una navaja que se abre) y las manos bajan a
+// tocar el pie, y aterrizas.
+// Qué se comprueba (todo en píxeles reales -- x*ancho, y*alto -- y dividido por el LARGO DE PIERNA medido de pie al armar,
+// así no depende de la distancia a la cámara):
+//   1. Salto: la cadera sube >= SWITCHBLADE_MIN_HIP_RISE (en largos de pierna) sobre su altura de pie.
+//   2. Tijera: en el aire la separación HORIZONTAL entre los dos tobillos llega a >= SWITCHBLADE_MIN_SPLIT. De frente a la
+//      cámara una pierna tapa a la otra y esto no se ve: por eso hay que ponerse DE PERFIL (se avisa si falla seguido).
+//   3. Piernas estiradas: en el instante de máxima separación las dos rodillas están a >= SWITCHBLADE_SPLIT_KNEE_MIN_DEG.
+//   4. Toque: en algún momento del aire una muñeca llega a <= SWITCHBLADE_MAX_HAND_FOOT de un tobillo.
+//   Si falla 1-4 el salto NO cuenta y se dice por qué. Cuenta al aterrizar. Qué pierna va delante (signo de la separación)
+//   solo se apunta en el registro: alternar es lo recomendable, pero no se exige.
+// Umbrales deducidos de la geometría (tijera de ~45° por pierna = separación de ~1.4 largos de pierna; se pide 0.8 para
+// perdonar saltos bajos). PENDIENTES de afinar con un vídeo real de cámara, como el resto de ejercicios nuevos.
+const SWITCHBLADE_MIN_VISIBILITY = 0.5;        // armar: hombros, caderas, rodillas y tobillos
+const SWITCHBLADE_HIPS_MIN_VISIBILITY = 0.35;  // seguir (si no, cuenta como ausencia)
+const SWITCHBLADE_AIR_MIN_VISIBILITY = 0.25;   // en el aire (el movimiento baja la confianza): un punto con menos no cuenta ese frame
+const SWITCHBLADE_ARM_STABLE_MS = 700;         // de pie quieto antes de calibrar
+const SWITCHBLADE_ARM_SETTLE_MS = 400;         // tras armar no se cuenta el primer acomodo
+const SWITCHBLADE_ARM_MAX_STEP = 0.05;         // movimiento vertical de cadera por frame al armar (largos de pierna)
+const SWITCHBLADE_ARM_NOISE_MS = 250;          // al armar, un frame suelto que no cumple no reinicia el cronómetro hasta pasar esto
+const SWITCHBLADE_ARM_KNEE_MIN_DEG = 150;      // armar: piernas estiradas
+const SWITCHBLADE_ARM_FEET_MAX_GAP = 0.45;     // armar: tobillos a <= 0.45 largos de pierna uno del otro (pies juntos o a la anchura de las caderas)
+const SWITCHBLADE_TAKEOFF_RISE = 0.07;         // la cadera sube >=7% del largo de pierna sobre su altura de pie -> despegue
+const SWITCHBLADE_LAND_RISE = 0.035;           // vuelve por debajo de esto -> aterrizaje
+const SWITCHBLADE_MIN_AIR_MS = 120;            // menos que esto en el aire = ruido de un frame
+const SWITCHBLADE_MAX_AIR_MS = 1500;           // más que esto "en el aire" = ya no es un salto: se descarta y se vuelve a armar
+const SWITCHBLADE_MIN_HIP_RISE = 0.08;         // altura mínima del salto (largos de pierna); el tutorial pide solo "un poco de impulso"
+const SWITCHBLADE_MIN_SPLIT = 0.80;            // separación horizontal máxima entre tobillos en el aire (largos de pierna)
+const SWITCHBLADE_SPLIT_KNEE_MIN_DEG = 130;    // rodillas casi estiradas en el momento de la máxima separación
+const SWITCHBLADE_MAX_HAND_FOOT = 0.40;        // distancia mínima muñeca-tobillo en el aire (largos de pierna) para dar el toque por bueno
+const SWITCHBLADE_MIN_REP_SECONDS = 0.15;      // solo ruido de un frame suelto
+const SWITCHBLADE_IDLE_CLOSE_MS = 8000;        // 8s sin saltar cierra la serie; solo si ya hay reps
+const SWITCHBLADE_OUT_OF_FRAME_MS = 3000;      // saltando se pierde visibilidad por el movimiento: más margen que el genérico
+const SWITCHBLADE_REF_ALPHA = 0.04;            // la referencia de pie sigue tu postura (deriva lenta)...
+const SWITCHBLADE_REF_TRACK_BAND = 0.03;       // ...solo con la cadera a <=3% de su altura de pie...
+const SWITCHBLADE_REF_QUIET_STEP = 0.02;       // ...y quieta (no a mitad de un salto)
+const SWITCHBLADE_NO_SPLIT_WARN_AFTER = 3;     // saltos SEGUIDOS sin tijera visible antes de pedir que te pongas de perfil
+const SWITCHBLADE_WAIT_MSG = "Ponte de pie, DE PERFIL a la cámara, con el cuerpo entero (de los hombros a los pies) en el encuadre, los pies juntos y espacio libre para saltar.";
+
+// -- Comba (saltar a la cuerda), de pie ---------------------------------------------------------------------
+// Pedido por Alex (2026-10-12). Técnica de referencia (guías de salto básico, p. ej. Elevate Rope "jump rope basics"):
+// saltitos MUY bajos (unos 2-4 cm), con las puntas de los pies, tronco erguido, codos pegados al cuerpo y la cuerda
+// girada con las muñecas a la altura de la cadera, rodillas ligeramente flexionadas. Vale con cuerda o sin ella (la
+// cámara no ve la cuerda: lo que cuenta es el cuerpo rebotando).
+// Cómo se cuenta (todo en VERTICAL y normalizado con el largo del tronco hombro->cadera, así no depende de la distancia
+// a la cámara y vale de frente y de perfil). Un salto de comba es una oscilación RÁPIDA y PEQUEÑA del cuerpo entero:
+//   1. Señal: altura media de hombros, caderas (y tobillos si se ven) -> filtro suave -> menos su tendencia lenta
+//      (así no cuenta agacharte, acercarte ni desplazarte despacio) = "d", el rebote del cuerpo.
+//   2. Un salto = un PICO de "d" (subida seguida de bajada de al menos JUMPROPE_DELTA, que se adapta al ruido de tu
+//      cámara medido al armar y a la amplitud de tus propios saltos).
+//   3. Ritmo: entre picos pasan entre JUMPROPE_MIN_INTERVAL_MS y JUMPROPE_MAX_INTERVAL_MS. Hacen falta
+//      JUMPROPE_START_PEAKS picos seguidos con un ritmo parecido para empezar a contar (se cuentan con retraso, de golpe,
+//      los de ese arranque); así un tembleque suelto o un paso no cuentan. Si paras más de MAX_INTERVAL_MS, hay que
+//      volver a coger el ritmo (3 saltos) y la serie se cierra sola a los JUMPROPE_IDLE_CLOSE_MS.
+//   4. Descartes: saltos grandes (JUMPROPE_MAX_SWING: no es comba), manos por encima del hombro (jumping jacks) y
+//      rodillas muy subidas (correr en el sitio, tuck jumps) NO cuentan y se dice por qué.
+// Un salto = una repetición (en un doble salto con la cuerda dos veces por salto cuenta el salto, no las pasadas).
+// Umbrales deducidos de la geometría (saltito de 2-4 cm sobre un tronco de ~50 cm = 0.04-0.08 de tronco; ruido de
+// landmarks ~0.01 de la imagen). PENDIENTES de afinar con un vídeo real de cámara, como el resto de ejercicios nuevos.
+const JUMPROPE_MIN_VISIBILITY = 0.5;        // armar: hombros y caderas
+const JUMPROPE_CORE_MIN_VISIBILITY = 0.35;  // seguir (si no, cuenta como ausencia)
+const JUMPROPE_LIMB_MIN_VISIBILITY = 0.3;   // tobillos / rodillas / muñecas: con menos, ese punto no se usa ese frame
+const JUMPROPE_MIN_TORSO_Y = 0.05;          // largo mínimo del tronco (altura de imagen) para fiarse de la escala
+const JUMPROPE_ARM_STABLE_MS = 800;         // de pie y quieto antes de calibrar
+const JUMPROPE_ARM_MIN_SAMPLES = 8;         // frames mínimos en esa ventana
+const JUMPROPE_ARM_MAX_SIGMA = 0.05;        // ruido máximo de la señal al armar (en largos de tronco): más = no estás quieto
+const JUMPROPE_ARM_NOISE_TOLERANCE_MS = 250; // al armar, un frame suelto que no cumple no reinicia la ventana hasta pasar esto
+const JUMPROPE_SMOOTH_TAU_MS = 45;          // filtro de suavizado de la señal (quita el temblor frame a frame)
+const JUMPROPE_BASE_TAU_MS = 700;           // tendencia lenta que se resta (no es salto: agacharse, acercarse, balanceo)
+const JUMPROPE_MAX_FRAME_GAP_MS = 400;      // hueco entre frames mayor que esto = el seguimiento se cortó: se reinicia el filtro
+const JUMPROPE_DELTA_MIN = 0.035;           // subida+bajada mínima (largos de tronco) para que sea un pico de salto
+const JUMPROPE_DELTA_MAX = 0.12;
+const JUMPROPE_DELTA_NOISE_FACTOR = 3.5;    // delta de base = esto x el ruido de la señal filtrada medido al armar
+const JUMPROPE_ARM_FILTER_SKIP_MS = 300;    // al medir ese ruido se ignora el arranque del filtro
+const JUMPROPE_NOISY_DELTA = 0.08;          // si el delta calibrado pasa de esto, la cámara tiene ruido: se avisa de saltar algo más alto
+const JUMPROPE_SWING_REL = 0.40;            // un pico menor que esta fracción de tus saltos recientes es un tembleque, no un salto
+const JUMPROPE_SWING_HISTORY = 6;           // cuántos saltos recientes se usan para esa mediana
+const JUMPROPE_MAX_SWING = 0.55;            // más que esto (largos de tronco) no es un saltito de comba
+const JUMPROPE_MIN_INTERVAL_MS = 230;       // dos picos más juntos que esto: el segundo es ruido (máx ~4 saltos/s)
+const JUMPROPE_MAX_INTERVAL_MS = 1100;      // más espacio que esto entre picos = ya no es ritmo seguido
+const JUMPROPE_START_PEAKS = 3;             // picos seguidos con ritmo parecido para empezar a contar
+const JUMPROPE_INTERVAL_SPREAD = 2.0;       // en el arranque, el intervalo más largo / el más corto no pasa de esto
+const JUMPROPE_RUN_INTERVAL_TOL = 1.6;      // al contar con retraso el arranque, solo entran los picos con intervalo cercano al típico (x/÷ esto)
+const JUMPROPE_SWING_SPREAD = 2.2;          // en el arranque, la amplitud mayor / la menor no pasa de esto
+const JUMPROPE_BURST_INTERVAL_TOL = 1.8;    // ya contando, un salto nuevo llega con un intervalo parecido al típico (x/÷ esto)
+const JUMPROPE_RUN_MAX = 10;                // picos del arranque que se guardan sin contar, esperando a que haya periodicidad
+const JUMPROPE_PERIOD_WINDOW_MS = 2000;     // ventana con la que se mide si el rebote es periódico
+const JUMPROPE_PERIOD_STEP_MS = 40;         // paso de remuestreo de esa ventana
+const JUMPROPE_PERIOD_START = 0.65;         // periodicidad mínima para EMPEZAR a contar (el ruido blanco da ~0.2-0.35)
+const JUMPROPE_PERIOD_KEEP = 0.30;          // periodicidad mínima para seguir contando una vez empezado
+const JUMPROPE_ARMS_UP_MARGIN = 0.15;       // muñeca por encima de (hombro + esto x tronco) = brazos arriba (jumping jacks)
+const JUMPROPE_KNEE_LIFT_MIN_RATIO = 0.55;  // distancia vertical cadera->rodilla / la de pie por debajo de esto = rodilla subida
+const JUMPROPE_GATE_HOLD_MS = 400;          // un pico se descarta si en este margen hubo brazos arriba o rodillas subidas
+const JUMPROPE_MIN_REP_SECONDS = 0.15;      // solo ruido de un frame suelto
+const JUMPROPE_IDLE_CLOSE_MS = 6000;        // 6s sin saltar cierra la serie; solo si ya hay saltos
+const JUMPROPE_OUT_OF_FRAME_MS = 2500;      // saltando se pierde visibilidad por el movimiento: más margen que el genérico
+const JUMPROPE_WAIT_MSG = "Ponte de pie, de frente o de perfil a la cámara, con el cuerpo entero (mejor de los hombros a los pies) en el encuadre, quieto y con la comba (o las manos, si es sin cuerda) a la altura de la cadera.";
+
+// -- Step ups (subir a un escalón / banco / caja y bajar), de pie ------------------------------------------
+// Pedido por Alex (2026-10-12). Forma (MasterClass, Fitbod): de pie delante de una superficie estable (escalón, banco,
+// caja o silla a la altura de la rodilla), se apoya UN pie entero encima, se empuja con esa pierna hasta quedar de
+// pie sobre la superficie (el otro pie sube y se junta, o queda en el aire) y se baja al suelo. Una repetición =
+// subir a la superficie Y volver a bajar al suelo, alternando pierna o siempre la misma.
+// Se mide TODO relativo a una referencia que se guarda al armar (de pie en el suelo, quieto, los dos pies a la
+// misma altura): altura de la cadera y de cada tobillo, normalizadas por el largo de pierna (cadera->tobillo).
+// Para contar tienen que pasar LAS TRES cosas, en este orden:
+//   1) un pie en alto y el otro todavía abajo (el tobillo más alto sube >= STEPUP_FOOT_ON_SURFACE y los dos
+//      tobillos difieren >= STEPUP_ASYM_MIN) -> "pie apoyado en la superficie";
+//   2) la cadera SUBE con él (>= STEPUP_TOP_HIP_MIN y >= STEPUP_TOP_HIP_FRACTION de lo que subió el pie): estás de
+//      pie encima. Un pie que sube sin que suba la cadera (rodilla al pecho, patada, caminar) NO es un step up, ni
+//      lo es ponerse de puntillas (los dos tobillos suben igual, no hay pie en alto y otro abajo);
+//   3) cadera y tobillos vuelven al nivel del suelo (<= STEPUP_DOWN_*) -> has bajado: cuenta la repetición.
+// Vale de frente y de perfil (todo es vertical). Umbrales deducidos de la geometría (pierna ~0.9 m: escalón de 15 cm
+// = 0.17 del largo de pierna, caja a la rodilla de 45 cm = 0.5; ruido de landmarks ~0.02-0.03).
+// PENDIENTES de afinar con un vídeo real de cámara.
+const STEPUP_MIN_VISIBILITY = 0.5;       // los dos tobillos para armar
+const STEPUP_HIPS_MIN_VISIBILITY = 0.4;  // caderas para seguir (si no, cuenta como ausencia)
+const STEPUP_ANKLE_LOST_VISIBILITY = 0.3; // armado: un tobillo con menos que esto se ignora (si no queda ninguno, frame ignorado)
+const STEPUP_ARM_STABLE_MS = 700;        // de pie quieto, los dos pies en el suelo, antes de calibrar
+const STEPUP_ARM_SETTLE_MS = 500;        // tras armar no se cuenta el primer acomodo
+const STEPUP_ARM_MAX_JUMP = 0.05;        // salto de cadera por frame al armar, en largos de pierna
+const STEPUP_ARM_MAX_LEG_DIFF = 0.20;    // al armar las dos piernas miden parecido
+const STEPUP_ARM_MAX_ASYM = 0.06;        // al armar los dos tobillos a la misma altura (los dos pies en el suelo)
+const STEPUP_FOOT_ON_SURFACE = 0.12;     // el tobillo más alto sube >=12% del largo de pierna -> un pie ya está en la superficie
+const STEPUP_ASYM_MIN = 0.08;            // ...y el otro tobillo va >=8% más abajo (un pie arriba y otro abajo)
+const STEPUP_ASYM_WINDOW_MS = 5000;      // el "pie apoyado" tiene que haberse visto hace menos de esto cuando llegas arriba
+const STEPUP_TOP_HIP_MIN = 0.10;         // arriba: la cadera sube >=10% del largo de pierna...
+const STEPUP_TOP_HIP_FRACTION = 0.6;     // ...y >=60% de lo que subió el pie apoyado (la cadera sube con el cuerpo)
+const STEPUP_TOP_STABLE_MS = 150;        // arriba al menos esto seguido (ruido de un frame suelto)
+const STEPUP_DOWN_HIP = 0.05;            // vuelta a "abajo": cadera a <=5% sobre el suelo...
+const STEPUP_DOWN_ANKLE = 0.05;          // ...y ningún tobillo a más de 5% -> cuenta la repetición
+const STEPUP_MAX_UP_MS = 20000;          // arriba más de esto = se descarta y se vuelve a armar
+const STEPUP_MIN_REP_SECONDS = 0.8;      // subir y bajar de verdad no dura menos
+const STEPUP_IDLE_CLOSE_MS = 10000;      // 10s sin repetir cierra la serie; solo si ya hay reps (cambiar de pierna lleva su tiempo)
+const STEPUP_BASE_ALPHA = 0.04;          // la referencia sigue a tu postura de pie (deriva lenta)...
+const STEPUP_BASE_TRACK_BAND = 0.03;     // ...solo mientras estás claramente en el suelo
+const STEPUP_WAIT_MSG = "Ponte de pie, de frente o de perfil, delante de un escalón o banco estable, con las piernas enteras en el encuadre y los dos pies en el suelo.";
 
 // -- Jumping jacks (calentamiento, subtipo de prueba) -------------------
 // Ejercicio DE FRENTE a la camara (a diferencia de sentadillas/fondos,
@@ -2233,6 +2501,46 @@ const DOUBLECRUNCH_IDLE_CLOSE_MS = 7000;
 // la geometría sea idéntica a la de un vídeo 16:9; en apaisado 16:9 no hace
 // nada (los umbrales ya calibrados siguen valiendo tal cual).
 const LYING_REF_ASPECT = 16 / 9;
+
+// ── Puente de glúteo (glute bridge), tumbado boca arriba ─────────────────────────────────────────────────
+// Pedido por Alex (2026-10-12). Forma: tumbado boca arriba, rodillas dobladas y pies planos en el suelo, brazos
+// a los lados. Se empuja con los talones y se SUBE la cadera hasta que hombro-cadera-rodilla quedan casi en línea
+// recta (hombros y cabeza siguen en el suelo); se baja la cadera de vuelta al suelo. 1 repetición = subir Y bajar.
+// Contador PROPIO (processGluteBridge), código original. NO sirve el de crunch (ahí sube el HOMBRO, aquí la CADERA
+// con el hombro quieto en el suelo) ni el de elevación de piernas (ahí se mueve el tobillo, la rodilla sigue doblada).
+// Cámara de PERFIL (a un lado). Todo se mide en geometría real (x multiplicada por el aspecto del vídeo), así vale
+// con el móvil en vertical o en apaisado, y relativo al largo del muslo (cadera-rodilla), que en el plano de la
+// cámara no cambia al hacer el puente:
+//   · lift  = (altura del hombro - altura de la cadera) / muslo, MENOS su valor en reposo (se guarda al armar).
+//             Tumbado = 0; arriba del todo ~0.35-0.6 (hombros en el suelo, cadera ~25 cm sobre él).
+//   · hipAngle = ángulo hombro-cadera-rodilla. Doblado abajo (~110-135°), casi recto arriba (>=150°).
+// Para contar, el ciclo tiene que ser: abajo (lift <= DOWN) -> arriba (lift >= UP Y hipAngle >= TOP_ANGLE, estable
+// TOP_STABLE_MS) -> abajo otra vez (lift <= DOWN) = cuenta. Levantar solo un poco la cadera, o doblarte por la cintura
+// sin extender la cadera, no cuenta.
+// Posición inicial REAL (regla de Alex 10-08): boca arriba, quieto, hombro y cadera a la par (tumbado), MUSLO levantado
+// (rodillas dobladas, no piernas estiradas en el suelo) y la cadera ya abajo.
+// PENDIENTES de afinar con un vídeo real de cámara.
+const GLUTEBRIDGE_MIN_VISIBILITY = 0.4;      // media de hombro, cadera y rodilla del lado mejor visto
+const GLUTEBRIDGE_ANKLE_MIN_VISIBILITY = 0.3; // el tobillo solo se mira si se ve (si no, no bloquea el armado)
+const GLUTEBRIDGE_ARM_MAX_TILT_DEG = 20;     // armar: línea hombro-cadera casi horizontal (tumbado del todo)
+const GLUTEBRIDGE_ARM_MIN_THIGH_ELEV = 0.35; // armar: rodilla al menos 0.35 muslos por encima de la cadera (rodillas dobladas, ~20°+)
+const GLUTEBRIDGE_ARM_MAX_KNEE_DEG = 150;    // armar: cadera-rodilla-tobillo doblado (si se ve el tobillo); piernas rectas no arman
+const GLUTEBRIDGE_ARM_MAX_RISE = 0.20;       // armar: la cadera ya está abajo, casi a la altura del hombro (no empezar a medio puente)
+const GLUTEBRIDGE_ARM_MAX_HIP_DEG = 145;     // armar: cadera todavía flexionada (hombro-cadera-rodilla); recta = ya estás arriba
+const GLUTEBRIDGE_ARM_STILL_BAND = 0.08;     // armar: la cadera no se mueve más que esto (en muslos) mientras se calibra
+const GLUTEBRIDGE_ARM_STABLE_MS = 800;       // armar: tumbado y quieto este rato (calibra el reposo)
+const GLUTEBRIDGE_ARM_SETTLE_MS = 400;       // tras armar no se cuenta el primer acomodo
+const GLUTEBRIDGE_UP_LIFT = 0.28;            // arriba: la cadera sube >=0.28 muslos sobre su reposo...
+const GLUTEBRIDGE_TOP_ANGLE_DEG = 148;       // ...Y hombro-cadera-rodilla casi recto (extensión de cadera de verdad)
+const GLUTEBRIDGE_TOP_STABLE_MS = 120;       // arriba al menos esto seguido (ruido de un frame suelto)
+const GLUTEBRIDGE_DOWN_LIFT = 0.12;          // abajo: cadera a <=0.12 muslos sobre el reposo -> cuenta la repetición
+const GLUTEBRIDGE_STAND_TILT_DEG = 55;       // tronco más inclinado que esto (sentado/de pie) = te has levantado (ojo: arriba del puente el tronco llega a ~35°)
+const GLUTEBRIDGE_MAX_UP_MS = 20000;         // arriba más de esto = se descarta y hay que volver a armar
+const GLUTEBRIDGE_MIN_REP_SECONDS = 0.4;     // subir y bajar de verdad no dura menos
+const GLUTEBRIDGE_IDLE_CLOSE_MS = 7000;      // 7s abajo sin ninguna repetición (con la serie empezada) cierra la serie, como crunch/doble crunch
+const GLUTEBRIDGE_BASE_ALPHA = 0.03;         // el reposo sigue a tu postura (deriva lenta)...
+const GLUTEBRIDGE_BASE_TRACK_BAND = 0.06;    // ...solo mientras estás claramente abajo
+const GLUTEBRIDGE_WAIT_MSG = "Túmbate boca arriba, de perfil a la cámara, con las rodillas dobladas y los pies planos en el suelo, y el cuerpo entero en el encuadre.";
 
 // ── Planchas con contador de repeticiones (pedido de Alex, 2026-10-11) ───────────────────────────────
 // "Plancha con toques de hombro", "Plancha dinámica" y "Plancha lateral con cadera" dejan de ser aguantes
@@ -5546,6 +5854,190 @@ export function createSupermanHoldChecker() {
   return check;
 }
 
+// ── Hollow body hold (aguante), tumbado boca arriba ─────────────────────────────────────────
+// "hollowbodyhold" (mode=timed, se cuentan segundos aguantados). Contador PROPIO y original: no comparte
+// lógica con ningún otro ejercicio. Técnica (guías de StrengthLog, The Barbell Physio y MasterClass): tumbado
+// boca arriba, piernas rectas y juntas, brazos estirados sobre la cabeza; se aprieta la zona lumbar contra el
+// suelo y se despegan A LA VEZ hombros+cabeza y piernas (forma de plátano: solo la lumbar y los glúteos
+// quedan apoyados). Cuanto más bajas las piernas, más difícil.
+//
+// Cómo lo mide la cámara (de perfil, 2D). Con la cadera como punto de apoyo se calcula el ÁNGULO sobre la
+// horizontal de dos segmentos: cadera->hombro ("torso") y cadera->tobillo ("pierna"), con la proporción
+// ancho/alto del vídeo corregida. Un ángulo no depende de la distancia a la cámara ni de lo grande que seas.
+// Hay tres fases:
+//   1) REPOSO: tumbado del todo (torso y piernas casi planos, piernas estiradas) y quieto HOLLOW_REST_STABLE_MS.
+//      Ahí se aprende tu reposo (ángulo de torso y de pierna) -- así tampoco importa que la cámara no esté
+//      perfectamente a nivel. Sin este reposo aprendido NO se arma el aguante (la posición de partida real).
+//   2) HOLLOW: torso Y piernas despegados a la vez respecto a su reposo (HOLLOW_TORSO_LIFT_DEG /
+//      HOLLOW_LEG_LIFT_DEG), rodillas estiradas, sin llegar a incorporarte ni a subir las piernas en V, y con la
+//      cara mirando hacia los pies (boca arriba; en un superman boca abajo la cara mira al lado contrario).
+//      Levantar solo los hombros (abdominal) o solo las piernas (elevación) no vale.
+//   3) Una vez aguantando se tolera algo más de ruido (umbrales LOOSE), como en los demás aguantes.
+// Levantarte/sentarte (torso > HOLLOW_SIT_DEG) desarma: hay que volver a tumbarse para empezar otra.
+// PRIMERA VERSIÓN: umbrales sacados de la biomecánica descrita en las guías, sin log real de la app todavía.
+// Si no aguanta o aguanta de más, pedir el 📋 (campos sube_torso / sube_pierna / rodilla).
+const HOLLOW_MIN_VISIBILITY = 0.4;         // media de hombro, cadera, rodilla y tobillo del lado mejor visto
+const HOLLOW_LOOSE_MIN_VISIBILITY = 0.3;   // ídem ya aguantando (las piernas elevadas pierden visibilidad)
+const HOLLOW_MIN_SEGMENT = 0.04;           // largo mínimo en pantalla (alto de imagen) de hombro-cadera y cadera-tobillo
+const HOLLOW_REST_TORSO_MAX_DEG = 18;      // reposo: torso casi plano (ángulo cadera->hombro sobre la horizontal)
+const HOLLOW_REST_TORSO_MIN_DEG = -15;
+const HOLLOW_REST_LEG_MAX_DEG = 12;        // reposo: piernas casi planas
+const HOLLOW_REST_LEG_MIN_DEG = -25;
+const HOLLOW_REST_KNEE_MIN_DEG = 150;      // reposo: piernas estiradas
+const HOLLOW_REST_STABLE_MS = 600;         // quieto y tumbado tanto rato para dar el reposo por aprendido
+const HOLLOW_REST_JITTER_DEG = 6;          // cuánto se puede mover (torso/pierna) durante esa calibración
+const HOLLOW_REST_ADAPT_ALPHA = 0.08;      // en reposo (todo abajo) el reposo aprendido sigue lentamente a tu postura
+const HOLLOW_TORSO_LIFT_DEG = 10;          // hollow: hombros/torso despegados al menos esto sobre su reposo (~10 cm del suelo)
+const HOLLOW_TORSO_LOOSE_LIFT_DEG = 6;     // ya aguantando
+const HOLLOW_TORSO_MAX_LIFT_DEG = 40;      // más que esto = te estás incorporando (ni V-up ni abdominal: hollow es corto)
+const HOLLOW_TORSO_LOOSE_MAX_LIFT_DEG = 48;
+const HOLLOW_LEG_LIFT_DEG = 6;             // hollow: piernas despegadas al menos esto sobre su reposo
+const HOLLOW_LEG_LOOSE_LIFT_DEG = 3;       // ya aguantando
+const HOLLOW_LEG_MAX_LIFT_DEG = 50;        // más alto = piernas en V, no hollow
+const HOLLOW_LEG_LOOSE_MAX_LIFT_DEG = 58;
+const HOLLOW_KNEE_MIN_DEG = 150;           // piernas rectas al empezar el aguante
+const HOLLOW_KNEE_LOOSE_MIN_DEG = 135;     // ya aguantando
+const HOLLOW_SIT_DEG = 60;                 // torso a más de esto sobre la horizontal = sentado/de pie: desarma
+const HOLLOW_FACE_MIN_DX = 0.012;          // nariz-oreja (ancho de imagen) mínimo para fiarse de hacia dónde mira la cara
+const HOLLOW_INVALID_STABLE_MS = 1200;     // tiempo seguido fuera de hollow para dar el tramo aguantado por terminado
+const HOLLOW_WAIT_MSG = "Túmbate boca arriba, de perfil a la cámara, con las piernas estiradas y los brazos estirados sobre la cabeza, todo en el suelo, y quédate quieto un momento. Después levanta a la vez hombros, cabeza y piernas y aguanta.";
+const HOLLOW_NOT_VISIBLE_MSG = "No se te ven bien el hombro, la cadera, la rodilla y el tobillo. Ponte de perfil a la cámara, tumbado boca arriba, con el cuerpo entero en el encuadre.";
+
+function hollowVideoAspect() {
+  try {
+    const v = document.querySelector("video");
+    if (v && v.videoWidth && v.videoHeight) return v.videoWidth / v.videoHeight;
+  } catch (e) { /* sin DOM */ }
+  return 1.78;
+}
+
+// Ángulo (grados) en B del segmento A-B-C, con el eje x corregido por la proporción del vídeo.
+function hollowJointDeg(a, b, c, A) {
+  const v1x = (a.x - b.x) * A, v1y = a.y - b.y, v2x = (c.x - b.x) * A, v2y = c.y - b.y;
+  const n = Math.hypot(v1x, v1y) * Math.hypot(v2x, v2y);
+  if (n < 1e-9) return null;
+  return (Math.acos(Math.max(-1, Math.min(1, (v1x * v2x + v1y * v2y) / n))) * 180) / Math.PI;
+}
+
+/**
+ * Comprobador de postura del hollow body (hollowbodyhold), con el formato de los demás comprobadores de
+ * aguante ({ ok, reason, debug, side }) pero con estado propio (aprende tu reposo tumbado) -- por eso es una
+ * fábrica: cada sitio que lo use crea el suyo. El objeto devuelto tiene .reset().
+ */
+export function createHollowBodyChecker() {
+  let armed = false;      // ya te ha visto tumbado, estirado y quieto (reposo aprendido)
+  let restTorso = 0, restLeg = 0;
+  let calib = null;       // { since, refT, refL, sumT, sumL, n }
+  let lastOk = false;
+
+  const fail = (reason, extra = {}) => { lastOk = false; return { ok: false, reason, ...extra }; };
+
+  const check = (lm, aspectArg) => {
+    const now = performance.now();
+    const A = aspectArg || hollowVideoAspect();
+    const vis4 = (s, h, k, a) => ((s.visibility ?? 1) + (h.visibility ?? 1) + (k.visibility ?? 1) + (a.visibility ?? 1)) / 4;
+    const lv = vis4(lm[L_SHOULDER], lm[L_HIP], lm[L_KNEE], lm[L_ANKLE]);
+    const rv = vis4(lm[R_SHOULDER], lm[R_HIP], lm[R_KNEE], lm[R_ANKLE]);
+    const useLeft = lv >= rv;
+    const vis = useLeft ? lv : rv;
+    const side = useLeft ? "left" : "right";
+    if (vis < (lastOk ? HOLLOW_LOOSE_MIN_VISIBILITY : HOLLOW_MIN_VISIBILITY)) {
+      calib = null;
+      return fail(HOLLOW_NOT_VISIBLE_MSG, { debug: { visibilidad: vis.toFixed(2) } });
+    }
+    const sh = useLeft ? lm[L_SHOULDER] : lm[R_SHOULDER], hip = useLeft ? lm[L_HIP] : lm[R_HIP];
+    const knee = useLeft ? lm[L_KNEE] : lm[R_KNEE], ank = useLeft ? lm[L_ANKLE] : lm[R_ANKLE];
+    const ear = useLeft ? lm[L_EAR] : lm[R_EAR], nose = lm[NOSE];
+
+    const torsoLen = Math.hypot((sh.x - hip.x) * A, sh.y - hip.y);
+    const legLen = Math.hypot((ank.x - hip.x) * A, ank.y - hip.y);
+    if (torsoLen < HOLLOW_MIN_SEGMENT || legLen < HOLLOW_MIN_SEGMENT) {
+      calib = null;
+      return fail(HOLLOW_NOT_VISIBLE_MSG, { side, debug: { visibilidad: vis.toFixed(2) } });
+    }
+    // Hombro y tobillo a lados OPUESTOS de la cadera = de perfil, tumbado a lo largo (no de frente ni doblado).
+    if ((sh.x - hip.x) * (ank.x - hip.x) >= 0) {
+      calib = null;
+      return fail("Ponte de perfil a la cámara, tumbado a lo largo, con la cabeza a un lado y los pies al otro.", { side, debug: { visibilidad: vis.toFixed(2) } });
+    }
+    // Ángulos sobre la horizontal (grados, + = por encima de la cadera en pantalla).
+    const torso = (Math.atan2(hip.y - sh.y, Math.abs(sh.x - hip.x) * A) * 180) / Math.PI;
+    const leg = (Math.atan2(hip.y - ank.y, Math.abs(ank.x - hip.x) * A) * 180) / Math.PI;
+    const kneeDeg = hollowJointDeg(hip, knee, ank, A);
+    const f = (v, d = 0) => (v === null || v === undefined ? null : v.toFixed(d));
+
+    // Hacia dónde mira la cara respecto a los pies: en el hollow el mentón va al pecho y se mira hacia los pies.
+    let faceOk = true, faceDx = null;
+    if (nose && ear && (nose.visibility ?? 1) >= 0.4 && (ear.visibility ?? 1) >= 0.4) {
+      faceDx = nose.x - ear.x;
+      if (Math.abs(faceDx) >= HOLLOW_FACE_MIN_DX) faceOk = (faceDx > 0) === (ank.x > hip.x);
+    }
+
+    // Incorporarse / sentarse: desarma (hay que volver a tumbarse para empezar otra serie).
+    if (armed && torso > HOLLOW_SIT_DEG) {
+      armed = false; calib = null;
+      return fail("Te has incorporado. Túmbate boca arriba otra vez, estirado, para empezar.", { side, debug: { torso: f(torso) } });
+    }
+
+    // ── Fase 1: aprender el reposo (tumbado, estirado y quieto) ──
+    const flat = torso <= HOLLOW_REST_TORSO_MAX_DEG && torso >= HOLLOW_REST_TORSO_MIN_DEG &&
+      leg <= HOLLOW_REST_LEG_MAX_DEG && leg >= HOLLOW_REST_LEG_MIN_DEG &&
+      kneeDeg !== null && kneeDeg >= HOLLOW_REST_KNEE_MIN_DEG;
+    if (!armed) {
+      if (flat) {
+        if (!calib || Math.abs(torso - calib.refT) > HOLLOW_REST_JITTER_DEG || Math.abs(leg - calib.refL) > HOLLOW_REST_JITTER_DEG) {
+          calib = { since: now, refT: torso, refL: leg, sumT: 0, sumL: 0, n: 0 };
+        }
+        calib.sumT += torso; calib.sumL += leg; calib.n += 1;
+        if (now - calib.since >= HOLLOW_REST_STABLE_MS && calib.n >= 3) {
+          restTorso = calib.sumT / calib.n; restLeg = calib.sumL / calib.n;
+          armed = true; calib = null;
+        }
+      } else {
+        calib = null;
+      }
+      if (!armed) {
+        return fail(HOLLOW_WAIT_MSG, { side, debug: { armado: "no", torso: f(torso), pierna: f(leg), rodilla: f(kneeDeg), visibilidad: vis.toFixed(2) } });
+      }
+    }
+
+    // ── Fases 2 y 3: ¿hollow? (con más tolerancia si ya estabas aguantando) ──
+    const torsoLift = torso - restTorso, legLift = leg - restLeg;
+    const loose = lastOk;
+    const torsoUp = torsoLift >= (loose ? HOLLOW_TORSO_LOOSE_LIFT_DEG : HOLLOW_TORSO_LIFT_DEG);
+    const legUp = legLift >= (loose ? HOLLOW_LEG_LOOSE_LIFT_DEG : HOLLOW_LEG_LIFT_DEG);
+    const torsoTooHigh = torsoLift > (loose ? HOLLOW_TORSO_LOOSE_MAX_LIFT_DEG : HOLLOW_TORSO_MAX_LIFT_DEG);
+    const legTooHigh = legLift > (loose ? HOLLOW_LEG_LOOSE_MAX_LIFT_DEG : HOLLOW_LEG_MAX_LIFT_DEG);
+    const straight = kneeDeg === null || kneeDeg >= (loose ? HOLLOW_KNEE_LOOSE_MIN_DEG : HOLLOW_KNEE_MIN_DEG);
+    const debug = {
+      armado: "sí", sube_torso: f(torsoLift), sube_pierna: f(legLift), torso: f(torso), pierna: f(leg),
+      rest_torso: f(restTorso), rest_pierna: f(restLeg), rodilla: f(kneeDeg), cara_dx: f(faceDx, 3), visibilidad: vis.toFixed(2),
+    };
+
+    if (torsoUp && legUp && !torsoTooHigh && !legTooHigh && straight && faceOk) {
+      lastOk = true;
+      return { ok: true, side, debug };
+    }
+
+    // En reposo (todo abajo) el reposo aprendido sigue despacio a tu postura.
+    if (flat && torsoLift < 4 && legLift < 3) {
+      restTorso += HOLLOW_REST_ADAPT_ALPHA * (torso - restTorso);
+      restLeg += HOLLOW_REST_ADAPT_ALPHA * (leg - restLeg);
+    }
+    const reason =
+      !faceOk ? "Mira hacia los pies, tumbado boca arriba (no boca abajo), con el mentón hacia el pecho."
+      : torsoTooHigh ? "Baja un poco el torso: solo hombros y cabeza despegados del suelo, no te incorpores."
+      : legTooHigh ? "Baja las piernas: casi pegadas al suelo, no en V."
+      : !torsoUp && !legUp ? "Levanta a la vez los hombros, la cabeza y las piernas del suelo, con la zona lumbar pegada al suelo."
+      : !torsoUp ? "Levanta también los hombros y la cabeza, con el mentón hacia el pecho."
+      : !legUp ? "Levanta también las piernas, rectas, unos centímetros del suelo."
+      : "Estira las rodillas: piernas rectas y juntas.";
+    return fail(reason, { side, debug });
+  };
+  check.reset = () => { armed = false; calib = null; lastOk = false; restTorso = 0; restLeg = 0; };
+  return check;
+}
+
 // "45 segundos" / "1 minuto y 5 segundos" -- para el aviso "la última vez
 // aguantaste X" de los ejercicios cronometrados (ver updateLastHint).
 function secondsLabel(n) {
@@ -6083,6 +6575,7 @@ class WorkoutSession {
     this.lsitHoldArmed = false; // lsithold: ya te has subido a las paralelas (armado), a la espera de/aguantando la L
     this.lsitTracker = new LSitTracker(); // L-sit en paralelas (reps): altura de pie, montado/desmontado y piernas -- ver el bloque LSIT_*
     this.lsitHoldChecker = createLSitHoldChecker(); // L-sit en paralelas (aguante): comprobador de postura con estado propio
+    this.hollowChecker = createHollowBodyChecker(); // Hollow body (aguante): comprobador con reposo aprendido -- ver el bloque HOLLOW_*
     this.standingQuadChecker = createStandingQuadStretchChecker(); // cuadriceps de pie (v2): comprobador con memoria (gracia ante fotogramas malos sueltos)
     this.lsitDownConfirmed = false; // lsit: ya se han visto las piernas abajo desde que se armó -- sin esto, armar ya con las piernas en L contaría una repetición sin haber visto la subida
     this.lsitUpSince = null;   // lsit: desde cuándo cumples la L seguido (debounce)
@@ -6442,7 +6935,7 @@ class WorkoutSession {
     // de la distancia a la cámara), así que el estado arranca vacío y se
     // fija solo cuando te pones arriba/de pie/en postura.
     if (
-      ["dip", "squat", "jumpsquat", "elephantsteps", "burpee", "crunch", "legraise", "highlegraise", "superman", "lsit", "situp", "scissor", "doublecrunch", "vup", "plankshouldertaps", "dynamicplank", "sideplankhipdips", "pushup", "pushupfront", "squatfront", "kneepushup", "kneedeclinepushup", "archerpushup", "onearmpushup", "clappushup", "pseudoplanchepushup"].includes(this.counterKey) ||
+      ["dip", "squat", "jumpsquat", "elephantsteps", "burpee", "crunch", "legraise", "highlegraise", "superman", "lsit", "situp", "scissor", "doublecrunch", "vup", "glutebridge", "plankshouldertaps", "dynamicplank", "sideplankhipdips", "pushup", "pushupfront", "squatfront", "kneepushup", "kneedeclinepushup", "rockingpushup", "archerpushup", "onearmpushup", "clappushup", "pseudoplanchepushup"].includes(this.counterKey) ||
       CAMERA_POSTURE_COUNTERS.has(this.counterKey)
     ) {
       this.state = null;
@@ -6657,7 +7150,7 @@ class WorkoutSession {
       this.groundStableSince = null;
       this.offGroundSince = null;
       this.setStatus(this.groundWaitingMessage());
-    } else if (this.counterKey === "kneepushup" || this.counterKey === "kneedeclinepushup" || this.counterKey === "onearmpushup" || this.counterKey === "clappushup" || this.counterKey === "pseudoplanchepushup") {
+    } else if (this.counterKey === "kneepushup" || this.counterKey === "kneedeclinepushup" || this.counterKey === "rockingpushup" || this.counterKey === "onearmpushup" || this.counterKey === "clappushup" || this.counterKey === "pseudoplanchepushup") {
       this.oneArmSide = null;
       this.clapBaseY = null;
       this.armVotes = [];
@@ -6802,6 +7295,89 @@ class WorkoutSession {
       this.heelRaiseIdleSince = null;
       this.heelRaiseUpSince = null;
       this.setStatus(HEELRAISE_WAIT_MSG);
+    } else if (this.counterKey === "stepup") {
+      // Sin barra que calibrar: al armar se guarda la altura de la cadera y de cada tobillo con los dos pies en el
+      // suelo y el largo de pierna (ver el bloque STEPUP_* arriba).
+      this.prepping = false;
+      this.state = null;
+      this.stepUpArmSince = null;
+      this.stepUpPrevHipY = null;
+      this.stepUpAcc = null;
+      this.stepUpRef = null;
+      this.stepUpArmedAt = null;
+      this.stepUpIdleSince = null;
+      this.stepUpUpSince = null;
+      this.stepUpAsymAt = null;
+      this.stepUpSurface = 0;
+      this.stepUpRepStart = null;
+      this.stepUpTopSince = null;
+      this.setStatus(STEPUP_WAIT_MSG);
+    } else if (this.counterKey === "splitjump") {
+      // Sin barra que calibrar: al armar se guardan, en zancada y quieto, el largo del tronco (escala), la altura de la
+      // cadera y la de cada tobillo (el "valle", ver el bloque SPLITJUMP_* arriba).
+      this.prepping = false;
+      this.state = null;
+      this.splitJumpArmSince = null;
+      this.splitJumpArmBadSince = null;
+      this.splitJumpPrevHipY = null;
+      this.splitJumpAcc = null;
+      this.splitJumpScale = null;
+      this.splitJumpTrough = null;
+      this.splitJumpStillSince = null;
+      this.splitJumpIdleSince = null;
+      this.splitJumpAirSince = null;
+      this.splitJumpPeak = null;
+      this.splitJumpPending = null;
+      this.splitJumpFront = null;
+      this.splitJumpRejected = 0;
+      this.setStatus(SPLITJUMP_WAIT_MSG);
+    } else if (this.counterKey === "tuckjump") {
+      // Sin barra que calibrar: al armar se guardan de pie la altura de la cadera, el largo de pierna y de muslo y la
+      // altura del tronco (ver el bloque TUCKJUMP_* arriba).
+      this.prepping = false;
+      this.state = null;
+      this.tuckJumpArmSince = null;
+      this.tuckJumpArmBadSince = null;
+      this.tuckJumpPrevHipY = null;
+      this.tuckJumpAcc = null;
+      this.tuckJumpRef = null;
+      this.tuckJumpArmedAt = null;
+      this.tuckJumpIdleSince = null;
+      this.tuckJumpAirSince = null;
+      this.tuckJumpPeak = null;
+      this.tuckJumpLand = null;
+      this.tuckJumpStiffRun = 0;
+      this.tuckJumpRejected = 0;
+      this.setStatus(TUCKJUMP_WAIT_MSG);
+    } else if (this.counterKey === "switchblade") {
+      // Sin barra que calibrar: al armar se guardan de pie la altura de la cadera y el largo de pierna en píxeles (ver el
+      // bloque SWITCHBLADE_* arriba).
+      this.prepping = false;
+      this.state = null;
+      this.switchbladeArmSince = null;
+      this.switchbladeArmBadSince = null;
+      this.switchbladePrevHipY = null;
+      this.switchbladeAcc = null;
+      this.switchbladeRef = null;
+      this.switchbladeArmedAt = null;
+      this.switchbladeIdleSince = null;
+      this.switchbladeAirSince = null;
+      this.switchbladePeak = null;
+      this.switchbladeRejected = 0;
+      this.switchbladeNoSplitRun = 0;
+      this.switchbladeLastFront = 0;
+      this.setStatus(SWITCHBLADE_WAIT_MSG);
+    } else if (this.counterKey === "jumprope") {
+      // Sin nada que calibrar con la cámara: al armar se mide, de pie y quieto, el largo del tronco (escala) y el ruido de
+      // la señal (ver el bloque JUMPROPE_* arriba).
+      this.prepping = false;
+      this.state = null;
+      this.jumpRopeArm = null;
+      this.jumpRopeLastT = null;
+      this.jumpRopeLastCountAt = null;
+      this.jumpRopeCfg = null;
+      this.jumpRopeResetDetector();
+      this.setStatus(JUMPROPE_WAIT_MSG);
     } else if (this.counterKey === "jumpingjack") {
       // Tampoco hay nada que calibrar: los umbrales son proporcionales
       // al ancho de hombros/cadera, no dependen de la distancia a la
@@ -7124,6 +7700,17 @@ class WorkoutSession {
       this.state = null;
       this.resetScissorTracking();
       this.setStatus("Túmbate boca arriba, con la cámara a un lado (de perfil), y empieza a alternar las piernas a un palmo del suelo.");
+    } else if (this.counterKey === "glutebridge") {
+      // Nada que calibrar con la cámara: al armar se guarda el reposo de la cadera (ver el bloque GLUTEBRIDGE_* arriba).
+      this.prepping = false;
+      this.state = null;
+      this.gluteBridgeBase = null;
+      this.gluteBridgeScaleRef = null;
+      this.gluteBridgeArmAcc = null;
+      this.gluteBridgeArmedAt = null;
+      this.gluteBridgeTopSince = null;
+      this.gluteBridgeUpSince = null;
+      this.setStatus(GLUTEBRIDGE_WAIT_MSG);
     } else if (this.counterKey === "vup") {
       this.prepping = false;
       this.state = null;
@@ -7165,6 +7752,7 @@ class WorkoutSession {
       this.prepping = false;
       this.state = null;
       this.currentHoldSeconds = 0;
+      if (this.counterKey === "hollowbodyhold") { this.hollowChecker.reset(); this.setStatus(HOLLOW_WAIT_MSG); }
       if (this.counterKey === "lsithold") { this.lsitHoldChecker.reset(); this.lsitTracker.reset(); this.lsitHoldArmed = false; }
       if (this.counterKey === "supermanhold") { this.supermanTracker.reset(); this.supermanHoldArmed = false; this.setStatus(SUPERMAN_LIE_DOWN_MSG); }
       this.postureGroundConfirmed = false;
@@ -7675,7 +8263,7 @@ class WorkoutSession {
         drawArm(lm[R_SHOULDER], lm[R_ELBOW], lm[R_WRIST], this.archerLiveRightAngle);
       }
 
-      if ((this.counterKey === "pushup" || this.counterKey === "inclinepushup" || this.counterKey === "kneepushup" || this.counterKey === "kneedeclinepushup" || this.counterKey === "onearmpushup" || this.counterKey === "clappushup" || this.counterKey === "pseudoplanchepushup" || this.counterKey === "pikepushup" || this.counterKey === "benchdip") && this.pushupSide) {
+      if ((this.counterKey === "pushup" || this.counterKey === "inclinepushup" || this.counterKey === "kneepushup" || this.counterKey === "kneedeclinepushup" || this.counterKey === "rockingpushup" || this.counterKey === "onearmpushup" || this.counterKey === "clappushup" || this.counterKey === "pseudoplanchepushup" || this.counterKey === "pikepushup" || this.counterKey === "benchdip") && this.pushupSide) {
         const shoulder = this.pushupSide === "left" ? lm[L_SHOULDER] : lm[R_SHOULDER];
         const elbow = this.pushupSide === "left" ? lm[L_ELBOW] : lm[R_ELBOW];
         const wrist = this.pushupSide === "left" ? lm[L_WRIST] : lm[R_WRIST];
@@ -8898,6 +9486,174 @@ class WorkoutSession {
           ? `rodilla sobre mano: ${(kneeRise * 100).toFixed(0)}% (mín ${(KNEE_DECLINE_PUSHUP_MIN_KNEE_RISE_FACTOR * 100).toFixed(0)}%)`
           : `inclinación: ${tilt.toFixed(0)}°`) +
         ` | estado: ${this.state ?? "esperando"} (abajo ≤${PUSHUP_COUNT_DOWN_ANGLE_DEG}°, arriba ≥${PUSHUP_COUNT_UP_ANGLE_DEG}°)`;
+    }
+  }
+
+  /**
+   * Rocking push-ups ("rockingpushup"): ver el bloque ROCKPUSHUP_* más arriba. De perfil, armado en plancha alta.
+   * Con la serie en marcha se siguen por separado la flexión (codo, solo con el cuerpo en plancha) y el
+   * balanceo de cadera (hombro-cadera-rodilla); la repetición se cuenta al volver a la plancha con las dos
+   * hechas. El lado que se mide se fija al armar (saltar de brazo a brazo daría flexiones falsas).
+   */
+  processRockingPushup(lm, now) {
+    const lShoulder = lm[L_SHOULDER], rShoulder = lm[R_SHOULDER];
+    const lElbow = lm[L_ELBOW], rElbow = lm[R_ELBOW];
+    const lWrist = lm[L_WRIST], rWrist = lm[R_WRIST];
+    const lHip = lm[L_HIP], rHip = lm[R_HIP];
+    const lKnee = lm[L_KNEE], rKnee = lm[R_KNEE];
+    const sideVis = (s, e, w, h, k) => ((s.visibility ?? 1) + (e.visibility ?? 1) + (w.visibility ?? 1) + (h.visibility ?? 1) + (k.visibility ?? 1)) / 5;
+    const leftVis = sideVis(lShoulder, lElbow, lWrist, lHip, lKnee);
+    const rightVis = sideVis(rShoulder, rElbow, rWrist, rHip, rKnee);
+    const useLeft = this.state !== null && this.pushupSide ? this.pushupSide === "left" : leftVis >= rightVis;
+    const vis = useLeft ? leftVis : rightVis;
+    const minVis = this.state === null ? ROCKPUSHUP_MIN_VISIBILITY : ROCKPUSHUP_LOOSE_VISIBILITY;
+    const log = (m) => { if (this.logScissor) this.logScissor("[rocking push-up] " + m); };
+
+    if (vis < minVis) {
+      if (this.state === null) {
+        this.announceStatus("No se te ven bien el hombro, el codo, la muñeca, la cadera y la rodilla. Ponte de perfil a la cámara, en plancha, con el cuerpo entero en el encuadre.");
+      }
+      if (this.debugEl) this.debugEl.textContent = "buscando hombro, codo, muñeca, cadera y rodilla de perfil…";
+      this.groundStableSince = null;
+      this.armVotes = [];
+      this.rockSmAt = null;
+      this.noteAbsence(now);
+      return;
+    }
+    this.outOfFrameSince = null;
+
+    const shoulder = useLeft ? lShoulder : rShoulder;
+    const elbow = useLeft ? lElbow : rElbow;
+    const wrist = useLeft ? lWrist : rWrist;
+    const hip = useLeft ? lHip : rHip;
+    const knee = useLeft ? lKnee : rKnee;
+    const elbowAngle = angle(shoulder, elbow, wrist);
+    const hipRaw = angle(shoulder, hip, knee);
+    const tilt = tiltFromHorizontal(shoulder, hip);
+    if (elbowAngle === null || hipRaw === null || tilt === null) return;
+    this.pushupSide = useLeft ? "left" : "right";
+
+    // Ángulo de cadera suavizado (EMA); si pasa más de 1 s sin datos se reinicia.
+    if (this.rockSmAt != null && now - this.rockSmAt > 1000) this.rockHipSm = null;
+    this.rockSmAt = now;
+    this.rockHipSm = this.rockHipSm == null ? hipRaw : ROCKPUSHUP_SMOOTH_ALPHA * hipRaw + (1 - ROCKPUSHUP_SMOOTH_ALPHA) * this.rockHipSm;
+    const hipAngle = this.rockHipSm;
+
+    if (this.state === null) {
+      this.rockPushBottom = false;
+      this.rockPushDone = false;
+      this.rockBackDone = false;
+      this.rockBackNow = false;
+      this.rockProgressAt = null;
+      const lineOk = hipAngle >= ROCKPUSHUP_LINE_MIN_DEG;
+      const tiltOk = tilt <= ON_GROUND_MAX_TILT_DEG;
+      const armsStraight = elbowAngle >= PUSHUP_ARM_GATE_ANGLE_DEG;
+      const armOk = lineOk && tiltOk && armsStraight;
+      if (this.armVote(armOk, now)) {
+        this.state = "top";
+        this.groundStableSince = null;
+        this.offGroundSince = null;
+        this.idleSince = null;
+        this.repStartTime = now;
+        if (!this.startupVoiceGiven) {
+          this.startupVoiceGiven = true;
+          this.announceStatus(
+            "Te veo. ¡Listo! Haz una flexión y balancea la cadera hacia atrás, hacia los talones. Para terminar una serie, ponte de pie o sal del encuadre.",
+            "startup_ready"
+          );
+        } else {
+          this.announceStatus("¡Listo! Puedes empezar.", "ready_to_go");
+        }
+      } else if (armOk) {
+        this.setStatus("Postura vista… confirmando (no te muevas).");
+      } else {
+        const falta = [];
+        if (!tiltOk) falta.push("cuerpo más horizontal, boca abajo");
+        if (!lineOk) falta.push("cuerpo recto de la cabeza a las rodillas");
+        if (!armsStraight) falta.push("brazos estirados");
+        this.setStatus(ROCKPUSHUP_WAIT_MSG + (falta.length ? " Falta: " + falta.join(", ") + "." : ""));
+        if (this.rockLogAt == null || now - this.rockLogAt >= ROCKPUSHUP_LOG_EVERY_MS) {
+          this.rockLogAt = now;
+          log(`esperando: falta=${falta.join("|") || "-"} codo=${elbowAngle.toFixed(0)}° cadera=${hipAngle.toFixed(0)}° (mín ${ROCKPUSHUP_LINE_MIN_DEG}) incl=${tilt.toFixed(0)}° vis=${vis.toFixed(2)}`);
+        }
+      }
+      if (this.debugEl) {
+        this.debugEl.textContent =
+          `codo (${useLeft ? "izq" : "der"}): ${elbowAngle.toFixed(0)}° (≥${PUSHUP_ARM_GATE_ANGLE_DEG}°) | cadera hombro-cadera-rodilla: ${hipAngle.toFixed(0)}° (≥${ROCKPUSHUP_LINE_MIN_DEG}°) | ` +
+          `inclinación: ${tilt.toFixed(0)}° | esperando a armar`;
+      }
+      return;
+    }
+
+    // Ya armado: de pie / fuera de postura un rato seguido = serie terminada. Los frames sueltos no cuentan
+    // (en el balanceo el brazo y la cadera se tapan y ensucian la inclinación).
+    if (tilt > ROCKPUSHUP_BROKEN_TILT_DEG) {
+      if (this.offGroundSince === null) this.offGroundSince = now;
+      if (now - this.offGroundSince >= ROCKPUSHUP_BROKEN_STABLE_MS) {
+        this.closeActiveSet();
+        return;
+      }
+    } else {
+      this.offGroundSince = null;
+    }
+
+    const inPlank = hipAngle >= ROCKPUSHUP_PLANK_MIN_DEG;
+
+    // Balanceo: cadera atrás (ángulo cerrado) y vuelta.
+    if (!this.rockBackNow && hipAngle <= ROCKPUSHUP_ROCK_BACK_DEG) {
+      this.rockBackNow = true;
+      this.rockBackDone = true;
+      this.rockProgressAt = now;
+      this.rockPushBottom = false;   // un codo medio doblado dentro del balanceo no es una flexión
+      log(`balanceo atrás: cadera=${hipAngle.toFixed(0)}°`);
+    } else if (this.rockBackNow && hipAngle >= ROCKPUSHUP_ROCK_RETURN_DEG) {
+      this.rockBackNow = false;
+      this.rockProgressAt = now;
+      log(`vuelta a la plancha: cadera=${hipAngle.toFixed(0)}°`);
+    }
+
+    // Flexión: solo con el cuerpo en plancha y fuera del balanceo.
+    if (inPlank && !this.rockBackNow) {
+      if (!this.rockPushBottom && elbowAngle <= PUSHUP_COUNT_DOWN_ANGLE_DEG) {
+        this.rockPushBottom = true;
+        this.rockProgressAt = now;
+      } else if (this.rockPushBottom && elbowAngle >= PUSHUP_COUNT_UP_ANGLE_DEG) {
+        this.rockPushBottom = false;
+        this.rockPushDone = true;
+        this.rockProgressAt = now;
+        log(`flexión hecha: codo=${elbowAngle.toFixed(0)}°`);
+      }
+    }
+
+    // Repetición completa: flexión + balanceo hechos y de vuelta en plancha con los brazos estirados.
+    if (
+      this.rockPushDone && this.rockBackDone && !this.rockBackNow && !this.rockPushBottom &&
+      inPlank && hipAngle >= ROCKPUSHUP_ROCK_RETURN_DEG && elbowAngle >= PUSHUP_COUNT_UP_ANGLE_DEG
+    ) {
+      this.countRep((now - this.repStartTime) / 1000, now, "Rocking push-up", ROCKPUSHUP_MIN_REP_SECONDS);
+      this.rockPushDone = false;
+      this.rockBackDone = false;
+      this.rockProgressAt = null;
+      this.repStartTime = now;
+    } else if (
+      this.rockProgressAt != null && !this.rockBackNow && !this.rockPushBottom &&
+      (this.rockPushDone || this.rockBackDone) && now - this.rockProgressAt > ROCKPUSHUP_PHASE_TIMEOUT_MS
+    ) {
+      log(`media repetición descartada (flexión=${this.rockPushDone}, balanceo=${this.rockBackDone})`);
+      this.rockPushDone = false;
+      this.rockBackDone = false;
+      this.rockProgressAt = null;
+      this.repStartTime = now;
+    }
+
+    // Para el dibujo del brazo (naranja en "bottom") y para el cierre por inactividad.
+    this.state = this.rockBackNow ? "rocked" : this.rockPushBottom ? "bottom" : "top";
+    if (this.checkIdleSetClose(now, ROCKPUSHUP_IDLE_CLOSE_MS, this.rockBackNow || this.rockPushBottom, "top")) return;
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `codo (${useLeft ? "izq" : "der"}): ${elbowAngle.toFixed(0)}° | cadera: ${hipAngle.toFixed(0)}° (balanceo ≤${ROCKPUSHUP_ROCK_BACK_DEG}°, vuelta ≥${ROCKPUSHUP_ROCK_RETURN_DEG}°) | ` +
+        `inclinación: ${tilt.toFixed(0)}° | flexión: ${this.rockPushDone ? "sí" : "no"} · balanceo: ${this.rockBackDone ? "sí" : "no"} | estado: ${this.state}`;
     }
   }
 
@@ -10875,6 +11631,1191 @@ class WorkoutSession {
         `[heelraise] subida media ${mean.toFixed(3)} (arriba ≥${HEELRAISE_UP}, abajo ≤${HEELRAISE_DOWN}) | cada pie ≥${HEELRAISE_UP_EACH}: ` +
         `${rel.map((v) => v.toFixed(3)).join("/")} | base ${ref.l.toFixed(3)}/${ref.r.toFixed(3)} | ` +
         `pies vis ${feetVis.toFixed(2)} | estado: ${this.state}`;
+    }
+  }
+
+  /**
+   * Step ups: subir a una superficie (escalón, banco, caja) y bajar. Se mide la altura de la cadera y de cada
+   * tobillo respecto a la referencia guardada al armar (ver el bloque STEPUP_* de arriba). Una repetición solo
+   * cuenta si se ve (1) un pie apoyado en alto con el otro abajo, (2) la cadera subiendo con el cuerpo hasta
+   * quedar de pie encima, y (3) la vuelta de cadera y tobillos al nivel del suelo. Se cierra la serie tras
+   * STEPUP_IDLE_CLOSE_MS sin repetir.
+   */
+  processStepUp(lm, now) {
+    const lH = lm[L_HIP], rH = lm[R_HIP];
+    const feet = [
+      { a: lm[L_ANKLE], hip: lH },
+      { a: lm[R_ANKLE], hip: rH },
+    ];
+    const vis = (p) => (p ? (p.visibility ?? 1) : 0);
+
+    // Cierre por inactividad: solo si ya hay reps en la serie y estás abajo (en el suelo) esperando.
+    if (this.state === "down" && this.currentSetReps > 0 && this.stepUpIdleSince !== null
+      && now - this.stepUpIdleSince >= STEPUP_IDLE_CLOSE_MS) {
+      this.closeActiveSet();
+      return;
+    }
+
+    const hipsVis = Math.min(vis(lH), vis(rH));
+    if (hipsVis < STEPUP_HIPS_MIN_VISIBILITY) {
+      this.announceStatus("No se te ven las caderas. Ponte de pie, con las piernas enteras en el encuadre.", "stepup_novis");
+      if (this.debugEl) this.debugEl.textContent = `buscando caderas… vis ${hipsVis.toFixed(2)}`;
+      this.stepUpArmSince = null;
+      this.noteAbsence(now);
+      return;
+    }
+    this.outOfFrameSince = null;
+
+    const aspect = (this.video && this.video.videoWidth) ? (this.video.videoHeight / this.video.videoWidth) : 1.78;
+    const dist = (a, b) => Math.hypot(a.x - b.x, (a.y - b.y) * aspect); // en unidades de ancho de imagen
+    for (const f of feet) {
+      f.vis = vis(f.a);
+      f.leg = f.a ? dist(f.hip, f.a) : 0;
+    }
+    const feetVis = Math.min(feet[0].vis, feet[1].vis);
+    const hipY = (lH.y + rH.y) / 2;
+    const avgLeg = (feet[0].leg + feet[1].leg) / 2;
+
+    // --- Armar: de pie en el suelo, quieto, los dos pies a la misma altura y las piernas enteras a la vista ---
+    if (this.state === null) {
+      const legsEven = Math.abs(feet[0].leg - feet[1].leg) <= STEPUP_ARM_MAX_LEG_DIFF * Math.max(feet[0].leg, feet[1].leg);
+      const bothOnFloor = feetVis >= STEPUP_MIN_VISIBILITY
+        && Math.abs(feet[0].a.y - feet[1].a.y) * aspect <= STEPUP_ARM_MAX_ASYM * avgLeg;
+      const still = this.stepUpPrevHipY != null
+        && Math.abs(hipY - this.stepUpPrevHipY) * aspect <= STEPUP_ARM_MAX_JUMP * avgLeg;
+      this.stepUpPrevHipY = hipY;
+      if (feetVis >= STEPUP_MIN_VISIBILITY && legsEven && bothOnFloor && still) {
+        if (this.stepUpArmSince == null) {
+          this.stepUpArmSince = now;
+          this.stepUpAcc = { hip: 0, l: 0, r: 0, leg: 0, n: 0 };
+        }
+        const a = this.stepUpAcc;
+        a.hip += hipY; a.l += feet[0].a.y; a.r += feet[1].a.y; a.leg += avgLeg; a.n += 1;
+        if (now - this.stepUpArmSince >= STEPUP_ARM_STABLE_MS) {
+          this.stepUpRef = { hip: a.hip / a.n, l: a.l / a.n, r: a.r / a.n, leg: a.leg / a.n };
+          this.state = "down";
+          this.stepUpArmSince = null;
+          this.stepUpArmedAt = now;
+          this.stepUpIdleSince = now;
+          this.stepUpUpSince = null;
+          this.stepUpAsymAt = null;
+          this.stepUpSurface = 0;
+          this.stepUpRepStart = null;
+          this.stepUpTopSince = null;
+          this.announceStatus("¡Listo! Sube un pie al escalón, sube el otro y baja.", "ready_to_go");
+        } else {
+          this.setStatus("De pie en el suelo… confirmando (no te muevas)");
+        }
+      } else {
+        this.stepUpArmSince = null;
+        this.setStatus(feetVis < STEPUP_MIN_VISIBILITY
+          ? "No se te ven los pies. Aléjate un poco para que quepan las piernas enteras."
+          : (!bothOnFloor ? "Ponte con los dos pies en el suelo, a la misma altura." : this.groundWaitingMessage()));
+      }
+      if (this.debugEl) {
+        this.debugEl.textContent = `[stepup] armando — tobillos vis ${feetVis.toFixed(2)} | piernas ${feet[0].leg.toFixed(3)}/${feet[1].leg.toFixed(3)} | ` +
+          `pies a la par ${bothOnFloor} | parejas ${legsEven} quieto ${still}`;
+      }
+      return;
+    }
+
+    // Ya armado: tobillos fuera de encuadre un momento = frame ignorado. Los de poca visibilidad no cuentan.
+    const used = feet.map((f, i) => ({ f, i })).filter(({ f }) => f.vis >= STEPUP_ANKLE_LOST_VISIBILITY);
+    if (used.length === 0) return;
+
+    const ref = this.stepUpRef;
+    const L = ref.leg;
+    const hipRise = (ref.hip - hipY) * aspect / L; // >0 = cadera más alta que de pie en el suelo
+    const rise = used.map(({ f, i }) => ((i === 0 ? ref.l : ref.r) - f.a.y) * aspect / L); // >0 = tobillo más alto
+    const maxRise = Math.max(...rise);
+    const asym = used.length === 2 ? Math.abs(rise[0] - rise[1]) : 0;
+
+    if (this.state === "down") {
+      // 1) Un pie ya en la superficie (alto) y el otro todavía abajo: se guarda cuándo y a qué altura estaba.
+      if (used.length === 2 && maxRise >= STEPUP_FOOT_ON_SURFACE && asym >= STEPUP_ASYM_MIN) {
+        if (this.stepUpAsymAt === null || now - this.stepUpAsymAt > STEPUP_ASYM_WINDOW_MS) this.stepUpRepStart = now;
+        this.stepUpAsymAt = now;
+        this.stepUpSurface = maxRise;
+      }
+      const sawFoot = this.stepUpAsymAt !== null && now - this.stepUpAsymAt <= STEPUP_ASYM_WINDOW_MS;
+      const settled = (now - this.stepUpArmedAt) >= STEPUP_ARM_SETTLE_MS;
+      // 2) La cadera ha subido con el cuerpo: estás de pie encima de la superficie.
+      const needHip = Math.max(STEPUP_TOP_HIP_MIN, STEPUP_TOP_HIP_FRACTION * this.stepUpSurface);
+      if (settled && sawFoot && hipRise >= needHip && maxRise >= STEPUP_FOOT_ON_SURFACE) {
+        if (this.stepUpTopSince == null) this.stepUpTopSince = now;
+        if (now - this.stepUpTopSince >= STEPUP_TOP_STABLE_MS) {
+          this.state = "up";
+          this.stepUpUpSince = now;
+          this.repStartTime = this.stepUpRepStart != null ? this.stepUpRepStart : now;
+          this.stepUpTopSince = null;
+          this.setStatus("Arriba… ahora baja.");
+        }
+      } else {
+        this.stepUpTopSince = null;
+        if (!sawFoot) { this.stepUpAsymAt = null; this.stepUpSurface = 0; this.stepUpRepStart = null; }
+        const onFloor = Math.abs(hipRise) <= STEPUP_BASE_TRACK_BAND && rise.every((r) => Math.abs(r) <= STEPUP_BASE_TRACK_BAND);
+        if (onFloor) {
+          // La referencia sigue a tu postura de pie (deriva lenta) mientras estás claramente en el suelo.
+          const k = STEPUP_BASE_ALPHA;
+          ref.hip = (1 - k) * ref.hip + k * hipY;
+          for (const { f, i } of used) {
+            if (i === 0) ref.l = (1 - k) * ref.l + k * f.a.y; else ref.r = (1 - k) * ref.r + k * f.a.y;
+          }
+          if (used.length === 2) ref.leg = (1 - k) * ref.leg + k * avgLeg;
+        }
+      }
+    } else if (this.state === "up") {
+      if (now - this.stepUpUpSince > STEPUP_MAX_UP_MS) {
+        // Llevas demasiado arriba: se descarta (no cuenta) y hay que volver a colocarse para armar de nuevo.
+        this.state = null;
+        this.stepUpArmSince = null;
+        this.stepUpPrevHipY = null;
+        this.stepUpIdleSince = now;
+        this.setStatus(this.groundWaitingMessage());
+      } else if (hipRise <= STEPUP_DOWN_HIP && maxRise <= STEPUP_DOWN_ANKLE) {
+        // 3) Has bajado: cadera y los dos tobillos de vuelta al nivel del suelo.
+        this.countRep((now - this.repStartTime) / 1000, now, "Step up", STEPUP_MIN_REP_SECONDS);
+        this.state = "down";
+        this.stepUpIdleSince = now;
+        this.stepUpAsymAt = null;
+        this.stepUpSurface = 0;
+        this.stepUpRepStart = null;
+        this.stepUpTopSince = null;
+      }
+    }
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `[stepup] cadera +${hipRise.toFixed(3)} (arriba ≥${STEPUP_TOP_HIP_MIN}, abajo ≤${STEPUP_DOWN_HIP}) | ` +
+        `tobillos ${rise.map((v) => v.toFixed(3)).join("/")} (pie en alto ≥${STEPUP_FOOT_ON_SURFACE}, dif ${asym.toFixed(3)} ≥${STEPUP_ASYM_MIN}) | ` +
+        `superficie ${this.stepUpSurface.toFixed(3)} | estado: ${this.state}`;
+    }
+  }
+
+  /**
+   * Reinicia el detector de picos de la comba (filtros, extremos, racha de saltos). No toca las reps ya contadas.
+   */
+  jumpRopeResetDetector() {
+    this.jumpRopeS = null;        // señal suavizada
+    this.jumpRopeBase = null;     // tendencia lenta
+    this.jumpRopeLookMax = true;  // buscando un máximo (true) o un mínimo (false)
+    this.jumpRopeMax = 0;
+    this.jumpRopeMaxT = 0;
+    this.jumpRopeMin = 0;
+    this.jumpRopeTrough = 0;
+    this.jumpRopeLastPeakT = null;
+    this.jumpRopeRun = [];        // picos del arranque, aún sin contar
+    this.jumpRopeBurst = false;   // ya hay ritmo: cada pico nuevo cuenta
+    this.jumpRopeSwings = [];     // amplitud de los últimos saltos aceptados
+    this.jumpRopeArmsUpAt = -Infinity;
+    this.jumpRopeKneesUpAt = -Infinity;
+    this.jumpRopeRejected = 0;
+    this.jumpRopeIv = [];         // últimos intervalos entre saltos contados (ms)
+    this.jumpRopeBuf = [];        // últimas muestras de "d" para medir si el rebote es periódico
+    this.jumpRopeScore = 0;       // periodicidad (0-1) en el último pico
+  }
+
+  /**
+   * Cuánto de periódico es el rebote reciente: autocorrelación normalizada de "d" en los últimos JUMPROPE_PERIOD_WINDOW_MS,
+   * mejor valor entre los retardos que corresponden a 1-4 saltos por segundo. Saltar a la comba da valores altos (0.6-0.9);
+   * el ruido de los landmarks y los balanceos irregulares, bajos. 0 = aún no hay ventana suficiente.
+   */
+  jumpRopePeriodicity(now) {
+    const buf = this.jumpRopeBuf;
+    const step = JUMPROPE_PERIOD_STEP_MS;
+    const n = Math.round(JUMPROPE_PERIOD_WINDOW_MS / step);
+    if (buf.length < 8 || now - buf[0].t < JUMPROPE_PERIOD_WINDOW_MS * 0.8) return 0;
+    const x = new Array(n);
+    let j = 0;
+    for (let i = 0; i < n; i++) {
+      const tt = now - (n - 1 - i) * step;
+      while (j < buf.length - 2 && buf[j + 1].t < tt) j++;
+      const a = buf[j], b = buf[j + 1];
+      if (tt <= a.t) x[i] = a.d;
+      else if (tt >= b.t) x[i] = b.d;
+      else x[i] = a.d + (b.d - a.d) * (tt - a.t) / (b.t - a.t);
+    }
+    let mean = 0;
+    for (let i = 0; i < n; i++) mean += x[i];
+    mean /= n;
+    let e = 0;
+    for (let i = 0; i < n; i++) { x[i] -= mean; e += x[i] * x[i]; }
+    e /= n;
+    if (e < 1e-9) return 0;
+    const lagMin = Math.round(JUMPROPE_MIN_INTERVAL_MS / step);
+    const lagMax = Math.min(Math.round(JUMPROPE_MAX_INTERVAL_MS / step), Math.floor(n / 2));
+    let best = 0;
+    for (let lag = lagMin; lag <= lagMax; lag++) {
+      let acc = 0;
+      for (let i = 0; i + lag < n; i++) acc += x[i] * x[i + lag];
+      const r = (acc / (n - lag)) / e; // sin sesgo por la longitud del solape
+      if (r > best) best = r;
+    }
+    return best;
+  }
+
+  /**
+   * Comba (saltar a la cuerda), de pie. Ver el bloque JUMPROPE_* de más arriba para la técnica, la señal y los umbrales.
+   * Estados: null (sin armar: midiendo de pie y quieto) -> "down" (armado; cuenta saltos). Se cierra la serie sola tras
+   * JUMPROPE_IDLE_CLOSE_MS sin saltar o al salir del encuadre.
+   */
+  processJumpRope(lm, now) {
+    const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER], lH = lm[L_HIP], rH = lm[R_HIP];
+    const lK = lm[L_KNEE], rK = lm[R_KNEE], lA = lm[L_ANKLE], rA = lm[R_ANKLE];
+    const lW = lm[L_WRIST], rW = lm[R_WRIST];
+    const vis = (p) => (p ? (p.visibility ?? 1) : 0);
+
+    // Cierre por inactividad: solo si ya hay saltos en la serie.
+    if (this.state !== null && this.currentSetReps > 0 && this.jumpRopeLastCountAt !== null
+      && now - this.jumpRopeLastCountAt >= JUMPROPE_IDLE_CLOSE_MS) {
+      this.closeActiveSet();
+      return;
+    }
+
+    const coreVis = Math.min(vis(lS), vis(rS), vis(lH), vis(rH));
+    if (coreVis < JUMPROPE_CORE_MIN_VISIBILITY) {
+      if (this.state === null) {
+        this.announceStatus("No se te ven los hombros y las caderas. Ponte de pie, con el cuerpo entero en el encuadre.", "jumprope_novis");
+        this.jumpRopeArm = null;
+      }
+      if (this.debugEl) this.debugEl.textContent = `[comba] buscando hombros y caderas… vis ${coreVis.toFixed(2)}`;
+      this.noteAbsence(now, JUMPROPE_OUT_OF_FRAME_MS);
+      return;
+    }
+    this.outOfFrameSince = null;
+
+    const shoulderY = (lS.y + rS.y) / 2, hipY = (lH.y + rH.y) / 2;
+    const torsoNow = hipY - shoulderY; // >0 con el tronco erguido
+    // Brazos arriba (jumping jacks, saludar): alguna muñeca vista por encima de (hombro + margen x tronco).
+    const armsUp = torsoNow > 0 && [lW, rW].some((w) => vis(w) >= JUMPROPE_LIMB_MIN_VISIBILITY
+      && w.y < shoulderY + JUMPROPE_ARMS_UP_MARGIN * torsoNow);
+
+    // --- Armar: de pie, quieto, brazos abajo; se mide la escala (tronco) y el ruido de la señal ---
+    if (this.state === null) {
+      const ankles = vis(lA) >= JUMPROPE_MIN_VISIBILITY && vis(rA) >= JUMPROPE_MIN_VISIBILITY;
+      const knees = vis(lK) >= JUMPROPE_MIN_VISIBILITY && vis(rK) >= JUMPROPE_MIN_VISIBILITY;
+      const ok = coreVis >= JUMPROPE_MIN_VISIBILITY && torsoNow >= JUMPROPE_MIN_TORSO_Y && !armsUp;
+      let a = this.jumpRopeArm;
+      if (ok && a && a.ankles !== ankles) { a = null; this.jumpRopeArm = null; } // cambió el conjunto de puntos: otra ventana
+      if (ok) {
+        a = this.jumpRopeArm;
+        if (!a) {
+          a = this.jumpRopeArm = { since: now, badSince: null, ankles, n: 0, sum: 0, sumsq: 0, torso: 0, thigh: 0, thighN: 0, ys: [], ts: [] };
+        }
+        a.badSince = null;
+        const y = ankles
+          ? (lS.y + rS.y + lH.y + rH.y + lA.y + rA.y) / 6
+          : (lS.y + rS.y + lH.y + rH.y) / 4;
+        a.n += 1; a.sum += y; a.sumsq += y * y; a.torso += torsoNow; a.ys.push(y); a.ts.push(now);
+        if (knees) { a.thigh += (lK.y + rK.y) / 2 - hipY; a.thighN += 1; }
+        if (now - a.since >= JUMPROPE_ARM_STABLE_MS && a.n >= JUMPROPE_ARM_MIN_SAMPLES) {
+          const mean = a.sum / a.n;
+          const torso = a.torso / a.n;
+          const sigma = Math.sqrt(Math.max(0, a.sumsq / a.n - mean * mean)) / torso; // en largos de tronco
+          if (sigma <= JUMPROPE_ARM_MAX_SIGMA) {
+            // Ruido que quedará en "d" (la señal ya suavizada y sin tendencia): se pasan por los mismos filtros las
+            // muestras de la ventana. Lo que importa para no inventar picos es ESE ruido, no el bruto.
+            let s = null, sum1 = 0, sum2 = 0, nD = 0;
+            for (let i = 0; i < a.ys.length; i++) {
+              const hi = -a.ys[i] / torso;
+              if (s === null) { s = hi; continue; }
+              s += (hi - s) * (1 - Math.exp(-(a.ts[i] - a.ts[i - 1]) / JUMPROPE_SMOOTH_TAU_MS));
+              if (a.ts[i] - a.since >= JUMPROPE_ARM_FILTER_SKIP_MS) { sum1 += s; sum2 += s * s; nD += 1; }
+            }
+            const sigmaD = nD >= 3 ? Math.sqrt(Math.max(0, sum2 / nD - (sum1 / nD) * (sum1 / nD))) : sigma;
+            const delta = Math.min(JUMPROPE_DELTA_MAX, Math.max(JUMPROPE_DELTA_MIN, JUMPROPE_DELTA_NOISE_FACTOR * sigmaD));
+            this.jumpRopeCfg = { ankles, scale: torso, thigh: a.thighN > 0 ? a.thigh / a.thighN : null, delta, sigma: sigmaD, h0: -mean / torso };
+            this.jumpRopeResetDetector();
+            this.jumpRopeLastT = null;
+            this.jumpRopeLastCountAt = null;
+            this.jumpRopeArm = null;
+            this.state = "down";
+            const hint = delta >= JUMPROPE_NOISY_DELTA
+              ? " Con esta cámara y esta luz, salta algo más alto de lo normal (4 cm o más) para que se detecte."
+              : "";
+            this.announceStatus("¡Listo! Salta a la comba con saltitos bajos, con las puntas de los pies." + hint, "ready_to_go");
+          } else {
+            this.jumpRopeArm = null; // demasiado movimiento: vuelve a medir
+            this.setStatus("Quédate de pie, quieto, para calibrar (sin saltar todavía).");
+          }
+        } else {
+          this.setStatus("De pie, quieto… confirmando (no te muevas)");
+        }
+      } else if (a) {
+        // Un frame suelto que no cumple (parpadeo del seguimiento) no reinicia la ventana: solo si se mantiene.
+        if (a.badSince == null) a.badSince = now;
+        if (now - a.badSince >= JUMPROPE_ARM_NOISE_TOLERANCE_MS) this.jumpRopeArm = null;
+      } else {
+        this.setStatus(armsUp
+          ? "Baja las manos: sujeta la comba a la altura de la cadera."
+          : (coreVis < JUMPROPE_MIN_VISIBILITY
+            ? "No se te ven bien los hombros y las caderas: aléjate un poco y enciende más luz."
+            : JUMPROPE_WAIT_MSG));
+      }
+      if (this.debugEl) {
+        this.debugEl.textContent = `[comba] armando — vis ${coreVis.toFixed(2)} | tronco ${torsoNow.toFixed(3)} (≥${JUMPROPE_MIN_TORSO_Y}) | ` +
+          `brazos arriba ${armsUp} | ventana ${a ? Math.round(now - a.since) : 0}ms n=${a ? a.n : 0}`;
+      }
+      return;
+    }
+
+    // --- Armado: señal de rebote del cuerpo y detección de picos ---
+    const cfg = this.jumpRopeCfg;
+    const useAnkles = cfg.ankles && vis(lA) >= JUMPROPE_LIMB_MIN_VISIBILITY && vis(rA) >= JUMPROPE_LIMB_MIN_VISIBILITY;
+    if (cfg.ankles && !useAnkles) {
+      // Faltan los tobillos este frame: cambiaría la media de golpe (un escalón falso). Se salta el frame.
+      if (this.debugEl) this.debugEl.textContent = "[comba] tobillos no vistos este frame — frame saltado";
+      return;
+    }
+    const meanY = cfg.ankles
+      ? (lS.y + rS.y + lH.y + rH.y + lA.y + rA.y) / 6
+      : (lS.y + rS.y + lH.y + rH.y) / 4;
+
+    // La escala sigue despacio al tronco visible (acercarte o alejarte); el tronco inclinado lo acorta, por eso solo
+    // se acepta si queda cerca de la escala actual.
+    if (torsoNow > 0.6 * cfg.scale && torsoNow < 1.7 * cfg.scale) cfg.scale += (torsoNow - cfg.scale) * 0.02;
+    const h = -meanY / cfg.scale; // sube = más grande
+
+    const dt = this.jumpRopeLastT === null ? 0 : now - this.jumpRopeLastT;
+    this.jumpRopeLastT = now;
+    if (this.jumpRopeS === null || dt > JUMPROPE_MAX_FRAME_GAP_MS || dt < 0) {
+      // Primer frame, o el seguimiento se cortó: arranca el filtro de cero (sin contar nada por el salto de valor).
+      const keepSwings = this.jumpRopeSwings;
+      const afterArm = cfg.h0 !== null && cfg.h0 !== undefined; // primer frame tras armar: se parte de la media de la ventana (sin ruido)
+      this.jumpRopeResetDetector();
+      this.jumpRopeSwings = keepSwings;
+      this.jumpRopeRampFrom = afterArm ? null : now; // tras un corte, la tendencia converge rápido al principio
+      const start = afterArm ? cfg.h0 : h;
+      cfg.h0 = null;
+      this.jumpRopeS = start; this.jumpRopeBase = start;
+      this.jumpRopeMax = 0; this.jumpRopeMaxT = now; this.jumpRopeMin = 0; this.jumpRopeTrough = 0;
+      return;
+    }
+    this.jumpRopeS += (h - this.jumpRopeS) * (1 - Math.exp(-dt / JUMPROPE_SMOOTH_TAU_MS));
+    const baseTau = this.jumpRopeRampFrom == null
+      ? JUMPROPE_BASE_TAU_MS
+      : Math.min(JUMPROPE_BASE_TAU_MS, 100 + 0.9 * (now - this.jumpRopeRampFrom));
+    this.jumpRopeBase += (this.jumpRopeS - this.jumpRopeBase) * (1 - Math.exp(-dt / baseTau));
+    const d = this.jumpRopeS - this.jumpRopeBase;
+    this.jumpRopeBuf.push({ t: now, d });
+    while (this.jumpRopeBuf.length > 2 && now - this.jumpRopeBuf[0].t > JUMPROPE_PERIOD_WINDOW_MS + 500) this.jumpRopeBuf.shift();
+
+    // Puertas: brazos arriba / rodillas subidas descartan los picos cercanos.
+    if (armsUp) this.jumpRopeArmsUpAt = now;
+    if (cfg.thigh && cfg.thigh > 0) {
+      const kneeUp = [lK, rK].some((k) => vis(k) >= JUMPROPE_LIMB_MIN_VISIBILITY
+        && (k.y - hipY) < JUMPROPE_KNEE_LIFT_MIN_RATIO * cfg.thigh);
+      if (kneeUp) this.jumpRopeKneesUpAt = now;
+    }
+
+    // Si dejas de saltar más de MAX_INTERVAL_MS se pierde el ritmo (hay que volver a coger 3 saltos seguidos).
+    if (this.jumpRopeLastPeakT !== null && now - this.jumpRopeLastPeakT > JUMPROPE_MAX_INTERVAL_MS) {
+      this.jumpRopeBurst = false;
+      this.jumpRopeRun = [];
+      this.jumpRopeLastPeakT = null;
+    }
+
+    // delta efectivo: la base (ruido de tu cámara) o, si ya hay saltos recientes, una fracción de su amplitud.
+    const sw = this.jumpRopeSwings;
+    let delta = cfg.delta;
+    if (sw.length >= 3) {
+      const s = [...sw].sort((x, y) => x - y);
+      delta = Math.max(delta, JUMPROPE_SWING_REL * s[Math.floor(s.length / 2)]);
+    }
+
+    // Detección de picos con histéresis (sube y baja al menos "delta").
+    if (d > this.jumpRopeMax) { this.jumpRopeMax = d; this.jumpRopeMaxT = now; }
+    if (d < this.jumpRopeMin) { this.jumpRopeMin = d; }
+    if (this.jumpRopeLookMax) {
+      if (d < this.jumpRopeMax - delta) {
+        const swing = this.jumpRopeMax - this.jumpRopeTrough;
+        this.jumpRopeOnPeak(this.jumpRopeMaxT, swing, delta, now);
+        this.jumpRopeLookMax = false;
+        this.jumpRopeMin = d;
+      }
+    } else if (d > this.jumpRopeMin + delta) {
+      this.jumpRopeTrough = this.jumpRopeMin;
+      this.jumpRopeLookMax = true;
+      this.jumpRopeMax = d;
+      this.jumpRopeMaxT = now;
+    }
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `[comba] d ${d.toFixed(3)} (delta ${delta.toFixed(3)}, ruido ${cfg.sigma.toFixed(3)}) | ` +
+        `ritmo ${this.jumpRopeBurst ? "sí" : `buscando ${this.jumpRopeRun.length}/${JUMPROPE_START_PEAKS}`} (periodicidad ${this.jumpRopeScore.toFixed(2)}) | ` +
+        `brazos arriba ${armsUp} | descartados ${this.jumpRopeRejected} | saltos ${this.currentSetReps}`;
+    }
+  }
+
+  /**
+   * Un pico de rebote confirmado (tiempo "t" del máximo, amplitud "swing" desde el valle anterior). Decide si es un salto
+   * de comba y lo cuenta: los primeros, de golpe, cuando hay ritmo parecido Y el rebote es periódico; después, cada pico
+   * mientras siga siendo periódico.
+   */
+  jumpRopeOnPeak(t, swing, delta, now) {
+    const breakRun = () => {
+      this.jumpRopeBurst = false;
+      this.jumpRopeRun = [];
+      this.jumpRopeLastPeakT = null;
+    };
+    if (swing < 0.8 * delta) return; // no llegó a la amplitud mínima (el primer pico tras armar, p. ej.)
+    if (swing > JUMPROPE_MAX_SWING) {
+      this.jumpRopeRejected += 1;
+      breakRun();
+      this.announceStatus("Salta más bajito: en la comba bastan 2-4 cm, con las puntas de los pies.", "jumprope_high");
+      return;
+    }
+    if (t - this.jumpRopeArmsUpAt < JUMPROPE_GATE_HOLD_MS) {
+      this.jumpRopeRejected += 1;
+      breakRun();
+      this.announceStatus("Baja las manos: en la comba van a la altura de la cadera, con los codos pegados al cuerpo.", "jumprope_arms");
+      return;
+    }
+    if (t - this.jumpRopeKneesUpAt < JUMPROPE_GATE_HOLD_MS) {
+      this.jumpRopeRejected += 1;
+      breakRun();
+      this.announceStatus("No subas las rodillas: en la comba son saltitos bajos, con las piernas casi rectas.", "jumprope_knees");
+      return;
+    }
+    const last = this.jumpRopeLastPeakT;
+    if (last !== null && t - last < JUMPROPE_MIN_INTERVAL_MS) return; // pico de más dentro del mismo salto: ruido
+    // Pico menor que tus saltos recientes: tembleque, no un salto.
+    const sw = this.jumpRopeSwings;
+    if (sw.length >= 3) {
+      const sorted = [...sw].sort((x, y) => x - y);
+      if (swing < JUMPROPE_SWING_REL * sorted[Math.floor(sorted.length / 2)]) return;
+    }
+    const score = this.jumpRopePeriodicity(now);
+    this.jumpRopeScore = score;
+
+    const countOne = (intervalMs) => {
+      this.countRep(Math.max(JUMPROPE_MIN_REP_SECONDS, intervalMs / 1000), now, "Comba", JUMPROPE_MIN_REP_SECONDS);
+      this.jumpRopeLastCountAt = now;
+    };
+    const pushSwing = (v) => {
+      sw.push(v);
+      if (sw.length > JUMPROPE_SWING_HISTORY) sw.shift();
+    };
+
+    if (this.jumpRopeBurst) {
+      if (score < JUMPROPE_PERIOD_KEEP) return; // sin ritmo periódico: ni cuenta ni alarga la racha
+      const gap = last === null ? null : t - last;
+      const iv = this.jumpRopeIv;
+      if (gap !== null && iv.length >= 3) {
+        // El intervalo tiene que parecerse al de los saltos anteriores (o ser el doble: un salto que la cámara no vio).
+        const m = [...iv].sort((x, y) => x - y)[Math.floor(iv.length / 2)];
+        const near = (g, ref) => g >= ref / JUMPROPE_BURST_INTERVAL_TOL && g <= ref * JUMPROPE_BURST_INTERVAL_TOL;
+        if (!near(gap, m) && !near(gap, 2 * m)) return; // pico suelto fuera de ritmo: no cuenta (y no mueve la referencia)
+      }
+      this.jumpRopeLastPeakT = t;
+      if (gap !== null) { iv.push(gap); if (iv.length > 5) iv.shift(); }
+      pushSwing(swing);
+      countOne(gap === null ? 500 : gap);
+      return;
+    }
+    // Arranque: se acumulan picos con ritmo; se empieza a contar cuando hay START_PEAKS parecidos y el rebote es periódico.
+    const run = this.jumpRopeRun;
+    if (last === null || t - last > JUMPROPE_MAX_INTERVAL_MS) run.length = 0;
+    run.push({ t, swing });
+    this.jumpRopeLastPeakT = t;
+    while (run.length > JUMPROPE_RUN_MAX) run.shift();
+    if (run.length < JUMPROPE_START_PEAKS) return;
+    const tail = run.slice(-JUMPROPE_START_PEAKS);
+    const iv = [];
+    for (let i = 1; i < tail.length; i++) iv.push(tail[i].t - tail[i - 1].t);
+    if (Math.max(...iv) / Math.min(...iv) > JUMPROPE_INTERVAL_SPREAD) return; // ritmo irregular: se sigue mirando
+    const sws = tail.map((q) => q.swing);
+    if (Math.max(...sws) / Math.min(...sws) > JUMPROPE_SWING_SPREAD) return; // amplitudes muy desiguales: no es un rebote regular
+    if (score < JUMPROPE_PERIOD_START) return; // ritmo parecido pero sin periodicidad: puede ser ruido, se espera
+    // Se cuenta desde el principio de la racha con ritmo (intervalos parecidos al típico de la cola).
+    const sortedIv = [...iv].sort((x, y) => x - y);
+    const med = sortedIv[Math.floor(sortedIv.length / 2)];
+    let from = run.length - JUMPROPE_START_PEAKS;
+    while (from > 0) {
+      const g = run[from].t - run[from - 1].t;
+      if (g < med / JUMPROPE_RUN_INTERVAL_TOL || g > med * JUMPROPE_RUN_INTERVAL_TOL) break;
+      from -= 1;
+    }
+    this.jumpRopeBurst = true;
+    this.jumpRopeIv = [];
+    for (let i = from + 1; i < run.length; i++) this.jumpRopeIv.push(run[i].t - run[i - 1].t);
+    this.jumpRopeIv = this.jumpRopeIv.slice(-5);
+    for (let i = from; i < run.length; i++) {
+      pushSwing(run[i].swing);
+      countOne(i === from ? med : run[i].t - run[i - 1].t);
+    }
+    this.jumpRopeRun = [];
+    this.setStatus("¡Así! Sigue saltando a ese ritmo.");
+  }
+
+  /**
+   * Tuck jumps, de pie (ver el bloque TUCKJUMP_* de más arriba para la técnica y los umbrales). Estados: null (sin
+   * armar) -> "down" (en el suelo, listo) -> "up" (en el aire) -> "down"... Una repetición = un salto completo
+   * (despegue y aterrizaje) que además pasa las tres comprobaciones de forma: altura, rodillas al pecho y tronco erguido.
+   * Un salto que falla alguna NO se cuenta y se dice por qué. El aterrizaje rígido solo avisa. Se cierra la serie tras
+   * TUCKJUMP_IDLE_CLOSE_MS sin saltar.
+   */
+  processTuckJump(lm, now) {
+    const lH = lm[L_HIP], rH = lm[R_HIP], lK = lm[L_KNEE], rK = lm[R_KNEE];
+    const lA = lm[L_ANKLE], rA = lm[R_ANKLE], lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
+    const vis = (p) => (p ? (p.visibility ?? 1) : 0);
+
+    // Cierre por inactividad: solo si ya hay reps en la serie y estás en el suelo esperando.
+    if (this.state === "down" && this.currentSetReps > 0 && this.tuckJumpIdleSince !== null
+      && now - this.tuckJumpIdleSince >= TUCKJUMP_IDLE_CLOSE_MS) {
+      this.closeActiveSet();
+      return;
+    }
+
+    const hipsVis = Math.min(vis(lH), vis(rH));
+    if (hipsVis < TUCKJUMP_HIPS_MIN_VISIBILITY) {
+      if (this.state === null) {
+        this.announceStatus("No se te ven las caderas. Ponte de pie, con el cuerpo entero en el encuadre.", "tuckjump_novis");
+        this.tuckJumpArmSince = null;
+        this.tuckJumpArmBadSince = null;
+      }
+      if (this.debugEl) this.debugEl.textContent = `[tuckjump] buscando caderas… vis ${hipsVis.toFixed(2)}`;
+      this.noteAbsence(now, TUCKJUMP_OUT_OF_FRAME_MS);
+      return;
+    }
+    this.outOfFrameSince = null;
+
+    const hipY = (lH.y + rH.y) / 2;
+    const shoulderVis = Math.min(vis(lS), vis(rS));
+    // Altura del tronco (hombro->cadera, vertical, >0 con el tronco erguido). null = hombros no vistos.
+    const torsoNow = shoulderVis >= TUCKJUMP_SHOULDER_MIN_VISIBILITY ? hipY - (lS.y + rS.y) / 2 : null;
+
+    // --- Armar: de pie, quieto, piernas estiradas, cuerpo entero a la vista ---
+    if (this.state === null) {
+      const allVis = Math.min(hipsVis, vis(lK), vis(rK), vis(lA), vis(rA), shoulderVis);
+      const legY = (lA.y + rA.y) / 2 - hipY;
+      const thighY = (lK.y + rK.y) / 2 - hipY;
+      const kneeL = angle(lH, lK, lA), kneeR = angle(rH, rK, rA);
+      const straight = kneeL !== null && kneeR !== null && Math.min(kneeL, kneeR) >= TUCKJUMP_ARM_KNEE_MIN_DEG;
+      // De pie DE VERDAD (no sentado ni agachado): la pierna (cadera->tobillo) mucho más larga que el tronco.
+      const upright = torsoNow !== null && torsoNow > 0 && legY > 0 && thighY >= TUCKJUMP_MIN_THIGH_Y
+        && legY / torsoNow >= ARM_FRONT_LEG_TORSO_MIN_RATIO;
+      const still = this.tuckJumpPrevHipY != null && legY > 0
+        && Math.abs(hipY - this.tuckJumpPrevHipY) <= TUCKJUMP_ARM_MAX_STEP * legY;
+      this.tuckJumpPrevHipY = hipY;
+      if (allVis >= TUCKJUMP_MIN_VISIBILITY && straight && upright && still) {
+        this.tuckJumpArmBadSince = null;
+        if (this.tuckJumpArmSince == null) {
+          this.tuckJumpArmSince = now;
+          this.tuckJumpAcc = { hip: 0, leg: 0, thigh: 0, torso: 0, n: 0 };
+        }
+        const a = this.tuckJumpAcc;
+        a.hip += hipY; a.leg += legY; a.thigh += thighY; a.torso += torsoNow; a.n += 1;
+        if (now - this.tuckJumpArmSince >= TUCKJUMP_ARM_STABLE_MS) {
+          this.tuckJumpRef = { hipY: a.hip / a.n, leg: a.leg / a.n, thigh: a.thigh / a.n, torso: a.torso / a.n };
+          this.state = "down";
+          this.tuckJumpArmSince = null;
+          this.tuckJumpArmedAt = now;
+          this.tuckJumpIdleSince = now;
+          this.tuckJumpAirSince = null;
+          this.tuckJumpPeak = null;
+          this.tuckJumpLand = null;
+          this.tuckJumpStiffRun = 0;
+          this.announceStatus("¡Listo! Salta y sube las rodillas al pecho; aterriza flexionando las rodillas.", "ready_to_go");
+        } else {
+          this.setStatus("De pie, quieto… confirmando (no te muevas)");
+        }
+      } else if (this.tuckJumpArmSince != null) {
+        // Un frame suelto que no cumple (parpadeo del seguimiento) no reinicia el cronómetro de estabilidad: solo si
+        // se mantiene TUCKJUMP_ARM_NOISE_TOLERANCE_MS seguidos (mismo criterio que jumping jacks).
+        if (this.tuckJumpArmBadSince == null) this.tuckJumpArmBadSince = now;
+        if (now - this.tuckJumpArmBadSince >= TUCKJUMP_ARM_NOISE_TOLERANCE_MS) {
+          this.tuckJumpArmSince = null;
+          this.tuckJumpArmBadSince = null;
+        }
+      } else {
+        this.setStatus(allVis < TUCKJUMP_MIN_VISIBILITY
+          ? "No se te ve el cuerpo entero. Aléjate un poco para que quepan de los hombros a los pies."
+          : this.groundWaitingMessage());
+      }
+      if (this.debugEl) {
+        this.debugEl.textContent = `[tuckjump] armando — vis ${allVis.toFixed(2)} | rodillas ${kneeL === null ? "-" : kneeL.toFixed(0)}°/${kneeR === null ? "-" : kneeR.toFixed(0)}° ` +
+          `(≥${TUCKJUMP_ARM_KNEE_MIN_DEG}°) | pierna/tronco ${torsoNow ? (legY / torsoNow).toFixed(2) : "-"} (≥${ARM_FRONT_LEG_TORSO_MIN_RATIO}) | derecho ${upright} quieto ${still}`;
+      }
+      return;
+    }
+
+    // --- Ya armado ---
+    const ref = this.tuckJumpRef;
+    const hipRise = (ref.hipY - hipY) / ref.leg;   // >0 = la cadera está más alta que de pie (en largos de pierna)
+    const step = this.tuckJumpPrevHipY != null ? Math.abs(hipY - this.tuckJumpPrevHipY) / ref.leg : 0;
+    this.tuckJumpPrevHipY = hipY;
+
+    // Observación del aterrizaje anterior: ¿se hundió la cadera (rodillas flexionadas) o cayó rígido?
+    const finishLanding = () => {
+      const w = this.tuckJumpLand;
+      this.tuckJumpLand = null;
+      if (!w || !w.counted || w.n < TUCKJUMP_LAND_MIN_SAMPLES) return;
+      if (-w.minRise < TUCKJUMP_LAND_DIP_MIN) {
+        this.tuckJumpStiffRun += 1;
+        if (this.tuckJumpStiffRun >= TUCKJUMP_STIFF_WARN_AFTER) {
+          this.tuckJumpStiffRun = 0;
+          this.announceStatus("Amortigua el aterrizaje: flexiona las rodillas al caer.", "tuckjump_stiff");
+        }
+      } else {
+        this.tuckJumpStiffRun = 0;
+      }
+    };
+
+    let knees = null; // [izq, der] en largos de muslo (0 = rodilla a la altura de la cadera), null = no vista
+    if (this.state === "up" || this.debugEl) {
+      const kl = vis(lK) >= TUCKJUMP_KNEE_MIN_VISIBILITY ? (lH.y - lK.y) / ref.thigh : null;
+      const kr = vis(rK) >= TUCKJUMP_KNEE_MIN_VISIBILITY ? (rH.y - rK.y) / ref.thigh : null;
+      knees = [kl, kr];
+    }
+
+    if (this.state === "down") {
+      const settled = (now - this.tuckJumpArmedAt) >= TUCKJUMP_ARM_SETTLE_MS;
+      if (hipRise >= TUCKJUMP_TAKEOFF_RISE && settled) {
+        finishLanding();
+        this.state = "up";
+        this.tuckJumpAirSince = now;
+        this.repStartTime = now;
+        this.tuckJumpPeak = { hip: hipRise, knee: -Infinity, kl: null, kr: null, torso: null, kneeFrames: 0 };
+      } else {
+        const w = this.tuckJumpLand;
+        if (w) {
+          w.minRise = Math.min(w.minRise, hipRise);
+          w.n += 1;
+          if (now - w.since >= TUCKJUMP_LAND_WINDOW_MS) finishLanding();
+        }
+        if (step <= TUCKJUMP_REF_QUIET_STEP && Math.abs(hipRise) <= TUCKJUMP_REF_TRACK_BAND) {
+          // La referencia sigue a tu postura de pie (deriva lenta) mientras estás quieto en el suelo.
+          const k = TUCKJUMP_REF_ALPHA;
+          ref.hipY += (hipY - ref.hipY) * k;
+          if (Math.min(vis(lA), vis(rA)) >= TUCKJUMP_MIN_VISIBILITY) {
+            const legY = (lA.y + rA.y) / 2 - hipY;
+            if (legY > 0) ref.leg += (legY - ref.leg) * k;
+          }
+          if (Math.min(vis(lK), vis(rK)) >= TUCKJUMP_MIN_VISIBILITY) {
+            const thighY = (lK.y + rK.y) / 2 - hipY;
+            if (thighY >= TUCKJUMP_MIN_THIGH_Y) ref.thigh += (thighY - ref.thigh) * k;
+          }
+          if (torsoNow !== null && torsoNow > 0) ref.torso += (torsoNow - ref.torso) * k;
+        }
+      }
+    } else if (this.state === "up") {
+      const pk = this.tuckJumpPeak;
+      if (hipRise > pk.hip) pk.hip = hipRise;
+      const seen = knees.filter((v) => v !== null);
+      if (seen.length > 0) {
+        pk.kneeFrames += 1;
+        const worst = Math.min(...seen);   // la rodilla MÁS BAJA de las que se ven: tienen que subir las dos
+        if (worst > pk.knee) {
+          pk.knee = worst;
+          pk.kl = knees[0]; pk.kr = knees[1];
+          pk.torso = torsoNow !== null ? torsoNow / ref.torso : null;
+        }
+      }
+      if (hipRise <= TUCKJUMP_LAND_RISE) {
+        // --- Aterrizaje: se juzga el salto entero ---
+        const airMs = now - this.tuckJumpAirSince;
+        this.tuckJumpAirSince = null;
+        this.state = "down";
+        if (airMs < TUCKJUMP_MIN_AIR_MS) {
+          this.tuckJumpLand = null; // un bache de un frame, no un salto
+        } else {
+          this.tuckJumpIdleSince = now;
+          const jumpOk = pk.hip >= TUCKJUMP_MIN_HIP_RISE;
+          const kneesSeen = pk.kneeFrames > 0;
+          const kneesOk = kneesSeen && pk.knee >= TUCKJUMP_KNEE_MIN_RISE;
+          const torsoOk = pk.torso === null || pk.torso >= TUCKJUMP_TORSO_MIN_RATIO;
+          let counted = false;
+          let verdict;
+          if (!jumpOk) {
+            verdict = "salto bajo";
+            this.announceStatus("Salto muy bajo: impúlsate más alto para que cuente.", "tuckjump_low");
+          } else if (!kneesSeen) {
+            verdict = "rodillas no vistas";
+            this.announceStatus("No se te ven las rodillas en el aire. Colócate con el cuerpo entero en el encuadre y buena luz.", "tuckjump_novis_air");
+          } else if (!kneesOk) {
+            const one = pk.kl !== null && pk.kr !== null && Math.max(pk.kl, pk.kr) >= TUCKJUMP_KNEE_MIN_RISE;
+            verdict = one ? "solo una rodilla" : "rodillas bajas";
+            this.announceStatus(one
+              ? "Sube las DOS rodillas a la vez hacia el pecho."
+              : "Sube más las rodillas: llévalas hacia el pecho, con los muslos al menos paralelos al suelo.", "tuckjump_knees");
+          } else if (!torsoOk) {
+            verdict = "tronco inclinado";
+            this.announceStatus("Mantén el tronco erguido: sube las rodillas al pecho sin inclinarte hacia delante.", "tuckjump_torso");
+          } else {
+            verdict = "ok";
+            counted = !!this.countRep((now - this.repStartTime) / 1000, now, "Tuck jump", TUCKJUMP_MIN_REP_SECONDS);
+          }
+          if (verdict !== "ok") this.tuckJumpRejected += 1;
+          // Una línea por salto en el registro de depuración: valores reales para afinar los umbrales con vídeo real.
+          this.logScissor(`[tuckjump] ${verdict} | aire ${Math.round(airMs)}ms | cadera +${(pk.hip * 100).toFixed(0)}% (mín ${TUCKJUMP_MIN_HIP_RISE * 100}%) | ` +
+            `rodillas ${pk.kl === null ? "-" : pk.kl.toFixed(2)}/${pk.kr === null ? "-" : pk.kr.toFixed(2)} (mín ${TUCKJUMP_KNEE_MIN_RISE}) | ` +
+            `tronco ${pk.torso === null ? "-" : pk.torso.toFixed(2)} (mín ${TUCKJUMP_TORSO_MIN_RATIO})`);
+          this.tuckJumpLand = { since: now, minRise: hipRise, n: 1, counted };
+        }
+        this.tuckJumpPeak = null;
+      } else if (now - this.tuckJumpAirSince > TUCKJUMP_MAX_AIR_MS) {
+        // Demasiado tiempo "en el aire": no es un salto (te has subido a algo, o el seguimiento se ha ido). Se descarta
+        // y hay que volver a colocarse para armar de nuevo.
+        this.state = null;
+        this.tuckJumpArmSince = null;
+        this.tuckJumpArmBadSince = null;
+        this.tuckJumpPrevHipY = null;
+        this.tuckJumpAirSince = null;
+        this.tuckJumpPeak = null;
+        this.tuckJumpLand = null;
+        this.tuckJumpIdleSince = now;
+        this.setStatus(this.groundWaitingMessage());
+      }
+    }
+
+    if (this.debugEl) {
+      const pk = this.tuckJumpPeak;
+      this.debugEl.textContent =
+        `[tuckjump] cadera ${(hipRise * 100).toFixed(0)}% (despegue ≥${TUCKJUMP_TAKEOFF_RISE * 100}%, salto mín ${TUCKJUMP_MIN_HIP_RISE * 100}%) | ` +
+        `rodillas ${knees && knees[0] !== null ? knees[0].toFixed(2) : "-"}/${knees && knees[1] !== null ? knees[1].toFixed(2) : "-"} (mín ${TUCKJUMP_KNEE_MIN_RISE}) | ` +
+        `tronco ${torsoNow !== null ? (torsoNow / ref.torso).toFixed(2) : "-"} (mín ${TUCKJUMP_TORSO_MIN_RATIO}) | ` +
+        (pk ? `pico cadera ${(pk.hip * 100).toFixed(0)}% rodilla ${pk.knee === -Infinity ? "-" : pk.knee.toFixed(2)} | ` : "") +
+        `descartados ${this.tuckJumpRejected} | estado: ${this.state}`;
+    }
+  }
+
+  /**
+   * Switchblade jumps, de pie y DE PERFIL (ver el bloque SWITCHBLADE_* de más arriba para la técnica y los umbrales).
+   * Estados: null (sin armar) -> "down" (en el suelo, listo) -> "up" (en el aire) -> "down"... Una repetición = un salto
+   * completo (despegue y aterrizaje) en el que, en el aire, las piernas estiradas se abrieron en tijera y una mano llegó
+   * a un pie. Un salto que falla alguna comprobación NO se cuenta y se dice por qué. Se cierra la serie tras
+   * SWITCHBLADE_IDLE_CLOSE_MS sin saltar.
+   */
+  processSwitchblade(lm, now) {
+    const lH = lm[L_HIP], rH = lm[R_HIP], lK = lm[L_KNEE], rK = lm[R_KNEE];
+    const lA = lm[L_ANKLE], rA = lm[R_ANKLE], lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
+    const lW = lm[L_WRIST], rW = lm[R_WRIST];
+    const vis = (p) => (p ? (p.visibility ?? 1) : 0);
+    // Píxeles reales: MediaPipe da x e y normalizados por separado (ancho y alto), así que se multiplican por el vídeo.
+    const W = (this.video && this.video.videoWidth) || 640;
+    const H = (this.video && this.video.videoHeight) || 480;
+    const dist = (a, b) => Math.hypot((a.x - b.x) * W, (a.y - b.y) * H);
+
+    // Cierre por inactividad: solo si ya hay reps en la serie y estás en el suelo esperando.
+    if (this.state === "down" && this.currentSetReps > 0 && this.switchbladeIdleSince !== null
+      && now - this.switchbladeIdleSince >= SWITCHBLADE_IDLE_CLOSE_MS) {
+      this.closeActiveSet();
+      return;
+    }
+
+    const hipsVis = Math.min(vis(lH), vis(rH));
+    if (hipsVis < SWITCHBLADE_HIPS_MIN_VISIBILITY) {
+      if (this.state === null) {
+        this.announceStatus("No se te ven las caderas. Ponte de pie, de perfil, con el cuerpo entero en el encuadre.", "switchblade_novis");
+        this.switchbladeArmSince = null;
+        this.switchbladeArmBadSince = null;
+      }
+      if (this.debugEl) this.debugEl.textContent = `[switchblade] buscando caderas… vis ${hipsVis.toFixed(2)}`;
+      this.noteAbsence(now, SWITCHBLADE_OUT_OF_FRAME_MS);
+      return;
+    }
+    this.outOfFrameSince = null;
+
+    const hipY = (lH.y + rH.y) / 2;
+
+    // --- Armar: de pie, quieto, piernas estiradas y pies juntos, cuerpo entero a la vista ---
+    if (this.state === null) {
+      const allVis = Math.min(hipsVis, vis(lK), vis(rK), vis(lA), vis(rA), vis(lS), vis(rS));
+      const legPx = (dist(lH, lA) + dist(rH, rA)) / 2;
+      const kneeL = angle(lH, lK, lA), kneeR = angle(rH, rK, rA);
+      const straight = kneeL !== null && kneeR !== null && Math.min(kneeL, kneeR) >= SWITCHBLADE_ARM_KNEE_MIN_DEG;
+      const upright = legPx > 0 && (lS.y + rS.y) / 2 < hipY && hipY < (lA.y + rA.y) / 2;
+      const together = legPx > 0 && Math.abs(lA.x - rA.x) * W <= SWITCHBLADE_ARM_FEET_MAX_GAP * legPx;
+      const still = this.switchbladePrevHipY != null && legPx > 0
+        && Math.abs(hipY - this.switchbladePrevHipY) * H <= SWITCHBLADE_ARM_MAX_STEP * legPx;
+      this.switchbladePrevHipY = hipY;
+      if (allVis >= SWITCHBLADE_MIN_VISIBILITY && straight && upright && together && still) {
+        this.switchbladeArmBadSince = null;
+        if (this.switchbladeArmSince == null) {
+          this.switchbladeArmSince = now;
+          this.switchbladeAcc = { hip: 0, leg: 0, n: 0 };
+        }
+        const a = this.switchbladeAcc;
+        a.hip += hipY; a.leg += legPx; a.n += 1;
+        if (now - this.switchbladeArmSince >= SWITCHBLADE_ARM_STABLE_MS) {
+          this.switchbladeRef = { hipY: a.hip / a.n, leg: a.leg / a.n };
+          this.state = "down";
+          this.switchbladeArmSince = null;
+          this.switchbladeArmedAt = now;
+          this.switchbladeIdleSince = now;
+          this.switchbladeAirSince = null;
+          this.switchbladePeak = null;
+          this.switchbladeNoSplitRun = 0;
+          this.announceStatus("¡Listo! Salta, abre las piernas en tijera y toca el pie de delante; aterriza con los pies juntos.", "ready_to_go");
+        } else {
+          this.setStatus("De pie, quieto… confirmando (no te muevas)");
+        }
+      } else if (this.switchbladeArmSince != null) {
+        // Un frame suelto que no cumple (parpadeo del seguimiento) no reinicia el cronómetro de estabilidad: solo si se
+        // mantiene SWITCHBLADE_ARM_NOISE_MS seguidos.
+        if (this.switchbladeArmBadSince == null) this.switchbladeArmBadSince = now;
+        if (now - this.switchbladeArmBadSince >= SWITCHBLADE_ARM_NOISE_MS) {
+          this.switchbladeArmSince = null;
+          this.switchbladeArmBadSince = null;
+        }
+      } else {
+        this.setStatus(allVis < SWITCHBLADE_MIN_VISIBILITY
+          ? "Aléjate un poco: tiene que verse el cuerpo entero, de los hombros a los pies."
+          : "De pie, de perfil, quieto, con las piernas estiradas y los pies juntos.");
+      }
+      if (this.debugEl) {
+        this.debugEl.textContent = `[switchblade] armando — vis ${allVis.toFixed(2)} | rodillas ${kneeL === null ? "-" : kneeL.toFixed(0)}°/${kneeR === null ? "-" : kneeR.toFixed(0)}° ` +
+          `(≥${SWITCHBLADE_ARM_KNEE_MIN_DEG}°) | derecho ${upright} pies juntos ${together} quieto ${still}`;
+      }
+      return;
+    }
+
+    // --- Armado: suelo <-> aire ---
+    const ref = this.switchbladeRef;
+    const hipRise = ((ref.hipY - hipY) * H) / ref.leg;   // >0 = la cadera está más alta que de pie (en largos de pierna)
+    const step = this.switchbladePrevHipY != null ? (Math.abs(hipY - this.switchbladePrevHipY) * H) / ref.leg : 0;
+    this.switchbladePrevHipY = hipY;
+
+    if (this.state === "down") {
+      const settled = (now - this.switchbladeArmedAt) >= SWITCHBLADE_ARM_SETTLE_MS;
+      if (hipRise >= SWITCHBLADE_TAKEOFF_RISE && settled) {
+        this.state = "up";
+        this.switchbladeAirSince = now;
+        this.repStartTime = now;
+        this.switchbladePeak = { hip: hipRise, split: 0, front: 0, splitFrames: 0, kl: null, kr: null, reach: Infinity };
+      } else if (step <= SWITCHBLADE_REF_QUIET_STEP && Math.abs(hipRise) <= SWITCHBLADE_REF_TRACK_BAND) {
+        // De pie y quieto: la referencia sigue despacio a tu postura (te acercas o te alejas un poco).
+        ref.hipY += (hipY - ref.hipY) * SWITCHBLADE_REF_ALPHA;
+        if (Math.min(vis(lA), vis(rA)) >= SWITCHBLADE_MIN_VISIBILITY) {
+          const legNow = (dist(lH, lA) + dist(rH, rA)) / 2;
+          if (legNow > 0) ref.leg += (legNow - ref.leg) * SWITCHBLADE_REF_ALPHA;
+        }
+      }
+    } else if (this.state === "up") {
+      const pk = this.switchbladePeak;
+      if (pk) {
+        if (hipRise > pk.hip) pk.hip = hipRise;
+        // Tijera: separación horizontal de tobillos (con signo: dice qué pierna va delante) y rodillas en ese instante.
+        if (vis(lA) >= SWITCHBLADE_AIR_MIN_VISIBILITY && vis(rA) >= SWITCHBLADE_AIR_MIN_VISIBILITY) {
+          const sep = ((lA.x - rA.x) * W) / ref.leg;
+          pk.splitFrames += 1;
+          if (Math.abs(sep) > pk.split) {
+            pk.split = Math.abs(sep);
+            pk.front = sep > 0 ? 1 : -1;
+            pk.kl = vis(lK) >= SWITCHBLADE_AIR_MIN_VISIBILITY ? angle(lH, lK, lA) : null;
+            pk.kr = vis(rK) >= SWITCHBLADE_AIR_MIN_VISIBILITY ? angle(rH, rK, rA) : null;
+          }
+        }
+        // Toque: la muñeca más cercana a cualquier tobillo durante todo el vuelo.
+        for (const w of [lW, rW]) {
+          if (vis(w) < SWITCHBLADE_AIR_MIN_VISIBILITY) continue;
+          for (const an of [lA, rA]) {
+            if (vis(an) < SWITCHBLADE_AIR_MIN_VISIBILITY) continue;
+            const d = dist(w, an) / ref.leg;
+            if (d < pk.reach) pk.reach = d;
+          }
+        }
+      }
+
+      if (hipRise <= SWITCHBLADE_LAND_RISE) {
+        // --- Aterrizaje: se juzga el salto entero ---
+        const airMs = now - this.switchbladeAirSince;
+        this.switchbladeAirSince = null;
+        this.state = "down";
+        if (pk && airMs >= SWITCHBLADE_MIN_AIR_MS) {
+          this.switchbladeIdleSince = now;
+          const jumpOk = pk.hip >= SWITCHBLADE_MIN_HIP_RISE;
+          const feetSeen = pk.splitFrames > 0;
+          const splitOk = pk.split >= SWITCHBLADE_MIN_SPLIT;
+          const kneesOk = (pk.kl === null || pk.kl >= SWITCHBLADE_SPLIT_KNEE_MIN_DEG)
+            && (pk.kr === null || pk.kr >= SWITCHBLADE_SPLIT_KNEE_MIN_DEG);
+          const handsSeen = pk.reach !== Infinity;
+          const reachOk = handsSeen && pk.reach <= SWITCHBLADE_MAX_HAND_FOOT;
+          let verdict;
+          if (!jumpOk) {
+            verdict = "low";
+            this.announceStatus("Salto muy bajo: impúlsate un poco más para que cuente.", "switchblade_low");
+          } else if (!feetSeen) {
+            verdict = "novis";
+            this.announceStatus("No se te ven los pies en el aire. Colócate de perfil, con el cuerpo entero en el encuadre y buena luz.", "switchblade_novis_air");
+          } else if (!splitOk) {
+            verdict = "split";
+            this.switchbladeNoSplitRun += 1;
+            if (this.switchbladeNoSplitRun >= SWITCHBLADE_NO_SPLIT_WARN_AFTER) {
+              this.switchbladeNoSplitRun = 0;
+              this.announceStatus("No veo la tijera de las piernas. Colócate de PERFIL a la cámara (de frente una pierna tapa a la otra) y abre más las piernas, una hacia delante y otra hacia atrás.", "switchblade_profile");
+            } else {
+              this.announceStatus("Abre más las piernas en el aire: una hacia delante y otra hacia atrás, como una tijera.", "switchblade_split");
+            }
+          } else if (!kneesOk) {
+            verdict = "bent";
+            this.announceStatus("Estira las piernas en la tijera: que no se doblen las rodillas.", "switchblade_bent");
+          } else if (!reachOk) {
+            verdict = handsSeen ? "reach" : "nohands";
+            this.announceStatus(handsSeen
+              ? "Baja las manos a tocar el pie de delante mientras estás en el aire."
+              : "No se te ven las manos en el aire. Aléjate un poco para que se vea el cuerpo entero con los brazos.", "switchblade_reach");
+          } else {
+            verdict = "ok";
+            this.switchbladeNoSplitRun = 0;
+            this.countRep((now - this.repStartTime) / 1000, now, "Switchblade jump", SWITCHBLADE_MIN_REP_SECONDS);
+            this.switchbladeLastFront = pk.front;
+          }
+          if (verdict !== "ok") this.switchbladeRejected += 1;
+          // Una línea por salto en el registro de depuración: valores reales para afinar los umbrales con vídeo real.
+          this.logScissor(`[switchblade] ${verdict} | aire ${Math.round(airMs)}ms | cadera +${(pk.hip * 100).toFixed(0)}% (mín ${SWITCHBLADE_MIN_HIP_RISE * 100}%) | ` +
+            `tijera ${pk.split.toFixed(2)} (mín ${SWITCHBLADE_MIN_SPLIT}) pierna delante ${pk.front} | ` +
+            `rodillas ${pk.kl === null ? "-" : pk.kl.toFixed(0)}°/${pk.kr === null ? "-" : pk.kr.toFixed(0)}° (mín ${SWITCHBLADE_SPLIT_KNEE_MIN_DEG}°) | ` +
+            `mano-pie ${handsSeen ? pk.reach.toFixed(2) : "-"} (máx ${SWITCHBLADE_MAX_HAND_FOOT})`);
+        }
+        this.switchbladePeak = null;
+      } else if (now - this.switchbladeAirSince > SWITCHBLADE_MAX_AIR_MS) {
+        // Demasiado tiempo "en el aire": no es un salto (te has subido a algo, o el seguimiento se ha ido). Se descarta y
+        // hay que volver a colocarse para armar de nuevo.
+        this.state = null;
+        this.switchbladeArmSince = null;
+        this.switchbladeArmBadSince = null;
+        this.switchbladePrevHipY = null;
+        this.switchbladeAirSince = null;
+        this.switchbladePeak = null;
+        this.switchbladeIdleSince = now;
+        this.setStatus(this.groundWaitingMessage());
+      }
+    }
+
+    if (this.debugEl) {
+      const pk = this.switchbladePeak;
+      this.debugEl.textContent =
+        `[switchblade] cadera ${(hipRise * 100).toFixed(0)}% (despegue ≥${SWITCHBLADE_TAKEOFF_RISE * 100}%, salto mín ${SWITCHBLADE_MIN_HIP_RISE * 100}%) | ` +
+        (pk ? `tijera ${pk.split.toFixed(2)} (mín ${SWITCHBLADE_MIN_SPLIT}) mano-pie ${pk.reach === Infinity ? "-" : pk.reach.toFixed(2)} (máx ${SWITCHBLADE_MAX_HAND_FOOT}) | ` : "") +
+        `descartados ${this.switchbladeRejected} | estado: ${this.state}`;
+    }
+  }
+
+  /**
+   * Split jumps (salto en zancada), de PERFIL (ver el bloque SPLITJUMP_* de más arriba para la técnica y los umbrales).
+   * Estados: null (sin armar) -> "down" (con los pies en el suelo, en zancada) -> "up" (en el aire) -> "down"...
+   * Una repetición = un salto con los DOS pies fuera del suelo que termina en zancada (con la misma pierna delante o
+   * cambiada). Se cuenta al CONFIRMAR el aterrizaje (la zancada de después), no al despegar. Un salto que falla se
+   * descarta diciendo por qué. Se cierra la serie tras SPLITJUMP_IDLE_CLOSE_MS sin saltar.
+   */
+  processSplitJump(lm, now) {
+    const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER], lH = lm[L_HIP], rH = lm[R_HIP];
+    const lK = lm[L_KNEE], rK = lm[R_KNEE], lA = lm[L_ANKLE], rA = lm[R_ANKLE];
+    const vis = (p) => (p ? (p.visibility ?? 1) : 0);
+    // Todo en unidades de ANCHO de imagen: x ya lo está; y se multiplica por alto/ancho del vídeo.
+    const asp = (this.video && this.video.videoWidth) ? (this.video.videoHeight / this.video.videoWidth) : 1.78;
+    const flat = (p) => ({ x: p.x, y: p.y * asp });
+    const bend = (h, k, a) => (vis(k) >= SPLITJUMP_KNEE_MIN_VISIBILITY ? angle(flat(h), flat(k), flat(a)) : null);
+
+    // Cierre por inactividad: solo si ya hay reps en la serie y estás en el suelo esperando.
+    if (this.state === "down" && this.currentSetReps > 0 && this.splitJumpIdleSince !== null
+      && now - this.splitJumpIdleSince >= SPLITJUMP_IDLE_CLOSE_MS) {
+      this.closeActiveSet();
+      return;
+    }
+
+    const hipsVis = Math.min(vis(lH), vis(rH));
+    if (hipsVis < SPLITJUMP_HIPS_MIN_VISIBILITY) {
+      if (this.state === null) {
+        this.announceStatus("No se te ven las caderas. Colócate de perfil, con el cuerpo entero en el encuadre.", "splitjump_novis");
+        this.splitJumpArmSince = null;
+        this.splitJumpArmBadSince = null;
+      }
+      if (this.debugEl) this.debugEl.textContent = `[splitjump] buscando caderas… vis ${hipsVis.toFixed(2)}`;
+      this.noteAbsence(now, SPLITJUMP_OUT_OF_FRAME_MS);
+      return;
+    }
+    this.outOfFrameSince = null;
+
+    const hipX = (lH.x + rH.x) / 2, hipY = (lH.y + rH.y) / 2;
+    const shoulderVis = Math.min(vis(lS), vis(rS));
+    const shX = (lS.x + rS.x) / 2, shY = (lS.y + rS.y) / 2;
+    // Largo del tronco ahora mismo y cuánto de él es vertical (1 = erguido del todo).
+    const torsoLen = shoulderVis >= SPLITJUMP_SHOULDER_MIN_VISIBILITY ? Math.hypot(hipX - shX, (hipY - shY) * asp) : 0;
+    const torsoUp = shoulderVis >= SPLITJUMP_SHOULDER_MIN_VISIBILITY ? (hipY - shY) * asp : 0;
+
+    // --- Armar: en zancada, de perfil, tronco erguido y quieto ---
+    if (this.state === null) {
+      const allVis = Math.min(hipsVis, shoulderVis, vis(lK), vis(rK), vis(lA), vis(rA));
+      const stride = torsoLen > 0 ? Math.abs(lA.x - rA.x) / torsoLen : 0;
+      const upright = torsoLen > 0 && torsoUp / torsoLen >= SPLITJUMP_ARM_UPRIGHT_MIN;
+      const still = this.splitJumpPrevHipY != null && torsoLen > 0
+        && Math.abs(hipY - this.splitJumpPrevHipY) * asp <= SPLITJUMP_ARM_MAX_STEP * torsoLen;
+      this.splitJumpPrevHipY = hipY;
+      if (allVis >= SPLITJUMP_ARM_MIN_VISIBILITY && upright && stride >= SPLITJUMP_ARM_STRIDE_MIN && still) {
+        this.splitJumpArmBadSince = null;
+        if (this.splitJumpArmSince == null) {
+          this.splitJumpArmSince = now;
+          this.splitJumpAcc = { hip: 0, aL: 0, aR: 0, scale: 0, n: 0 };
+        }
+        const a = this.splitJumpAcc;
+        a.hip += hipY; a.aL += lA.y; a.aR += rA.y; a.scale += torsoLen; a.n += 1;
+        if (now - this.splitJumpArmSince >= SPLITJUMP_ARM_STABLE_MS) {
+          this.splitJumpScale = a.scale / a.n;
+          this.splitJumpTrough = { hipY: a.hip / a.n, aL: a.aL / a.n, aR: a.aR / a.n };
+          this.state = "down";
+          this.splitJumpArmSince = null;
+          this.splitJumpStillSince = null;
+          this.splitJumpIdleSince = now;
+          this.splitJumpAirSince = null;
+          this.splitJumpPeak = null;
+          this.splitJumpPending = null;
+          this.announceStatus("¡Listo! Salta desde la zancada con los dos pies y aterriza otra vez en zancada.", "ready_to_go");
+        } else {
+          this.setStatus("En zancada, quieto… confirmando (no te muevas)");
+        }
+      } else if (this.splitJumpArmSince != null) {
+        if (this.splitJumpArmBadSince == null) this.splitJumpArmBadSince = now;
+        if (now - this.splitJumpArmBadSince >= SPLITJUMP_ARM_NOISE_TOLERANCE_MS) {
+          this.splitJumpArmSince = null;
+          this.splitJumpArmBadSince = null;
+        }
+      } else if (allVis < SPLITJUMP_ARM_MIN_VISIBILITY) {
+        this.setStatus("No se te ve el cuerpo entero. Aléjate un poco para que quepan de los hombros a los pies.");
+      } else if (stride < SPLITJUMP_ARM_STRIDE_MIN) {
+        this.setStatus("Ponte de PERFIL y separa los pies en zancada: una pierna delante y la otra detrás.");
+      } else {
+        this.setStatus(this.groundWaitingMessage());
+      }
+      if (this.debugEl) {
+        this.debugEl.textContent = `[splitjump] armando — vis ${allVis.toFixed(2)} | zancada ${stride.toFixed(2)} (≥${SPLITJUMP_ARM_STRIDE_MIN}) | ` +
+          `tronco erguido ${upright} | quieto ${still}`;
+      }
+      return;
+    }
+
+    // --- Ya armado ---
+    const S = this.splitJumpScale;
+    let tr = this.splitJumpTrough;
+    const rise = (tr.hipY - hipY) * asp / S;   // >0 = cadera más alta que en el valle (largos de tronco)
+    const step = this.splitJumpPrevHipY != null ? Math.abs(hipY - this.splitJumpPrevHipY) * asp / S : 0;
+    this.splitJumpPrevHipY = hipY;
+    // Cuánto ha subido cada tobillo sobre SU suelo (el del valle); null = tobillo no visto.
+    const liftL = vis(lA) >= SPLITJUMP_ANKLE_MIN_VISIBILITY ? (tr.aL - lA.y) * asp / S : null;
+    const liftR = vis(rA) >= SPLITJUMP_ANKLE_MIN_VISIBILITY ? (tr.aR - rA.y) * asp / S : null;
+    const seenLifts = [liftL, liftR].filter((v) => v !== null);
+    const feetLift = seenLifts.length > 0 ? Math.min(...seenLifts) : null;   // el pie que menos sube manda
+
+    // Zancada ahora mismo: separación horizontal de los tobillos y flexión de las rodillas.
+    const strideNow = Math.abs(lA.x - rA.x) / S;
+    const kneeAngles = [bend(lH, lK, lA), bend(rH, rK, rA)].filter((v) => v !== null);
+    const kneeMin = kneeAngles.length > 0 ? Math.min(...kneeAngles) : null;
+    // Qué pierna va delante: la que está más lejos en el sentido en que mira la nariz. null = no se sabe.
+    const nose = lm[NOSE];
+    let front = null;
+    if (nose && vis(nose) >= 0.3 && Math.abs(nose.x - hipX) > 0.01) {
+      const facingRight = nose.x > hipX;
+      front = (lA.x > rA.x) === facingRight ? "izq" : "der";
+    }
+
+    const rejectPending = (why) => {
+      const pd = this.splitJumpPending;
+      this.splitJumpPending = null;
+      this.splitJumpRejected += 1;
+      this.announceStatus("Aterriza en zancada: una pierna delante y la otra detrás, con las rodillas flexionadas.", "splitjump_land");
+      this.logScissor(`[splitjump] ${why} | aire ${Math.round(pd.airMs)}ms | cadera +${pd.rise.toFixed(2)} | pies +${pd.lift.toFixed(2)} | ` +
+        `zancada ${strideNow.toFixed(2)} (mín ${SPLITJUMP_LAND_STRIDE_MIN}) | rodilla ${kneeMin === null ? "-" : kneeMin.toFixed(0)}° (máx ${SPLITJUMP_LAND_KNEE_MAX_DEG}°)`);
+    };
+
+    if (this.state === "down") {
+      // 1. ¿El aterrizaje del último salto quedó en zancada?
+      const pd = this.splitJumpPending;
+      if (pd) {
+        const strideOk = strideNow >= SPLITJUMP_LAND_STRIDE_MIN;
+        const kneeOk = kneeMin === null || kneeMin <= SPLITJUMP_LAND_KNEE_MAX_DEG;
+        if (strideOk && kneeOk) {
+          this.splitJumpPending = null;
+          this.splitJumpIdleSince = now;
+          const changed = front !== null && this.splitJumpFront !== null && front !== this.splitJumpFront;
+          if (front !== null) this.splitJumpFront = front;
+          const counted = !!this.countRep(pd.secs, now, "Split jump", SPLITJUMP_MIN_REP_SECONDS);
+          this.logScissor(`[splitjump] ok${counted ? "" : " (no contado)"} | aire ${Math.round(pd.airMs)}ms | cadera +${pd.rise.toFixed(2)} (mín ${SPLITJUMP_MIN_RISE}) | ` +
+            `pies +${pd.lift.toFixed(2)} (mín ${SPLITJUMP_FEET_OFF_MIN}) | zancada ${strideNow.toFixed(2)} | rodilla ${kneeMin === null ? "-" : kneeMin.toFixed(0)}° | ` +
+            `delante ${front ?? "?"}${changed ? " (cambio de pierna)" : ""}`);
+        } else if (now - pd.at >= SPLITJUMP_LAND_WINDOW_MS) {
+          rejectPending("no aterriza en zancada");
+        }
+      }
+
+      // 2. ¿Empieza otro salto? (la cadera sube sobre el valle)
+      if (rise >= SPLITJUMP_TAKEOFF_RISE) {
+        if (this.splitJumpPending) rejectPending("nuevo salto sin zancada");
+        this.state = "up";
+        this.splitJumpAirSince = now;
+        this.repStartTime = now;
+        this.splitJumpIdleSince = now;
+        this.splitJumpPeak = { rise, lift: feetLift === null ? -Infinity : feetLift };
+      } else {
+        // 3. En el suelo: el valle baja con la cadera y, si te quedas quieto, se recoloca en tu altura actual (así,
+        //    levantarte despacio de la zancada no deja un valle viejo que dispare saltos falsos).
+        if (hipY > tr.hipY) {
+          tr = this.splitJumpTrough = { hipY, aL: lA.y, aR: rA.y };
+          this.splitJumpStillSince = null;
+        } else if (step <= SPLITJUMP_REANCHOR_MAX_STEP) {
+          if (this.splitJumpStillSince == null) this.splitJumpStillSince = now;
+          if (now - this.splitJumpStillSince >= SPLITJUMP_REANCHOR_STILL_MS) {
+            tr = this.splitJumpTrough = { hipY, aL: lA.y, aR: rA.y };
+          }
+        } else {
+          this.splitJumpStillSince = null;
+        }
+      }
+    } else if (this.state === "up") {
+      const pk = this.splitJumpPeak;
+      if (rise > pk.rise) pk.rise = rise;
+      if (feetLift !== null && feetLift > pk.lift) pk.lift = feetLift;
+      const airMs = now - this.splitJumpAirSince;
+      const fell = pk.rise >= SPLITJUMP_MIN_RISE && rise <= pk.rise * (1 - SPLITJUMP_FALL_FRACTION);
+      const settledLow = rise < SPLITJUMP_SETTLED_RISE;
+      if (fell || settledLow) {
+        // --- Aterrizaje: se juzga el salto entero. El valle se recoloca aquí y baja con la cadera al absorber. ---
+        this.state = "down";
+        this.splitJumpAirSince = null;
+        this.splitJumpStillSince = null;
+        this.splitJumpTrough = { hipY, aL: lA.y, aR: rA.y };
+        const lift = pk.lift === -Infinity ? 0 : pk.lift;
+        if (airMs < SPLITJUMP_MIN_AIR_MS) {
+          // un bache de un frame, no un salto
+        } else if (pk.rise < SPLITJUMP_MIN_RISE) {
+          this.splitJumpRejected += 1;
+          this.announceStatus("Salto muy bajo: impúlsate más alto para que cuente.", "splitjump_low");
+          this.logScissor(`[splitjump] salto bajo | aire ${Math.round(airMs)}ms | cadera +${pk.rise.toFixed(2)} (mín ${SPLITJUMP_MIN_RISE}) | pies +${lift.toFixed(2)}`);
+        } else if (pk.lift === -Infinity || pk.lift < SPLITJUMP_FEET_OFF_MIN) {
+          this.splitJumpRejected += 1;
+          this.announceStatus("Despega los DOS pies del suelo: salta, no te limites a levantarte de la zancada.", "splitjump_feet");
+          this.logScissor(`[splitjump] pies en el suelo | aire ${Math.round(airMs)}ms | cadera +${pk.rise.toFixed(2)} | ` +
+            `pies +${lift.toFixed(2)} (mín ${SPLITJUMP_FEET_OFF_MIN}) | tobillos ${liftL === null ? "-" : liftL.toFixed(2)}/${liftR === null ? "-" : liftR.toFixed(2)}`);
+        } else {
+          // Salto bueno: falta confirmar la zancada del aterrizaje (arriba, en el estado "down").
+          this.splitJumpPending = { at: now, secs: (now - this.repStartTime) / 1000, airMs, rise: pk.rise, lift };
+        }
+        this.splitJumpPeak = null;
+      } else if (airMs > SPLITJUMP_MAX_AIR_MS) {
+        // Demasiado tiempo arriba: no es un salto (te has levantado del todo, o el seguimiento se ha ido). Se descarta y
+        // hay que volver a la zancada para armar de nuevo.
+        this.state = null;
+        this.splitJumpArmSince = null;
+        this.splitJumpArmBadSince = null;
+        this.splitJumpPrevHipY = null;
+        this.splitJumpAirSince = null;
+        this.splitJumpPeak = null;
+        this.splitJumpPending = null;
+        this.splitJumpIdleSince = now;
+        this.setStatus("Vuelve a la zancada y quédate quieto para seguir.");
+      }
+    }
+
+    if (this.debugEl) {
+      const pk = this.splitJumpPeak;
+      this.debugEl.textContent =
+        `[splitjump] cadera +${rise.toFixed(2)} (despegue ≥${SPLITJUMP_TAKEOFF_RISE}, salto ≥${SPLITJUMP_MIN_RISE}) | ` +
+        `pies +${feetLift === null ? "-" : feetLift.toFixed(2)} (≥${SPLITJUMP_FEET_OFF_MIN}) | zancada ${strideNow.toFixed(2)} (≥${SPLITJUMP_LAND_STRIDE_MIN}) | ` +
+        `rodilla ${kneeMin === null ? "-" : kneeMin.toFixed(0)}° | ` +
+        (pk ? `pico cadera ${pk.rise.toFixed(2)} pies ${pk.lift === -Infinity ? "-" : pk.lift.toFixed(2)} | ` : "") +
+        `descartados ${this.splitJumpRejected} | estado: ${this.state}`;
     }
   }
 
@@ -13718,6 +15659,8 @@ class WorkoutSession {
         return "Ponte de pie, de perfil a la cámara, con el cuerpo entero en el encuadre, para empezar.";
       case "scissor":
         return "Túmbate boca arriba y levanta una pierna a un palmo del suelo para empezar.";
+      case "glutebridge":
+        return GLUTEBRIDGE_WAIT_MSG;
       case "vup":
         return "Túmbate boca arriba con los brazos sobre la cabeza y las piernas estiradas y abajo para empezar.";
       case "doublecrunch":
@@ -13734,6 +15677,8 @@ class WorkoutSession {
         return KNEE_PUSHUP_WAIT_MSG;
       case "kneedeclinepushup":
         return KNEE_DECLINE_PUSHUP_WAIT_MSG;
+      case "rockingpushup":
+        return ROCKPUSHUP_WAIT_MSG;
       case "archerpushup":
         return ARCHER_PUSHUP_WAIT_MSG;
       case "onearmpushup":
@@ -13748,6 +15693,8 @@ class WorkoutSession {
         return "Ponte de perfil a la cámara, agárrate a las paralelas con los brazos estirados, para empezar.";
       case "dumbbellcurl":
         return "Ponte de perfil a la cámara, de pie, con la mancuerna colgando y el brazo estirado, para empezar.";
+      case "jumprope":
+        return JUMPROPE_WAIT_MSG;
       case "jumpingjack":
         return "Ponte de pie, de frente a la cámara, con los brazos pegados al cuerpo y los pies juntos, para empezar.";
       case "armcircles":
@@ -13772,8 +15719,16 @@ class WorkoutSession {
         return "Ponte de pie, de frente a la cámara, con las dos piernas apoyadas, para empezar.";
       case "forearmrotation":
         return "Agarra el codo de un brazo con la otra mano, cerca del cuerpo, para empezar.";
+      case "splitjump":
+        return SPLITJUMP_WAIT_MSG;
+      case "tuckjump":
+        return TUCKJUMP_WAIT_MSG;
+      case "switchblade":
+        return SWITCHBLADE_WAIT_MSG;
       case "heelraise":
         return HEELRAISE_WAIT_MSG;
+      case "stepup":
+        return STEPUP_WAIT_MSG;
       case "cossacksquat":
         return "Ponte de pie, de frente a la cámara, con los pies muy separados, las piernas estiradas y enteras en el encuadre.";
       case "pistolsquat":
@@ -13861,6 +15816,9 @@ class WorkoutSession {
     // checkHandstandPosture); a diferencia de silla en pared, aquí no hay
     // ninguna postura cotidiana (sentarse en una silla…) que pueda colarse
     // como un falso positivo.
+    if (this.counterKey === "hollowbodyhold") {
+      return HOLLOW_WAIT_MSG;
+    }
     if (this.counterKey === "supermanhold") {
       return "Túmbate boca abajo, de perfil a la cámara, completamente estirado (brazos al frente y piernas en el suelo); luego levanta a la vez brazos y piernas y aguanta.";
     }
@@ -14062,6 +16020,8 @@ class WorkoutSession {
           ? "Postura correcta. ¡Listo! Aguanta con los pies en el aire y las rodillas apoyadas en los brazos, mirando un punto fijo delante de las manos. Para terminar una serie, baja los pies al suelo o sal del encuadre."
           : this.counterKey === "handstand"
           ? "Postura correcta. ¡Listo! Aguanta el pino, con el abdomen apretado y el cuerpo recto. Para terminar una serie, baja del pino o sal del encuadre."
+          : this.counterKey === "hollowbodyhold"
+          ? "Postura correcta. ¡Listo! Aguanta con hombros, cabeza y piernas despegados y la zona lumbar pegada al suelo. Para terminar una serie, baja el cuerpo al suelo, incorpórate o sal del encuadre."
           : this.counterKey === "supermanhold"
           ? "Postura correcta. ¡Listo! Aguanta con brazos y piernas levantados a la vez. Para terminar una serie, baja brazos y piernas, levántate o sal del encuadre."
           : this.counterKey === "lsithold"
@@ -14279,6 +16239,7 @@ class WorkoutSession {
       this.counterKey === "kneeholdbar" ? KNEEHOLDBAR_INVALID_STABLE_MS
       : this.counterKey === "deadhang" ? DEADHANG_INVALID_STABLE_MS
       : this.counterKey === "tucklever" ? TUCKLEVER_INVALID_STABLE_MS
+      : this.counterKey === "hollowbodyhold" ? HOLLOW_INVALID_STABLE_MS
       : this.counterKey === "supermanhold" ? SUPERMANHOLD_INVALID_STABLE_MS
       : this.counterKey === "lsithold" ? LSITHOLD_INVALID_STABLE_MS
       : this.counterKey === "frogstand" ? FROGSTAND_INVALID_STABLE_MS
@@ -14589,6 +16550,8 @@ class WorkoutSession {
         ? checkFrogStandPosture(lm, this.postureValidSince !== null)
         : this.counterKey === "handstand"
         ? checkHandstandPosture(lm)
+        : this.counterKey === "hollowbodyhold"
+        ? this.hollowChecker(lm, this.videoAspect())
         : this.counterKey === "lsithold"
         ? this.lsitHoldChecker(lm)
         : this.counterKey === "armcrossstretch"
@@ -14677,6 +16640,8 @@ class WorkoutSession {
         ? "frog stand / crow pose"
         : this.counterKey === "handstand"
         ? "pino"
+        : this.counterKey === "hollowbodyhold"
+        ? "hollow body"
         : this.counterKey === "lsithold"
         ? "L-sit en paralelas"
         : this.counterKey === "armcrossstretch"
@@ -15181,6 +17146,174 @@ class WorkoutSession {
       this.debugEl.textContent =
         `ángulo cadera (${useLeft ? "izq" : "der"}): ${hipAngle.toFixed(0)}° | tilt: ${tilt.toFixed(0)}° (${onGround ? "en el suelo" : "fuera del suelo"}) | estado: ${this.state ?? "esperando"} ` +
         `(abajo ≥${HIGHLEGRAISE_DOWN_ANGLE_DEG}°, arriba ≤${HIGHLEGRAISE_UP_ANGLE_DEG}°)`;
+    }
+  }
+
+  /**
+   * Puente de glúteo (tumbado boca arriba). Ver el bloque GLUTEBRIDGE_* de más arriba para la técnica y los
+   * umbrales. Estados: null (sin armar) -> "down" (cadera abajo, armado) -> "up" (cadera arriba, con la
+   * extensión de cadera hecha) -> cuenta al volver a "down". Se cierra la serie al incorporarte, al salir del
+   * encuadre o tras GLUTEBRIDGE_IDLE_CLOSE_MS abajo sin repetir (solo con la serie empezada).
+   */
+  processGluteBridge(lm, now) {
+    const vis = (p) => (p ? (p.visibility ?? 1) : 0);
+    const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
+    const lH = lm[L_HIP], rH = lm[R_HIP];
+    const lK = lm[L_KNEE], rK = lm[R_KNEE];
+    const lA = lm[L_ANKLE], rA = lm[R_ANKLE];
+
+    const leftVis = (vis(lS) + vis(lH) + vis(lK)) / 3;
+    const rightVis = (vis(rS) + vis(rH) + vis(rK)) / 3;
+    const useLeft = leftVis >= rightVis;
+    const sideVis = useLeft ? leftVis : rightVis;
+
+    if (sideVis < GLUTEBRIDGE_MIN_VISIBILITY) {
+      this.announceStatus("No se te ven bien el hombro, la cadera y la rodilla. Ponte de perfil a la cámara, tumbado boca arriba.");
+      if (this.debugEl) this.debugEl.textContent = "[glutebridge] buscando hombro, cadera y rodilla de perfil…";
+      this.groundStableSince = null;
+      this.idleSince = null;
+      this.noteAbsence(now);
+      return;
+    }
+    this.outOfFrameSince = null;
+
+    // Geometría real: x por el aspecto del vídeo (así los ángulos y las distancias valen en vertical y en apaisado).
+    const ar = this.videoAspect() || LYING_REF_ASPECT;
+    const pt = (p) => (p ? { x: p.x * ar, y: p.y, visibility: p.visibility } : null);
+    const shoulder = pt(useLeft ? lS : rS);
+    const hip = pt(useLeft ? lH : rH);
+    const knee = pt(useLeft ? lK : rK);
+    const ankleRaw = useLeft ? lA : rA;
+    const ankle = vis(ankleRaw) >= GLUTEBRIDGE_ANKLE_MIN_VISIBILITY ? pt(ankleRaw) : null;
+
+    const liveThigh = Math.hypot(hip.x - knee.x, hip.y - knee.y);
+    if (!liveThigh) return;
+    // Escala congelada al armar (mover la rodilla no debe cambiar los umbrales a mitad de serie).
+    const thigh = (this.state !== null && this.gluteBridgeScaleRef) || liveThigh;
+
+    this.announcePreArm(now, "Te veo. Túmbate boca arriba con las rodillas dobladas y los pies planos en el suelo, y espera al «Listo» para empezar. Después sube la cadera hasta formar una línea recta de hombros a rodillas y vuelve a bajarla. Para terminar una serie, levántate o sal del encuadre.", "Para terminar una serie, levántate o sal del encuadre.");
+
+    const tilt = tiltFromHorizontal(shoulder, hip);
+    if (tilt === null) return;
+    const hipAngle = angle(shoulder, hip, knee);
+    if (hipAngle === null) return;
+    const kneeAngle = ankle ? angle(hip, knee, ankle) : null;
+    const thighElev = (hip.y - knee.y) / thigh;            // >0: rodilla más alta que la cadera
+    const rawRise = (shoulder.y - hip.y) / thigh;          // >0: cadera más alta que el hombro
+    const lift = rawRise - (this.gluteBridgeBase ?? rawRise);
+
+    // Boca arriba de verdad (no a cuatro patas / de rodillas / boca abajo): ver checkOnBack. Las manos no se miran
+    // (en el puente van a los lados, en el suelo).
+    const back = this.checkOnBack(lm, useLeft, tilt, thigh, { checkHands: false, checkFace: this.state === null, checkKnee: true });
+    const lying = tilt <= GLUTEBRIDGE_STAND_TILT_DEG && back.onBack;
+    const resting = this.currentSetReps === 0 && this.setClosedAt !== null && now - this.setClosedAt < MIN_REST_MS;
+
+    if (this.state === null) {
+      const lyingToArm = tilt <= GLUTEBRIDGE_ARM_MAX_TILT_DEG && back.onBack && back.faceOk;
+      const kneesBent = thighElev >= GLUTEBRIDGE_ARM_MIN_THIGH_ELEV && (kneeAngle === null || kneeAngle <= GLUTEBRIDGE_ARM_MAX_KNEE_DEG);
+      const hipDown = rawRise <= GLUTEBRIDGE_ARM_MAX_RISE && hipAngle <= GLUTEBRIDGE_ARM_MAX_HIP_DEG;
+      if (lyingToArm && kneesBent && hipDown && resting) {
+        this.groundStableSince = null;
+        this.gluteBridgeArmAcc = null;
+        this.announceRestBlocked(now);
+      } else if (lyingToArm && kneesBent && hipDown) {
+        // El reposo se aprende promediando mientras estás quieto: un salto de la cadera reinicia la calibración.
+        const acc = this.gluteBridgeArmAcc;
+        if (acc && Math.abs(rawRise - acc.sum / acc.n) > GLUTEBRIDGE_ARM_STILL_BAND) this.gluteBridgeArmAcc = null;
+        if (!this.gluteBridgeArmAcc) {
+          this.gluteBridgeArmAcc = { sum: 0, n: 0, thigh: 0 };
+          this.groundStableSince = now;
+        }
+        const a = this.gluteBridgeArmAcc;
+        a.sum += rawRise; a.n += 1; a.thigh += liveThigh;
+        if (this.groundStableSince === null) this.groundStableSince = now;
+        if (now - this.groundStableSince >= GLUTEBRIDGE_ARM_STABLE_MS) {
+          this.gluteBridgeBase = a.sum / a.n;
+          this.gluteBridgeScaleRef = a.thigh / a.n;
+          this.gluteBridgeArmAcc = null;
+          this.gluteBridgeArmedAt = now;
+          this.gluteBridgeTopSince = null;
+          this.gluteBridgeUpSince = null;
+          this.state = "down";
+          this.offGroundSince = null;
+          this.idleSince = null;
+          this.announceStatus("¡Listo! Sube la cadera y vuelve a bajar.", "ready_to_go");
+        } else {
+          this.setStatus("Tumbado, quieto… confirmando (no te muevas)");
+        }
+      } else if (lyingToArm) {
+        this.groundStableSince = null;
+        this.gluteBridgeArmAcc = null;
+        this.announceStatus(kneesBent
+          ? "Posición inicial: baja la cadera al suelo, quieto, para empezar."
+          : "Posición inicial: dobla las rodillas y apoya los pies planos en el suelo, quieto, para empezar.", "start_pose");
+      } else if (!(back.onBack && back.faceOk) && tilt <= GLUTEBRIDGE_ARM_MAX_TILT_DEG) {
+        this.groundStableSince = null;
+        this.gluteBridgeArmAcc = null;
+        this.announceNotOnBack();
+      } else {
+        this.groundStableSince = null;
+        this.gluteBridgeArmAcc = null;
+        this.setStatus(GLUTEBRIDGE_WAIT_MSG);
+      }
+      if (this.debugEl) {
+        this.debugEl.textContent =
+          `[glutebridge] armando — inclinación ${tilt.toFixed(0)}° (≤${GLUTEBRIDGE_ARM_MAX_TILT_DEG}) | rodilla sobre cadera ${thighElev.toFixed(2)} (≥${GLUTEBRIDGE_ARM_MIN_THIGH_ELEV}) | ` +
+          `rodilla ${kneeAngle === null ? "–" : kneeAngle.toFixed(0)}° (≤${GLUTEBRIDGE_ARM_MAX_KNEE_DEG}) | cadera abajo ${hipDown ? "sí" : "no"} (${rawRise.toFixed(2)} ≤${GLUTEBRIDGE_ARM_MAX_RISE}, ${hipAngle.toFixed(0)}° ≤${GLUTEBRIDGE_ARM_MAX_HIP_DEG}) | ${this.backDebug(back)}${resting ? " | en descanso" : ""}`;
+      }
+      return;
+    }
+
+    // Te has incorporado / no estás boca arriba (vale en "down" y en "up"): se cierra la serie.
+    if (!lying) {
+      if (this.offGroundSince === null) this.offGroundSince = now;
+      if (now - this.offGroundSince >= OFF_GROUND_STABLE_MS) {
+        this.closeActiveSet();
+        return;
+      }
+    } else {
+      this.offGroundSince = null;
+    }
+
+    // Cierre por inactividad: abajo, tumbado, sin hacer ninguna repetición (solo con la serie empezada).
+    if (this.checkIdleSetClose(now, GLUTEBRIDGE_IDLE_CLOSE_MS, !lying || lift > GLUTEBRIDGE_DOWN_LIFT)) return;
+
+    if (this.state === "down") {
+      const settled = (now - this.gluteBridgeArmedAt) >= GLUTEBRIDGE_ARM_SETTLE_MS;
+      if (settled && lying && lift >= GLUTEBRIDGE_UP_LIFT && hipAngle >= GLUTEBRIDGE_TOP_ANGLE_DEG) {
+        if (this.gluteBridgeTopSince == null) this.gluteBridgeTopSince = now;
+        if (now - this.gluteBridgeTopSince >= GLUTEBRIDGE_TOP_STABLE_MS) {
+          this.state = "up";
+          this.gluteBridgeUpSince = now;
+          this.repStartTime = now;
+          this.gluteBridgeTopSince = null;
+          this.idleSince = null;
+        }
+      } else {
+        this.gluteBridgeTopSince = null;
+        // El reposo sigue a tu postura (deriva lenta) mientras estás claramente abajo.
+        if (lying && Math.abs(lift) <= GLUTEBRIDGE_BASE_TRACK_BAND) {
+          this.gluteBridgeBase += GLUTEBRIDGE_BASE_ALPHA * (rawRise - this.gluteBridgeBase);
+        }
+      }
+    } else if (this.state === "up") {
+      if (now - this.gluteBridgeUpSince > GLUTEBRIDGE_MAX_UP_MS) {
+        // Demasiado rato arriba: se descarta (no cuenta) y hay que volver a colocarse para armar.
+        this.state = null;
+        this.groundStableSince = null;
+        this.gluteBridgeArmAcc = null;
+        this.setStatus(GLUTEBRIDGE_WAIT_MSG);
+      } else if (lift <= GLUTEBRIDGE_DOWN_LIFT) {
+        this.countRep((now - this.repStartTime) / 1000, now, "Puente de glúteo", GLUTEBRIDGE_MIN_REP_SECONDS);
+        this.state = "down";
+        this.idleSince = now;
+      }
+    }
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `[glutebridge] subida de cadera ${lift.toFixed(2)} (arriba ≥${GLUTEBRIDGE_UP_LIFT}, abajo ≤${GLUTEBRIDGE_DOWN_LIFT}) | ` +
+        `ángulo cadera ${hipAngle.toFixed(0)}° (≥${GLUTEBRIDGE_TOP_ANGLE_DEG}) | inclinación ${tilt.toFixed(0)}° | ${this.backDebug(back)} | estado: ${this.state ?? "esperando"}`;
     }
   }
 
@@ -17904,6 +20037,10 @@ class WorkoutSession {
       this.processKneePushup(lm, now, true);
       return;
     }
+    if (this.counterKey === "rockingpushup") {
+      this.processRockingPushup(lm, now);
+      return;
+    }
     if (this.counterKey === "archerpushup") {
       this.processArcherPushup(lm, now);
       return;
@@ -17958,6 +20095,26 @@ class WorkoutSession {
     }
     if (this.counterKey === "heelraise") {
       this.processHeelRaise(lm, now);
+      return;
+    }
+    if (this.counterKey === "stepup") {
+      this.processStepUp(lm, now);
+      return;
+    }
+    if (this.counterKey === "splitjump") {
+      this.processSplitJump(lm, now);
+      return;
+    }
+    if (this.counterKey === "tuckjump") {
+      this.processTuckJump(lm, now);
+      return;
+    }
+    if (this.counterKey === "switchblade") {
+      this.processSwitchblade(lm, now);
+      return;
+    }
+    if (this.counterKey === "jumprope") {
+      this.processJumpRope(lm, now);
       return;
     }
     if (this.counterKey === "jumpingjack") {
@@ -18046,6 +20203,10 @@ if (this.counterKey === "crunch") {
     }
     if (this.counterKey === "scissor") {
       this.processScissor(this.landscapeLm(lm), now);
+      return;
+    }
+    if (this.counterKey === "glutebridge") {
+      this.processGluteBridge(lm, now);
       return;
     }
     if (this.counterKey === "vup") {

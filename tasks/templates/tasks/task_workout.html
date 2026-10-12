@@ -43,7 +43,7 @@
             <div class="workout__stat">
                 <span class="workout__stat-value" id="workout-reps">0</span>
                 <span class="workout__stat-label">
-                    {% if exercise.counter_key == "plank" or exercise.counter_key == "sideplank" or exercise.counter_key == "wallsit" or exercise.counter_key == "kneeholdbar" or exercise.counter_key == "lsithold" or exercise.counter_key == "supermanhold" %}segundos{% else %}{{ exercise.name|lower }}{% endif %}
+                    {% if exercise.counter_key == "plank" or exercise.counter_key == "sideplank" or exercise.counter_key == "wallsit" or exercise.counter_key == "kneeholdbar" or exercise.counter_key == "lsithold" or exercise.counter_key == "supermanhold" or exercise.counter_key == "hollowbodyhold" %}segundos{% else %}{{ exercise.name|lower }}{% endif %}
                 </span>
             </div>
             <div class="workout__stat">
@@ -96,6 +96,88 @@
     </p>
     <p class="workout__note">
         Si pasan 8 segundos sin hacer ninguna repetición, la serie se cierra sola.
+    </p>
+    {% elif exercise.counter_key == "glutebridge" %}
+    <p class="workout__note">
+        📐 Túmbate <strong>boca arriba</strong>, con el móvil o el portátil <strong>a un lado</strong> (de perfil) y el
+        <strong>cuerpo entero</strong> en el encuadre. Dobla las <strong>rodillas</strong>, apoya los <strong>pies planos</strong> en el
+        suelo y deja los brazos a los lados. Espera quieto al «Listo». Una repetición es <strong>subir la cadera</strong> empujando con
+        los talones hasta que hombros, cadera y rodillas formen una línea recta (hombros y cabeza siguen en el suelo) y
+        <strong>volver a bajarla</strong>.
+    </p>
+    <p class="workout__note">
+        La cámara comprueba que la cadera sube de verdad y que extiendes la cadera, no solo que arqueas la espalda. Si pasan 7 segundos
+        sin hacer ninguna repetición, la serie se cierra sola.
+    </p>
+    {% elif exercise.counter_key == "splitjump" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de PERFIL</strong> (a un lado), algo alejado, para que se vea el
+        <strong>cuerpo entero</strong> (de los hombros a los pies) y tengas <strong>espacio libre para saltar</strong>.
+        Empieza en <strong>zancada</strong>: una pierna delante (rodilla flexionada) y la otra detrás (rodilla casi en el suelo), con
+        el tronco erguido, quieto, y espera al «Listo». Una repetición es <strong>un salto</strong>: te impulsas lo más alto que
+        puedas con los <strong>dos pies fuera del suelo</strong> y <strong>aterrizas otra vez en zancada</strong>, con las rodillas
+        flexionadas. Puedes dejar la misma pierna delante o <strong>cambiarla en el aire</strong>: las dos cuentan.
+    </p>
+    <p class="workout__note">
+        La cámara comprueba que la cadera sube, que los dos pies se despegan del suelo y que aterrizas con una pierna delante y
+        otra detrás: si no, el salto no cuenta y te dice por qué. De frente no se ve qué pierna va delante, así que ponte de perfil.
+        Calienta antes y, si notas dolor en rodillas o tobillos, para. Si pasan 8 segundos sin saltar, la serie se cierra sola.
+    </p>
+    {% elif exercise.counter_key == "stepup" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de frente o de perfil</strong>, algo alejado, para que se vean las
+        <strong>dos piernas enteras</strong>, de la cadera a los pies, y el escalón, banco o caja (estable, a la altura de la
+        rodilla o más bajo) a tu lado o delante. Empieza de pie en el suelo, quieto, con los <strong>dos pies a la misma altura</strong>,
+        y espera al «Listo». Una repetición es <strong>subir a la superficie</strong> (apoyas un pie entero encima, empujas con esa
+        pierna hasta quedar de pie encima y el otro pie sube o se queda en el aire) y <strong>volver a bajar al suelo</strong>.
+        Puedes alternar de pierna o hacer todas con la misma.
+    </p>
+    <p class="workout__note">
+        Solo cuenta si la cámara ve que subes y bajas del todo. Si pasan 10 segundos sin hacer ninguna repetición, la serie se cierra sola.
+    </p>
+    {% elif exercise.counter_key == "tuckjump" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de frente o de perfil</strong>, algo alejado, para que se vea el
+        <strong>cuerpo entero</strong> (de los hombros a los pies) y tengas <strong>espacio libre para saltar</strong>.
+        Empieza de pie, quieto, con los pies a la anchura de las caderas y las piernas estiradas, y espera al «Listo».
+        Una repetición es <strong>un salto</strong>: te impulsas lo más alto que puedas y en el aire
+        <strong>subes las dos rodillas a la vez hacia el pecho</strong> (los muslos, al menos paralelos al suelo), con el
+        <strong>tronco erguido</strong> (sin inclinarte hacia las rodillas), y aterrizas <strong>suave</strong>, con las rodillas
+        flexionadas y los pies a la anchura de las caderas.
+    </p>
+    <p class="workout__note">
+        La cámara comprueba la altura del salto, que las dos rodillas suban y que el tronco no se incline: si alguna falla, el
+        salto <strong>no cuenta</strong> y te dice por qué. Si caes con las piernas rígidas, te avisa. Calienta antes y, si notas
+        dolor en rodillas o tobillos, para. Si pasan 8 segundos sin saltar, la serie se cierra sola.
+    </p>
+    {% elif exercise.counter_key == "switchblade" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>DE PERFIL</strong> (el cuerpo de lado a la cámara, que si no una pierna tapa a la
+        otra), algo alejado, para que se vea el <strong>cuerpo entero</strong> con los brazos y tengas
+        <strong>espacio libre para saltar</strong>. Empieza de pie, quieto, con las piernas estiradas y los
+        <strong>pies juntos</strong>, y espera al «Listo». Una repetición es <strong>un salto</strong>: te impulsas y, en el aire,
+        <strong>abres las piernas estiradas en tijera</strong> (una hacia delante y otra hacia atrás) y
+        <strong>bajas la mano a tocar el pie de delante</strong>, como una navaja que se abre; aterrizas <strong>suave</strong>, con
+        los pies juntos. En el siguiente salto cambia de pierna. Para aprenderlo: primero solo la tijera con un poco de impulso,
+        luego añade el toque.
+    </p>
+    <p class="workout__note">
+        La cámara comprueba que saltas, que la separación de los pies en el aire es amplia, que las piernas quedan casi rectas y que
+        una mano llega a un pie: si alguna falla, el salto <strong>no cuenta</strong> y te dice por qué. Calienta antes y, si notas
+        dolor en rodillas, isquios o tobillos, para. Si pasan 8 segundos sin saltar, la serie se cierra sola.
+    </p>
+    {% elif exercise.counter_key == "jumprope" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de frente o de perfil</strong>, algo alejado, para que se vea el
+        <strong>cuerpo entero</strong> (mejor de los hombros a los pies) y tengas espacio libre para saltar.
+        Empieza de pie, quieto, con la comba (o las manos, si es sin cuerda) <strong>a la altura de la cadera</strong>, y espera al «Listo».
+        Una repetición es <strong>un salto</strong>: saltitos muy bajos (2-4 cm), con las <strong>puntas de los pies</strong>, los
+        <strong>codos pegados al cuerpo</strong>, el tronco erguido y las rodillas casi rectas.
+    </p>
+    <p class="workout__note">
+        La cámara cuenta el rebote de tu cuerpo: tras <strong>3 saltos seguidos</strong> a buen ritmo empieza a contar (los 3 primeros se
+        suman de golpe). Con las manos arriba (jumping jacks), las rodillas subidas o saltos muy altos <strong>no cuenta</strong> y te
+        dice por qué. Si te tropiezas, vuelve a coger el ritmo; tras 6 segundos sin saltar la serie se cierra sola.
     </p>
     {% elif exercise.counter_key == "pushup" %}
     <p class="workout__note">
@@ -217,6 +299,17 @@
         Cada vez que <strong>levantas una mano</strong> del suelo para tocarte el hombro contrario y la <strong>vuelves a
         apoyar</strong> cuenta un toque (los de la mano derecha y los de la izquierda suman). Si pasan 10 segundos sin
         ningún toque, la serie se cierra sola.
+    </p>
+    {% elif exercise.counter_key == "rockingpushup" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti) y encuadra el cuerpo entero,
+        de la cabeza a los pies. Empieza en <strong>plancha alta</strong> (manos bajo los hombros, brazos estirados,
+        cuerpo recto) y espera al «Listo».
+    </p>
+    <p class="workout__note">
+        Cada repetición: una <strong>flexión</strong> y, con los brazos estirados, <strong>balancea la cadera hacia
+        atrás</strong>, hacia los talones (como la postura del niño), y vuelve a la plancha. Solo cuenta si haces las dos
+        cosas (da igual el orden). Si pasan 15 segundos sin ninguna repetición, la serie se cierra sola.
     </p>
     {% elif exercise.counter_key == "dynamicplank" %}
     <p class="workout__note">
@@ -342,6 +435,16 @@
         sal del encuadre.{% else %}y aguanta arriba. Aquí no se cuentan repeticiones: el contador de arriba muestra los
         <strong>segundos aguantados</strong>. Si bajas los brazos o las piernas, te levantas o sales del encuadre un par de segundos, la
         serie se cierra sola.{% endif %}
+    </p>
+    {% elif exercise.counter_key == "hollowbodyhold" %}
+    <p class="workout__note">
+        📐 Túmbate <strong>boca arriba</strong> y coloca el móvil o el portátil <strong>de lado</strong> (de perfil respecto a ti), con el
+        <strong>cuerpo entero</strong> en el encuadre, de la cabeza a los pies. Empieza <strong>completamente estirado</strong>: piernas
+        rectas y juntas y brazos estirados sobre la cabeza, todo apoyado en el suelo, y quédate quieto un momento para que la cámara
+        aprenda tu posición de reposo. Después <strong>levanta a la vez hombros, cabeza y piernas</strong> unos centímetros del suelo, con el
+        mentón hacia el pecho y la <strong>zona lumbar pegada al suelo</strong> (forma de plátano), y aguanta. Cuanto más bajas las piernas,
+        más difícil. Aquí no se cuentan repeticiones: el contador de arriba muestra los <strong>segundos aguantados</strong>. Si bajas el
+        cuerpo, te incorporas o sales del encuadre un par de segundos, la serie se cierra sola.
     </p>
     {% elif exercise.counter_key == "lsit" or exercise.counter_key == "lsithold" %}
     <p class="workout__note">

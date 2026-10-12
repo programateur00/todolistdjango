@@ -8,3 +8,6 @@ mobile_releases/
 
 # Copias de seguridad automaticas (*.bak-pre-*): no se suben a git, pesan ~100 MB
 *.bak*
+
+# PDFs de planes de lectura subidos (temporales, se borran al terminar el libro)
+media/

@@ -13,9 +13,9 @@
         <span class="field__label">PDF del libro</span>
         <p class="field__hint" id="pdf-pick-hint">
             {% if task.reading_pdf_key %}
-                Ya tienes un PDF elegido en este navegador.
+                Ya hay un PDF elegido para este plan. Si lo cambias, se vuelve a subir.
             {% else %}
-                Se guarda solo en este navegador (nunca sube al servidor) — elige el mismo PDF cada vez que abras el visor desde este ordenador.
+                Se sube al servidor para poder leer el libro también desde el móvil, y se borra solo cuando lo termines (o borres el plan).
             {% endif %}
         </p>
         <div class="task-form__actions">
@@ -97,6 +97,37 @@
     var pickStatus = document.getElementById('pdf-pick-status');
     var keyInput = document.getElementById('reading-pdf-key-input');
     var titleInput = document.getElementById('reading-title-input');
+    var form = pickBtn.closest('form');
+    var submitBtn = form.querySelector('button[type="submit"]');
+    var csrfToken = form.querySelector('input[name="csrfmiddlewaretoken"]').value;
+    var pdfUrlTpl = "{% url 'tasks:reading_pdf' 'KEYPLACEHOLDER' %}";
+    var MAX_MB = 40; // mismo tope que ReadingPdf.MAX_BYTES en el servidor
+
+    // Sube el PDF al servidor (el móvil lo descarga de ahí). Mientras sube,
+    // el botón de guardar el plan queda bloqueado para no crear un plan
+    // cuyo PDF todavía no ha llegado.
+    function uploadToServer(file) {
+        var name = file.name;
+        if (file.size > MAX_MB * 1024 * 1024) {
+            pickStatus.textContent = 'Elegido: ' + name + ' — pesa más de ' + MAX_MB + ' MB y no se puede subir al servidor: solo lo podrás leer desde este navegador.';
+            return Promise.resolve();
+        }
+        submitBtn.disabled = true;
+        pickStatus.textContent = 'Elegido: ' + name + ' — subiendo al servidor…';
+        var fd = new FormData();
+        fd.append('file', file, 'libro.pdf');
+        return fetch(pdfUrlTpl.replace('KEYPLACEHOLDER', encodeURIComponent(keyInput.value)), {
+            method: 'POST', headers: { 'X-CSRFToken': csrfToken }, body: fd,
+        }).then(function (r) {
+            return r.json().catch(function () { return {}; }).then(function (d) {
+                if (!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status));
+            });
+        }).then(function () {
+            pickStatus.textContent = 'Elegido: ' + name + ' — subido al servidor ✓ (también podrás leerlo desde el móvil).';
+        }).catch(function (err) {
+            pickStatus.textContent = 'Elegido: ' + name + ' — no se pudo subir al servidor (' + (err.message || err) + '). Lo podrás leer desde este navegador, pero no desde el móvil.';
+        }).then(function () { submitBtn.disabled = false; });
+    }
 
     if (!supportsLocal) {
         pickBtn.disabled = true;
@@ -161,6 +192,7 @@
                 lastAutoTitle = titleFromFilename(file.name);
                 titleInput.value = lastAutoTitle;
             }
+            return uploadToServer(file);
         }).catch(function (err) {
             if (err && err.name !== 'AbortError') {
                 pickStatus.textContent = 'No se pudo usar ese archivo (' + (err.name || err.message || err) + ').';

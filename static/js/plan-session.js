@@ -19,7 +19,7 @@
  */
 import {
   checkPlankPosture, checkSidePlankPosture, checkWallSitPosture,
-  checkKneeHoldBarPosture, checkHandstandPosture, checkFrogStandPosture, createLSitHoldChecker, createSupermanHoldChecker,
+  checkKneeHoldBarPosture, checkHandstandPosture, checkFrogStandPosture, createLSitHoldChecker, createSupermanHoldChecker, createHollowBodyChecker,
   speakOut, numeroEnPalabras, isVoiceEnabled, REP_VOICE_RATE, exportDebugLogText, clearVoiceTransitionMute,
 } from "./workout.js";
 import { PersonGate } from "./workout.js";
@@ -209,7 +209,7 @@ import { openCameraStream } from "./camera-stream.js";
 
   // Ver checkPlankPosture/etc. importadas arriba — mismo set que
   // circuit.js.
-  const POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "frogstand", "lsithold", "supermanhold"]);
+  const POSTURE_COUNTERS = new Set(["plank", "sideplank", "wallsit", "kneeholdbar", "handstand", "frogstand", "lsithold", "supermanhold", "hollowbodyhold"]);
 
   const STRETCH_FIXED_COUNTERS = new Set(["armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
 
@@ -463,6 +463,8 @@ import { openCameraStream } from "./camera-stream.js";
         ? checkFrogStandPosture
         : item.counter_key === "handstand"
         ? checkHandstandPosture
+        : item.counter_key === "hollowbodyhold"
+        ? createHollowBodyChecker()
         : item.counter_key === "supermanhold"
         ? createSupermanHoldChecker()
         : item.counter_key === "lsithold"

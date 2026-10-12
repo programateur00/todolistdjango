@@ -39,6 +39,7 @@ urlpatterns = [
     path("tasks/<uuid:uuid>/reading/", api.reading_state, name="reading_state"),
     path("tasks/<uuid:uuid>/reading/progress/", api.reading_progress, name="reading_progress"),
     path("tasks/<uuid:uuid>/reading/save/", api.reading_session_save, name="reading_session_save"),
+    path("reading-pdfs/<str:key>/", api.reading_pdf, name="reading_pdf"),
     path("reading-plans/", api.reading_plan_create, name="reading_plan_create"),
     path("reading-plans/<uuid:uuid>/", api.reading_plan_update, name="reading_plan_update"),
     path("tasks/<uuid:uuid>/course-progress/", api.course_progress_save, name="course_progress_save"),

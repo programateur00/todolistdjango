@@ -279,6 +279,10 @@ STATIC_URL = 'static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 STATIC_ROOT = BASE_DIR / 'staticfiles'  # aqui caen los archivos tras collectstatic
 
+# PDFs de los planes de lectura (tasks.models.ReadingPdf). No se sirven por
+# URL pública: los reparte la vista tasks.api.reading_pdf, detrás de BasicAuth.
+MEDIA_ROOT = BASE_DIR / 'media'
+
 # En desarrollo, que WhiteNoise sirva directamente desde STATICFILES_DIRS
 # en vez de desde el manifiesto compilado en STATIC_ROOT. Sin esto,
 # cualquier cambio en un .js o .css no se veía hasta ejecutar

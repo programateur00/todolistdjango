@@ -28,6 +28,11 @@ _YOUTUBE_PLAYLIST_ID_RE = re.compile(r"[?&]list=([A-Za-z0-9_-]+)")
 # vídeo miden siempre 11 caracteres; los de playlist, bastantes más.
 _YOUTUBE_BARE_PLAYLIST_RE = re.compile(r"^(?:PL|UU|FL|OL|RD|LL)[A-Za-z0-9_-]{10,}$")
 
+# Avisos cuando se pega un enlace en el campo equivocado (ver
+# Task.normalize_youtube_fields).
+_NOTICE_PLAYLIST_IN_VIDEO = "Ese enlace es de una playlist, no de un vídeo."
+_NOTICE_VIDEO_IN_PLAYLIST = "Ese enlace es de un vídeo, no de una playlist."
+
 # Niveles MCER (A1→C2), a nivel de módulo porque tanto Task (el nivel del
 # vídeo concreto de hoy) como Plan (el rango de nivel del curso entero) lo
 # necesitan, y Task se define antes que Plan en este archivo.
@@ -1040,6 +1045,9 @@ class Task(models.Model):
         self.normalize_youtube_fields()
         super().save(*args, **kwargs)
 
+    # Aviso (no se guarda) de la última normalización — ver normalize_youtube_fields.
+    youtube_link_notice = ""
+
     def normalize_youtube_fields(self):
         """
         Deja youtube_video_id / youtube_playlist_id como IDs limpios.
@@ -1057,6 +1065,7 @@ class Task(models.Model):
         before = (self.youtube_video_id, self.youtube_playlist_id)
         raw = (self.youtube_video_id or "").strip()
         raw_pl = (self.youtube_playlist_id or "").strip()
+        notice = ""
         if raw:
             m = _YOUTUBE_ID_RE.search(raw)
             if m:
@@ -1065,13 +1074,30 @@ class Task(models.Model):
                 pm = _YOUTUBE_PLAYLIST_ID_RE.search(raw)
                 if pm:
                     raw_pl, raw = pm.group(1), ""
+                    notice = _NOTICE_PLAYLIST_IN_VIDEO
                 elif len(raw) > 11 and _YOUTUBE_BARE_PLAYLIST_RE.match(raw):
                     raw_pl, raw = raw, ""
+                    notice = _NOTICE_PLAYLIST_IN_VIDEO
         if raw_pl:
             m = _YOUTUBE_PLAYLIST_ID_RE.search(raw_pl)
-            raw_pl = m.group(1) if m else raw_pl
+            if m:
+                raw_pl = m.group(1)
+            else:
+                # Al revés: un enlace (o ID) de VÍDEO suelto pegado en el
+                # campo de playlist (youtu.be/ID, watch?v=ID...). Como ID de
+                # playlist no existe, YouTube respondía "no disponible".
+                vm = _YOUTUBE_ID_RE.search(raw_pl)
+                if vm or re.fullmatch(r"[A-Za-z0-9_-]{11}", raw_pl):
+                    if not raw:
+                        raw = vm.group(1) if vm else raw_pl
+                    raw_pl = ""
+                    notice = _NOTICE_VIDEO_IN_PLAYLIST
         self.youtube_video_id = raw
         self.youtube_playlist_id = raw_pl
+        # Aviso para el usuario (lo muestran la vista web y la API tras
+        # guardar): se ha corregido algo que había pegado en el campo
+        # equivocado. No se guarda en la base de datos.
+        self.youtube_link_notice = notice
         return before != (self.youtube_video_id, self.youtube_playlist_id)
 
     def repair_youtube_fields(self):
@@ -1506,6 +1532,9 @@ class Task(models.Model):
         if finished:
             self._flush_reading_time()
             self.mark_done()
+            # Libro terminado: el PDF ya no hace falta en el servidor (ver ReadingPdf).
+            if self.reading_pdf_key:
+                ReadingPdf.discard(self.user, self.reading_pdf_key)
         return finished
 
     def _flush_reading_time(self):
@@ -5596,3 +5625,64 @@ class DebugLog(models.Model):
 
     def __str__(self):
         return f"{self.counter_key or '?'} ({self.platform}) — {self.created_at:%Y-%m-%d %H:%M}"
+
+
+def _reading_pdf_path(instance, filename):
+    # Nombre aleatorio: el original (puede traer cualquier cosa) se guarda
+    # solo como texto en original_name, nunca se usa como ruta.
+    return f"reading_pdfs/{uuid.uuid4().hex}.pdf"
+
+
+class ReadingPdf(models.Model):
+    """
+    PDF de un Plan de lectura guardado en el servidor, para poder leer el
+    mismo libro desde el PC y desde la app móvil sin pasarse el archivo a
+    mano. Se identifica por Task.reading_pdf_key (la misma clave que ya
+    usaba el visor para encontrarlo en el IndexedDB de cada dispositivo,
+    y que se propaga día a día en Task._spawn_next).
+
+    Es TEMPORAL a propósito: se borra al terminar el libro
+    (Task.record_reading_page) o al eliminar el plan (views.reading_plan_delete),
+    para no llenar el disco del hosting. Cada dispositivo guarda además su
+    propia copia en IndexedDB; el servidor es solo el punto de encuentro.
+    """
+    MAX_BYTES = 40 * 1024 * 1024
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="reading_pdfs",
+    )
+    key = models.CharField(max_length=64)
+    file = models.FileField(upload_to=_reading_pdf_path)
+    original_name = models.CharField(max_length=255, blank=True)
+    size = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "key"], name="uniq_reading_pdf_user_key"),
+        ]
+
+    def __str__(self):
+        return f"{self.key} ({self.size // 1024} KB)"
+
+    @classmethod
+    def store(cls, user, key, uploaded):
+        """Guarda (o reemplaza) el PDF de `key`, borrando del disco el anterior."""
+        obj = cls.objects.filter(user=user, key=key).first()
+        if obj is not None:
+            obj.file.delete(save=False)
+        else:
+            obj = cls(user=user, key=key)
+        obj.file.save(uploaded.name or "libro.pdf", uploaded, save=False)
+        obj.original_name = (uploaded.name or "")[:255]
+        obj.size = uploaded.size
+        obj.save()
+        return obj
+
+    @classmethod
+    def discard(cls, user, key):
+        """Borra el PDF de `key` (fila y archivo). No hace nada si no existe."""
+        for obj in cls.objects.filter(user=user, key=key):
+            obj.file.delete(save=False)
+            obj.delete()

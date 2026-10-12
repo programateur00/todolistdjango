@@ -15,7 +15,7 @@ from django.utils import timezone
 from . import ai, api
 from . import time_stats
 from .models import (
-    CourseQuiz, Exercise, Occurrence, Plan, PlanItem, Routine, RoutineItem, SavedVideo, Task,
+    CourseQuiz, Exercise, Occurrence, Plan, PlanItem, ReadingPdf, Routine, RoutineItem, SavedVideo, Task,
     TimerSession, UserSettings, WarmupStatus, WorkoutSession, last_set_reps, last_set_seconds,
 )
 from . import calories
@@ -435,6 +435,8 @@ def task_create(request):
                 if client_uuid:
                     task.uuid = client_uuid
                 task.save()
+                if task.youtube_link_notice:
+                    messages.warning(request, task.youtube_link_notice)
                 if task.youtube_playlist_id:
                     task.sync_playlist_videos()
                 created_msg = "Tarea creada."
@@ -519,6 +521,8 @@ def task_edit(request, pk):
             messages.error(request, link_error)
         else:
             task.save()
+            if task.youtube_link_notice:
+                messages.warning(request, task.youtube_link_notice)
             if task.youtube_playlist_id and task.youtube_playlist_id != old_playlist_id:
                 task.sync_playlist_videos()
             messages.success(request, "Tarea actualizada.")
@@ -572,6 +576,8 @@ def reading_plan_delete(request, pk):
     task = get_object_or_404(
         Task, pk=pk, user=get_current_user(), reading_mode=Task.READING_MODE_PLAN,
     )
+    if task.reading_pdf_key:
+        ReadingPdf.discard(task.user, task.reading_pdf_key)
     Task.objects.filter(series_id=task.series_id, user=get_current_user()).delete()
     messages.success(request, "Plan de lectura eliminado. Su historial y estadísticas se conservan.")
     return redirect(reverse("tasks:task_list"))
@@ -1207,6 +1213,13 @@ def reading_plan_form(request, pk=None):
     })
 
 
+def reading_pdf(request, key):
+    """PDF del plan de lectura en el servidor (subir/descargar/comprobar) -- ver ReadingPdf."""
+    if request.method not in ("GET", "HEAD", "POST"):
+        return HttpResponseNotAllowed(["GET", "HEAD", "POST"])
+    return api.reading_pdf_response(request, key)
+
+
 def task_reading(request, pk):
     """
     Visor de PDF a pantalla completa de un Plan de lectura -- pdf.js
@@ -1423,6 +1436,7 @@ def task_video(request, pk):
         # reproductor los reproduce directamente en vez de fiarse de que
         # YouTube acepte la lista por su ID — ver task_video.html.
         "playlist_video_ids_json": json.dumps([] if override_video_id else task.playlist_video_ids()),
+        "playlist_video_durations_json": json.dumps([] if override_video_id else task.playlist_video_durations()),
         "target_minutes": None if override_video_id else task.target_minutes,
         "target_video_count": None if override_video_id else task.target_video_count,
         "playlist_start_index": None if override_video_id else task.playlist_start_index,
@@ -1981,7 +1995,7 @@ def stats_delete_series(request, series_id):
 # ─────────────────────────────────────────────────────────────────────
 
 # Contadores que existen de verdad en workout.js.
-COUNTERS = {"superman", "lsit", "elephantsteps", "burpee", "pullup", "dip", "pushup", "squat", "jumpsquat", "splitsquat", "crunch", "legraise", "highlegraise", "situp", "doublecrunch", "vup", "scissor", "archerpullup", "inclinepushup", "kneepushup", "kneedeclinepushup", "archerpushup", "onearmpushup", "clappushup", "pseudoplanchepushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "hipforwardback", "scapularpull", "handstandpushup", "pistolsquat", "cossacksquat", "plankshouldertaps", "dynamicplank", "sideplankhipdips", "heelraise", "toestobar"}
+COUNTERS = {"superman", "lsit", "elephantsteps", "burpee", "pullup", "dip", "pushup", "squat", "jumpsquat", "splitsquat", "crunch", "legraise", "highlegraise", "situp", "doublecrunch", "vup", "scissor", "archerpullup", "inclinepushup", "kneepushup", "kneedeclinepushup", "archerpushup", "onearmpushup", "clappushup", "pseudoplanchepushup", "rockingpushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "hipforwardback", "scapularpull", "handstandpushup", "pistolsquat", "cossacksquat", "plankshouldertaps", "dynamicplank", "sideplankhipdips", "heelraise", "tuckjump", "switchblade", "jumprope", "toestobar", "stepup", "glutebridge", "splitjump"}
 
 # Ejercicios "timed" (se aguantan, no se cuentan en repeticiones) que
 # workout.js sabe seguir con cámara comprobando la postura — plancha,
@@ -1989,7 +2003,7 @@ COUNTERS = {"superman", "lsit", "elephantsteps", "burpee", "pullup", "dip", "pus
 # task_workout: a estos, a diferencia del resto de "timed" (bicicleta…),
 # sí se les deja entrar en el entreno individual de una tarea con cámara
 # encendida, no solo dentro de un circuito.
-POSTURE_COUNTERS = {"supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "tucklever", "deadhang", "handstand", "frogstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch", "elephantstepshold"}
+POSTURE_COUNTERS = {"hollowbodyhold", "supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "tucklever", "deadhang", "handstand", "frogstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch", "elephantstepshold"}
 
 
 def _plans_qs():

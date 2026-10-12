@@ -25,7 +25,7 @@ from functools import wraps
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Q, Sum
-from django.http import Http404, JsonResponse
+from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from django.utils import timezone
@@ -36,7 +36,7 @@ from django.views.decorators.http import require_http_methods
 from . import ai
 from .models import (
     CourseModule, CoursePlaylist, CourseQuiz, DebugLog, Exercise, Occurrence, Plan, PlanItem,
-    Routine, RoutineItem, SavedVideo, Task, TimerSession, TrainingSession, WarmupStatus,
+    ReadingPdf, Routine, RoutineItem, SavedVideo, Task, TimerSession, TrainingSession, WarmupStatus,
     WorkoutSession, day_average_pace, last_set_reps, last_set_seconds,
 )
 from .utils import get_current_user, read_mobile_release, resolve_plan_target as _plan_context
@@ -569,7 +569,11 @@ def task_create(request):
     t.save()
     if t.youtube_playlist_id:
         t.sync_playlist_videos()
-    return JsonResponse({"ok": True, "task": task_json(t)}, status=201)
+    # "notice": se corrigió un enlace pegado en el campo equivocado
+    # (vídeo <-> playlist); la app lo enseña tras guardar.
+    return JsonResponse(
+        {"ok": True, "task": task_json(t), "notice": t.youtube_link_notice}, status=201
+    )
 
 
 @api("GET", "PATCH", "DELETE")
@@ -586,6 +590,7 @@ def task_detail(request, uuid):
         # YouTube acepte la lista por su ID. Solo en el detalle, no en el
         # listado (pesa). [] = playlist sin sincronizar.
         data["playlist_video_ids"] = t.playlist_video_ids() if t.youtube_playlist_id else []
+        data["playlist_video_durations"] = t.playlist_video_durations() if t.youtube_playlist_id else []
         return JsonResponse({"task": data})
 
     if request.method == "PATCH":
@@ -598,7 +603,7 @@ def task_detail(request, uuid):
         # vídeos de la anterior ya no sirve.
         if t.youtube_playlist_id != old_playlist_id:
             t.sync_playlist_videos()
-        return JsonResponse({"ok": True, "task": task_json(t)})
+        return JsonResponse({"ok": True, "task": task_json(t), "notice": t.youtube_link_notice})
 
     # DELETE — borrado suave, no se borra la fila. Si se borrara de
     # verdad, el otro dispositivo no podría enterarse al sincronizar y la
@@ -1114,6 +1119,50 @@ def reading_session_save(request, uuid):
     return JsonResponse({"ok": True})
 
 
+_READING_PDF_KEY_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def reading_pdf_response(request, key):
+    """
+    Subir (POST multipart, campo "file") / descargar (GET) / comprobar (HEAD) el
+    PDF de un plan de lectura. Compartida por la API de la app (reading_pdf) y
+    por la vista web (views.reading_pdf).
+    """
+    if not _READING_PDF_KEY_RE.fullmatch(key or ""):
+        return JsonResponse({"ok": False, "error": "Clave de PDF no válida"}, status=400)
+    if request.method == "POST":
+        f = request.FILES.get("file")
+        if f is None:
+            return JsonResponse({"ok": False, "error": "Falta el archivo"}, status=400)
+        if f.size > ReadingPdf.MAX_BYTES:
+            return JsonResponse({
+                "ok": False,
+                "error": f"El PDF pesa demasiado (máximo {ReadingPdf.MAX_BYTES // (1024 * 1024)} MB).",
+            }, status=413)
+        head = f.read(5)
+        f.seek(0)
+        if head != b"%PDF-":
+            return JsonResponse({"ok": False, "error": "Eso no parece un PDF."}, status=400)
+        obj = ReadingPdf.store(_user(), key, f)
+        return JsonResponse({"ok": True, "size": obj.size})
+    obj = ReadingPdf.objects.filter(user=_user(), key=key).first()
+    if obj is None or not obj.file:
+        return JsonResponse({"ok": False, "error": "No hay PDF en el servidor para este libro."}, status=404)
+    try:
+        fh = obj.file.open("rb")
+    except FileNotFoundError:
+        obj.delete()  # fila huérfana (archivo borrado a mano): se limpia sola
+        return JsonResponse({"ok": False, "error": "No hay PDF en el servidor para este libro."}, status=404)
+    resp = FileResponse(fh, content_type="application/pdf")
+    resp["Cache-Control"] = "private, no-store"
+    return resp
+
+
+@api("GET", "HEAD", "POST")
+def reading_pdf(request, key):
+    return reading_pdf_response(request, key)
+
+
 def _reading_plan_fields(data):
     """Valida el formulario del plan (mismas reglas que views.reading_plan_form)."""
     def to_int(v, default=0):
@@ -1601,6 +1650,17 @@ def routine_result(request, uuid, routine_uuid):
 # Planes
 # ─────────────────────────────────────────────────────────────────────
 
+def _item_requires_computer(it):
+    """Objetivo de Estudio que solo se puede montar/seguir con la extensión de
+    Chrome del PC (curso de Udemy con palabra clave, o clases de Ilerna)."""
+    return bool(it.watch_keyword or it.watch_site)
+
+
+COMPUTER_ONLY_MSG = (
+    "Los planes de Udemy, Ilerna y lectura (PDF) se crean y se editan desde el ordenador."
+)
+
+
 def plan_json(p, detail=False):
     head = p.headline
 
@@ -1655,6 +1715,10 @@ def plan_json(p, detail=False):
             "youtube_playlist_id": it.youtube_playlist_id,
             "target_minutes": it.target_minutes,
             "target_video_count": it.target_video_count,
+            # Udemy / clases de Ilerna: los cuenta la extensión de Chrome del
+            # PC, así que la app móvil los enseña pero no los crea ni edita.
+            "requires_computer": _item_requires_computer(it),
+            "watch_site": it.watch_site,
         }
 
     data = {
@@ -1675,6 +1739,7 @@ def plan_json(p, detail=False):
         "custom_days": p.custom_days_list(),
         "due_time": p.due_time.strftime("%H:%M") if p.due_time else None,
         "headline": _item(head) if head else None,
+        "requires_computer": bool(head and _item_requires_computer(head)),
         # Estudio · Idiomas no lleva PlanItem (headline sale None) -- sin
         # esto la app móvil no podía ni distinguir un plan de idioma de
         # un Hábito simple, ver plan_language_options/_draft/_save más abajo.
@@ -2021,6 +2086,11 @@ def plan_item_create(request, uuid):
     plan = get_object_or_404(plans_qs(), uuid=uuid)
     if plan.plan_type == Plan.PLAN_TYPE_GENERAL:
         return JsonResponse({"ok": False, "error": "Un plan General no necesita objetivos."}, status=400)
+    # Un objetivo nuevo de Estudio pasaría a ser el destacado y desplazaría al
+    # de Udemy/Ilerna del ordenador: mejor no tocarlo desde el móvil.
+    head = plan.headline
+    if plan.plan_type == Plan.PLAN_TYPE_STUDY and head and _item_requires_computer(head):
+        return JsonResponse({"ok": False, "error": COMPUTER_ONLY_MSG}, status=400)
     item = PlanItem(plan=plan)
     error = _apply_plan_item_fields(item, plan, body(request))
     if error:
@@ -2043,6 +2113,8 @@ def plan_item_detail(request, uuid, item_id):
         plan.sync_task()
         return JsonResponse({"ok": True, "plan": plan_json(plan, detail=True)})
 
+    if _item_requires_computer(item):
+        return JsonResponse({"ok": False, "error": COMPUTER_ONLY_MSG}, status=400)
     error = _apply_plan_item_fields(item, plan, body(request))
     if error:
         return JsonResponse({"ok": False, "error": error}, status=400)

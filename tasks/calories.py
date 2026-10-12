@@ -31,7 +31,7 @@ DEFAULT_SECONDS_PER_REP = 3.0   # lo que dura una repetición típica
 # Duración típica de UNA repetición en los ejercicios que no son de ~3 s.
 SECONDS_PER_REP = {
     # rápidos
-    "jumping-jack": 1.0, "heel-kicks": 1.0, "knee-raises": 1.0, "arm-circles": 1.5,
+    "jumping-jack": 1.0, "jump-rope": 0.5, "switchblade-jump": 1.5, "heel-kicks": 1.0, "knee-raises": 1.0, "arm-circles": 1.5,
     "arm-scissors": 1.5, "high-leg-raise": 1.5, "leg-rotation": 2.0, "scissor-kick": 1.5,
     "crunch": 2.0, "double-crunch": 2.5, "leg-raise": 2.5, "superman": 2.5,
     "scapular-pull": 2.0, "dumbbell-curl": 2.5, "neck-lateral-mobility": 2.0,
@@ -41,10 +41,10 @@ SECONDS_PER_REP = {
     "pullup": 4.0, "wide-pullup": 4.0, "chinup": 4.0, "commando-pullup": 4.5, "weighted-pullup": 4.5,
     "wide-weighted-pullup": 4.5, "archer-pullup": 5.0, "jumping-pullup": 3.0,
     "dips": 4.0, "weighted-dips": 4.5, "handstand-push-up": 5.0,
-    "burpee": 4.0, "pistol-squat": 5.0, "cossack-squat": 4.0, "heel-raise": 3.0, "toes-to-bar": 3.5, "l-sit": 4.0, "weighted-squat": 4.0, "weighted-crunch": 2.5,
+    "burpee": 4.0, "pistol-squat": 5.0, "cossack-squat": 4.0, "heel-raise": 3.0, "step-up": 4.0, "toes-to-bar": 3.5, "l-sit": 4.0, "weighted-squat": 4.0, "weighted-crunch": 2.5,
     "archer-push-up": 4.0, "one-arm-push-up": 5.0, "clap-push-up": 2.5,
-    "pseudo-planche-push-up": 4.0,
-    "jump-squat": 2.5, "bulgarian-split-squat": 4.0,
+    "pseudo-planche-push-up": 4.0, "rocking-push-up": 4.0,
+    "jump-squat": 2.5, "tuck-jump": 2.0, "split-jump": 2.5, "bulgarian-split-squat": 4.0,
     "v-up": 2.5, "dynamic-plank": 3.0,
 }
 

@@ -28,6 +28,7 @@ urlpatterns = [
     path("planes-lectura/nuevo/", views.reading_plan_form, name="reading_plan_create"),
     path("planes-lectura/<int:pk>/editar/", views.reading_plan_form, name="reading_plan_edit"),
     path("planes-lectura/<int:pk>/eliminar/", views.reading_plan_delete, name="reading_plan_delete"),
+    path("lectura-pdf/<str:key>/", views.reading_pdf, name="reading_pdf"),
     path("<int:pk>/lectura/", views.task_reading, name="task_reading"),
     path("<int:pk>/lectura/progreso/", views.task_reading_progress, name="task_reading_progress"),
     path("<int:pk>/lectura/guardar/", views.task_reading_save, name="task_reading_save"),
