@@ -442,7 +442,7 @@ import { openCameraStream } from "./camera-stream.js";
             : ""
         }
         <div class="workout__camera">
-          <video id="posture-video" playsinline muted class="workout__video"></video>
+          <video id="posture-video" playsinline muted poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" class="workout__video"></video>
           <canvas id="posture-canvas" class="workout__canvas"></canvas>
         </div>
         <p id="posture-status" class="workout__status">Preparando la cámara…</p>
@@ -733,7 +733,7 @@ import { openCameraStream } from "./camera-stream.js";
             : ""
         }
         <div class="workout__camera">
-          <video id="workout-video" playsinline muted class="workout__video"></video>
+          <video id="workout-video" playsinline muted poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" class="workout__video"></video>
           <canvas id="workout-canvas" class="workout__canvas"></canvas>
         </div>
         <p id="workout-goal-banner" class="workout__goal-banner" hidden></p>

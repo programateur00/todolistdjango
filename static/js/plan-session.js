@@ -488,7 +488,7 @@ import { openCameraStream } from "./camera-stream.js";
         <p class="circuit__phase circuit__phase--work">${isFailure ? "Al fallo" : "Trabajo"}</p>
         ${lastSecondsHintHtml(item)}
         <div class="workout__camera">
-          <video id="posture-video" playsinline muted class="workout__video"></video>
+          <video id="posture-video" playsinline muted poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" class="workout__video"></video>
           <canvas id="posture-canvas" class="workout__canvas"></canvas>
         </div>
         <p id="posture-status" class="workout__status">Preparando la cámara…</p>
@@ -752,7 +752,7 @@ import { openCameraStream } from "./camera-stream.js";
         <p class="run-target">Objetivo: <strong>${objetivo}</strong> ${fuente}</p>
         <p id="workout-last-hint" class="circuit__side-hint run-last-hint" hidden></p>
         <div class="workout__camera">
-          <video id="workout-video" playsinline muted class="workout__video"></video>
+          <video id="workout-video" playsinline muted poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" class="workout__video"></video>
           <canvas id="workout-canvas" class="workout__canvas"></canvas>
         </div>
         <p id="workout-goal-banner" class="workout__goal-banner" hidden></p>

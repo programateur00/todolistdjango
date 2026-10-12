@@ -1146,3 +1146,10 @@ body.cam-fullscreen .page { animation:none; transform:none; }
 .kv-list li:first-child strong { color:var(--ember); }
 .kv-list strong { color:var(--bone); font-weight:600; }
 
+
+/* Sin el play gris por defecto del navegador/WebView al cambiar de ejercicio:
+   fondo negro y fuera el botón nativo de reproducir. */
+.workout__video { background: #000; }
+.workout__video::-webkit-media-controls,
+.workout__video::-webkit-media-controls-start-playback-button,
+.workout__video::-webkit-media-controls-overlay-play-button { display: none !important; -webkit-appearance: none; }

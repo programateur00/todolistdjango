@@ -136,7 +136,7 @@ async function runSallyPushups(host) {
     <div class="circuit">
       <p class="circuit__progress" id="sally-progress">Ronda 1 de ${SALLY_ROUNDS}</p>
       <div class="workout__camera">
-        <video id="sally-video" playsinline muted class="workout__video"></video>
+        <video id="sally-video" playsinline muted poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" class="workout__video"></video>
         <canvas id="sally-canvas" class="workout__canvas"></canvas>
       </div>
       <p id="sally-status" class="workout__status">Colócate: boca abajo, de perfil, codos ya doblados (posición de abajo).</p>
@@ -334,7 +334,7 @@ function runPullupSet(host, state) {
       <h2 class="circuit__exercise-name">Dominadas</h2>
       <p class="run-target">Haz las que quieras en esta serie y pulsa «Terminar serie» cuando acabes.</p>
       <div class="workout__camera">
-        <video id="workout-video" playsinline muted class="workout__video"></video>
+        <video id="workout-video" playsinline muted poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" class="workout__video"></video>
         <canvas id="workout-canvas" class="workout__canvas"></canvas>
       </div>
       <p id="workout-goal-banner" class="workout__goal-banner" hidden></p>
@@ -567,7 +567,7 @@ function runCindyPhase(host, state) {
       <h2 class="circuit__exercise-name">${phase.name}</h2>
       <p class="run-target">Exactamente ${phase.min}, en una sola serie. <span id="cindy-gate"></span><br><small>${phase.exit}</small></p>
       <div class="workout__camera">
-        <video id="workout-video" playsinline muted class="workout__video"></video>
+        <video id="workout-video" playsinline muted poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" class="workout__video"></video>
         <canvas id="workout-canvas" class="workout__canvas"></canvas>
       </div>
       <p id="workout-goal-banner" class="workout__goal-banner" hidden></p>
