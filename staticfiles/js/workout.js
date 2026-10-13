@@ -10,7 +10,7 @@
 // que revendorizar una versión nueva o volver a un CDN externo, solo
 // hace falta tocar ese fichero pequeño, no bucear por todo workout.js.
 // Ver static/vendor/mediapipe/README.md para el paso a paso.
-import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL, OBJECT_MODEL_URL } from "./mediapipe-vendor.js";
+import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL, OBJECT_MODEL_URL, createPoseLandmarker } from "./mediapipe-vendor.js";
 import { openCameraStream } from "./camera-stream.js";
 
 // Prueba hecha 2026-09-15 en el Redmi A5 de Alex: "GPU" prom=114.8ms/9fps
@@ -29,7 +29,7 @@ const POSE_DELEGATE = "GPU";
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-19-frontpos-v1+cindy-v2+lsithold-flow-v18+superman-v2+pikepushup-v1+forearmrotation-v2+elephantsteps-v1+burpee-v1+forearmrotation-v3+hiplateral-v6+hipforwardback-v4+standingquadstretch-v2+pikepushup-v2+dips-vis-v1+dips-lastre-v1+legrotation-v5+hiplateral-v7+websync-2026-10-08+dips-v2+kneepushup-v1+archerpushup-v1+pseudoplanche-v1+kneepushup-v2+archerclap-v2+archer-v3+cossack-v1+rockingpushup-v1+tuckjump-v1+jumprope-v1+glutebridge-v1+switchblade-v1+splitjump-v1";
+const WORKOUT_JS_BUILD = "2026-09-19-frontpos-v1+cindy-v2+lsithold-flow-v18+superman-v2+pikepushup-v1+forearmrotation-v2+elephantsteps-v1+burpee-v1+forearmrotation-v3+hiplateral-v6+hipforwardback-v4+standingquadstretch-v2+pikepushup-v2+dips-vis-v1+dips-lastre-v1+legrotation-v5+hiplateral-v7+websync-2026-10-08+dips-v2+kneepushup-v1+archerpushup-v1+pseudoplanche-v1+kneepushup-v2+archerclap-v2+archer-v3+cossack-v1+rockingpushup-v1+tuckjump-v1+jumprope-v1+glutebridge-v1+switchblade-v1+splitjump-v1+dips-balanceo-v1+clap-v2+archer-v4+rockingpushup-v2+clap-v3b+clap-v4+archer-v7+frogstand-v6";
 
 // Token del registro de depuración remoto (ver settings.DEBUG_LOG_TOKEN
 // en el backend) -- exportScissorLog() lo manda junto al registro para
@@ -188,6 +188,55 @@ const TOESTOBAR_SCALE_TOLERANCE = 0.40;    // cuánto puede variar el largo de t
 const TOESTOBAR_MIN_REP_SECONDS = 0.25;    // despegar de abajo y llegar arriba en menos de esto = ruido de un frame (kipping rápido tarda ~0.4 s)
 const BAR_MARGIN_FACTOR = 0.25; // cuanto por debajo de la barra ya cuenta como "llegaste arriba"
 const BAR_OFFSET_FACTOR = 0.05; // empuja la linea de la barra hacia arriba respecto a la muñeca (~2cm en un adulto medio, ver nota abajo)
+// Dominadas (todas las variantes con counter "pullup": normales, anchas, chin-ups, con peso, con salto,
+// commando; NO la escapular, que tiene su propio contador). 2026-10-12: contaba como válidas subidas muy
+// cortas (casi escapulares) porque lo único que se miraba era la nariz contra la barra calibrada. Ahora
+// además hay que (a) subir de verdad desde el punto más bajo y (b) doblar el codo. Solo un poco más
+// exigente que antes, no hace falta tocar pecho con la barra. Sube estos números para exigir más.
+const PULLUP_MIN_RISE_FACTOR = 0.40;    // subida mínima de la nariz desde el punto más bajo, en anchos de hombro (escapular ~0.18, dominada completa ~0.8-0.9)
+const PULLUP_TOP_ELBOW_MAX_DEG = 100;   // codo (2D, suavizado) como máximo así de abierto arriba; si no se ve codo/muñeca no se mira
+const PULLUP_ELBOW_SMOOTH_ALPHA = 0.5;
+// Dominadas COMMANDO (2026-10-13): comparten contador con las dominadas, pero reportado "no cuenta ninguna".
+// En la commando el cuerpo queda de lado a la barra (manos una detras de otra), el torso gira hacia el lado que
+// sube y la cabeza queda AL LADO de la barra, no por encima: (1) el ancho de hombros cambia mucho al girar y el
+// descarte por cambio de escala tiraba justo los frames de arriba; (2) arriba el hombro que sube llega a la
+// altura de las munecas y "brazos en alto" fallaba y borraba el punto de abajo a mitad de subida; (3) la nariz
+// queda mas lejos de la linea de la barra; (4) las manos se tapan entre si y el codo medio engaña. Solo en
+// commando se relaja cada cosa; las dominadas normales no cambian.
+const COMMANDO_BAR_MARGIN_FACTOR = 0.60; // nariz hasta 0,6 anchos de hombro POR DEBAJO de la linea de la barra ya cuenta como arriba (normal: 0,25)
+const COMMANDO_TOP_ELBOW_MAX_DEG = 110;  // codo del brazo que mas se dobla (normal: media de ambos <=100)
+const COMMANDO_SCALE_MIN = 0.40;         // ancho de hombros actual / calibrado: por debajo = no es giro, te has alejado
+const COMMANDO_SCALE_MAX = 1.60;         // por encima = te has acercado a la camara
+// Commando DE PERFIL (2026-10-13): el usuario se pone de lado a la camara, agarra la barra (una mano delante de la
+// otra, la barra queda horizontal en la imagen) y sube; da igual por que lado de la barra pase la cabeza, de perfil
+// eso es profundidad y no se ve ni hace falta. De perfil los dos hombros casi se solapan, asi que el ANCHO DE HOMBROS
+// ya no sirve de unidad (se hace diminuto e inestable y los umbrales se vuelven absurdos). La unidad pasa a ser el
+// LARGO DEL TRONCO (hombro-cadera), que de perfil se ve entero y no cambia al girar el torso ni al tirar. Se escala
+// por COMMANDO_UNIT_PER_TORSO para que quede equivalente a un ancho de hombros de frente y valgan los mismos
+// umbrales que las dominadas (un ancho de hombros ~0,75 tronco).
+const COMMANDO_UNIT_PER_TORSO = 0.75;
+const COMMANDO_MAX_FRONTAL_RATIO = 0.62; // ancho de hombros / largo de tronco: de frente ~0,75-0,9; de perfil ~0,1-0,4. Mas que esto = estas de frente.
+function commandoTorsoLen(lm) {
+  const ls = lm[L_SHOULDER], rs = lm[R_SHOULDER], lh = lm[L_HIP], rh = lm[R_HIP];
+  if (!ls || !rs || !lh || !rh) return null;
+  const sVis = ((ls.visibility ?? 1) + (rs.visibility ?? 1)) / 2;
+  const hVis = ((lh.visibility ?? 1) + (rh.visibility ?? 1)) / 2;
+  if (sVis < 0.4 || hVis < 0.3) return null;
+  return Math.hypot((ls.x + rs.x) / 2 - (lh.x + rh.x) / 2, (ls.y + rs.y) / 2 - (lh.y + rh.y) / 2);
+}
+// Unidad de medida de la commando; si no se ven hombros+caderas cae a `fallback` (la ultima calibrada).
+function commandoBodyUnit(lm, fallback) {
+  const t = commandoTorsoLen(lm);
+  return t ? t * COMMANDO_UNIT_PER_TORSO : fallback;
+}
+// {ok, reason}: ok = estas de perfil y se te ven hombros y caderas. Se exige solo para ARMAR (esperar/calibrar).
+function commandoSetupCheck(lm) {
+  const t = commandoTorsoLen(lm);
+  if (!t) return { ok: false, reason: "Que se te vean los hombros y las caderas." };
+  const sw = Math.hypot(lm[L_SHOULDER].x - lm[R_SHOULDER].x, lm[L_SHOULDER].y - lm[R_SHOULDER].y);
+  if (sw / t > COMMANDO_MAX_FRONTAL_RATIO) return { ok: false, reason: "Ponte de perfil (de lado a la cámara) para la commando." };
+  return { ok: true, reason: "" };
+}
 const HANG_MARGIN_FACTOR = 0.08; // cuanto tienen que estar las munecas por encima de los hombros para considerar que estas colgado
 // Umbral, bastante mas generoso que HANG_MARGIN_FACTOR, para decidir que
 // de verdad te has SOLTADO de la barra a mitad de serie (no solo que
@@ -304,6 +353,12 @@ const FACE_MIN_SCALE = 0.08;                // escala mínima (fracción del enc
 const FACE_NOSE_HOLD_MS = 400;              // cuánto se reutiliza la última nariz buena si no hay cara con la que corregirla
 const FACE_LOG_EVERY_MS = 1000;             // máximo una línea de registro por segundo
 const NOSE_SIGNAL_COUNTERS = new Set(["necklateral", "neckturn", "neckcircles", "neckhalfturn", "situp", "archerpullup"]); // la nariz ES la señal de la repetición: con la nariz anulada (sanitizeFace) se salta el frame
+// Frog stand / crow: poses con la cabeza abajo y el cuerpo plegado. En el 3er registro el modelo no dio NINGÚN esqueleto
+// durante ~25 s seguidos (882 fotogramas "sin detección"). Umbrales más bajos solo para este ejercicio; el filtro de
+// persona (PersonGate) sigue descartando esqueletos fantasma.
+const POSE_MIN_DETECTION_CONFIDENCE_ODD = 0.3;
+const POSE_MIN_PRESENCE_CONFIDENCE_ODD = 0.3;
+const POSE_MIN_TRACKING_CONFIDENCE_ODD = 0.3;
 const POSE_MIN_DETECTION_CONFIDENCE = 0.6;  // confianza mínima de MediaPipe para DETECTAR una pose nueva (defecto 0.5)
 const PERF_LOG_EVERY_N_FRAMES = 90; // cada cuantos frames se vuelca al registro [perf] (ver loop()) un resumen de ms/frame real de detectForVideo -- ~3s a 30fps, ~1.5s a 60fps
 // Velocidad de la voz al contar reps (1 = normal). El plugin nativo (TtsPlugin.java) la aplica con setSpeechRate.
@@ -662,6 +717,8 @@ const DIP_ARM_VERTICAL_MIN_RATIO = 0.65;  // (muñeca.y - hombro.y) / largo de b
 const DIP_ARM_TILT_MAX_RATIO = 0.75;      // |muñeca.x - hombro.x| / largo de brazo: tope de inclinación hacia delante/atrás
 const DIP_LEG_MIN_VISIBILITY = 0.3;       // visibilidad mínima de rodilla y tobillo para fiarse del ángulo de la espinilla
 const DIP_SHANK_LIFT_MIN_DEG = 40;        // espinilla (rodilla->tobillo) desviada ≥ esto de la vertical = pies levantados (rodillas dobladas hacia atrás). De pie / andando ≈ 0-20°
+const DIP_FEET_QUIET_WINDOW_MS = 800;     // fondos-balanceo (2026-10-12): ventana en la que se mira si los pies se están balanceando
+const DIP_FEET_QUIET_MAX_RANGE_DEG = 12;  // fondos-balanceo: si la espinilla varía más que esto en esa ventana, los pies se BALANCEAN (colgando de las paralelas) y NO cuentan como "pies en el suelo". De pie en el suelo la espinilla está casi quieta (<~5°)
 const DIP_SHANK_DOWN_MAX_DEG = 20;        // espinilla a ≤ esto de la vertical = pies apoyados en el suelo (desmonte en paralelas bajas)
 const DIP_GROUND_DECAY_PER_FRAME = 0.0003; // olvido lento de la referencia de hombro "de pie" (solo paralelas altas / piernas no visibles)
 const DIP_WALK_WINDOW_MS = 1200;          // ventana para detectar que andas por el encuadre (desmonte)
@@ -1092,6 +1149,24 @@ const ROCKPUSHUP_PHASE_TIMEOUT_MS = 8000;                // una mitad hecha (fle
 const ROCKPUSHUP_MIN_REP_SECONDS = 1.0;
 const ROCKPUSHUP_IDLE_CLOSE_MS = 15000;                  // en plancha sin ninguna repetición: serie terminada
 const ROCKPUSHUP_LOG_EVERY_MS = 1000;
+
+// ── v2 (2026-10-13): "al levantarme cuenta una rep falsa" ───────────────────────────────────────────────
+// Causa: levantarse desde el balanceo (flexión ya hecha + balanceo hecho) pasa por "cadera recta (>=150°) +
+// brazos estirados (de pie, colgando)", justo la condición de "vuelta a la plancha" -> contaba una rep.
+// Arreglo: (1) la vuelta a la plancha solo vale con el cuerpo HORIZONTAL (inclinación hombro-cadera <=
+// ROCKPUSHUP_COUNT_MAX_TILT_DEG) y mantenida ROCKPUSHUP_RETURN_HOLD_MS; (2) de pie (inclinación alta)
+// ROCKPUSHUP_STAND_RESET_MS seguido se descarta la media repetición en curso; (3) apoyos fijos: al armar se
+// guardan la posición de la mano y del pie (tobillo) apoyados; si se mueven de ahí ROCKPUSHUP_ANCHOR_BREAK_MS
+// seguido (levantas las manos, das un paso) no se cuenta nada hasta que vuelvan, y si de verdad te has
+// recolocado en plancha firme ROCKPUSHUP_REANCHOR_MS, se reancla en el sitio nuevo.
+const ROCKPUSHUP_COUNT_MAX_TILT_DEG = 45;                // plancha/flexión (armar exige <= 40°, ON_GROUND_MAX_TILT_DEG); de pie ronda 90°
+const ROCKPUSHUP_RETURN_HOLD_MS = 100;                   // la vuelta a la plancha debe cumplirse seguida este rato
+const ROCKPUSHUP_STAND_RESET_MS = 300;                   // inclinación > BROKEN_TILT seguida: se descarta lo a medias
+const ROCKPUSHUP_ANCHOR_MIN_VIS = 0.4;                   // visibilidad mínima de muñeca/tobillo para anclar o comprobar
+const ROCKPUSHUP_HAND_MOVE_FACTOR = 0.6;                 // mano movida más de esto (x largo de tronco al armar) = manos fuera del suelo
+const ROCKPUSHUP_FOOT_MOVE_FACTOR = 0.6;                 // idem para el pie
+const ROCKPUSHUP_ANCHOR_BREAK_MS = 400;                  // apoyo movido seguido este rato = no se cuenta
+const ROCKPUSHUP_REANCHOR_MS = 2000;                     // recolocado en plancha firme este rato = nuevo anclaje
 const ROCKPUSHUP_WAIT_MSG =
   "Ponte en plancha alta de perfil a la cámara (manos bajo los hombros, brazos estirados, cuerpo recto), con " +
   "el cuerpo entero en el encuadre. Cada repetición: una flexión, balancea la cadera hacia atrás hasta los " +
@@ -1114,10 +1189,10 @@ const ROCKPUSHUP_WAIT_MSG =
 //    vuelo dura ~0.2-0.4 s: a fps bajo pueden caer pocos fotogramas; el umbral es bajo a propósito.
 // Todos los umbrales son valores de partida SIN probar en cámara real.
 const ARCHER_PUSHUP_ARM_GATE_DEG = 140;        // armar: los dos brazos casi rectos
-const ARCHER_PUSHUP_BENT_DEG = 110;            // brazo que baja: codo como mucho esto (= PUSHUPFRONT_DOWN_DEG)
+const ARCHER_PUSHUP_BENT_DEG = 130;            // brazo que baja: codo como mucho esto (= PUSHUPFRONT_DOWN_DEG)
 const ARCHER_PUSHUP_STRAIGHT_DEG = 140;        // el otro brazo, al empezar la bajada: al menos esto
 const ARCHER_PUSHUP_STRAIGHT_LOOSE_DEG = 120;  // ...y durante la rep no baja de esto (si baja, rep inválida)
-const ARCHER_PUSHUP_UP_DEG = 135;              // los dos brazos otra vez casi rectos -> rep completa (= PUSHUPFRONT_UP_DEG)
+const ARCHER_PUSHUP_UP_DEG = 145;              // los dos brazos otra vez casi rectos -> rep completa (= PUSHUPFRONT_UP_DEG)
 const ARCHER_PUSHUP_USE_3D = false;            // false: ángulo de codo en 2D (de frente, el movimiento va en el plano de la imagen); true: world landmarks 3D como pushupfront
 const ARCHER_PUSHUP_BOTTOM_HOLD_MS = 120;      // el fondo (un brazo doblado, el otro estirado) se sostiene al menos esto seguido para abrir una rep
 const ARCHER_PUSHUP_MIN_REP_SECONDS = 0.5;     // de abrir la rep a volver a estirar: menos que esto es ruido, no cuenta
@@ -1125,26 +1200,53 @@ const ARCHER_PUSHUP_REFRACTORY_MS = 700;       // tras contar una rep, no se abr
 const ARCHER_PUSHUP_MAX_REP_MS = 10000;        // rep abierta más tiempo que esto sin volver arriba: se descarta
 // v3: umbrales RELATIVOS a cómo ve la cámara CADA brazo estirado (un brazo puede verse siempre algo más cerrado
 // por escorzo/encuadre y no llegar nunca a los 140° "absolutos" -> ese lado no contaba jamás).
-const ARCHER_PUSHUP_REL_BENT_MAX_DEG = 125;    // brazo que baja: vale hasta esto si el otro está MUY por encima (diferencia >= REL_DIFF)
-const ARCHER_PUSHUP_REL_DIFF_DEG = 45;         // diferencia mínima entre el brazo estirado y el que baja para usar REL_BENT_MAX
+const ARCHER_PUSHUP_REL_BENT_MAX_DEG = 140;    // brazo que baja: vale hasta esto si el otro está MUY por encima (diferencia >= REL_DIFF)
+const ARCHER_PUSHUP_REL_DIFF_DEG = 35;         // diferencia mínima entre el brazo estirado y el que baja para usar REL_BENT_MAX
 const ARCHER_PUSHUP_STRAIGHT_BELOW_TOP_DEG = 20; // el otro brazo, al empezar: >= (su ángulo normal arriba) - esto (tope: STRAIGHT_DEG)
 const ARCHER_PUSHUP_FLOOR_BELOW_TOP_DEG = 30;  // el otro brazo, durante la rep: no baja de (su ángulo normal arriba) - esto (tope: LOOSE_DEG)
 const ARCHER_PUSHUP_UP_BELOW_TOP_DEG = 15;     // volver arriba: >= (su ángulo normal arriba) - esto (tope: UP_DEG)
 const ARCHER_PUSHUP_HIDDEN_HOLD_MS = 2000;     // brazo estirado fuera de encuadre/poca visibilidad: se da por estirado (su último valor) hasta esto
 const ARCHER_PUSHUP_LOG_EVERY_MS = 500;        // registro de intentos que no llegan a abrir rep
+// v4 (2026-10-13, "arma pero no cuenta"): el brazo que baja pierde visibilidad (queda pegado al cuerpo/cámara) y se descartaba;
+// y un solo fotograma de ruido en el brazo estirado invalidaba la rep para siempre.
+// v5 (2026-10-13, "un lado no cuenta nunca"): SEGUNDA señal que no depende de los codos (que MediaPipe ve mal de frente):
+// en una flexión arquero la CABEZA se va hacia la mano del brazo que baja (en una normal se queda centrada entre las dos manos).
+// t = (nariz.x - muñeca_izq.x) / (muñeca_der.x - muñeca_izq.x): 0 = sobre la mano izq, 1 = sobre la der, 0.5 = centrada.
+// v6 (2026-10-13, log real de Alex): en TODAS sus flexiones arquero la cámara veía los DOS codos doblarse a la vez (izq/der ~30° a la vez,
+// 3D ~90°/90°) y la cabeza centrada (t~0.5): de frente MediaPipe no distingue el brazo estirado, así que exigirlo (otro brazo >= 140°) hacía
+// que NO SE CONTARA NINGUNA. Decisión de Alex (10-11): las variantes que la cámara no distingue comparten el contador del ejercicio base.
+// false = cuenta cada bajada y subida de al menos un brazo (los dos juntos también); true = el comportamiento estricto de v3-v5.
+const ARCHER_REQUIRE_STRAIGHT_OTHER = false;
+const ARCHER_SHIFT_MIN_SPAN = 0.2;     // separación mínima de las muñecas (ancho de imagen) para fiarse de t
+const ARCHER_SHIFT_OFFSET = 0.2;       // cabeza desplazada >= esto desde el centro (t <= 0.3 o t >= 0.7) = baja hacia ese lado
+const ARCHER_SHIFT_BACK_BAND = 0.12;   // t vuelve a 0.5 +- esto = ha vuelto al centro (rep completa)
+const ARCHER_SHIFT_MIN_DROP = 0.05;    // la cabeza se mueve en vertical al menos esto (en separaciones de muñecas) respecto a arriba: no vale solo ladearse
+const ARCHER_PUSHUP_ACTIVE_MIN_VISIBILITY = 0.2; // con la serie en marcha basta esta visibilidad media del brazo (para armar sigue FRONT_MIN_VISIBILITY)
+const ARCHER_PUSHUP_INVALID_HOLD_MS = 250;      // el otro brazo tiene que estar doblado esto seguido para invalidar la rep (flexión normal)
 const ONEARM_PUSHUP_LINE_MIN_DEG = 140;        // hombro-cadera-tobillo (algo más laxo que PUSHUP_LINE_MIN_DEG: la cadera rota)
 const ONEARM_PUSHUP_FREE_HAND_LIFT_FACTOR = 0.25;       // armar: (muñeca apoyada.y - muñeca libre.y) / tronco
 const ONEARM_PUSHUP_FREE_HAND_LIFT_LOOSE_FACTOR = 0.10; // ya armado
 const ONEARM_PUSHUP_FREE_WRIST_MIN_VISIBILITY = 0.3;    // por debajo no se fía de dónde está la mano libre
-const CLAP_PUSHUP_MIN_LIFT_FACTOR = 0.12;      // (base.y - muñeca.y) / tronco: manos despegadas del suelo
+const CLAP_PUSHUP_MIN_LIFT_FACTOR = 0.09;      // v3 (era 0.12: un brinco pequeño no llegaba)  // (base.y - muñeca.y) / tronco: manos despegadas del suelo
 const CLAP_PUSHUP_LANDED_LIFT_FACTOR = 0.05;   // por debajo de esto, otra vez apoyadas
-const CLAP_PUSHUP_MIN_AIR_ELBOW_DEG = 110;     // en el aire los brazos van extendidos (no es un tirón de muñeca)
+const CLAP_PUSHUP_MIN_AIR_ELBOW_DEG = 90;      // v3 (era 110: al juntar las manos para la palmada el codo se dobla en el aire)  // en el aire los brazos van extendidos (no es un tirón de muñeca)
 const CLAP_PUSHUP_FLIGHT_WINDOW_MS = 400;      // tras estirar los brazos, cuánto esperar a ver las manos despegar
 const CLAP_PUSHUP_AIR_TIMEOUT_MS = 1500;       // máximo en estado "aire" sin ver el aterrizaje
-const CLAP_PUSHUP_MIN_SHOULDER_RISE_FACTOR = 0.08; // en el aire los HOMBROS suben por encima de su altura arriba (apoyado): (base.y - hombro.y) / tronco. Una flexión normal nunca pasa de su altura arriba.
+const CLAP_PUSHUP_MIN_SHOULDER_RISE_FACTOR = 0.05; // v3 (era 0.08) // en el aire los HOMBROS suben por encima de su altura arriba (apoyado): (base.y - hombro.y) / tronco. Una flexión normal nunca pasa de su altura arriba.
 const CLAP_PUSHUP_AIR_MIN_FRAMES = 2;          // fotogramas seguidos "en el aire" para contar (o uno solo con el doble de margen en manos y hombros)
-const CLAP_PUSHUP_AIR_LINE_MIN_DEG = 130;      // en el aire el cuerpo va recto (hombro-cadera-tobillo): levantarse/encogerse al final de la serie no cuenta
-const CLAP_PUSHUP_MIN_REP_SECONDS = 0.4;       // de empezar a bajar a despegar: menos que esto no cuenta
+const CLAP_PUSHUP_AIR_LINE_MIN_DEG = 120; // v3 (era 130)      // en el aire el cuerpo va recto (hombro-cadera-tobillo): levantarse/encogerse al final de la serie no cuenta
+const CLAP_PUSHUP_MIN_REP_SECONDS = 0;         // v3 (v2: 0.1; v1: 0.4): ya no descarta nada por duración -- el vuelo está verificado (hits+bajada previa+aterrizaje) y un rebote del estado 'abajo' con los codos en el límite dejaba la duración en ~0 y perdía reps reales. // v2 (era 0.4): se mide desde el FONDO hasta despegar, y en una palmada explosiva eso dura 0.2-0.3 s -> las reps rápidas se descartaban como "muy cortas". El vuelo ya está comprobado (manos+hombros), esto solo evita ruido.
+const CLAP_PUSHUP_LOOSE_DOWN_DEG = 125;        // v2: bajada "suave" (el fps no llegó a ver el fondo de PUSHUP_COUNT_DOWN_ANGLE_DEG): si hay vuelo tras haber bajado hasta aquí, cuenta
+const CLAP_PUSHUP_AIR_WINDOW_MS = 300;         // v2: los fotogramas "en el aire" no tienen que ser seguidos; basta CLAP_PUSHUP_AIR_MIN_FRAMES dentro de esta ventana
+const CLAP_PUSHUP_ABSENCE_MS = 5000;           // v3: con la serie en marcha, perder la detección (o la persona) menos que esto NO cierra la serie: abajo, con el pecho pegado al suelo, el modelo pierde puntos un momento
+const CLAP_PUSHUP_SHOULDER_RISE_FROM_LOW = 0.25; // v3: alternativa a "hombros por encima de su altura arriba": los hombros suben tanto desde el punto más bajo de la bajada (brinco con los codos doblados, que nunca supera la altura de arriba)
+// v4 (log real de Alex, 2026-10-13): levantarse al terminar la serie contaba 2 reps falsas (manos 206-229% del tronco, hombros 132-152%,
+// inclinación 89°). Las palmadas reales de ese log: manos <=55%, hombros <=15% sobre su altura de arriba, inclinación <=44° -> techos con margen.
+const CLAP_PUSHUP_AIR_MAX_LIFT_FACTOR = 0.70;      // manos despegadas MÁS que esto (en troncos): no es una palmada, es levantarse
+const CLAP_PUSHUP_AIR_MAX_SHOULDER_RISE = 0.45;    // hombros por encima de su altura de arriba MÁS que esto: idem
+const CLAP_PUSHUP_AIR_MAX_TILT_DEG = 52;           // tronco más vertical que esto: te estás levantando (el cierre por postura rota es a 60° sostenido)
+const CLAP_PUSHUP_AIR_SINGLE_FACTOR = 1.5;     // v3: un solo fotograma en el aire vale si manos y hombros pasan de umbral x esto (era x2)
+const CLAP_PUSHUP_LANDED_SHOULDER_RISE = 0.02; // v2: otra señal de aterrizaje: los hombros vuelven a su altura de arriba
 const ARCHER_PUSHUP_WAIT_MSG =
   "Túmbate boca abajo, mirando a la cámara, con las manos MUY separadas (más anchas que los hombros) y los " +
   "dos brazos estirados en el encuadre, para empezar.";
@@ -1826,7 +1928,7 @@ const JUMPINGJACK_MIN_REP_SECONDS = 0.12; // sustituye al MIN_REP_SECONDS generi
 const ARMCIRCLES_MIN_VISIBILITY = 0.4; // visibilidad media de hombros+muñecas exigida para fiarse del frame
 const ARMCIRCLES_MIN_REACH_FACTOR = 0.45; // la muñeca tiene que estar al menos esto de veces el ancho de hombros lejos del hombro para considerar el brazo "extendido" (evita acumular ángulo con el brazo pegado al cuerpo, quieto) -- bajado de 0.6 (segundo test en cámara real, 2026-09-05): con 0.6 hacía falta el brazo prácticamente perfectamente recto para armar el contador, cualquier codo algo doblado se quedaba corto
 const ARMCIRCLES_MAX_HANG_REL = 0.35; // NUEVO (2026-09-22, vídeo de referencia con audio de Alex, analizado fotograma a fotograma con MediaPipe simulado + transcripción de la voz con Vosk): la muñeca no puede colgar más de esto (veces el ancho de hombros) por DEBAJO del propio hombro para que el brazo cuente como "posición inicial correcta" al armar -- antes solo se exigía ARMCIRCLES_MIN_REACH_FACTOR (distancia al hombro en CUALQUIER dirección), que un brazo colgando totalmente relajado ya cumple de sobra (reach medido ~0.8 en el vídeo, muy por encima de 0.45) -- así que el contador se armaba en cuanto Alex se quedaba de pie explicando el ejercicio, sin haber levantado los brazos todavía. Solo se exige al ARMAR (this.state === null); durante el giro activo el brazo pasa por "colgando" en la parte baja del círculo con total normalidad y no se comprueba.
-const ARMCIRCLES_ARM_STABLE_MS = 800; // brazos extendidos sostenido esto antes de armar el contador (mismo espíritu que JUMPINGJACK_ARM_STABLE_MS, más corto porque aquí no hay piernas que comprobar)
+const ARMCIRCLES_ARM_STABLE_MS = 400; // brazos extendidos sostenido esto antes de armar el contador (mismo espíritu que JUMPINGJACK_ARM_STABLE_MS, más corto porque aquí no hay piernas que comprobar)
 const ARMCIRCLES_MIN_ANGULAR_DELTA = 0.09; // SUBIDO de 0.02 (~1.15°/frame) a 0.09 (~5.2°/frame) el 2026-09-22: analizando fotograma a fotograma (MediaPipe simulado a ~10fps, el ritmo real de móvil) el vídeo de referencia de Alex, la pausa real que hace entre un sentido y otro (brazos quietos, en alto) sigue produciendo 1-18°/frame de ruido de tracking sosteniendo la postura -- muy por encima del umbral viejo, así que ARMCIRCLES_STILL_MS nunca llegaba a completarse (0 pausas detectadas como quietud de verdad en todo el vídeo) y el cambio de sentido no se disparaba nunca por esta vía (ver ARMCIRCLES_STILL_MS y el cambio de sentido por vuelta completa en dirección contraria, en processArmCircles, que ya no depende de esto). Radianes por frame por debajo de esto se consideran ruido de tracking sosteniendo una postura, no giro de verdad.
 const ARMCIRCLES_STILL_MS = 4000; // SUBIDO de 2500 a 4000 (2026-09-22, mismo motivo y mismo valor que ARMSCISSORS_STILL_MS ese mismo día): en el vídeo de referencia la pausa real entre sentidos dura casi 3 segundos (brazos quietos, en alto) -- con el ruido ya corregido (ver ARMCIRCLES_MIN_ANGULAR_DELTA) 2500ms hubiera cerrado la serie entera de golpe a mitad de una pausa normal para coger aire, antes de girar en el sentido contrario. Ahora esta constante solo decide cuándo se da la sesión entera por TERMINADA -- el cambio de sentido DENTRO de la sesión ya no depende de esto (ver el cambio por vuelta completa en dirección contraria, más abajo).
 const ARMCIRCLES_OUT_OF_FRAME_MS = 3000; // mismo motivo que JUMPINGJACK_OUT_OF_FRAME_MS: girando de verdad los brazos también se pierde visibilidad por motion blur, no solo al salirte del encuadre
@@ -4349,60 +4451,120 @@ export function checkTuckLeverPosture(lm, holding = false) {
 // tronco, así que (igual que tuck lever/plancha) se exige más para ARMAR y se
 // afloja una vez aguantando: sin pierna visible ya aguantando NO rompe el
 // aguante. UMBRALES PENDIENTES de afinar con un vídeo real de cámara.
-const FROGSTAND_MIN_VISIBILITY = 0.4;              // hombros/cadera/muñecas
-const FROGSTAND_LEG_MIN_VISIBILITY = 0.3;          // rodilla/tobillo, al ARMAR
+const FROGSTAND_MIN_VISIBILITY = 0.4;              // hombros/cadera/muñecas al ARMAR: basta UN lado de cada par (de perfil el lejano casi no se ve)
+const FROGSTAND_LOOSE_MIN_VISIBILITY = 0.25;       // idem, ya aguantando
+const FROGSTAND_LEG_MIN_VISIBILITY = 0.2;          // rodilla/tobillo, al ARMAR
 const FROGSTAND_LEG_LOOSE_MIN_VISIBILITY = 0.1;    // rodilla/tobillo, ya aguantando
-const FROGSTAND_WRIST_BELOW_HIP_FACTOR = 0.4;      // muñeca por debajo de la cadera
-const FROGSTAND_WRIST_BELOW_SHOULDER_FACTOR = 0.3; // muñeca por debajo del hombro
-const FROGSTAND_FEET_ABOVE_HANDS_FACTOR = 0.5;     // al ARMAR: tobillo sobre la muñeca
+const FROGSTAND_WRIST_BELOW_HIP_FACTOR = 0.25;     // muñeca por debajo de la cadera
+const FROGSTAND_WRIST_BELOW_HIP_LOOSE_FACTOR = 0.1;
+const FROGSTAND_WRIST_BELOW_SHOULDER_FACTOR = 0.15; // muñeca por debajo del hombro
+const FROGSTAND_WRIST_BELOW_SHOULDER_LOOSE_FACTOR = 0.05;
+const FROGSTAND_FEET_ABOVE_HANDS_FACTOR = 0.55;    // ESTRICTO: tobillo sobre la muñeca (con los pies en el suelo, en el registro sale ~0.4-0.6 por la perspectiva)
 const FROGSTAND_FEET_ABOVE_HANDS_LOOSE_FACTOR = 0.25;
-const FROGSTAND_KNEE_ABOVE_HANDS_FACTOR = 0.35;    // rodilla ~a la altura del codo
-const FROGSTAND_KNEE_ABOVE_HANDS_LOOSE_FACTOR = 0.15;
-const FROGSTAND_KNEE_MAX_ANGLE_DEG = 110;          // al ARMAR: piernas bien recogidas
-const FROGSTAND_KNEE_LOOSE_MAX_ANGLE_DEG = 135;
+const FROGSTAND_KNEE_ABOVE_HANDS_FACTOR = 0.2;     // rodilla sobre la muñeca (a cuatro patas ~0)
+const FROGSTAND_KNEE_ABOVE_HANDS_LOOSE_FACTOR = 0.05;
+const FROGSTAND_KNEE_MAX_ANGLE_DEG = 125;          // al ARMAR: piernas recogidas (plancha ~170°)
+const FROGSTAND_KNEE_LOOSE_MAX_ANGLE_DEG = 125;   // ya aguantando (en la caída hacia delante sube a 100-110°)
 // Boca abajo y en equilibrio hay rachas de mal seguimiento: mismo margen largo
 // que pino/tuck lever.
-const FROGSTAND_FLICKER_STABLE_MS = 700;
+// 2026-10-13: bajado de 700 a 400 ms (con registro real): al caerte hacia delante la postura se daba por buena 0,7 s de más.
+const FROGSTAND_FLICKER_STABLE_MS = 400;
 const FROGSTAND_INVALID_STABLE_MS = 1800;
+// 2026-10-13 (registro real de Alex): metiendo la cabeza hacia abajo con los pies
+// doblados (como en pasos de elefante) el contador arrancaba en el PRIMER frame
+// "bueno" y sumaba 3 s falsos. Dos causas: (1) tras cerrar una serie, el primer
+// frame ya daba la postura por confirmada (sin tiempo de espera) y (2) los pies
+// apenas estaban despegados. En el registro, un frog stand con los pies de
+// verdad arriba tiene (muñeca-tobillo)/(muñeca-cadera) ~0.6-0.7 y el gesto
+// falso 0.1-0.35 (con algún frame suelto ~0.5). Ese cociente es solo vertical,
+// no depende de la escala ni de la proporción del vídeo.
+// Calibrado con el 2º registro real (frog stand bueno, de perfil): cociente de pies 0.43-0.50
+// (pies~1.1, rodillas~1.1, ángulo 70-80°) durante 2+ s, con bajadas puntuales a 0.3-0.4 al balancearse.
+// Gesto falso (pies en el suelo, plegado hacia delante): cociente 0.17-0.33 y rodillas MUY por encima del tobillo.
+// Caída hacia delante: cociente 0.38 -> 0.18, ángulo 90 -> 109°, rodillas 1.1 -> 2.4.
+// Dos niveles, como el resto de aguantes: ESTRICTO para empezar a contar, RELAJADO una vez aguantando.
+// 3er registro (2026-10-13): su aguante bueno tiene DOS formas -- frog (rodillas a media altura: pies~1.1, rodillas~1.1,
+// cociente 0.46) y tipo crow (rodillas a la altura de la cadera, cabeza alta: pies~0.8, rodillas~2.1, cociente 0.37, tobillo
+// ~1.2 por debajo de la rodilla). Con 0.40 y 0.35 de tobillo-bajo-rodilla no arrancaba ninguna de las dos de forma estable.
+// Lo que sigue separando los gestos falsos (plegado con los pies en el suelo: cociente 0.1-0.3, pies 0.4-0.6) es el cociente
+// y los pies; la forma de la pierna (tobillo-rodilla) ya solo corta extremos.
+const FROGSTAND_FEET_FRACTION = 0.30;              // ESTRICTO (arrancar): tobillo a >=30% del camino de la mano a la cadera
+const FROGSTAND_FEET_FRACTION_LOOSE = 0.20;        // RELAJADO (ya aguantando)
+const FROGSTAND_ANKLE_BELOW_KNEE_MAX = 1.5;        // ESTRICTO: el tobillo, como mucho esto (en escala) POR DEBAJO de la rodilla (frog ~0, crow ~1.2)
+const FROGSTAND_ANKLE_BELOW_KNEE_LOOSE_MAX = 1.8;  // RELAJADO
+const FROGSTAND_HEAD_ABOVE_HANDS_MIN = 0.25;       // la nariz, al menos esto (en escala) por encima de las manos: si no, la cabeza toca el suelo
+const FROGSTAND_ARM_WINDOW_MS = 1000;              // la postura tiene que verse buena durante este rato ANTES de empezar a contar
+const FROGSTAND_ARM_MIN_OK_FRACTION = 0.8;         // ...en al menos esta fracción de los frames de la ventana (y el último bueno)
 
 export function checkFrogStandPosture(lm, holding = false) {
-  const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
-  const lH = lm[L_HIP], rH = lm[R_HIP];
-  const lW = lm[L_WRIST], rW = lm[R_WRIST];
+  // El ejercicio se hace DE PERFIL: una sola persona, un solo lado hacia la
+  // cámara. Los puntos del lado lejano (el "otro" hombro, cadera, muñeca...)
+  // quedan tapados por el cuerpo, con visibilidad baja y posiciones inventadas;
+  // antes se exigían los de los DOS lados y se promediaban, así que la postura
+  // nunca salía válida y no contaba ni un segundo. Ahora se elige el lado que
+  // mejor se ve (como en hollow body) y TODO se calcula con la cadena de ese
+  // único lado: hombro, cadera, muñeca, rodilla y tobillo. El otro lado se usa
+  // solo de reserva para las piernas si las de este lado no se ven.
+  const vis = (p) => (p ? (p.visibility ?? 1) : 0);
+  const chain = (S, H, W, K, A) => ({ s: lm[S], h: lm[H], w: lm[W], k: lm[K], a: lm[A] });
+  const left = chain(L_SHOULDER, L_HIP, L_WRIST, L_KNEE, L_ANKLE);
+  const right = chain(R_SHOULDER, R_HIP, R_WRIST, R_KNEE, R_ANKLE);
+  const chainVis = (c) => vis(c.s) + vis(c.h) + vis(c.w) + vis(c.k) + vis(c.a);
+  const useLeft = chainVis(left) >= chainVis(right);
+  const side = useLeft ? left : right;
+  const other = useLeft ? right : left;
+  const sideName = useLeft ? "izq" : "der";
 
-  if ([lS, rS, lH, rH, lW, rW].some((p) => (p.visibility ?? 1) < FROGSTAND_MIN_VISIBILITY)) {
+  const bodyMinVis = holding ? FROGSTAND_LOOSE_MIN_VISIBILITY : FROGSTAND_MIN_VISIBILITY;
+  if (Math.min(vis(side.s), vis(side.h), vis(side.w)) < bodyMinVis) {
     return {
       ok: false,
-      reason: "No se te ven bien los hombros, la cadera y las manos. Coloca la cámara para que se vea todo el cuerpo, con las manos en el suelo.",
-      debug: { fail: "vis" },
+      reason: "No se te ven bien el hombro, la cadera y la mano. Ponte de perfil a la cámara, con todo el cuerpo en el encuadre y las manos en el suelo.",
+      debug: {
+        fail: "vis", lado: sideName,
+        visHombro: vis(side.s).toFixed(2), visCadera: vis(side.h).toFixed(2), visMano: vis(side.w).toFixed(2),
+      },
     };
   }
 
-  const shoulderMidX = (lS.x + rS.x) / 2, shoulderMidY = (lS.y + rS.y) / 2;
-  const hipMidX = (lH.x + rH.x) / 2, hipMidY = (lH.y + rH.y) / 2;
-  const wristMidY = (lW.y + rW.y) / 2;
-  const shoulderWidth = Math.hypot(lS.x - rS.x, lS.y - rS.y);
-  const torsoLen = Math.hypot(shoulderMidX - hipMidX, shoulderMidY - hipMidY);
+  const shoulderY = side.s.y, hipY = side.h.y, wristY = side.w.y;
+  const torsoLen = Math.hypot(side.s.x - side.h.x, side.s.y - side.h.y);
+  // De frente (si se ven bien los dos hombros) el ancho de hombros también sirve de escala;
+  // de perfil se solapan y manda el largo del tronco.
+  const sOther = other.s;
+  const shoulderWidth = vis(sOther) >= bodyMinVis ? Math.hypot(side.s.x - sOther.x, side.s.y - sOther.y) : 0;
   const scale = Math.max(shoulderWidth, 0.75 * torsoLen);
   if (!scale) {
-    return { ok: false, reason: "No se te ve bien. Aléjate un poco de la cámara.", debug: { fail: "vis" } };
+    return { ok: false, reason: "No se te ve bien. Aléjate un poco de la cámara.", debug: { fail: "vis", lado: sideName } };
   }
 
   const debug = {
-    manos: ((wristMidY - hipMidY) / scale).toFixed(2),
+    lado: sideName,
+    manos: ((wristY - hipY) / scale).toFixed(2),
   };
 
-  // 1. Manos en el suelo, soportando el peso: por debajo de cadera y hombros.
-  if (wristMidY < hipMidY + FROGSTAND_WRIST_BELOW_HIP_FACTOR * scale
-      || wristMidY < shoulderMidY + FROGSTAND_WRIST_BELOW_SHOULDER_FACTOR * scale) {
+  // 1. Manos en el suelo, soportando el peso: por debajo de cadera y hombro.
+  const wristHipF = holding ? FROGSTAND_WRIST_BELOW_HIP_LOOSE_FACTOR : FROGSTAND_WRIST_BELOW_HIP_FACTOR;
+  const wristShF = holding ? FROGSTAND_WRIST_BELOW_SHOULDER_LOOSE_FACTOR : FROGSTAND_WRIST_BELOW_SHOULDER_FACTOR;
+  if (wristY < hipY + wristHipF * scale || wristY < shoulderY + wristShF * scale) {
     return { ok: false, reason: "Apoya las manos en el suelo, con la cadera por encima de ellas.", debug };
   }
 
-  // 2-4. Piernas: las que se vean con confianza suficiente.
+  // Cabeza tocando el suelo (balanceo hacia delante): la nariz queda a la altura de las manos.
+  const nose = lm[NOSE];
+  if (nose && vis(nose) >= 0.4) {
+    const headUp = (wristY - nose.y) / scale;
+    debug.cabeza = headUp.toFixed(2);
+    if (headUp < FROGSTAND_HEAD_ABOVE_HANDS_MIN) {
+      return { ok: false, reason: "No apoyes la cabeza en el suelo: mantén la cabeza levantada, mirando al frente.", debug };
+    }
+  }
+
+  // 2-4. Piernas: las de este lado; si no se ven, las del otro.
   const legMinVis = holding ? FROGSTAND_LEG_LOOSE_MIN_VISIBILITY : FROGSTAND_LEG_MIN_VISIBILITY;
-  const legs = [[lm[L_HIP], lm[L_KNEE], lm[L_ANKLE]], [lm[R_HIP], lm[R_KNEE], lm[R_ANKLE]]]
-    .filter(([, k, a]) => Math.min(k.visibility ?? 1, a.visibility ?? 1) >= legMinVis);
-  if (!legs.length) {
+  const legOk = (c) => c.h && c.k && c.a && Math.min(vis(c.k), vis(c.a)) >= legMinVis;
+  const leg = legOk(side) ? side : legOk(other) ? other : null;
+  if (!leg) {
     if (holding) return { ok: true, debug: { ...debug, piernas: "no se ven (aguantando)" } };
     return {
       ok: false,
@@ -4415,17 +4577,26 @@ export function checkFrogStandPosture(lm, holding = false) {
   const kneeFactor = holding ? FROGSTAND_KNEE_ABOVE_HANDS_LOOSE_FACTOR : FROGSTAND_KNEE_ABOVE_HANDS_FACTOR;
   const maxAngle = holding ? FROGSTAND_KNEE_LOOSE_MAX_ANGLE_DEG : FROGSTAND_KNEE_MAX_ANGLE_DEG;
 
-  const lowAnkleY = Math.max(...legs.map(([, , a]) => a.y));
-  const lowKneeY = Math.max(...legs.map(([, k]) => k.y));
-  const feetUp = (wristMidY - lowAnkleY) / scale;
-  const kneesUp = (wristMidY - lowKneeY) / scale;
-  const kneeAngle = legs.reduce((s, [h, k, a]) => s + angle(h, k, a), 0) / legs.length;
+  const feetUp = (wristY - leg.a.y) / scale;
+  const kneesUp = (wristY - leg.k.y) / scale;
+  const kneeAngle = angle(leg.h, leg.k, leg.a) ?? 0;
   debug.pies = feetUp.toFixed(2);
   debug.rodillas = kneesUp.toFixed(2);
   debug.angRodilla = Math.round(kneeAngle);
+  const handsUp = wristY - hipY; // > 0: ya comprobado arriba (muñeca por debajo de la cadera)
+  const feetFrac = handsUp > 0 ? (wristY - leg.a.y) / handsUp : 0;
+  debug.fraccionPies = feetFrac.toFixed(2);
 
   if (feetUp < feetFactor) {
     return { ok: false, reason: "Despega los pies del suelo: súbelos hacia los glúteos y apoya las rodillas en los brazos.", debug };
+  }
+  if (feetFrac < (holding ? FROGSTAND_FEET_FRACTION_LOOSE : FROGSTAND_FEET_FRACTION)) {
+    return { ok: false, reason: "Sube más los pies: tienen que quedar bien despegados del suelo, cerca de los glúteos, no solo de puntillas.", debug };
+  }
+  const ankleBelowKnee = kneesUp - feetUp; // > 0: el tobillo queda por debajo de la rodilla (pies colgando hacia el suelo)
+  debug.tobilloBajoRodilla = ankleBelowKnee.toFixed(2);
+  if (ankleBelowKnee > (holding ? FROGSTAND_ANKLE_BELOW_KNEE_LOOSE_MAX : FROGSTAND_ANKLE_BELOW_KNEE_MAX)) {
+    return { ok: false, reason: "Recoge los pies hacia los glúteos: no los dejes colgando por debajo de las rodillas.", debug };
   }
   if (kneesUp < kneeFactor) {
     return { ok: false, reason: "Sube las rodillas hasta apoyarlas en los codos o en la parte de atrás de los brazos.", debug };
@@ -6328,6 +6499,7 @@ class WorkoutSession {
     this.counterKey = root.dataset.counterKey || "pullup";
     // Fondos con peso (chaleco): umbrales algo más permisivos, ver DIP_TUNING_LOADED.
     this.dipLoaded = (root.dataset.exerciseSlug || "") === "weighted-dips";
+    this.commando = (root.dataset.exerciseSlug || "") === "commando-pullup"; // dominadas commando: ver COMMANDO_*
     // Círculos de brazos en DOS pantallas (2026-09-29, a petición de Alex): el
     // circuito (session-runner.js/circuit.js) pone data-circle-direction=
     // "forward"|"backward" según la aparición del ejercicio (1ª = hacia
@@ -6823,6 +6995,13 @@ class WorkoutSession {
    * de ahí solo se dice "Serie de N terminada.", corto y al grano.
    */
   announceSetComplete(prefix, waitingMessage) {
+    // Calentamiento (2026-10-12, pedido de Alex): NO hay series. Ni aviso de
+    // "Serie de N terminada", ni descanso obligatorio: las repeticiones se
+    // acumulan hasta el objetivo aunque pares un rato (ver closeActiveSet).
+    if (this.autoAdvanceOnGoal) {
+      if (waitingMessage) this.setStatus(waitingMessage);
+      return;
+    }
     // Descanso obligatorio: la explicación completa ("mínimo N segundos")
     // se decía SIEMPRE, en cada serie — pero es la misma tabarra que el
     // resto de este aviso (cómo colocarte), así que ahora sigue la misma
@@ -6976,15 +7155,18 @@ class WorkoutSession {
     try {
       const { FilesetResolver, PoseLandmarker } = await import(MEDIAPIPE_BUNDLE_URL);
       const vision = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_BASE_URL);
-      this.poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+      this.poseLandmarker = await createPoseLandmarker(PoseLandmarker, vision, {
         baseOptions: { modelAssetPath: MODEL_URL, delegate: POSE_DELEGATE },
         runningMode: "VIDEO",
         numPoses: 1,
         outputSegmentationMasks: true, // 2026-10-08: máscara de persona (ver PersonGate.sampleMask)
-        minPoseDetectionConfidence: POSE_MIN_DETECTION_CONFIDENCE,
+        minPoseDetectionConfidence: this.counterKey === "frogstand" ? POSE_MIN_DETECTION_CONFIDENCE_ODD : POSE_MIN_DETECTION_CONFIDENCE,
+        ...(this.counterKey === "frogstand"
+          ? { minPosePresenceConfidence: POSE_MIN_PRESENCE_CONFIDENCE_ODD, minTrackingConfidence: POSE_MIN_TRACKING_CONFIDENCE_ODD }
+          : {}),
       });
       this.logScissor(
-        `[perf] PoseLandmarker creado pidiendo delegate=${POSE_DELEGATE} (con "GPU" la librería no ` +
+        `[perf] PoseLandmarker creado pidiendo delegate=${POSE_DELEGATE}, usado=${this.poseLandmarker?.delegateUsed || "?"} (con "GPU" la librería no ` +
         "confirma si de verdad lo consigue usar o cae a CPU en silencio — comparar el resumen [perf] " +
         "de más abajo entre una prueba con cada valor es la forma indirecta de saberlo)."
       );
@@ -7023,7 +7205,7 @@ class WorkoutSession {
 
     // Cada (re)calibración marca el final de la serie en curso (si
     // tenía alguna repetición) y el principio de la siguiente.
-    if (this.currentSetReps > 0) {
+    if (this.currentSetReps > 0 && !this.autoAdvanceOnGoal) {
       this.sets.push({ reps: this.currentSetReps, durations: [...this.currentSetDurations] });
       this.currentSetReps = 0;
       this.currentSetDurations = [];
@@ -7039,8 +7221,9 @@ class WorkoutSession {
     if (CAMERA_POSTURE_COUNTERS.has(this.counterKey)) {
       this._flushPostureHold();
     }
-    // El contador grande siempre arranca en 0 al empezar una serie nueva.
-    if (this.repsEl) this.repsEl.textContent = "0";
+    // El contador grande siempre arranca en 0 al empezar una serie nueva
+    // (en calentamiento no hay series: sigue la cuenta acumulada).
+    if (this.repsEl && !this.autoAdvanceOnGoal) this.repsEl.textContent = "0";
 
     this.prepping = true;
     this.calibrating = false;
@@ -7406,6 +7589,7 @@ class WorkoutSession {
       this.armCirclePhaseReps = 0;
       this.armCircleWrongWay = 0;
       this.armCircleArmStableSince = null;
+      this.armCircleAwaitRaise = false;
       this.armCircleLastProgressAt = null;
       this.armCircleRepStartTime = null;
       this.armCircleDidPhaseSwitch = false;
@@ -8837,9 +9021,20 @@ class WorkoutSession {
     // (b) hombro de vuelta a la altura de pie (paralelas altas).
     // (c) andar por el encuadre: la cadera se desplaza mucho en ~1 s.
     let dismountReason = null;
+    // fondos-balanceo (2026-10-12): con las piernas dobladas el balanceo de
+    // los pies hace pasar la espinilla por casi vertical (<= DIP_SHANK_DOWN_MAX_DEG)
+    // y se leía como "pies en el suelo" -> cerraba la serie. Pies de verdad
+    // en el suelo = espinilla baja Y quieta; si varía mucho en la ventana,
+    // es balanceo y se sigue contando.
+    if (!this.dipShankHist) this.dipShankHist = [];
+    if (shankDeg !== null) this.dipShankHist.push({ t: now, d: shankDeg });
+    while (this.dipShankHist.length && now - this.dipShankHist[0].t > DIP_FEET_QUIET_WINDOW_MS) this.dipShankHist.shift();
+    const shankVals = this.dipShankHist.map((p) => p.d);
+    const feetSwaying = shankVals.length >= 3 && (Math.max(...shankVals) - Math.min(...shankVals)) > DIP_FEET_QUIET_MAX_RANGE_DEG;
+    const feetSettled = feetDown && !feetSwaying;
     const dismountShape = this.dipBarType === "alta"
       ? shoulderRise < T.dismountRatio * (this.dipSetPeakShoulderRise ?? 0.01)
-      : feetDown;
+      : feetSettled;
     if (dismountShape) {
       this.dipBreakInterruptSince = null;
       if (this.dipBreakSince === null) this.dipBreakSince = now;
@@ -8867,6 +9062,7 @@ class WorkoutSession {
       this.dipArmWin = null;
       this.dipArmFailSince = null;
       this.dipPosHist = [];
+      this.dipShankHist = [];
       this.closeActiveSet();
       return;
     }
@@ -8964,7 +9160,7 @@ class WorkoutSession {
     this.logScissor(
       `codo=${elbowAngle.toFixed(0)}° hombro_y=${shoulderY.toFixed(3)} arriba_y=${(this.dipTopShoulderY ?? 0).toFixed(3)} ` +
       `bajada_actual=${sinceTop.toFixed(2)} estado=${this.state} tipo=${this.dipBarType ?? "-"} ` +
-      `espinilla=${shankDeg === null ? "-" : shankDeg.toFixed(0) + "°"} pies_suelo=${feetDown ? "sí" : "no"} ` +
+      `espinilla=${shankDeg === null ? "-" : shankDeg.toFixed(0) + "°"} pies_suelo=${feetDown ? "sí" : "no"} balanceo=${feetSwaying ? "sí" : "no"} ` +
       `desmonte_sostenido=${this.dipBreakSince === null ? "-" : (now - this.dipBreakSince).toFixed(0) + "ms"} ` +
       `muñeca_desplaz=${(this.dipRepWristShift ?? 0).toFixed(2)} modo=${this.dipLoaded ? "con_peso" : "normal"} lado=${sideName} ` +
       `cadera_vis=${(hip.visibility ?? 0).toFixed(2)} rodilla_vis=${(knee.visibility ?? 0).toFixed(2)} tobillo_vis=${(ankle.visibility ?? 0).toFixed(2)}`
@@ -9545,6 +9741,12 @@ class WorkoutSession {
       this.rockBackDone = false;
       this.rockBackNow = false;
       this.rockProgressAt = null;
+      this.rockHandAnchor = null;
+      this.rockFootAnchor = null;
+      this.rockAnchorScale = 0;
+      this.rockSupportsOff = false;
+      this.rockSupportsOffSince = null;
+      this.rockReturnSince = null;
       const lineOk = hipAngle >= ROCKPUSHUP_LINE_MIN_DEG;
       const tiltOk = tilt <= ON_GROUND_MAX_TILT_DEG;
       const armsStraight = elbowAngle >= PUSHUP_ARM_GATE_ANGLE_DEG;
@@ -9555,6 +9757,18 @@ class WorkoutSession {
         this.offGroundSince = null;
         this.idleSince = null;
         this.repStartTime = now;
+        // Apoyos fijos: dónde están la mano y el pie apoyados al armar (ver bloque v2 arriba).
+        {
+          const ankleA = useLeft ? lm[L_ANKLE] : lm[R_ANKLE];
+          const scaleA = Math.hypot(shoulder.x - hip.x, shoulder.y - hip.y);
+          this.rockAnchorScale = scaleA > 0 ? scaleA : 0;
+          this.rockHandAnchor = this.rockAnchorScale && (wrist.visibility ?? 1) >= ROCKPUSHUP_ANCHOR_MIN_VIS ? { x: wrist.x, y: wrist.y } : null;
+          this.rockFootAnchor = this.rockAnchorScale && ankleA && (ankleA.visibility ?? 1) >= ROCKPUSHUP_ANCHOR_MIN_VIS ? { x: ankleA.x, y: ankleA.y } : null;
+          this.rockSupportsOff = false;
+          this.rockSupportsOffSince = null;
+          this.rockReturnSince = null;
+          log(`armado: manos ${this.rockHandAnchor ? "ancladas" : "SIN anclar"}, pies ${this.rockFootAnchor ? "anclados" : "SIN anclar"}`);
+        }
         if (!this.startupVoiceGiven) {
           this.startupVoiceGiven = true;
           this.announceStatus(
@@ -9589,6 +9803,14 @@ class WorkoutSession {
     // (en el balanceo el brazo y la cadera se tapan y ensucian la inclinación).
     if (tilt > ROCKPUSHUP_BROKEN_TILT_DEG) {
       if (this.offGroundSince === null) this.offGroundSince = now;
+      if (now - this.offGroundSince >= ROCKPUSHUP_STAND_RESET_MS && (this.rockPushDone || this.rockBackDone || this.rockPushBottom)) {
+        log(`de pie / fuera de postura: media repetición descartada (flexión=${this.rockPushDone}, balanceo=${this.rockBackDone})`);
+        this.rockPushDone = false;
+        this.rockBackDone = false;
+        this.rockPushBottom = false;
+        this.rockProgressAt = null;
+        this.rockReturnSince = null;
+      }
       if (now - this.offGroundSince >= ROCKPUSHUP_BROKEN_STABLE_MS) {
         this.closeActiveSet();
         return;
@@ -9597,7 +9819,44 @@ class WorkoutSession {
       this.offGroundSince = null;
     }
 
-    const inPlank = hipAngle >= ROCKPUSHUP_PLANK_MIN_DEG;
+    // En plancha de verdad: cadera recta Y cuerpo horizontal (de pie, la cadera también sale "recta").
+    const inPlank = hipAngle >= ROCKPUSHUP_PLANK_MIN_DEG && tilt <= ROCKPUSHUP_COUNT_MAX_TILT_DEG;
+
+    // Apoyos fijos: la mano y el pie apoyados no se mueven del sitio donde se armó.
+    {
+      const ankle = useLeft ? lm[L_ANKLE] : lm[R_ANKLE];
+      const scale = this.rockAnchorScale;
+      let moved = false;
+      if (scale > 0 && this.rockHandAnchor && (wrist.visibility ?? 1) >= ROCKPUSHUP_ANCHOR_MIN_VIS &&
+          Math.hypot(wrist.x - this.rockHandAnchor.x, wrist.y - this.rockHandAnchor.y) > ROCKPUSHUP_HAND_MOVE_FACTOR * scale) moved = true;
+      if (scale > 0 && this.rockFootAnchor && ankle && (ankle.visibility ?? 1) >= ROCKPUSHUP_ANCHOR_MIN_VIS &&
+          Math.hypot(ankle.x - this.rockFootAnchor.x, ankle.y - this.rockFootAnchor.y) > ROCKPUSHUP_FOOT_MOVE_FACTOR * scale) moved = true;
+      this.rockMovedNow = moved;   // sin debounce: mientras algún apoyo esté fuera de sitio no se cierra ninguna repetición
+      if (moved) {
+        if (this.rockSupportsOffSince == null) this.rockSupportsOffSince = now;
+        const movedFor = now - this.rockSupportsOffSince;
+        if (!this.rockSupportsOff && movedFor >= ROCKPUSHUP_ANCHOR_BREAK_MS) {
+          this.rockSupportsOff = true;
+          this.rockPushDone = false;
+          this.rockBackDone = false;
+          this.rockPushBottom = false;
+          this.rockProgressAt = null;
+          this.rockReturnSince = null;
+          log("manos o pies movidos del sitio: no se cuenta hasta que vuelvan");
+        }
+        if (this.rockSupportsOff && inPlank && elbowAngle >= PUSHUP_ARM_GATE_ANGLE_DEG && movedFor >= ROCKPUSHUP_REANCHOR_MS) {
+          this.rockHandAnchor = (wrist.visibility ?? 1) >= ROCKPUSHUP_ANCHOR_MIN_VIS ? { x: wrist.x, y: wrist.y } : null;
+          this.rockFootAnchor = ankle && (ankle.visibility ?? 1) >= ROCKPUSHUP_ANCHOR_MIN_VIS ? { x: ankle.x, y: ankle.y } : null;
+          this.rockSupportsOff = false;
+          this.rockSupportsOffSince = null;
+          log("recolocado en plancha: apoyos reanclados");
+        }
+      } else {
+        if (this.rockSupportsOff) log("manos y pies de vuelta en su sitio");
+        this.rockSupportsOff = false;
+        this.rockSupportsOffSince = null;
+      }
+    }
 
     // Balanceo: cadera atrás (ángulo cerrado) y vuelta.
     if (!this.rockBackNow && hipAngle <= ROCKPUSHUP_ROCK_BACK_DEG) {
@@ -9613,7 +9872,7 @@ class WorkoutSession {
     }
 
     // Flexión: solo con el cuerpo en plancha y fuera del balanceo.
-    if (inPlank && !this.rockBackNow) {
+    if (inPlank && !this.rockBackNow && !this.rockSupportsOff) {
       if (!this.rockPushBottom && elbowAngle <= PUSHUP_COUNT_DOWN_ANGLE_DEG) {
         this.rockPushBottom = true;
         this.rockProgressAt = now;
@@ -9626,11 +9885,17 @@ class WorkoutSession {
     }
 
     // Repetición completa: flexión + balanceo hechos y de vuelta en plancha con los brazos estirados.
-    if (
-      this.rockPushDone && this.rockBackDone && !this.rockBackNow && !this.rockPushBottom &&
-      inPlank && hipAngle >= ROCKPUSHUP_ROCK_RETURN_DEG && elbowAngle >= PUSHUP_COUNT_UP_ANGLE_DEG
-    ) {
+    const returnReady =
+      this.rockPushDone && this.rockBackDone && !this.rockBackNow && !this.rockPushBottom && !this.rockSupportsOff && !this.rockMovedNow &&
+      inPlank && hipAngle >= ROCKPUSHUP_ROCK_RETURN_DEG && elbowAngle >= PUSHUP_COUNT_UP_ANGLE_DEG;
+    if (returnReady) {
+      if (this.rockReturnSince == null) this.rockReturnSince = now;
+    } else {
+      this.rockReturnSince = null;
+    }
+    if (returnReady && now - this.rockReturnSince >= ROCKPUSHUP_RETURN_HOLD_MS) {
       this.countRep((now - this.repStartTime) / 1000, now, "Rocking push-up", ROCKPUSHUP_MIN_REP_SECONDS);
+      this.rockReturnSince = null;
       this.rockPushDone = false;
       this.rockBackDone = false;
       this.rockProgressAt = null;
@@ -9653,7 +9918,8 @@ class WorkoutSession {
     if (this.debugEl) {
       this.debugEl.textContent =
         `codo (${useLeft ? "izq" : "der"}): ${elbowAngle.toFixed(0)}° | cadera: ${hipAngle.toFixed(0)}° (balanceo ≤${ROCKPUSHUP_ROCK_BACK_DEG}°, vuelta ≥${ROCKPUSHUP_ROCK_RETURN_DEG}°) | ` +
-        `inclinación: ${tilt.toFixed(0)}° | flexión: ${this.rockPushDone ? "sí" : "no"} · balanceo: ${this.rockBackDone ? "sí" : "no"} | estado: ${this.state}`;
+        `inclinación: ${tilt.toFixed(0)}° | flexión: ${this.rockPushDone ? "sí" : "no"} · balanceo: ${this.rockBackDone ? "sí" : "no"} | ` +
+        `manos/pies: ${this.rockSupportsOff ? "MOVIDOS" : "fijos"} | estado: ${this.state}`;
     }
   }
 
@@ -9680,11 +9946,13 @@ class WorkoutSession {
       left: { s: L_SHOULDER, e: L_ELBOW, r: L_WRIST },
       right: { s: R_SHOULDER, e: R_ELBOW, r: R_WRIST },
     };
-    const raw = {}, raw3 = {};
+    const raw = {}, raw3 = {}, visA = {};
     for (const k of ["left", "right"]) {
       const sd = arms[k];
       const vis = ((lm[sd.s].visibility ?? 1) + (lm[sd.e].visibility ?? 1) + (lm[sd.r].visibility ?? 1)) / 3;
-      if (vis < FRONT_MIN_VISIBILITY) { raw[k] = null; raw3[k] = null; continue; }
+      visA[k] = vis;
+      const minVis = this.state !== null ? ARCHER_PUSHUP_ACTIVE_MIN_VISIBILITY : FRONT_MIN_VISIBILITY;
+      if (vis < minVis) { raw[k] = null; raw3[k] = null; continue; }
       const a2 = angle(lm[sd.s], lm[sd.e], lm[sd.r]);
       const a3 = w ? ang3(w[sd.s], w[sd.e], w[sd.r]) : null;
       raw3[k] = a3;
@@ -9704,6 +9972,10 @@ class WorkoutSession {
     }
     if (raw.left === null || raw.right === null) {
       this.archerBase = null;
+      if (this.state !== null && this.logScissor && (this.archerLogAt == null || now - this.archerLogAt >= 1000)) {
+        this.archerLogAt = now;
+        this.logScissor(`[arquero] no se ven los dos brazos | vis izq=${visA.left.toFixed(2)} der=${visA.right.toFixed(2)} (mín ${ARCHER_PUSHUP_ACTIVE_MIN_VISIBILITY}) | estado=${this.state}`);
+      }
       this.announceStatus(
         "No se te ven bien los dos brazos. Colócate boca abajo, mirando a la cámara, con los dos brazos estirados y bien separados en el encuadre.",
         "archerpushup_novis"
@@ -9721,7 +9993,7 @@ class WorkoutSession {
     this.archerSmoothL = this.archerSmoothL == null ? raw.left : a * raw.left + (1 - a) * this.archerSmoothL;
     this.archerSmoothR = this.archerSmoothR == null ? raw.right : a * raw.right + (1 - a) * this.archerSmoothR;
     const L = this.archerSmoothL, R = this.archerSmoothR;
-    const log = (msg) => { if (this.logScissor) this.logScissor(`[arquero] ${msg} | L=${L.toFixed(0)}° R=${R.toFixed(0)}° (3D: ${raw3.left == null ? "-" : raw3.left.toFixed(0)}/${raw3.right == null ? "-" : raw3.right.toFixed(0)}°)`); };
+    const log = (msg) => { if (this.logScissor) this.logScissor(`[arquero] ${msg} | L=${L.toFixed(0)}° R=${R.toFixed(0)}° (3D: ${raw3.left == null ? "-" : raw3.left.toFixed(0)}/${raw3.right == null ? "-" : raw3.right.toFixed(0)}°) cabeza t=${tShift == null ? "-" : tShift.toFixed(2)} dif=${this.archerDropRel == null ? "-" : this.archerDropRel.toFixed(2)} vis=${visA.left.toFixed(2)}/${visA.right.toFixed(2)}`); };
 
     // "¿De pie?": igual que processPushupFront (solo si se ven las caderas).
     const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER], lH = lm[L_HIP], rH = lm[R_HIP];
@@ -9741,6 +10013,24 @@ class WorkoutSession {
     const upL = Math.max(115, Math.min(ARCHER_PUSHUP_UP_DEG, topL - ARCHER_PUSHUP_UP_BELOW_TOP_DEG));
     const upR = Math.max(115, Math.min(ARCHER_PUSHUP_UP_DEG, topR - ARCHER_PUSHUP_UP_BELOW_TOP_DEG));
 
+    // v5: posición lateral de la cabeza entre las manos (ver ARCHER_SHIFT_*).
+    let shiftCand = null, tShift = null, shiftBack = false;
+    {
+      const nz = lm[NOSE], wl = lm[L_WRIST], wr = lm[R_WRIST];
+      const spanNow = wl && wr ? wr.x - wl.x : 0;
+      if (this.state !== null && this.archerNoseY != null && nz && (nz.visibility ?? 1) >= 0.3 &&
+          (wl.visibility ?? 1) >= 0.15 && (wr.visibility ?? 1) >= 0.15 && Math.abs(spanNow) >= ARCHER_SHIFT_MIN_SPAN) {
+        tShift = (nz.x - wl.x) / spanNow;
+        const dropRel = Math.abs(nz.y - this.archerNoseY) / Math.abs(spanNow);
+        this.archerDropRel = dropRel;
+        if (dropRel >= ARCHER_SHIFT_MIN_DROP) {
+          if (tShift <= 0.5 - ARCHER_SHIFT_OFFSET) shiftCand = "left";
+          else if (tShift >= 0.5 + ARCHER_SHIFT_OFFSET) shiftCand = "right";
+        }
+        shiftBack = Math.abs(tShift - 0.5) <= ARCHER_SHIFT_BACK_BAND;
+      }
+    }
+
     if (this.state !== null) {
       if (standingLike) {
         if (this.offGroundSince === null) this.offGroundSince = now;
@@ -9757,13 +10047,16 @@ class WorkoutSession {
       if (!standingLike && L >= ARCHER_PUSHUP_ARM_GATE_DEG && R >= ARCHER_PUSHUP_ARM_GATE_DEG) {
         if (this.groundStableSince === null || !this.archerBase) {
           this.groundStableSince = this.groundStableSince === null ? now : this.groundStableSince;
-          this.archerBase = { l: 0, r: 0, n: 0 };
+          this.archerBase = { l: 0, r: 0, n: 0, ny: 0, sp: 0, m: 0 };
         }
         this.archerBase.l += L; this.archerBase.r += R; this.archerBase.n++;
+        { const nzB = lm[NOSE], wlB = lm[L_WRIST], wrB = lm[R_WRIST];
+          if (nzB && wlB && wrB && (nzB.visibility ?? 1) >= 0.3 && Math.abs(wrB.x - wlB.x) >= ARCHER_SHIFT_MIN_SPAN) { this.archerBase.ny += nzB.y; this.archerBase.sp += Math.abs(wrB.x - wlB.x); this.archerBase.m++; } }
         if (now - this.groundStableSince >= this.groundStableMs) {
           const clampTop = (v) => Math.max(130, Math.min(180, v));
           this.archerTopL = this.archerBase.n ? clampTop(this.archerBase.l / this.archerBase.n) : 170;
           this.archerTopR = this.archerBase.n ? clampTop(this.archerBase.r / this.archerBase.n) : 170;
+          this.archerNoseY = this.archerBase.m ? this.archerBase.ny / this.archerBase.m : null;
           this.archerBase = null;
           this.state = "top";
           this.groundStableSince = null;
@@ -9784,13 +10077,15 @@ class WorkoutSession {
       // Dobla si llega al ángulo "de rep" o, con el otro brazo MUY por encima, a uno algo más abierto (v3).
       const bentL = L <= ARCHER_PUSHUP_BENT_DEG || (L <= ARCHER_PUSHUP_REL_BENT_MAX_DEG && R - L >= ARCHER_PUSHUP_REL_DIFF_DEG);
       const bentR = R <= ARCHER_PUSHUP_BENT_DEG || (R <= ARCHER_PUSHUP_REL_BENT_MAX_DEG && L - R >= ARCHER_PUSHUP_REL_DIFF_DEG);
-      const lBent = bentL && R >= strR;
-      const rBent = bentR && L >= strL;
-      const cand = lBent ? "left" : rBent ? "right" : null;
+      const lBent = bentL && (!ARCHER_REQUIRE_STRAIGHT_OTHER || R >= strR);
+      const rBent = bentR && (!ARCHER_REQUIRE_STRAIGHT_OTHER || L >= strL);
+      // Los dos doblados (lo que ve la cámara de frente): cuenta como el lado que más baja.
+      const cand = lBent && rBent ? (L <= R ? "left" : "right") : lBent ? "left" : rBent ? "right" : null;
+      const candAny = cand || shiftCand;
       const refractory = this.archerLastCountAt != null && now - this.archerLastCountAt < ARCHER_PUSHUP_REFRACTORY_MS;
-      if (!cand || refractory) {
+      if (!candAny || refractory) {
         // Intento que no llega a abrir rep: se anota (throttled) el motivo para el registro de depuración.
-        if (Math.min(L, R) <= ARCHER_PUSHUP_REL_BENT_MAX_DEG && (this.archerLogAt == null || now - this.archerLogAt >= ARCHER_PUSHUP_LOG_EVERY_MS)) {
+        if (Math.min(L, R) <= ARCHER_PUSHUP_REL_BENT_MAX_DEG + 25 && (this.archerLogAt == null || now - this.archerLogAt >= ARCHER_PUSHUP_LOG_EVERY_MS)) {
           this.archerLogAt = now;
           const side = L <= R ? "izq" : "der";
           const why = refractory ? "periodo refractario"
@@ -9799,16 +10094,18 @@ class WorkoutSession {
           log(`intento ${side} sin abrir: ${why}${archerHiddenArm ? " | brazo " + (archerHiddenArm === "left" ? "izq" : "der") + " fuera de encuadre (se asume estirado)" : ""}`);
         }
       }
-      if (cand && !refractory) {
+      if (candAny && !refractory) {
         // El fondo hay que sostenerlo un momento seguido: un pico suelto de un solo fotograma no abre una rep.
-        if (this.archerCand !== cand) { this.archerCand = cand; this.archerCandSince = now; }
+        if (this.archerCand !== candAny) { this.archerCand = candAny; this.archerCandSince = now; }
         if (now - this.archerCandSince >= ARCHER_PUSHUP_BOTTOM_HOLD_MS) {
           this.state = "bottom";
           this.repStartTime = this.archerCandSince;
-          this.archerSide = cand;
+          this.archerSide = candAny;
+          this.archerSource = cand ? "codo" : "cabeza";
           this.archerValid = true;
+          this.archerOtherLowSince = null;
           this.archerCand = null;
-          log(`baja ${cand === "left" ? "izq" : "der"}`);
+          log(`baja ${candAny === "left" ? "izq" : "der"} (detectada por ${this.archerSource})`);
         }
       } else {
         this.archerCand = null;
@@ -9816,11 +10113,17 @@ class WorkoutSession {
     } else {
       const other = this.archerSide === "left" ? R : L;
       const otherFloor = this.archerSide === "left" ? floorR : floorL;
-      if (other < otherFloor && this.archerValid) {
-        this.archerValid = false; // los dos brazos doblados: flexión normal
-        log("inválida (el otro brazo se dobla)");
+      if (ARCHER_REQUIRE_STRAIGHT_OTHER && other < otherFloor && this.archerSource !== "cabeza") {
+        if (this.archerOtherLowSince == null) this.archerOtherLowSince = now;
+        if (this.archerValid && now - this.archerOtherLowSince >= ARCHER_PUSHUP_INVALID_HOLD_MS) {
+          this.archerValid = false; // los dos brazos doblados: flexión normal
+          log("inválida (el otro brazo se dobla)");
+        }
+      } else {
+        this.archerOtherLowSince = null;
       }
-      if (L >= upL && R >= upR) {
+      // Rep abierta por la cabeza: solo se cierra cuando la cabeza vuelve al centro (los codos pueden no haber "bajado" nunca).
+      if (this.archerSource === "cabeza" ? shiftBack : (L >= upL && R >= upR)) {
         const dur = (now - this.repStartTime) / 1000;
         if (this.archerValid && this.countRep(dur, now, `Flexión arquero (${this.archerSide === "left" ? "izq" : "der"})`, ARCHER_PUSHUP_MIN_REP_SECONDS)) {
           this.archerLastCountAt = now;
@@ -9839,8 +10142,8 @@ class WorkoutSession {
       this.debugEl.textContent =
         `[arquero, de frente ${ARCHER_PUSHUP_USE_3D && w ? "3D" : "2D"}] codo izq ${L.toFixed(0)}° | der ${R.toFixed(0)}° | ` +
         `torso/hombros: ${torsoRatio === null ? "sin caderas" : torsoRatio.toFixed(2)}${standingLike ? " (de pie)" : ""} | ` +
-        `estado: ${this.state ?? "esperando"}${this.state === "bottom" ? " (" + this.archerSide + (this.archerValid ? "" : ", inválida") + ")" : ""} ` +
-        `(dobla ≤${ARCHER_PUSHUP_BENT_DEG}° con el otro ≥${ARCHER_PUSHUP_STRAIGHT_DEG}°, suben ≥${ARCHER_PUSHUP_UP_DEG}°)`;
+        `cabeza t=${tShift == null ? "-" : tShift.toFixed(2)} | estado: ${this.state ?? "esperando"}${this.state === "bottom" ? " (" + this.archerSide + (this.archerValid ? "" : ", inválida") + ")" : ""} ` +
+        `(dobla ≤${ARCHER_PUSHUP_BENT_DEG}°${ARCHER_REQUIRE_STRAIGHT_OTHER ? " con el otro ≥" + ARCHER_PUSHUP_STRAIGHT_DEG + "°" : ""}, suben ≥${ARCHER_PUSHUP_UP_DEG}°)`;
     }
   }
 
@@ -10022,9 +10325,38 @@ class WorkoutSession {
     const lift = this.clapBaseY == null ? 0 : (this.clapBaseY - wrist.y) / torsoLength;
     // Segunda señal independiente del vuelo: los hombros suben por encima de su altura arriba (y el cuerpo va recto).
     const shoulderRise = this.clapShoulderBaseY == null ? 0 : (this.clapShoulderBaseY - shoulder.y) / torsoLength;
+    // v3: punto más bajo de los hombros desde el último aterrizaje (se actualiza antes del vuelo, no durante).
+    if (this.state !== null && this.state !== "air" && (this.clapShLowY == null || shoulder.y > this.clapShLowY)) this.clapShLowY = shoulder.y;
+    const riseFromLow = this.clapShLowY == null ? 0 : (this.clapShLowY - shoulder.y) / torsoLength;
+    const shoulderOk = shoulderRise >= CLAP_PUSHUP_MIN_SHOULDER_RISE_FACTOR || riseFromLow >= CLAP_PUSHUP_SHOULDER_RISE_FROM_LOW;
     const airCand = lift >= CLAP_PUSHUP_MIN_LIFT_FACTOR && elbowAngle >= CLAP_PUSHUP_MIN_AIR_ELBOW_DEG &&
-      shoulderRise >= CLAP_PUSHUP_MIN_SHOULDER_RISE_FACTOR && lineAngle >= CLAP_PUSHUP_AIR_LINE_MIN_DEG;
-    this.clapAirFrames = airCand ? (this.clapAirFrames || 0) + 1 : 0;
+      shoulderOk && lineAngle >= CLAP_PUSHUP_AIR_LINE_MIN_DEG &&
+      lift <= CLAP_PUSHUP_AIR_MAX_LIFT_FACTOR && shoulderRise <= CLAP_PUSHUP_AIR_MAX_SHOULDER_RISE && tilt <= CLAP_PUSHUP_AIR_MAX_TILT_DEG;
+    // v2: aciertos "en el aire" dentro de una ventana (un fotograma intermedio malo ya no reinicia la cuenta).
+    this.clapAirHits = (this.clapAirHits || []).filter((t) => now - t <= CLAP_PUSHUP_AIR_WINDOW_MS);
+    if (airCand) this.clapAirHits.push(now);
+    this.clapAirFrames = this.clapAirHits.length;
+    // v3: tras contar un vuelo no se cuenta otro hasta ver el aterrizaje (manos al suelo, codo muy doblado o tiempo): sin esto el
+    // mismo vuelo se podía contar dos veces al aterrizar con los codos doblados.
+    if (this.clapNeedLanding && (lift <= CLAP_PUSHUP_LANDED_LIFT_FACTOR || elbowAngle < CLAP_PUSHUP_MIN_AIR_ELBOW_DEG || now - (this.clapAirSince || 0) >= CLAP_PUSHUP_AIR_TIMEOUT_MS)) {
+      this.clapNeedLanding = false;
+      this.clapAirHits = [];
+      this.clapAirFrames = 0;
+      this.clapShLowY = null;
+    }
+    const airborneNow = !this.clapNeedLanding && (this.clapAirFrames >= CLAP_PUSHUP_AIR_MIN_FRAMES ||
+      (airCand && lift >= CLAP_PUSHUP_AIR_SINGLE_FACTOR * CLAP_PUSHUP_MIN_LIFT_FACTOR && (shoulderRise >= CLAP_PUSHUP_AIR_SINGLE_FACTOR * CLAP_PUSHUP_MIN_SHOULDER_RISE_FACTOR || riseFromLow >= CLAP_PUSHUP_AIR_SINGLE_FACTOR * CLAP_PUSHUP_SHOULDER_RISE_FROM_LOW)));
+    const countFlight = (startTime) => {
+      const dur = (now - startTime) / 1000;
+      const counted = this.countRep(dur, now, "Flexión con palmada", CLAP_PUSHUP_MIN_REP_SECONDS);
+      if (this.logScissor) this.logScissor(`[palmada] ${counted ? "CUENTA" : "descartada (muy corta)"} dur=${dur.toFixed(2)}s manos↑=${(lift * 100).toFixed(0)}% hombros↑=${(shoulderRise * 100).toFixed(0)}% codo=${elbowAngle.toFixed(0)}° línea=${lineAngle.toFixed(0)}° estado=${this.state}`);
+      this.state = "air";
+      this.clapAirSince = now;
+      this.clapDipSince = null;
+      this.clapDipLast = null;
+      this.clapAirHits = [];
+      this.clapNeedLanding = true;
+    };
 
     if (this.state === null) {
       const bodyStraight = lineAngle >= PUSHUP_LINE_MIN_DEG;
@@ -10037,6 +10369,7 @@ class WorkoutSession {
         if (armVoted) {
           this.clapBaseY = this.clapBaseSum / this.clapBaseN;
           this.clapShoulderBaseY = this.clapShSum / this.clapBaseN; // altura de la muñeca apoyada = "suelo" de esta serie
+          this.clapNeedLanding = false; this.clapAirHits = []; this.clapDipSince = null; this.clapShLowY = null;
           this.state = "top";
           this.groundStableSince = null;
           this.offGroundSince = null;
@@ -10061,16 +10394,20 @@ class WorkoutSession {
       if (elbowAngle <= PUSHUP_COUNT_DOWN_ANGLE_DEG) {
         this.state = "bottom";
         this.repStartTime = now;
+        this.clapDipSince = null;
+      } else {
+        // v2: si el fps no llegó a ver el fondo, pero se bajó "algo" (<= LOOSE_DOWN) y luego hay vuelo, también cuenta.
+        if (elbowAngle <= CLAP_PUSHUP_LOOSE_DOWN_DEG) {
+          if (this.clapDipSince == null) this.clapDipSince = now;
+          this.clapDipLast = now;
+        } else if (this.clapDipSince != null && now - this.clapDipLast > CLAP_PUSHUP_FLIGHT_WINDOW_MS) {
+          this.clapDipSince = null;
+        }
+        if (this.clapDipSince != null && airborneNow) countFlight(this.clapDipSince);
       }
     } else if (this.state === "bottom" || this.state === "peak") {
-      const airborne = this.clapAirFrames >= CLAP_PUSHUP_AIR_MIN_FRAMES ||
-        (airCand && lift >= 2 * CLAP_PUSHUP_MIN_LIFT_FACTOR && shoulderRise >= 2 * CLAP_PUSHUP_MIN_SHOULDER_RISE_FACTOR);
-      if (airborne) {
-        const dur = (now - this.repStartTime) / 1000;
-        const counted = this.countRep(dur, now, "Flexión con palmada", CLAP_PUSHUP_MIN_REP_SECONDS);
-        if (this.logScissor) this.logScissor(`[palmada] ${counted ? "CUENTA" : "descartada (muy corta)"} dur=${dur.toFixed(2)}s manos↑=${(lift * 100).toFixed(0)}% hombros↑=${(shoulderRise * 100).toFixed(0)}% codo=${elbowAngle.toFixed(0)}° línea=${lineAngle.toFixed(0)}°`);
-        this.state = "air";
-        this.clapAirSince = now;
+      if (airborneNow) {
+        countFlight(this.repStartTime);
       } else if (this.state === "bottom" && elbowAngle >= PUSHUP_COUNT_UP_ANGLE_DEG) {
         // Brazos ya estirados pero las manos aún no han despegado: se espera un momento a verlas en el aire.
         this.state = "peak";
@@ -10081,14 +10418,18 @@ class WorkoutSession {
           this.repStartTime = now;
         } else if (now - this.clapPeakSince >= CLAP_PUSHUP_FLIGHT_WINDOW_MS) {
           this.state = "top";    // no despegó: flexión normal, no cuenta
+          this.clapDipSince = null;
         }
       }
     } else if (this.state === "air") {
       if (elbowAngle <= PUSHUP_COUNT_DOWN_ANGLE_DEG) {
         this.state = "bottom"; // aterrizó y ya está bajando
         this.repStartTime = now;
-      } else if (lift <= CLAP_PUSHUP_LANDED_LIFT_FACTOR || now - this.clapAirSince >= CLAP_PUSHUP_AIR_TIMEOUT_MS) {
+        this.clapDipSince = null;
+      } else if (lift <= CLAP_PUSHUP_LANDED_LIFT_FACTOR || shoulderRise <= CLAP_PUSHUP_LANDED_SHOULDER_RISE || now - this.clapAirSince >= CLAP_PUSHUP_AIR_TIMEOUT_MS) {
         this.state = "top";
+        this.clapDipSince = null;
+        this.clapDipLast = null;
       }
     }
 
@@ -13041,7 +13382,7 @@ class WorkoutSession {
         : this.armCircleAnyDirection
         ? "Gíralos en el sentido que quieras. Al llegar al objetivo pasa solo al siguiente."
         : "Para terminar una serie, párate quieto un par de segundos, o sal del encuadre.";
-      this.announcePreArm(now, `Hombros y muñecas a la vista. Ponte de frente, con los dos brazos levantados a los lados, a la altura de los hombros, y espera al «Listo» para empezar. ${acTail}`, acTail);
+      this.announcePreArm(now, `Hombros y muñecas a la vista. Espera al «Listo», levanta los dos brazos a los lados, a la altura de los hombros, y empieza a girar. ${acTail}`, acTail);
     }
 
     const shoulderWidth = Math.hypot(lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y);
@@ -13062,7 +13403,11 @@ class WorkoutSession {
       // contador (visto en el vídeo de referencia, 2026-09-22).
       const hangOkL = (lWrist.y - lShoulder.y) < ARMCIRCLES_MAX_HANG_REL * shoulderWidth;
       const hangOkR = (rWrist.y - rShoulder.y) < ARMCIRCLES_MAX_HANG_REL * shoulderWidth;
-      const readyPosition = armsExtended && hangOkL && hangOkR;
+      // 2026-10-12 (pedido de Alex): el «Listo» sale en cuanto te ve en el encuadre
+      // (hombros y muñecas visibles, ya garantizado arriba), SIN exigir levantar los
+      // brazos antes. Levantarlos se espera DESPUÉS de armar (armCircleAwaitRaise).
+      const raisedOk = armsExtended && hangOkL && hangOkR;
+      const readyPosition = true;
       if (readyPosition) {
         if (this.armCircleArmStableSince === null) this.armCircleArmStableSince = now;
         if (now - this.armCircleArmStableSince >= ARMCIRCLES_ARM_STABLE_MS) {
@@ -13082,6 +13427,9 @@ class WorkoutSession {
           this.armCircleDidPhaseSwitch = false;
           this.armCircleLastProgressAt = now;
           this.armCircleRepStartTime = now;
+          // Si aún los tienes colgando, no se acumula ángulo ni corre el reloj de
+          // quietud hasta que los levantes (ver el bloque armCircleAwaitRaise).
+          this.armCircleAwaitRaise = !raisedOk;
           this.announceStatus("¡Listo! Empieza a girar los brazos.", "ready_to_go");
         } else {
           this.setStatus("Brazos extendidos… confirmando (no te muevas)");
@@ -13102,6 +13450,26 @@ class WorkoutSession {
     }
 
     // state === "active": ya armado, se acumula ángulo cada frame.
+
+    // Armado con los brazos aún colgando (ver arriba): hasta que los levantes a los
+    // lados no se acumula nada (si no, subirlos contaría un cuarto de vuelta falso) ni
+    // corre ARMCIRCLES_STILL_MS (no se cierra la serie esperando a que empieces).
+    if (this.armCircleAwaitRaise) {
+      const raisedL = (lWrist.y - lShoulder.y) < ARMCIRCLES_MAX_HANG_REL * shoulderWidth;
+      const raisedR = (rWrist.y - rShoulder.y) < ARMCIRCLES_MAX_HANG_REL * shoulderWidth;
+      this.armCircleLastProgressAt = now;
+      this.armCircleRepStartTime = now;
+      if (reachOkL && reachOkR && raisedL && raisedR) {
+        this.armCircleAwaitRaise = false;
+        this.armCirclePrevAngleL = Math.atan2(-(lWrist.y - lShoulder.y), lWrist.x - lShoulder.x);
+        this.armCirclePrevAngleR = Math.atan2(-(rWrist.y - rShoulder.y), -(rWrist.x - rShoulder.x));
+        this.armCircleAccum = 0;
+      } else {
+        this.setStatus("Levanta los brazos a los lados, a la altura de los hombros, y empieza a girar.");
+        if (this.debugEl) this.debugEl.textContent = "armado — esperando a que levantes los brazos…";
+        return;
+      }
+    }
 
     // Parar de girar ARMCIRCLES_STILL_MS seguidos, DE VERDAD (ver
     // ARMCIRCLES_MIN_ANGULAR_DELTA -- ya no cualquier ruido de tracking
@@ -13253,7 +13621,7 @@ class WorkoutSession {
         // (ver ARMCIRCLES_MIN_REP_SECONDS), no hay nada que cerrar ni que
         // anunciar, simplemente se pasa a pedir el sentido nuevo.
         const closedReps = this.currentSetReps;
-        if (closedReps > 0) {
+        if (closedReps > 0 && !this.autoAdvanceOnGoal) {
           this.sets.push({ reps: this.currentSetReps, durations: [...this.currentSetDurations] });
           this.currentSetReps = 0;
           this.currentSetDurations = [];
@@ -15858,7 +16226,7 @@ class WorkoutSession {
     this.torsoOutOfBandSince = null;
     const waitingMessage = this.groundWaitingMessage();
 
-    if (this.currentSetReps > 0) {
+    if (this.currentSetReps > 0 && !this.autoAdvanceOnGoal) {
       const closedReps = this.currentSetReps;
       this.sets.push({ reps: this.currentSetReps, durations: [...this.currentSetDurations] });
       this.currentSetReps = 0;
@@ -15951,6 +16319,7 @@ class WorkoutSession {
    * has salido del encuadre a propósito y se cierra la serie en curso.
    */
   noteAbsence(now, thresholdMs = OUT_OF_FRAME_STABLE_MS) {
+    if (this.counterKey === "clappushup" && this.state !== null) thresholdMs = Math.max(thresholdMs, CLAP_PUSHUP_ABSENCE_MS); // v3
     if (this.outOfFrameSince === null) this.outOfFrameSince = now;
     if (now - this.outOfFrameSince >= thresholdMs) {
       this.closeActiveSet();
@@ -16355,6 +16724,41 @@ class WorkoutSession {
    * (compartidas con circuit.js/session-runner.js, ver esas funciones más
    * arriba) para decidir, frame a frame, si la postura es correcta.
    */
+  /**
+   * Frog stand / crow: puerta de ARMADO. Hasta ahora el contador empezaba a sumar en el primer
+   * frame bueno (sobre todo tras cerrar una serie, con postureLastOk a null). Metiendo la cabeza
+   * hacia abajo con los pies doblados daba 3 s falsos. Ahora la postura tiene que verse buena
+   * FROGSTAND_ARM_WINDOW_MS seguidos (casi todos los frames) antes de empezar; una vez armado
+   * todo sigue como siempre (margen de parpadeo, etc.). Se desarma al darse por rota la postura
+   * (postureLastOk false) o al cerrarse la serie (null).
+   */
+  frogStandArmGate(check, now) {
+    if (this.frogArmed) {
+      if (this.postureLastOk === true) return check;
+      this.frogArmed = false;
+      this.frogArmFrames = [];
+    }
+    const f = this.frogArmFrames || (this.frogArmFrames = []);
+    f.push({ t: now, ok: !!check.ok });
+    while (f.length && now - f[0].t > FROGSTAND_ARM_WINDOW_MS) f.shift();
+    if (!check.ok) return check;
+    const span = now - f[0].t;
+    const okN = f.filter((x) => x.ok).length;
+    if (f.length >= 4 && span >= FROGSTAND_ARM_WINDOW_MS * 0.9 && okN / f.length >= FROGSTAND_ARM_MIN_OK_FRACTION) {
+      this.frogArmed = true;
+      this.postureLastOk = true; // empieza a contar ya: la espera ya se ha hecho aquí
+      this.frogCreditSeconds = span / 1000; // ...y esa espera también era aguante: se abona
+      this.postureCandidateOk = null;
+      this.postureCandidateSince = null;
+      return check;
+    }
+    return {
+      ok: false,
+      reason: "Postura buena… aguántala un momento para empezar a contar.",
+      debug: { ...check.debug, confirmando: `${okN}/${f.length}` },
+    };
+  }
+
   processPosture(lm, now) {
     // Paso 1, común a plancha y plancha lateral: tumbarte del todo, en
     // cualquier orientación, antes de pedir la postura en sí — ver la
@@ -16566,6 +16970,7 @@ class WorkoutSession {
     // Plancha normal: el margen laxo de incline (cuerpo casi plano) solo
     // se tolera PLANK_LOW_INCLINE_GRACE_MS seguidos -- ver la nota junto a
     // PLANK_FEET_MIN_VISIBILITY. Cualquier otro frame reinicia la cuenta.
+    if (this.counterKey === "frogstand") check = this.frogStandArmGate(check, now);
     if (this.counterKey === "plank") {
       if (check.ok && check.lowIncline) {
         if (!this.plankLowInclineSince) this.plankLowInclineSince = now;
@@ -16611,6 +17016,10 @@ class WorkoutSession {
         : this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch" || this.counterKey === "seatedhamstringstretch" ? STRETCH_FLICKER_STABLE_MS
         : POSTURE_FLICKER_STABLE_MS;
       if (now - this.postureCandidateSince >= flickerStableMs) {
+        // Frog stand: los frames malos que han hecho falta para darla por rota NO eran aguante: se descuentan.
+        if (this.counterKey === "frogstand" && !check.ok && this.postureValidSince !== null) {
+          this.currentHoldSeconds = Math.max(0, this.currentHoldSeconds - (now - this.postureCandidateSince) / 1000);
+        }
         this.postureLastOk = check.ok;
         this.postureCandidateOk = null;
         this.postureCandidateSince = null;
@@ -16664,6 +17073,10 @@ class WorkoutSession {
       return;
     }
     this.notePostureOk(now);
+    if (this.frogCreditSeconds && this.postureValidSince !== null) {
+      this.currentHoldSeconds += this.frogCreditSeconds;
+      this.frogCreditSeconds = 0;
+    }
   }
 
   /**
@@ -20257,7 +20670,10 @@ if (this.counterKey === "crunch") {
     const rElbow = lm[R_ELBOW];
     const lWrist = lm[L_WRIST];
     const rWrist = lm[R_WRIST];
-    const shoulderWidth = Math.hypot(lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y);
+    const shoulderWidthRaw = Math.hypot(lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y);
+    // Commando: la unidad es el largo del tronco (de perfil el ancho de hombros no sirve), ver COMMANDO_UNIT_PER_TORSO.
+    const shoulderWidth = this.commando ? commandoBodyUnit(lm, this.shoulderWidth || shoulderWidthRaw) : shoulderWidthRaw;
+    const commandoSetup = this.commando ? commandoSetupCheck(lm) : { ok: true, reason: "" };
     if (result._noseRejected) {
       if (this.debugEl) this.debugEl.textContent = "nariz no fiable (no encaja con la cara) — frame saltado";
       return;
@@ -20291,10 +20707,14 @@ if (this.counterKey === "crunch") {
       // repetirlo, ya sabes cómo colocarte.
       if ((wristVisible || elbowVisible) && !this.startupVoiceGiven) {
         this.startupVoiceGiven = true;
-        this.announceStatus("Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
+        if (this.commando) this.announceStatus("Ponte de lado a la cámara y cuélgate de la barra con los brazos estirados.", "startup_ready", "Ponte de perfil y cuélgate de la barra.");
+        else this.announceStatus("Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
       }
 
-      if (armsUpNow) {
+      if (armsUpNow && !commandoSetup.ok) {
+        this.hangStableSince = null;
+        this.setStatus(commandoSetup.reason);
+      } else if (armsUpNow) {
         if (this.hangStableSince === null) this.hangStableSince = now;
         if (now - this.hangStableSince >= this.hangStableMs) {
           // Llevas ya un ratito con los brazos en alto de verdad -> calibra ya,
@@ -20323,7 +20743,7 @@ if (this.counterKey === "crunch") {
     if (this.calibrating) {
       // Si en medio de la calibración bajas los brazos (falsa alarma),
       // aborta y vuelve a esperar en vez de calibrar con datos malos.
-      if (!armsUpNow) {
+      if (!armsUpNow || !commandoSetup.ok) {
         this.prepping = true;
         this.calibrating = false;
         this.hangStableSince = null;
@@ -20379,9 +20799,15 @@ if (this.counterKey === "crunch") {
     if (!this.shoulderWidth || this.barY === null) return;
 
     const scaleChange = Math.abs(shoulderWidth - this.shoulderWidth) / this.shoulderWidth;
-    const scaleOk = scaleChange < SCALE_TOLERANCE;
+    const scaleRatio = shoulderWidth / this.shoulderWidth;
+    const scaleOk = this.commando
+      ? (scaleRatio >= COMMANDO_SCALE_MIN && scaleRatio <= COMMANDO_SCALE_MAX)
+      : scaleChange < SCALE_TOLERANCE;
+    // Commando: en lo alto el hombro que sube iguala a las munecas y armsUpNow se apaga aunque sigas agarrado;
+    // basta con que no te hayas soltado de verdad (munecas claramente por debajo de los hombros).
+    const armsHeld = this.commando ? !armsClearlyReleased : armsUpNow;
 
-    if (!armsUpNow || !scaleOk) {
+    if (!armsHeld || !scaleOk) {
       // No pareces estar colgado de la barra (o te has acercado/alejado de
       // la cámara) — no cuentes nada de lo que pase ahora mismo, y cuando
       // vuelvas a agarrar la barra, empieza a medir desde cero otra vez.
@@ -20398,7 +20824,7 @@ if (this.counterKey === "crunch") {
       // posicion ALTA como nuevo "punto de abajo" y esa repeticion se
       // perdia sin contarse. Aqui se descarta SOLO este frame, no el
       // progreso de la repeticion.
-      if (!armsUpNow) {
+      if (!armsHeld) {
         this.localBottomY = null;
         this.localTopY = null;
         this.liftoffTime = null;
@@ -20441,7 +20867,7 @@ if (this.counterKey === "crunch") {
       }
 
       if (this.debugEl) {
-        this.debugEl.textContent = !armsUpNow
+        this.debugEl.textContent = !armsHeld
           ? "esperando a que agarres la barra (brazos en alto)…"
           : "distancia a la cámara cambió demasiado, recalibra si sigue así";
       }
@@ -20451,7 +20877,19 @@ if (this.counterKey === "crunch") {
     this.armsDownSince = null;
 
     const moveThresh = MOVE_FACTOR * this.shoulderWidth;
-    const barThresh = this.barY + BAR_MARGIN_FACTOR * this.shoulderWidth;
+    const barThresh = this.barY + (this.commando ? COMMANDO_BAR_MARGIN_FACTOR : BAR_MARGIN_FACTOR) * this.shoulderWidth;
+
+    // Ángulo de codo medio (2D) de los brazos que se ven bien, suavizado; null si no se ve ninguno.
+    const pullAngL = elbowVisible && wristVisible ? angle(lShoulder, lElbow, lWrist) : null;
+    const pullAngR = elbowVisible && wristVisible ? angle(rShoulder, rElbow, rWrist) : null;
+    const pullAngs = [pullAngL, pullAngR].filter((a) => a !== null);
+    // Commando: un brazo tira y el otro queda mas estirado -> vale el que mas se dobla; el resto, la media.
+    const pullAngRaw = pullAngs.length ? (this.commando ? Math.min(...pullAngs) : pullAngs.reduce((a, b) => a + b, 0) / pullAngs.length) : null;
+    this.pullupElbowSmooth = pullAngRaw === null
+      ? null
+      : (this.pullupElbowSmooth == null
+        ? pullAngRaw
+        : PULLUP_ELBOW_SMOOTH_ALPHA * pullAngRaw + (1 - PULLUP_ELBOW_SMOOTH_ALPHA) * this.pullupElbowSmooth);
 
     if (this.state === "down") {
       // sigue bajando (o igual) -> este es el nuevo punto de referencia "abajo",
@@ -20468,7 +20906,10 @@ if (this.counterKey === "crunch") {
       }
 
       const reachedBar = y <= barThresh;
-      if (reachedBar && risenFromBottom > moveThresh) {
+      const riseOk = risenFromBottom >= PULLUP_MIN_RISE_FACTOR * this.shoulderWidth;
+      const elbowOk = this.pullupElbowSmooth === null || this.pullupElbowSmooth <= (this.commando ? COMMANDO_TOP_ELBOW_MAX_DEG : PULLUP_TOP_ELBOW_MAX_DEG);
+      this.pullupGateInfo = `subida ${(risenFromBottom / this.shoulderWidth).toFixed(2)}/${PULLUP_MIN_RISE_FACTOR} codo ${this.pullupElbowSmooth === null ? "-" : this.pullupElbowSmooth.toFixed(0)}°/≤${PULLUP_TOP_ELBOW_MAX_DEG}`;
+      if (reachedBar && risenFromBottom > moveThresh && riseOk && elbowOk) {
         this.state = "up";
         this.localTopY = y;
         this.repStartTime = this.liftoffTime ?? now;
@@ -20491,7 +20932,7 @@ if (this.counterKey === "crunch") {
     if (this.debugEl) {
       this.debugEl.textContent =
         `estado: ${this.state} | nariz-barra: ${((y - this.barY) / this.shoulderWidth).toFixed(2)} ` +
-        `(umbral ${BAR_MARGIN_FACTOR}) | hombros: ${this.shoulderWidth.toFixed(3)}`;
+        `(umbral ${BAR_MARGIN_FACTOR}) | hombros: ${this.shoulderWidth.toFixed(3)} | ${this.pullupGateInfo ?? ""}`;
     }
     this.logScissor(
       `estado=${this.state} nariz_y=${y.toFixed(3)} barra_y=${this.barY.toFixed(3)} dist_barra=${((y - this.barY) / this.shoulderWidth).toFixed(2)}(umbral ${BAR_MARGIN_FACTOR}) ` +

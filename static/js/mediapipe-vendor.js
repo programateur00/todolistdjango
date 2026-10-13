@@ -48,3 +48,33 @@ export const MODEL_URL = new URL("models/pose_landmarker_full.task", MEDIAPIPE_V
 // Detector de personas (2026-10-10): OPCIONAL. Si colocas efficientdet_lite0.tflite en models/ se usa ese; si no está,
 // workout.js lo pide a storage.googleapis.com (ver initPersonDetector) y, si tampoco se puede, sigue sin detector.
 export const OBJECT_MODEL_URL = new URL("models/efficientdet_lite0.tflite", MEDIAPIPE_VENDOR_BASE).href;
+
+// 2026-10-13: algunos móviles (GPU sin texturas float de 4 canales; error "GPU does not fully
+// support 4 channel float32 or float16 formats") no pueden crear el modelo con delegate "GPU".
+// Se prueba el delegate pedido y, si falla al crearlo, se reintenta en CPU (más lento, pero
+// funciona). Devuelve el landmarker con `.delegateUsed` ("GPU" o "CPU") para el registro 📋.
+// Si el modelo viene en bytes (modelAssetBuffer) se pasa una COPIA en cada intento, por si el
+// primero se come el buffer.
+export async function createPoseLandmarker(PoseLandmarker, vision, options) {
+  const asked = (options && options.baseOptions && options.baseOptions.delegate) || "CPU";
+  const buf = options && options.baseOptions && options.baseOptions.modelAssetBuffer;
+  const optionsFor = (delegate) => ({
+    ...options,
+    baseOptions: {
+      ...options.baseOptions,
+      ...(buf ? { modelAssetBuffer: new Uint8Array(buf) } : {}),
+      delegate,
+    },
+  });
+  try {
+    const lm = await PoseLandmarker.createFromOptions(vision, optionsFor(asked));
+    try { lm.delegateUsed = asked; } catch { /* solo informativo */ }
+    return lm;
+  } catch (err) {
+    if (asked === "CPU") throw err;
+    console.warn(`PoseLandmarker con delegate=${asked} falló; reintento en CPU:`, err);
+    const lm = await PoseLandmarker.createFromOptions(vision, optionsFor("CPU"));
+    try { lm.delegateUsed = "CPU"; } catch { /* solo informativo */ }
+    return lm;
+  }
+}

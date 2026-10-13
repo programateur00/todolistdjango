@@ -1973,6 +1973,80 @@ class PlanMissedDayTests(TestCase):
         self.assertEqual(WorkoutSession.objects.filter(task=task).count(), 1)
 
 
+class PlanWeekFollowsSessionsTests(TestCase):
+    """
+    Reportado por Alex: 3 sesiones por semana y 6 hechas, y el plan
+    seguía en la semana 2 porque la semana/escalón solo avanzaba con
+    sesiones CUMPLIDAS. La semana tiene que avanzar con las sesiones que
+    pasan (cumplidas o no) y, si fallas, bajar la carga — no estancarse.
+    """
+
+    def setUp(self):
+        self.user = get_current_user()
+        self.pull = Exercise.objects.create(slug="pull-week", name="Dominadas", mode=Exercise.MODE_POSE)
+        self.plan = Plan.objects.create(
+            name="Mes", user=self.user, weeks=4, custom_days="0,2,4",
+            started_on=timezone.localtime(timezone.now()).date(),
+        )
+        self.item = PlanItem.objects.create(
+            plan=self.plan, exercise=self.pull, progression=PlanItem.PROG_REPS,
+            start_sets=2, start_reps=5, goal_sets=4, goal_reps=12,
+            weekly_linear=True, sessions_per_step=3, deload_after_failures=0,
+        )
+
+    def _session(self, reps):
+        task = Task.objects.create(title="Sesión", user=self.user)
+        WorkoutSession.objects.create(
+            task=task, user=self.user, plan=self.plan, exercise="pull-week",
+            total_reps=reps, total_sets=2, target_sets=2, target_reps=5,
+        )
+
+    def test_failed_sessions_still_advance_the_week(self):
+        for _ in range(6):
+            self._session(reps=1)  # ninguna cumplida
+        self.assertEqual(self.plan.sessions_done(), 6)
+        self.assertEqual(self.plan.week_number, 3)
+        self.assertEqual(self.item.current_step(), 2)
+
+    def test_week_is_capped_at_plan_length(self):
+        for _ in range(20):
+            self._session(reps=1)
+        self.assertEqual(self.plan.week_number, 4)
+
+    def test_no_sessions_is_week_one(self):
+        self.assertEqual(self.plan.week_number, 1)
+
+    def test_progress_pct_counts_against_planned_sessions(self):
+        for _ in range(6):
+            self._session(reps=20)  # todas cumplidas
+        # 6 cumplidas de 12 planificadas (4 semanas x 3)
+        self.assertEqual(self.item.own_progress_pct(), 50)
+
+    def test_plan_does_not_close_early_in_last_week(self):
+        for _ in range(9):
+            self._session(reps=20)
+        self.assertEqual(self.plan.week_number, 4)
+        self.assertFalse(self.plan._all_items_reached_goal())
+
+    def test_expired_plan_closes_with_partial_percentage(self):
+        """Al cumplirse las semanas el plan se cierra solo y guarda el %
+        que lleva, aunque no haya llegado al objetivo."""
+        for _ in range(3):
+            self._session(reps=20)   # cumplidas
+        for _ in range(3):
+            self._session(reps=1)    # falladas
+        self.plan.started_on = timezone.localtime(timezone.now()).date() - timedelta(days=30)
+        self.plan.save()
+
+        self.assertEqual(self.plan.week_number, 4)
+        Plan.auto_close_expired(self.user)
+
+        self.plan.refresh_from_db()
+        self.assertIsNotNone(self.plan.closed_at)
+        self.assertEqual(self.plan.final_progress_pct, 25)  # 3 de 12
+        self.assertFalse(self.plan.is_completed)
+
+
 class ListFilteringTests(TestCase):
     """
     Regresiones de dos molestias reales:
@@ -2704,19 +2778,30 @@ class LastSetRepsTests(TestCase):
         self._ws([9, 6])  # más reciente, pero suelta
         self.assertEqual(self.item.last_session_set_reps(), [5, 5, 5])
 
-    def test_plan_without_history_falls_back_to_last_time_anywhere(self):
+    def test_plan_without_history_does_not_borrow_freestyle(self):
         self._ws([9, 6])
-        self.assertEqual(self.item.last_session_set_reps(), [9, 6])
+        self.assertIsNone(self.item.last_session_set_reps())
 
-    def test_routine_sessions_do_not_count_in_fallback(self):
+    def test_freestyle_does_not_see_plan_sessions(self):
+        self._ws([12], plan=self.plan)
+        self.assertIsNone(self.last_set_reps(self.user, "pullup"))
+        self._ws([9, 6])
+        self.assertEqual(self.last_set_reps(self.user, "pullup"), [9, 6])
+
+    def test_routine_sessions_do_not_count_in_freestyle(self):
         self._ws([9, 6])
         self._ws([3], routine=self.Routine.objects.create(name="warm", user=self.user))
-        self.assertEqual(self.item.last_session_set_reps(), [9, 6])
+        self.assertEqual(self.last_set_reps(self.user, "pullup"), [9, 6])
 
-    def test_api_exercise_target_returns_last_sets(self):
-        self._ws([9, 6])
-        data = self.client.get("/api/exercises/pullup/target/").json()
+    def test_api_exercise_target_freestyle_task_ignores_plan(self):
+        from .models import Task
+        self._ws([12], plan=self.plan)  # historial del plan "al fallo"
+        self._ws([9, 6])                # historial suelto
+        freestyle = Task.objects.create(title="Dominadas", user=self.user)
+        data = self.client.get(f"/api/exercises/pullup/target/?task={freestyle.uuid}").json()
         self.assertEqual(data["last_sets"], [9, 6])
+        self.assertIsNone(data["target_sets"])
+        self.assertIsNone(data["plan_name"])
 
 
 class LastSetSecondsTests(TestCase):
@@ -2749,16 +2834,23 @@ class LastSetSecondsTests(TestCase):
     def test_returns_seconds_per_set_rounded(self):
         self._ws([45.4, 40.6])
         self.assertEqual(self.last_set_seconds(self.user, "plank"), [45, 41])
-        self.assertEqual(self.item.last_session_set_seconds(), [45, 41])
+        self._ws([30.2], plan=self.plan)
+        self.assertEqual(self.item.last_session_set_seconds(), [30])
 
     def test_old_session_with_only_totals_is_ignored(self):
         self.WS.objects.create(user=self.user, exercise="plank", session_duration_seconds=90, total_sets=3)
         self.assertIsNone(self.last_set_seconds(self.user, "plank"))
 
-    def test_routine_sessions_do_not_count_in_fallback(self):
+    def test_routine_sessions_do_not_count_in_freestyle(self):
         self._ws([45, 40])
         self._ws([10], routine=self.Routine.objects.create(name="warm", user=self.user))
-        self.assertEqual(self.item.last_session_set_seconds(), [45, 40])
+        self.assertEqual(self.last_set_seconds(self.user, "plank"), [45, 40])
+
+    def test_plan_and_freestyle_seconds_are_separate(self):
+        self._ws([60], plan=self.plan)
+        self.assertIsNone(self.last_set_seconds(self.user, "plank"))
+        self._ws([45, 40])
+        self.assertEqual(self.item.last_session_set_seconds(), [60])
 
     def test_rep_exercise_gets_no_seconds(self):
         from .models import Exercise, PlanItem
@@ -2769,8 +2861,11 @@ class LastSetSecondsTests(TestCase):
         self.assertIsNone(it.last_session_set_seconds())
 
     def test_api_exercise_target_returns_last_seconds(self):
+        from .models import Task
+        self._ws([60], plan=self.plan)  # historial del plan, no debe colarse en freestyle
         self._ws([45, 40])
-        data = self.client.get("/api/exercises/plank/target/").json()
+        freestyle = Task.objects.create(title="Plancha", user=self.user)
+        data = self.client.get(f"/api/exercises/plank/target/?task={freestyle.uuid}").json()
         self.assertEqual(data["last_seconds"], [45, 40])
 
     def test_plan_session_save_stores_set_seconds(self):

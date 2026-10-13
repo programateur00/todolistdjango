@@ -25,7 +25,7 @@ import {
   speakOut, stopSpeaking, isVoiceEnabled, startWorkout, setQuietVoice, clearPullupCalibCache, exportDebugLogText,
 } from "./workout.js";
 import { PersonGate } from "./workout.js";
-import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./mediapipe-vendor.js";
+import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL, createPoseLandmarker } from "./mediapipe-vendor.js";
 import { openCameraStream } from "./camera-stream.js";
 
 const fmt = (s) => {
@@ -186,7 +186,7 @@ async function runSallyPushups(host) {
   try {
     const { FilesetResolver, PoseLandmarker } = await import(MEDIAPIPE_BUNDLE_URL);
     const vision = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_BASE_URL);
-    poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+    poseLandmarker = await createPoseLandmarker(PoseLandmarker, vision, {
       baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
       runningMode: "VIDEO", numPoses: 1, outputSegmentationMasks: true,
     });

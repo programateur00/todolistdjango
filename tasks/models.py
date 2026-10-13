@@ -1119,6 +1119,11 @@ class Task(models.Model):
         """IDs de vídeo (ya filtrados por sync_playlist_videos) para el reproductor."""
         return [e["video_id"] for e in (self.playlist_videos_cache or []) if e.get("video_id")]
 
+    def playlist_video_durations(self):
+        """Duración en segundos de cada vídeo de playlist_video_ids(), en el
+        mismo orden (None si YouTube no da duración fija, p. ej. un directo)."""
+        return [e.get("duration_seconds") for e in (self.playlist_videos_cache or []) if e.get("video_id")]
+
     def sync_playlist_videos(self):
         """
         Refresca playlist_videos_cache desde la API de YouTube -- mismo
@@ -2740,7 +2745,35 @@ class Plan(models.Model):
     def week_number(self):
         """En qué semana del plan estamos (1 = la primera)."""
         days = (timezone.localtime(timezone.now()).date() - self.started_on).days
-        return max(1, days // 7 + 1)
+        calendar_week = max(1, days // 7 + 1)
+        if self.plan_type == self.PLAN_TYPE_STUDY:
+            return calendar_week
+        # Deporte/General: la semana avanza con lo que pasa de verdad, no
+        # solo con el calendario. Cada sesión que le tocaba al plan
+        # (cumplida, a medias o fallada) consume un hueco de la semana:
+        # 3 sesiones/semana y 6 sesiones registradas = ya vas por la
+        # semana 3. Se toma la mayor de las dos cuentas para no quedarse
+        # nunca estancado en una semana, y se limita a la duración del
+        # plan. Fallar una sesión NO congela la semana: lo que baja es la
+        # carga (deload), no el calendario.
+        per_week = max(1, len(self.custom_days_list()))
+        session_week = self.sessions_done() // per_week + 1
+        return max(1, min(self.weeks or 1, max(calendar_week, session_week)))
+
+    def sessions_done(self):
+        """
+        Sesiones del plan que ya han pasado, cumplidas o no: una por
+        tarea del plan con algún WorkoutSession (los días que expiran en
+        silencio también dejan una a 0%, ver Task._record_plan_miss). Las
+        sueltas, sin tarea, cuentan una por día.
+        """
+        qs = WorkoutSession.objects.filter(plan=self, deleted_at__isnull=True)
+        by_task = qs.exclude(task__isnull=True).values("task_id").distinct().count()
+        loose_days = {
+            timezone.localtime(r).date()
+            for r in qs.filter(task__isnull=True).values_list("recorded_at", flat=True)
+        }
+        return by_task + len(loose_days)
 
     @property
     def is_completed(self):
@@ -2833,6 +2866,10 @@ class Plan(models.Model):
         """
         items = list(self.items.all())
         if not items:
+            return False
+        if any(it.weekly_linear for it in items):
+            # Reparto por semanas: el destino se alcanza en la ÚLTIMA
+            # semana, no al terminarla — el plan dura lo que se eligió.
             return False
         return all(
             (remaining := item.sessions_to_goal()) is not None and remaining == 0
@@ -3970,9 +4007,8 @@ class PlanItem(models.Model):
         reps por serie guardadas (las sesiones previas a este campo solo
         tienen el total, no se puede inventar el reparto).
 
-        Ver last_set_reps(): primero se mira lo hecho dentro de este mismo
-        plan y, si ahí no hay nada, la última vez que se hizo el ejercicio
-        en cualquier sitio (entreno suelto, otro plan).
+        Ver last_set_reps(): solo cuenta lo hecho dentro de este mismo
+        plan; los entrenos sueltos (freestyle) no se mezclan.
         """
         if not self.exercise_id:
             return None
@@ -4024,7 +4060,14 @@ class PlanItem(models.Model):
         quedarte atascado para siempre en un número que hoy no puedes.
         """
         successes, failure_streak = self.successes_and_streak()
-        step = successes // max(1, self.sessions_per_step)
+        if self.weekly_linear and self.plan_id:
+            # Un escalón = una semana del plan, y la semana sigue a las
+            # sesiones/calendario aunque falles (ver Plan.week_number):
+            # si no cumples, el objetivo no se queda parado en la semana
+            # 2 — baja por el deload de abajo, pero el plan avanza.
+            step = self.plan.week_number - 1
+        else:
+            step = successes // max(1, self.sessions_per_step)
         if self.deload_after_failures and failure_streak >= self.deload_after_failures:
             step = max(0, step - 1)
         return step
@@ -4462,7 +4505,12 @@ class PlanItem(models.Model):
         if remaining is None:
             return None
         successes, _ = self.successes_and_streak()
-        total_sessions = self.current_step() * self.sessions_per_step + remaining
+        if self.weekly_linear and self.plan_id:
+            # % cumplido = sesiones cumplidas / sesiones planificadas de
+            # TODO el plan (semanas x sesiones por semana).
+            total_sessions = max(1, self.plan.weeks) * max(1, self.sessions_per_step)
+        else:
+            total_sessions = self.current_step() * self.sessions_per_step + remaining
         if total_sessions <= 0:
             return 100
         return min(100, round(100 * successes / total_sessions))
@@ -4733,11 +4781,11 @@ def last_set_reps(user, exercise_slug, plan=None):
     ([12, 10, 9]), o None si no hay ninguna sesión con las reps por serie
     guardadas. Alimenta el aviso "Serie 2: la última vez hiciste 10".
 
-    Primero se mira dentro de `plan` (si se pasa): es la comparación más
-    justa. Si el plan aún no tiene nada de ese ejercicio -- o es un
-    entreno suelto, sin plan -- se usa la última vez que se hizo en
-    cualquier sitio, salvo dentro de un circuito/calentamiento (routine),
-    donde las reps son de rutina y no de entrenamiento de verdad.
+    Plan y freestyle (2026-10-13) están SEPARADOS, sin mezclar nunca:
+    con `plan` solo se miran las sesiones de ESE plan; sin `plan` (tarea
+    freestyle) solo las sesiones sueltas, sin plan ni circuito/calentamiento
+    (routine, donde las reps son de rutina y no de entrenamiento de verdad).
+    Así una tarea freestyle no enseña "la última vez hiciste 12" de un plan.
     """
     if not user or not exercise_slug:
         return None
@@ -4759,10 +4807,8 @@ def last_set_reps(user, exercise_slug, plan=None):
         exercise=exercise_slug, user=user, deleted_at__isnull=True,
     )
     if plan is not None:
-        found = _first_with_reps(base.filter(plan=plan))
-        if found:
-            return found
-    return _first_with_reps(base.filter(routine__isnull=True))
+        return _first_with_reps(base.filter(plan=plan))
+    return _first_with_reps(base.filter(plan__isnull=True, routine__isnull=True))
 
 
 def last_set_seconds(user, exercise_slug, plan=None):
@@ -4803,11 +4849,10 @@ def last_set_seconds(user, exercise_slug, plan=None):
     base = WorkoutSession.objects.filter(
         exercise=exercise_slug, user=user, deleted_at__isnull=True,
     )
+    # Misma separación plan / freestyle que last_set_reps().
     if plan is not None:
-        found = _first_with_seconds(base.filter(plan=plan))
-        if found:
-            return found
-    return _first_with_seconds(base.filter(routine__isnull=True))
+        return _first_with_seconds(base.filter(plan=plan))
+    return _first_with_seconds(base.filter(plan__isnull=True, routine__isnull=True))
 
 
 

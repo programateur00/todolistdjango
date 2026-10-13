@@ -26,7 +26,7 @@ import {
 import { PersonGate } from "./workout.js";
 // De dónde sale MediaPipe (versión + rutas a los ficheros locales)
 // vive en un único sitio — ver static/js/mediapipe-vendor.js.
-import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL } from "./mediapipe-vendor.js";
+import { MEDIAPIPE_BUNDLE_URL, MEDIAPIPE_WASM_BASE_URL, MODEL_URL, createPoseLandmarker } from "./mediapipe-vendor.js";
 import { openCameraStream } from "./camera-stream.js";
 
 (function () {
@@ -549,7 +549,7 @@ import { openCameraStream } from "./camera-stream.js";
       try {
         const { FilesetResolver, PoseLandmarker } = await import(MEDIAPIPE_BUNDLE_URL);
         const vision = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_BASE_URL);
-        poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+        poseLandmarker = await createPoseLandmarker(PoseLandmarker, vision, {
           baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
           runningMode: "VIDEO", numPoses: 1, outputSegmentationMasks: true,
         });

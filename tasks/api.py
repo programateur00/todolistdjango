@@ -309,15 +309,35 @@ def exercise_target(request, slug):
     para avisar en directo al llegar a él.
     """
     ctx = _plan_context(slug)
+    # ?task=<uuid> (2026-10-13): la app dice para QUÉ tarea lo pide. Si esa
+    # tarea es freestyle (no la generó ningún plan), no se enseña nada de
+    # ningún plan -- ni objetivo ni historial -- aunque haya un plan activo
+    # con el mismo ejercicio: el historial sale solo de entrenos sueltos.
+    # Sin ?task= (clientes antiguos) se mantiene el comportamiento de antes.
+    task_param = request.GET.get("task")
+    if task_param:
+        try:
+            freestyle_task = tasks_qs().filter(uuid=uuid.UUID(task_param)).first()
+        except ValueError:
+            freestyle_task = None
+        if freestyle_task is not None and not freestyle_task.plan:
+            return JsonResponse({
+                "target_sets": None,
+                "target_reps": None,
+                "target_seconds": None,
+                "plan_name": None,
+                "last_sets": last_set_reps(_user(), slug, plan=None),
+                "last_seconds": last_set_seconds(_user(), slug, plan=None),
+            })
     return JsonResponse({
         "target_sets": ctx["target_sets"],
         "target_reps": ctx["target_reps"],
         "target_seconds": ctx["target_seconds"],
         "plan_name": ctx["plan"].name if ctx["plan"] else None,
         # Reps de cada serie la última vez que se hizo este ejercicio
-        # ([12, 10, 9]) -- para "Serie 2: la última vez hiciste 10". Va
-        # siempre, también en entrenos sueltos sin plan (a diferencia del
-        # objetivo, esto es historial tuyo, no de ningún plan).
+        # ([12, 10, 9]) -- para "Serie 2: la última vez hiciste 10". Solo
+        # del propio plan (o solo de entrenos sueltos si no hay plan):
+        # plan y freestyle no se mezclan (ver last_set_reps).
         "last_sets": last_set_reps(_user(), slug, plan=ctx["plan"]),
         # Lo mismo para ejercicios cronometrados: segundos aguantados en
         # cada serie ([45, 40]) -- "la última vez aguantaste 45 segundos".
