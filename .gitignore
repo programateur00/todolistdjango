@@ -11,3 +11,7 @@ mobile_releases/
 
 # PDFs de planes de lectura subidos (temporales, se borran al terminar el libro)
 media/
+
+static/staticfiles/
+staticfiles/
+*.bak*
