@@ -7,10 +7,14 @@ la app móvil, con `source=pc_usage` en vez de `app_usage`. Hay dos
 tipos de pestaña trackeable, cada uno emparejado con un tipo de tarea:
 
 - **Udemy** — tarea de categoría Estudio, subtipo "Curso de Udemy".
-  Por defecto cuenta tiempo mientras la pestaña de udemy.com está
-  sonando (chrome.tabs.audible) — estar en el Q&A, las reseñas o el
-  temario del curso sin el vídeo reproduciéndose NO cuenta, solo se
-  trackea mientras se oye la clase. Hay dos formas de tener una tarea
+  Hay dos modos de contar el tiempo, elegidos por curso (ver abajo) y que
+  nunca se mezclan. Por defecto es **"por vídeos vistos"**: cuenta SOLO
+  mientras el vídeo suena (chrome.tabs.audible) o se está reproduciendo
+  (un `<video>` de la lección sin pausa, también con el sonido
+  silenciado). Estar en el Q&A, las reseñas o el temario, o tener el
+  vídeo en pausa, NO cuenta aunque muevas el ratón; se tolera una pausa
+  de hasta 60 s (`VIDEO_PAUSE_GRACE_SECONDS`, para apuntar algo) y pasado
+  ese tiempo la cuenta para. Hay dos formas de tener una tarea
   de Udemy: **con palabra clave** (viene de un Plan) — cuenta solo ESE
   curso, y cada minuto comprueba si Udemy lo reporta al 100% para
   cerrar la tarea entera (no solo el día) en cuanto se termina; **sin
@@ -20,14 +24,14 @@ tipos de pestaña trackeable, cada uno emparejado con un tipo de tarea:
   específica siempre gana sobre el hábito genérico, para que nunca se
   pisen ni sumen el mismo rato dos veces.
 
-  Un curso con **palabra clave** puede además marcarse como "casi sin
-  audio" (Task.watch_requires_audio=False, checkbox al editar el
-  objetivo del Plan — pensado para cursos sobre todo de ejercicios, sin
-  apenas vídeo hablado): ahí la exigencia deja de ser tab.audible y
-  pasa a ser la misma que usa Lectura de PDF, más abajo — sin
-  inactividad de ratón/teclado (chrome.idle, 5 min) — para poder seguir
-  contando aunque no suene nada, sin dejar de detectar si dejaste el
-  curso abierto en primer plano y te fuiste.
+  Un curso con **palabra clave** puede además ponerse **"por tiempo en la
+  página"** (Task.watch_requires_audio=False, selector al editar el
+  objetivo del Plan — pensado para cursos de ejercicios, sin apenas
+  vídeo): ahí no se mira el sonido ni el vídeo, solo que la pestaña esté
+  en primer plano y que hayas tocado ratón/teclado en los últimos 5
+  minutos (chrome.idle), igual que Lectura de PDF más abajo. Cuando te
+  vas, esos 5 minutos de inactividad que hicieron falta para detectarlo
+  NO se suman.
 - **Clases de Ilerna (Zoom)** — tarea de categoría Estudio, subtipo
   "Clases de Ilerna (Zoom)" (o plan de Estudio → "Clases de Ilerna").
   Cuenta tiempo mientras tienes una grabación de `ilernaonline.zoom.us`
@@ -107,18 +111,18 @@ falta el subtipo.
 
 ### En ambos casos
 
-- Si cambias de pestaña, minimizas la ventana, o pasas más de un
-  minuto sin tocar ratón/teclado, esa sesión se cierra y se manda; al
-  volver, empieza una sesión nueva. (Para Udemy con audio exigido
-  —el valor por defecto— cuenta si la pestaña suena (se asume que sigues
-  viendo el vídeo, aunque no toques nada) O si hay actividad de
-  ratón/teclado: así las pausas, ejercicios y ratos de leer en silencio
-  también suman. Solo deja de contar si está en silencio Y llevas 5
-  minutos sin tocar nada. Para un PDF, o para un curso de Udemy marcado
-  como "casi sin audio", no hay señal de sonido en la que fiarse, así
-  que ahí hace falta seguir tocando algo de vez en cuando — si pasan 5
-  minutos sin tocar nada, chrome.idle lo detecta y se para de contar,
-  aunque la pestaña del curso se quede abierta y en primer plano.)
+- Si cambias de pestaña, minimizas la ventana o dejas de cumplir la
+  condición de tu modo, esa sesión se cierra y se manda; al volver,
+  empieza una sesión nueva. Resumen de cada modo:
+  - **Udemy "por vídeos vistos"** (por defecto): cuenta con el vídeo
+    sonando o reproduciéndose, más una pausa de hasta 60 s. Con el
+    vídeo parado más tiempo, para — aunque muevas el ratón.
+  - **Udemy "por tiempo en la página"** y **PDF**: cuenta con la pestaña
+    en primer plano y actividad de ratón/teclado en los últimos 5
+    minutos; si te vas, la sesión acaba en el instante en que dejaste de
+    tocar (no se suman los 5 minutos de espera).
+  - **Clases de Ilerna (Zoom)**: cuenta si suena O hay actividad de
+    ratón/teclado; para al estar en silencio Y 5 minutos inactivo.
 - Los segundos sueltos de cada trozo no se pierden: lo que sobra (o
   falta) para el minuto entero se arrastra al siguiente trozo de esa
   tarea el mismo día (`takeWholeMinutes`), así que salir y volver varias
@@ -140,6 +144,13 @@ si esto no existiera, no rompe nada.
 - Si mandar una sesión falla (sin red, servidor caído), se guarda en
   `chrome.storage.local` y se reintenta cada 5 minutos — no se pierde
   tiempo trackeado por un corte puntual.
-- Las sesiones de menos de 1 minuto no se mandan.
+- Para un curso de Udemy (con o sin palabra clave) hay que poner siempre
+  los minutos al día: sin ellos la primera sesión de 1 minuto daría el
+  día por cumplido.
+- Las sesiones de menos de 1 minuto no se mandan sueltas: los segundos
+  sobrantes se acumulan al siguiente trozo del mismo día.
+- Los reintentos nunca duplican un envío (hay un cerrojo) y un envío que
+  el servidor rechaza con un error 4xx (p. ej. tarea borrada) se descarta
+  en vez de reintentarse eternamente; el resto caduca a los 14 días.
 - La lista de tareas "Curso de Udemy" se cachea 2 minutos — crear o
   editar una tarea puede tardar hasta ese rato en reflejarse aquí.

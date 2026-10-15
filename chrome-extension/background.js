@@ -24,6 +24,14 @@
  *     por la misma que usa Lectura más abajo: sin inactividad de
  *     ratón/teclado (ver IDLE_DETECTION_SECONDS), en vez de requerir
  *     sonido — ver la rama `udemy` de getActiveMatch().
+ *     MODO "POR VÍDEOS VISTOS" (watch_requires_audio=true, el de por
+ *     defecto): cuenta SOLO si el vídeo suena (tab.audible) o se está
+ *     reproduciendo (<video> sin pausa); una pausa de hasta
+ *     VIDEO_PAUSE_GRACE_SECONDS se tolera y de ahí en adelante para,
+ *     aunque muevas el ratón. MODO "POR TIEMPO EN LA PÁGINA"
+ *     (watch_requires_audio=false): cuenta con la pestaña en primer plano
+ *     y sin inactividad de ratón/teclado (IDLE_DETECTION_SECONDS). Los
+ *     dos modos no se mezclan.
  *     Además, mientras hay sesión, se comprueba cada minuto cuánto
  *     lleva el curso (ver checkCourseCompletion) — el % se manda siempre
  *     que se puede calcular, para la barra de la pantalla del plan, y si
@@ -59,6 +67,11 @@
 const TASKS_CACHE_TTL_MS = 2 * 60 * 1000;     // 2 min
 const IDLE_DETECTION_SECONDS = 300;            // 5 min sin tocar ratón/teclado = inactivo
 const MIN_SESSION_MINUTES_TO_SEND = 1;         // no se manda 0 min; el resto de segundos se acumula (ver takeWholeMinutes)
+// Cursos de Udemy "por vídeos vistos": solo cuenta mientras el vídeo
+// suena/se reproduce. Una pausa corta (apuntar algo, pensar un ejercicio)
+// se tolera hasta este límite; pasado, la cuenta PARA y lo que quede de
+// pausa no se suma. Ya NO vale mover el ratón con el vídeo parado.
+const VIDEO_PAUSE_GRACE_SECONDS = 60;
 const HEARTBEAT_ALARM = "libreta-udemy-heartbeat";
 const RETRY_ALARM = "libreta-udemy-retry-uploads";
 
@@ -86,7 +99,7 @@ function apiUrl(cfg, path) {
 
 async function fetchTasksFromServer(cfg) {
   // Sin filtro de categoría: aquí se necesitan tareas de dos categorías
-  // distintas (Estudio → Udemy, Enfoque → Lectura), así que se pide
+  // distintas (Estudio → Udemy/Ilerna, Lectura), así que se pide
   // todo lo pendiente de hoy y se filtra en el cliente.
   const resp = await fetch(apiUrl(cfg, "/tasks/"), {
     headers: { Authorization: authHeader(cfg) },
@@ -207,6 +220,44 @@ function pdfFileName(rawUrl) {
   }
 }
 
+// --------------------------------------- modo "por vídeos vistos" (Udemy)
+
+/** ¿Hay un <video> de la lección reproduciéndose (no en pausa) en la pestaña?
+ * Cubre vídeo con el sonido silenciado, donde tab.audible sería false. */
+async function isVideoPlayingInTab(tabId) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: () => {
+        if (!location.pathname.includes("/learn/") && window === window.top) return false;
+        return Array.from(document.querySelectorAll("video")).some(
+          (v) => !v.paused && !v.ended && v.readyState > 2
+        );
+      },
+    });
+    return results.some((r) => r && r.result === true);
+  } catch {
+    return false;
+  }
+}
+
+/** Última vez que se vio el vídeo sonando/reproduciéndose, por pestaña. */
+async function markPlaying(tabId, at) {
+  const { lastPlaying } = await chrome.storage.session.get("lastPlaying");
+  const map = lastPlaying && typeof lastPlaying === "object" ? lastPlaying : {};
+  map[tabId] = at;
+  const keys = Object.keys(map);
+  if (keys.length > 10) {
+    keys.sort((a, b) => map[a] - map[b]).slice(0, keys.length - 10).forEach((k) => delete map[k]);
+  }
+  await chrome.storage.session.set({ lastPlaying: map });
+}
+
+async function getLastPlaying(tabId) {
+  const { lastPlaying } = await chrome.storage.session.get("lastPlaying");
+  return lastPlaying && lastPlaying[tabId] ? lastPlaying[tabId] : null;
+}
+
 /** Tarea+pestaña que tocaría estar contando AHORA MISMO, o null si nada aplica. */
 async function getActiveMatch() {
   try {
@@ -231,6 +282,11 @@ async function getActiveMatch() {
     const found = matchTask(candidates, tab.title);
     if (!found) return null;
 
+    let videoMode = false;
+    // Sesión que SOLO se sostiene con actividad de ratón/teclado (Udemy "por
+    // tiempo en la página" y PDF). Al cerrarla, los minutos de inactividad
+    // que hicieron falta para detectar que te fuiste no cuentan (ver endSession).
+    let activityOnly = false;
     if (udemy || ilerna) {
       // Por defecto (watch_requires_audio=true, o caché vieja sin el
       // campo), la única señal fiable desde fuera de la página de que
@@ -254,7 +310,21 @@ async function getActiveMatch() {
       // Ilerna no tiene opción de "casi sin audio": una grabación de
       // clase siempre suena, así que usa siempre la regla por defecto.
       const requiresAudio = ilerna ? true : found.task.watch_requires_audio !== false;
-      if (requiresAudio) {
+      if (udemy && requiresAudio) {
+        // Curso "por vídeos vistos": SOLO cuenta con el vídeo sonando o
+        // reproduciéndose (más la pausa corta tolerada). La actividad de
+        // ratón/teclado NO basta aquí -- eso es del modo "por tiempo en
+        // la página" (rama de más abajo) y no se mezclan.
+        const now = Date.now();
+        const playing = tab.audible || (await isVideoPlayingInTab(tab.id));
+        if (playing) {
+          await markPlaying(tab.id, now);
+        } else {
+          const last = await getLastPlaying(tab.id);
+          if (!last || now - last > VIDEO_PAUSE_GRACE_SECONDS * 1000) return null;
+        }
+        videoMode = true;
+      } else if (requiresAudio) {
         if (!tab.audible) {
           const idleState = await chrome.idle.queryState(IDLE_DETECTION_SECONDS);
           if (idleState !== "active") return null;
@@ -262,18 +332,22 @@ async function getActiveMatch() {
       } else {
         const idleState = await chrome.idle.queryState(IDLE_DETECTION_SECONDS);
         if (idleState !== "active") return null;
+        activityOnly = true;
       }
     } else {
       // Un PDF no suena nunca, así que aquí la única señal de "sigues
       // ahí" que hay es la inactividad de ratón/teclado de Chrome.
       const idleState = await chrome.idle.queryState(IDLE_DETECTION_SECONDS);
       if (idleState !== "active") return null;
+      activityOnly = true;
     }
 
     return {
       task: found.task,
       tabId: tab.id,
       appPackage: udemy ? "udemy.com" : ilerna ? "ilernaonline.zoom.us" : pdfFileName(tab.url),
+      videoMode,
+      activityOnly,
     };
   } catch (err) {
     console.warn("[Libreta] getActiveMatch falló:", err);
@@ -283,11 +357,36 @@ async function getActiveMatch() {
 
 // --------------------------------------------------------- subir sesión
 
-async function queueFailedUpload(taskUuid, minutes, appPackage) {
-  const { pendingUploads } = await chrome.storage.local.get("pendingUploads");
-  const list = Array.isArray(pendingUploads) ? pendingUploads : [];
-  list.push({ taskUuid, minutes, appPackage, queuedAt: Date.now() });
-  await chrome.storage.local.set({ pendingUploads: list });
+// La cola de envíos fallidos se lee y se reescribe entera, y la tocan a la vez
+// el latido (cada minuto), la alarma de reintento y el cierre de sesiones: sin
+// este cerrojo dos reintentos simultáneos mandaban el MISMO trozo dos veces
+// (minutos duplicados) y un fallo nuevo que llegaba durante un reintento se
+// perdía al reescribir la lista.
+let uploadLock = Promise.resolve();
+function withUploadLock(fn) {
+  const run = uploadLock.then(fn);
+  uploadLock = run.catch(() => {});
+  return run;
+}
+
+// Un envío con error 4xx (tarea borrada, petición mala...) no se arregla
+// reintentando: se descartaría para siempre en bucle. Sí se reintenta sin red,
+// con 5xx, y con 401 (credenciales mal puestas, que la persona puede corregir),
+// 408 y 429.
+function isRetriableUpload(err) {
+  const status = err && err.status;
+  if (!status) return true;
+  return status >= 500 || status === 401 || status === 408 || status === 429;
+}
+const PENDING_UPLOAD_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+
+function queueFailedUpload(taskUuid, minutes, appPackage) {
+  return withUploadLock(async () => {
+    const { pendingUploads } = await chrome.storage.local.get("pendingUploads");
+    const list = Array.isArray(pendingUploads) ? pendingUploads : [];
+    list.push({ taskUuid, minutes, appPackage, queuedAt: Date.now() });
+    await chrome.storage.local.set({ pendingUploads: list });
+  });
 }
 
 async function postFocusSession(cfg, taskUuid, minutes, appPackage) {
@@ -296,7 +395,11 @@ async function postFocusSession(cfg, taskUuid, minutes, appPackage) {
     headers: { Authorization: authHeader(cfg), "Content-Type": "application/json" },
     body: JSON.stringify({ minutes, source: "pc_usage", app_package: appPackage }),
   });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  if (!resp.ok) {
+    const err = new Error(`HTTP ${resp.status}`);
+    err.status = resp.status;
+    throw err;
+  }
   return resp.json();
 }
 
@@ -310,28 +413,35 @@ async function sendSessionMinutes(taskUuid, minutes, appPackage) {
     // la siga ofreciendo como candidata.
     refreshTasksCache();
   } catch (err) {
+    if (!isRetriableUpload(err)) {
+      console.warn("[Libreta] el servidor rechazó la sesión, no se reintenta:", err);
+      return;
+    }
     console.warn("[Libreta] no se pudo mandar la sesión, se guarda para reintentar:", err);
     await queueFailedUpload(taskUuid, minutes, appPackage);
   }
 }
 
-async function flushPendingUploads() {
-  const cfg = await getConfig();
-  if (!isConfigured(cfg)) return;
-  const { pendingUploads } = await chrome.storage.local.get("pendingUploads");
-  const list = Array.isArray(pendingUploads) ? pendingUploads : [];
-  if (!list.length) return;
+function flushPendingUploads() {
+  return withUploadLock(async () => {
+    const cfg = await getConfig();
+    if (!isConfigured(cfg)) return;
+    const { pendingUploads } = await chrome.storage.local.get("pendingUploads");
+    const list = Array.isArray(pendingUploads) ? pendingUploads : [];
+    if (!list.length) return;
 
-  const stillFailing = [];
-  for (const item of list) {
-    try {
-      await postFocusSession(cfg, item.taskUuid, item.minutes, item.appPackage);
-    } catch {
-      stillFailing.push(item);
+    const stillFailing = [];
+    for (const item of list) {
+      try {
+        await postFocusSession(cfg, item.taskUuid, item.minutes, item.appPackage);
+      } catch (err) {
+        const tooOld = Date.now() - (item.queuedAt || 0) > PENDING_UPLOAD_MAX_AGE_MS;
+        if (isRetriableUpload(err) && !tooOld) stillFailing.push(item);
+      }
     }
-  }
-  await chrome.storage.local.set({ pendingUploads: stillFailing });
-  if (stillFailing.length < list.length) refreshTasksCache();
+    await chrome.storage.local.set({ pendingUploads: stillFailing });
+    if (stillFailing.length < list.length) refreshTasksCache();
+  });
 }
 
 // ----------------------------------------------- detección de "100%"
@@ -616,7 +726,22 @@ async function endSession(session) {
   if (endedSessions.size > 50) endedSessions.delete(endedSessions.values().next().value);
 
   await setCurrentSession(null);
-  const minutes = await takeWholeMinutes(session.task.uuid, Date.now() - session.startedAt);
+  // En modo vídeo, la sesión no se cuenta más allá de la última vez que el
+  // vídeo estuvo sonando + la pausa tolerada (la sesión se cierra en el
+  // siguiente latido o evento, que puede llegar bastante después).
+  let endAt = Date.now();
+  if (session.videoMode) {
+    const last = await getLastPlaying(session.tabId);
+    if (last) endAt = Math.min(endAt, last + VIDEO_PAUSE_GRACE_SECONDS * 1000);
+  }
+  // Sesión sostenida solo por actividad: chrome.idle avisa DESPUÉS de
+  // IDLE_DETECTION_SECONDS sin tocar nada, así que sin esto cada vez que te
+  // ibas se sumaban 5 minutos en los que no había nadie delante.
+  if (session.activityOnly) {
+    const { idleSince } = await chrome.storage.session.get("idleSince");
+    if (idleSince && idleSince > session.startedAt) endAt = Math.min(endAt, idleSince);
+  }
+  const minutes = await takeWholeMinutes(session.task.uuid, Math.max(0, endAt - session.startedAt));
   if (minutes < MIN_SESSION_MINUTES_TO_SEND) return;
   await sendSessionMinutes(session.task.uuid, minutes, session.appPackage);
 }
@@ -626,6 +751,8 @@ async function startSession(match) {
     task: match.task,
     tabId: match.tabId,
     appPackage: match.appPackage,
+    videoMode: Boolean(match.videoMode),
+    activityOnly: Boolean(match.activityOnly),
     startedAt: Date.now(),
   });
 }
@@ -728,7 +855,12 @@ async function heartbeat() {
 // ------------------------------------------------------------ arranque
 
 chrome.tabs.onActivated.addListener(() => { reevaluate(); checkProgressOnActiveUdemyTab(); });
-chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
+  if (changeInfo.audible === false) {
+    // El vídeo acaba de dejar de sonar: ese es el último instante "viendo".
+    const cur = await getCurrentSession();
+    if (cur && cur.tabId === tabId && cur.videoMode) await markPlaying(tabId, Date.now());
+  }
   if (
     changeInfo.title !== undefined ||
     changeInfo.url !== undefined ||
@@ -747,7 +879,21 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
   if (current && current.tabId === tabId) await endSession(current);
 });
 chrome.windows.onFocusChanged.addListener(() => reevaluate());
-chrome.idle.onStateChanged.addListener(() => reevaluate());
+chrome.idle.onStateChanged.addListener(async (state) => {
+  // Se apunta CUÁNDO empezó la inactividad antes de reevaluar: "idle" llega
+  // IDLE_DETECTION_SECONDS después del último gesto; "locked" es inmediato
+  // (y si ya estabas inactivo, se conserva el instante anterior).
+  if (state === "active") {
+    await chrome.storage.session.remove("idleSince");
+  } else {
+    const { idleSince } = await chrome.storage.session.get("idleSince");
+    if (state === "idle" || !idleSince) {
+      const since = state === "idle" ? Date.now() - IDLE_DETECTION_SECONDS * 1000 : Date.now();
+      await chrome.storage.session.set({ idleSince: since });
+    }
+  }
+  await reevaluate();
+});
 
 chrome.idle.setDetectionInterval(IDLE_DETECTION_SECONDS);
 

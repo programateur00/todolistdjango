@@ -65,12 +65,12 @@ function renderDebug(snap) {
   if (snap.tasks.length) {
     snap.tasks.forEach((t) => {
       const audioNote = t.subcategory === "udemy"
-        ? (t.watch_requires_audio === false ? " — sin exigir audio (idle)" : " — exige audio")
+        ? (t.watch_requires_audio === false ? " — por tiempo en la página (idle)" : " — por vídeos vistos (solo con vídeo sonando/en marcha)")
         : "";
       lines.push(`   · [${t.subcategory}] "${t.title}" — palabra clave: "${t.watch_keyword}"${audioNote}`);
     });
   } else {
-    lines.push('   (ninguna — revisa que la tarea sea de hoy: Estudio → "Curso de Udemy" / "Clases de Ilerna", o Enfoque → "Lectura")');
+    lines.push('   (ninguna — revisa que la tarea sea de hoy: Estudio → "Curso de Udemy" / "Clases de Ilerna", o Lectura)');
   }
   lines.push(`Coincidencia encontrada ahora: ${snap.match ? `SÍ — "${snap.match.taskTitle}" (por "${snap.match.keyword}")` : "NO"}`);
   lines.push(`Sesión en curso: ${snap.currentSession ? `${snap.currentSession.taskTitle} [${snap.currentSession.subcategory}]` : "ninguna"}`);

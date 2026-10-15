@@ -36,14 +36,22 @@
     var hint = document.getElementById('focus-hint');
     var targetMinutes = parseInt(root.dataset.targetMinutes, 10) || null;
 
+    // El tiempo se mide con el reloj (Date.now), NO contando ticks de
+    // setInterval: con la pestaña en segundo plano (lo normal mientras lees
+    // el libro) Chrome frena los temporizadores —hasta uno por minuto—, y
+    // contar ticks se dejaba por el camino casi todo el rato real.
     var seconds = 0, running = false, interval = null;
+    var accumulatedMs = 0, startedAt = null;
+    function currentSeconds() {
+        return Math.floor((accumulatedMs + (running && startedAt !== null ? Date.now() - startedAt : 0)) / 1000);
+    }
 
     function fmt(s) {
         var m = Math.floor(s / 60), r = s % 60;
         return String(m).padStart(2, '0') + ':' + String(r).padStart(2, '0');
     }
     function tick() {
-        seconds += 1;
+        seconds = currentSeconds();
         display.textContent = fmt(seconds);
         if (targetMinutes && progress) {
             progress.style.width = Math.min(100, Math.round(100 * seconds / (targetMinutes * 60))) + '%';
@@ -52,18 +60,26 @@
     toggleBtn.addEventListener('click', function () {
         running = !running;
         if (running) {
+            startedAt = Date.now();
             interval = setInterval(tick, 1000);
             toggleBtn.textContent = 'Pausar';
             hint.textContent = 'En marcha — puedes pausar si te interrumpen.';
             saveBtn.hidden = false;
         } else {
+            accumulatedMs += Date.now() - startedAt;
+            startedAt = null;
             clearInterval(interval);
+            tick();
             toggleBtn.textContent = 'Reanudar';
             hint.textContent = 'En pausa. Reanuda cuando sigas, o guarda si has terminado.';
         }
     });
+    // Al volver a la pestaña se repinta ya, sin esperar al siguiente tick.
+    document.addEventListener('visibilitychange', function () { if (!document.hidden && running) tick(); });
     saveBtn.addEventListener('click', function () {
+        if (running && startedAt !== null) { accumulatedMs += Date.now() - startedAt; startedAt = null; running = false; }
         clearInterval(interval);
+        seconds = Math.floor(accumulatedMs / 1000);
         toggleBtn.disabled = true;
         saveBtn.disabled = true;
         saveBtn.textContent = 'Guardando…';

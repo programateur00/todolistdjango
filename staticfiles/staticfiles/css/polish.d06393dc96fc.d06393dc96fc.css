@@ -1,0 +1,477 @@
+/* ==========================================================================
+   Strive — capa de pulido (polish.css)
+   --------------------------------------------------------------------------
+   Se carga la ÚLTIMA, después de styles.css (y app.css en la app móvil), tanto
+   en la web como en la app. Es el MISMO archivo en los dos sitios:
+     · libreta-todo-django/static/css/polish.css
+     · mobile-app/www/css/polish.css
+   Si cambias uno, cambia el otro.
+
+   Qué arregla:
+   1. Cuadros azules al tocar (WebView de Android) y selección de texto al
+      mantener pulsado.
+   2. Efectos :hover que se quedaban "pegados" tras un toque.
+   3. Feedback de pulsación propio (:active) en vez del de por defecto.
+   4. Superficies, tipografía, botones, formularios y barra inferior más limpios.
+   ========================================================================== */
+
+/* ── 1 · Tokens ────────────────────────────────────────────────────────── */
+:root {
+  --ash:        #14110E;
+  --ash-soft:   #211A14;
+  --paper:      #1B1612;
+  --line:       #2F251C;
+  --bone:       #F2E8D9;
+  --bone-faded: #A19282;
+  --radius:     16px;
+  --radius-sm:  12px;
+  --shadow:     0 1px 2px rgba(0, 0, 0, .35);
+  --shadow-lg:  0 12px 32px -12px rgba(0, 0, 0, .6);
+  --chrome-bg:  rgba(20, 17, 14, .98);
+  --ring:       0 0 0 3px rgba(255, 106, 31, .22);
+  --press:      rgba(255, 255, 255, .05);
+  --track:      rgba(255, 255, 255, .09);
+  --ease:       cubic-bezier(.2, .8, .2, 1);
+}
+:root[data-theme="light"] {
+  --line:       #DCC799;
+  --shadow:     0 1px 2px rgba(70, 40, 10, .10);
+  --shadow-lg:  0 12px 32px -12px rgba(70, 40, 10, .28);
+  --chrome-bg:  rgba(250, 240, 220, .98);
+  --ring:       0 0 0 3px rgba(226, 84, 13, .20);
+  --press:      rgba(60, 30, 0, .06);
+  --track:      rgba(60, 30, 0, .12);
+}
+
+/* ── 2 · Táctil: fuera cuadros azules, selección y zoom por doble toque ──── */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+*, *::before, *::after {
+  -webkit-tap-highlight-color: transparent;
+}
+a, button, summary, label, select, input, textarea,
+[role="button"], .task-card, .plan-card, .menu-row, .tabbar a {
+  touch-action: manipulation;
+}
+button, summary, [role="button"] {
+  -webkit-appearance: none;
+  appearance: none;
+}
+/* Los controles no se pueden "seleccionar" como si fueran texto. */
+a, button, summary, label, [role="button"], .tabbar, .site-nav,
+.check-btn, .workout-btn, .primary-btn, .ghost-btn, .category-chip,
+.range-chip, .category-option, .repeat-option, .weekday-chip {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+/* Lo que se escribe, sí. */
+input, textarea, [contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+/* Foco: solo visible con teclado, nunca como recuadro tras un toque. */
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
+button:focus:not(:focus-visible),
+a:focus:not(:focus-visible),
+summary:focus:not(:focus-visible) { outline: none; }
+
+/* En el móvil la app se comporta como app, no como página web. */
+@media (hover: none) and (pointer: coarse) {
+  html, body { overscroll-behavior-y: none; }
+  body { -webkit-touch-callout: none; }
+  .task-card, .plan-card, .stats-card, .streak-card, .plan-item, .menu-list,
+  .week-summary, .workout__stat, .topbar, .section-title, .task-section__title,
+  .exercise-picker__item {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  ::-webkit-scrollbar { display: none; }
+  * { scrollbar-width: none; }
+}
+
+/* ── 3 · Base ───────────────────────────────────────────────────────────── */
+body {
+  background-image: none;
+  line-height: 1.45;
+  text-rendering: optimizeLegibility;
+}
+::selection { background: rgba(255, 106, 31, .28); color: inherit; }
+
+/* ── 4 · Cabeceras ──────────────────────────────────────────────────────── */
+.topbar { margin-bottom: 20px; align-items: flex-end; }
+.topbar__eyebrow {
+  font-size: 11px; font-weight: 600; letter-spacing: .14em;
+  color: var(--ember); margin-bottom: 4px;
+}
+.topbar__title h1 { font-size: 40px; line-height: 1; letter-spacing: .02em; }
+
+.stats-link, .back-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 38px; padding: 0 14px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--paper);
+  color: var(--bone-faded); font-size: 13px; font-weight: 600;
+  transition: background .15s var(--ease), color .15s var(--ease), transform .12s var(--ease);
+}
+.back-link { margin-bottom: 18px; }
+.stats-link:active, .back-link:active { background: var(--ash-soft); color: var(--bone); transform: scale(.97); }
+
+/* ── 5 · Superficies ────────────────────────────────────────────────────── */
+.task-card, .plan-card, .stats-card, .streak-card, .week-summary,
+.plan-item, .workout__stat, .focus-timer, .profile-stat, .menu-list,
+.kv-list, .task-form, .quick-add, .exercise-picker__item,
+.workout__stats-summary, .stamp-card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+/* Sin el zigzag "tallado": la superficie limpia se lee más profesional. */
+.streak-card::before, .plan-card:not(.plan-card--off)::before { display: none; }
+
+.week-summary { padding: 16px 18px; margin-bottom: 20px; }
+.week-summary__top { align-items: center; margin-bottom: 8px; }
+.week-summary__top:not(:first-child) { margin-top: 18px; }
+.week-summary__label {
+  font-size: 11px; font-weight: 700; letter-spacing: .12em; color: var(--bone-faded);
+}
+.week-summary__pct { font-size: 18px; color: var(--bone); letter-spacing: -.01em; }
+.week-summary__meta { margin: 8px 0 0; font-size: 12.5px; color: var(--bone-faded); }
+
+.stats-bar, .task-progress__bar {
+  height: 6px; background: var(--track); border-radius: 999px; overflow: hidden;
+}
+.stats-bar__done, .task-progress__done {
+  background: linear-gradient(90deg, var(--ember), var(--gold));
+  border-radius: 999px;
+}
+.plan-bar { height: 6px; background: var(--track); border: none; }
+.plan-bar__fill { background: linear-gradient(90deg, var(--ember), var(--gold)); }
+
+/* Aire entre filtros y listas; chips en varias líneas en pantallas anchas. */
+.filters { margin-bottom: 22px; }
+legend.field__label { padding: 0; }
+@media (min-width: 640px) {
+  .category-filter { flex-wrap: wrap; overflow: visible; }
+}
+
+/* ── 6 · Títulos de sección ─────────────────────────────────────────────── */
+.task-section { margin-bottom: 26px; }
+.task-section__title,
+.done-summary,
+.done-toggle,
+.section-title {
+  font-family: var(--font-b);
+  font-size: 12px; font-weight: 700; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--bone-faded);
+}
+.task-section__title {
+  border-bottom: none; padding-bottom: 0; margin: 0 0 10px;
+}
+.task-section__count, .done-toggle__count {
+  background: var(--ash-soft); color: var(--bone-faded);
+  font-size: 11px; font-weight: 700; letter-spacing: 0;
+  padding: 2px 8px; border-radius: 999px;
+}
+.done-summary, .done-toggle {
+  border-bottom: none; padding: 10px 2px; margin: 18px 0 6px;
+}
+.section-title { margin: 26px 0 10px; }
+
+/* ── 7 · Tarjetas de tarea ──────────────────────────────────────────────── */
+.task-list { gap: 10px; }
+.task-card {
+  gap: 12px; padding: 12px 12px 12px 12px;
+  transition: border-color .18s var(--ease), background .18s var(--ease);
+}
+.task-card--important { border-left: 3px solid var(--amber); }
+.task-card--done { opacity: .6; }
+.task-card--overdue {
+  background: linear-gradient(0deg, var(--danger-soft), var(--danger-soft)), var(--paper);
+  border-color: rgba(229, 73, 58, .35);
+  border-left: 3px solid var(--danger);
+  animation: none;
+}
+.task-card__actions { gap: 6px; }
+.task-card__actions-spacer { width: 82px; }
+.task-card__body { padding: 2px 0; gap: 6px; }
+.task-card__title { font-size: 15.5px; font-weight: 600; line-height: 1.3; letter-spacing: -.005em; }
+.task-card__title--struck { color: var(--bone-faded); }
+.task-card__streak {
+  font-size: 11.5px; padding: 2px 8px; background: var(--amber-soft); color: var(--amber);
+}
+
+.check-btn {
+  width: 38px; height: 38px; background: transparent;
+  border: 1.5px solid var(--line); color: transparent;
+  transition: background .15s var(--ease), border-color .15s var(--ease),
+              color .15s var(--ease), transform .12s var(--ease);
+}
+.check-btn--done { color: var(--gold); border-color: rgba(216, 166, 61, .5); }
+.check-btn--undone {
+  width: 38px; height: 38px; margin-top: 0;
+  color: var(--bone-faded); border-color: var(--line);
+}
+.check-btn--undo { color: var(--amber); }
+.check-btn:active { transform: scale(.9); }
+.check-btn--done:active { background: var(--gold-soft); border-color: var(--gold); }
+.check-btn--undone:active { background: var(--ember-soft); border-color: var(--ember); color: var(--ember); }
+.check-btn--undo:active { background: var(--amber-soft); border-color: var(--amber); }
+
+.workout-btn {
+  width: 38px; height: 38px; border: none;
+  background: var(--ember); color: #fff;
+  box-shadow: 0 6px 14px -6px rgba(255, 106, 31, .65);
+  transition: transform .12s var(--ease), filter .12s var(--ease);
+}
+.workout-btn:active { transform: scale(.92); filter: brightness(.9); }
+.workout-btn svg { margin-left: 1px; }
+
+.task-card__delete button, .task-card__delete {
+  color: var(--bone-faded);
+  transition: background .15s var(--ease), color .15s var(--ease), transform .12s var(--ease);
+}
+.task-card__delete:active, .task-card__delete button:active {
+  background: var(--danger-soft); color: var(--danger); transform: scale(.9);
+}
+.task-card__delete--armed, .ghost-btn--armed {
+  background: var(--danger-soft); border-color: var(--danger); color: var(--danger);
+}
+
+.task-card__meta { gap: 6px; }
+.meta-pill {
+  font-size: 11px; font-weight: 600; letter-spacing: .01em;
+  padding: 3px 9px; border-radius: 999px;
+  background: var(--ash-soft); color: var(--bone-faded);
+}
+.meta-pill--date { background: var(--ash-soft); color: var(--bone-faded); opacity: 1; }
+.meta-pill--urgent { background: var(--amber-soft); color: var(--amber); }
+.meta-pill--late   { background: var(--danger-soft); color: var(--danger); }
+.meta-pill--avoid  { background: var(--ash-soft); color: var(--bone); }
+
+.expired-badge { font-weight: 700; letter-spacing: .06em; }
+
+/* ── 8 · Chips y filtros ────────────────────────────────────────────────── */
+.category-filter, .category-options, .repeat-options { gap: 8px; }
+.category-chip, .range-chip {
+  min-height: 34px; padding: 0 13px; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 600; color: var(--bone-faded);
+  transition: background .15s var(--ease), color .15s var(--ease),
+              border-color .15s var(--ease), transform .12s var(--ease);
+}
+.category-chip:active, .range-chip:active { transform: scale(.96); background: var(--ash-soft); }
+.category-chip--active, .range-chip--active {
+  background: var(--bone); color: var(--ash); border-color: var(--bone);
+}
+.category-chip--active:active, .range-chip--active:active { background: var(--bone); }
+.category-chip__count {
+  background: rgba(255, 255, 255, .08); font-size: 11px; font-weight: 700;
+  padding: 0 6px; border-radius: 999px;
+}
+.category-chip--active .category-chip__count { background: rgba(0, 0, 0, .12); }
+.range-filter { background: var(--paper); border-radius: 999px; padding: 3px; }
+
+.category-option, .repeat-option {
+  min-height: 40px; padding: 0 14px; border-radius: 999px;
+  font-size: 13.5px; font-weight: 600;
+  transition: background .15s var(--ease), border-color .15s var(--ease), transform .12s var(--ease);
+}
+.category-option:active, .repeat-option:active { transform: scale(.97); }
+.repeat-option { background: var(--ash); }
+.repeat-option:has(input:checked) { border-color: var(--ember); background: var(--ember-soft); color: var(--bone); }
+.category-option input, .repeat-option input { accent-color: var(--ember); }
+.weekday-chip { transition: background .15s var(--ease), transform .12s var(--ease); }
+.weekday-chip:active { transform: scale(.94); }
+
+/* ── 9 · Botones ────────────────────────────────────────────────────────── */
+.primary-btn, .quick-add__button, .workout__btn--primary {
+  min-height: 46px; padding: 0 22px; border: none; border-radius: 14px;
+  font-size: 15px; font-weight: 700; letter-spacing: .005em;
+  background: linear-gradient(180deg, #FF7B33 0%, var(--ember) 100%);
+  color: #1B1007;
+  box-shadow: 0 6px 14px -8px rgba(255, 106, 31, .55), inset 0 1px 0 rgba(255, 255, 255, .22);
+  transition: transform .12s var(--ease), filter .12s var(--ease), box-shadow .18s var(--ease);
+}
+.primary-btn:active, .quick-add__button:active, .workout__btn--primary:active:not(:disabled) {
+  transform: scale(.97); filter: brightness(.92);
+  box-shadow: 0 3px 8px -4px rgba(255, 106, 31, .6), inset 0 1px 0 rgba(255, 255, 255, .15);
+}
+.primary-btn:disabled, .workout__btn--primary:disabled { opacity: .5; box-shadow: none; }
+
+.ghost-btn, .workout__btn--ghost {
+  min-height: 44px; padding: 0 18px; border-radius: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); background: var(--paper);
+  color: var(--bone); font-size: 14px; font-weight: 600;
+  transition: transform .12s var(--ease), background .15s var(--ease), border-color .15s var(--ease);
+}
+.ghost-btn:active, .workout__btn--ghost:active:not(:disabled) {
+  transform: scale(.97); background: var(--ash-soft);
+}
+.workout__btn { min-height: 50px; padding: 0 18px; font-size: 15px; border-radius: 999px; }
+.workout__btn:active:not(:disabled) { transform: scale(.97); }
+.workout__btn--subtle { min-height: 0; background: none; border: none; box-shadow: none; }
+
+.quick-add { padding: 5px 5px 5px 16px; border-radius: 16px; margin-bottom: 24px; }
+.quick-add:focus-within { border-color: rgba(255, 106, 31, .55); box-shadow: var(--ring); }
+.quick-add__input { font-size: 16px; }
+.quick-add__button { min-height: 42px; padding: 0 18px; border-radius: 12px; }
+
+/* ── 10 · Formularios ───────────────────────────────────────────────────── */
+.task-form { padding: 22px; gap: 20px; }
+.field { gap: 8px; }
+.field__label {
+  font-size: 11px; font-weight: 700; letter-spacing: .12em; color: var(--bone-faded);
+}
+.field__hint { font-size: 12px; line-height: 1.4; color: var(--bone-faded); }
+.field input[type="text"], .field input[type="date"], .field input[type="time"],
+.field input[type="number"], .field input[type="password"], .field input[type="url"],
+.field input[type="email"], .field textarea, .field select,
+.video-add-form input[type="text"] {
+  min-height: 48px; padding: 12px 14px; font-size: 16px; border-radius: var(--radius-sm);
+  border: 1px solid var(--line); background: var(--ash); color: var(--bone);
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease), background .15s var(--ease);
+}
+.field textarea { min-height: 96px; line-height: 1.45; resize: none; }
+.field input:focus, .field textarea:focus, .field select:focus,
+.video-add-form input[type="text"]:focus {
+  outline: none; border-color: var(--ember); background: var(--paper); box-shadow: var(--ring);
+}
+.field input::placeholder, .field textarea::placeholder { color: var(--bone-faded); opacity: .7; }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--ember); }
+
+/* Casilla propia (en vez de la cuadrada gris del sistema). */
+label:not(.weekday-chip) > input[type="checkbox"], input[type="checkbox"].check {
+  -webkit-appearance: none; appearance: none;
+  width: 24px; height: 24px; flex: none; margin: 0;
+  border-radius: 8px; border: 1.5px solid var(--line); background-color: var(--ash);
+  background-repeat: no-repeat; background-position: center; background-size: 15px;
+  transition: background-color .15s var(--ease), border-color .15s var(--ease), transform .12s var(--ease);
+}
+label:not(.weekday-chip) > input[type="checkbox"]:checked, input[type="checkbox"].check:checked {
+  background-color: var(--ember); border-color: var(--ember);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7'/%3E%3C/svg%3E");
+}
+label:not(.weekday-chip) > input[type="checkbox"]:active { transform: scale(.9); }
+
+/* Opciones de tipo / repetición: chips limpios, sin el radio del sistema. */
+.category-option, .repeat-option { position: relative; }
+.category-option input, .repeat-option input {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  margin: 0; opacity: 0; cursor: pointer;
+}
+.category-option:has(input:focus-visible), .repeat-option:has(input:focus-visible) {
+  outline: 2px solid var(--ember); outline-offset: 2px;
+}
+.category-option:has(input:checked) { color: var(--ash); }
+:root[data-theme="light"] .category-option:has(input:checked) { color: var(--paper); }
+.field--inline { gap: 12px; }
+.field--inline .field__label { font-size: 13px; letter-spacing: .04em; text-transform: none; color: var(--bone); }
+.field-row { gap: 14px; }
+
+/* ── 11 · Listas tipo ajustes y menú ────────────────────────────────────── */
+.menu-list { overflow: hidden; }
+.menu-row {
+  min-height: 54px; padding: 0 16px; font-size: 15px; font-weight: 600;
+  transition: background .12s var(--ease);
+}
+.menu-row:active { background: var(--press); }
+.menu-row svg { color: var(--ember); }
+.menu-row__chev { color: var(--bone-faded); }
+.exercise-picker__item {
+  min-height: 60px; padding: 14px 16px;
+  transition: background .12s var(--ease), border-color .15s var(--ease), transform .12s var(--ease);
+}
+.exercise-picker__item:active { background: var(--ash-soft); transform: scale(.985); }
+
+.plan-card a, .stats-card__link { transition: background .12s var(--ease); }
+.plan-card a:active, .stats-card__link:active { background: var(--press); }
+.plan-card, .stats-card { overflow: hidden; }
+.plan-card__name { font-size: 18px; letter-spacing: .01em; }
+
+.profile-stat strong { font-size: 26px; }
+.avatar { box-shadow: 0 0 0 3px var(--ash), 0 0 0 4px var(--line); }
+
+/* ── 12 · Barra de pestañas (solo app móvil) ────────────────────────────── */
+.tabbar {
+  background: var(--chrome-bg);
+  -webkit-backdrop-filter: saturate(160%) blur(18px);
+  backdrop-filter: saturate(160%) blur(18px);
+  border-top: 1px solid var(--line);
+  padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+  gap: 2px;
+}
+.tabbar a {
+  position: relative; gap: 3px; padding: 8px 4px 6px;
+  border-radius: 14px; font-size: 10.5px; font-weight: 600; letter-spacing: .02em;
+  color: var(--bone-faded);
+  transition: color .15s var(--ease), background .15s var(--ease), transform .12s var(--ease);
+}
+.tabbar a svg { width: 23px; height: 23px; transition: transform .2s var(--ease); }
+.tabbar a:active { background: var(--press); transform: scale(.94); }
+.tabbar a.active { color: var(--ember); }
+.tabbar a.active svg { transform: translateY(-1px); }
+.tabbar a.active::before {
+  content: ""; position: absolute; top: -7px; left: 50%;
+  width: 22px; height: 3px; margin-left: -11px; border-radius: 0 0 4px 4px;
+  background: var(--ember);
+}
+body { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
+.wrap { padding: 20px 18px 28px; }
+
+/* ── 13 · Navegación web ────────────────────────────────────────────────── */
+.site-nav {
+  background: var(--chrome-bg);
+  -webkit-backdrop-filter: saturate(160%) blur(14px);
+  backdrop-filter: saturate(160%) blur(14px);
+}
+.site-nav__brand { text-shadow: none; letter-spacing: .1em; }
+.site-nav__links a { font-weight: 500; transition: color .15s var(--ease), border-color .15s var(--ease); }
+.theme-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: color .15s var(--ease), transform .12s var(--ease);
+}
+.theme-toggle svg { width: 18px; height: 18px; display: block; }
+.theme-toggle:active { transform: scale(.9); }
+
+/* ── 14 · Avisos ────────────────────────────────────────────────────────── */
+.flash { border-radius: var(--radius-sm); padding: 10px 14px; font-weight: 500; }
+.toast {
+  top: calc(env(safe-area-inset-top) + 8px); margin: 0 12px; border-radius: 14px;
+  box-shadow: var(--shadow-lg); font-weight: 600;
+}
+.offline-banner, .queue-banner { font-weight: 600; letter-spacing: .01em; }
+
+/* ── 15 · Pantalla de entreno ───────────────────────────────────────────── */
+.workout__camera { border-radius: 20px; box-shadow: var(--shadow-lg); }
+.workout__stat-value { letter-spacing: -.02em; }
+.circuit__timer { letter-spacing: -.03em; }
+
+/* ── 16 · Sólo con ratón: hovers discretos ──────────────────────────────── */
+@media (hover: hover) {
+  .task-card:hover, .plan-card:hover, .stats-card:hover, .streak-card:hover,
+  .exercise-picker__item:hover {
+    transform: none; border-color: rgba(255, 106, 31, .4);
+    box-shadow: var(--shadow), 0 10px 24px -14px rgba(255, 106, 31, .4);
+  }
+  .primary-btn:hover, .quick-add__button:hover, .ghost-btn:hover,
+  .workout__btn:hover:not(:disabled) { transform: translateY(-1px); }
+  .primary-btn:hover, .quick-add__button:hover { filter: brightness(1.06); }
+  .category-chip:hover, .range-chip:hover { transform: none; }
+}
+
+/* ── 17 · Movimiento reducido ───────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+  }
+}

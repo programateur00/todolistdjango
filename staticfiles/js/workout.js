@@ -29,7 +29,7 @@ const POSE_DELEGATE = "GPU";
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-19-frontpos-v1+cindy-v2+lsithold-flow-v18+superman-v2+pikepushup-v1+forearmrotation-v2+elephantsteps-v1+burpee-v1+forearmrotation-v3+hiplateral-v6+hipforwardback-v4+standingquadstretch-v2+pikepushup-v2+dips-vis-v1+dips-lastre-v1+legrotation-v5+hiplateral-v7+websync-2026-10-08+dips-v2+kneepushup-v1+archerpushup-v1+pseudoplanche-v1+kneepushup-v2+archerclap-v2+archer-v3+cossack-v1+rockingpushup-v1+tuckjump-v1+jumprope-v1+glutebridge-v1+switchblade-v1+splitjump-v1+dips-balanceo-v1+clap-v2+archer-v4+rockingpushup-v2+clap-v3b+clap-v4+archer-v7+frogstand-v6";
+const WORKOUT_JS_BUILD = "2026-09-19-frontpos-v1+cindy-v2+lsithold-flow-v18+superman-v2+pikepushup-v1+forearmrotation-v2+elephantsteps-v1+burpee-v1+forearmrotation-v3+hiplateral-v6+hipforwardback-v4+standingquadstretch-v2+pikepushup-v2+dips-vis-v1+dips-lastre-v1+legrotation-v5+hiplateral-v7+websync-2026-10-08+dips-v2+kneepushup-v1+archerpushup-v1+pseudoplanche-v1+kneepushup-v2+archerclap-v2+archer-v3+cossack-v1+rockingpushup-v1+tuckjump-v1+jumprope-v1+glutebridge-v1+switchblade-v1+splitjump-v1+dips-balanceo-v1+clap-v2+archer-v4+rockingpushup-v2+clap-v3b+clap-v4+archer-v7+frogstand-v6+dips-cierre-v1";
 
 // Token del registro de depuración remoto (ver settings.DEBUG_LOG_TOKEN
 // en el backend) -- exportScissorLog() lo manda junto al registro para
@@ -750,9 +750,9 @@ const DIP_TUNING_NORMAL = {
   armStableMs: DIP_ARM_STABLE_MS,
   mountRiseMin: DIP_MOUNT_RISE_MIN_FACTOR,
   mountedRatio: DIP_SHOULDER_RISE_MOUNTED_RATIO,
-  dismountRatio: DIP_SHOULDER_RISE_DISMOUNT_RATIO,
-  breakStableMs: DIP_BREAK_STABLE_MS,
-  breakGraceMs: DIP_BREAK_INTERRUPT_GRACE_MS,
+  dismountRatio: 0.15,   // dips-cierre-v1 (2026-10-15): igual que con peso -- mover las piernas un poco sin querer cerraba la serie
+  breakStableMs: 1600,   // dips-cierre-v1: igual que con peso (antes DIP_BREAK_STABLE_MS=1000)
+  breakGraceMs: 600,     // dips-cierre-v1: igual que con peso (antes DIP_BREAK_INTERRUPT_GRACE_MS=300)
   minDrop: DIP_MIN_SHOULDER_DROP_FACTOR,
   hipVis: 0.35,          // visibilidad mínima de la cadera para armar (largo de tronco de referencia)
 };

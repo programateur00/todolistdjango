@@ -62,6 +62,7 @@
     var targetMinutes = {{ target_minutes|default_if_none:"null" }};
     var targetVideoCount = {{ target_video_count|default_if_none:"null" }} || (playlistId && !targetMinutes ? 1 : null);
     var saveUrl = "{% url 'tasks:task_video_save' task.pk %}";
+    var positionUrl = "{% url 'tasks:task_video_position' task.pk %}";
     var csrfToken = "{{ csrf_token }}";
     // Próximos vídeos del temario de un curso de idioma (ver
     // Plan.upcoming_course_queue) — courseQueue[0] es SIEMPRE el vídeo
@@ -83,8 +84,9 @@
     var goalFinishBtn = document.getElementById('video-finish-btn');
     var goalReached = false;
     // Un vídeo local guardado en ESTE navegador para esta tarea, además
-    // del de YouTube — solo tiene sentido en Deporte/Enfoque (vídeos
-    // cortos); Estudio ya usa playlists/vídeos largos de YouTube.
+    // del de YouTube — solo tiene sentido en Deporte (vídeos cortos; una
+    // tarea antigua de Lectura que ya lo tuviera lo conserva); Estudio ya
+    // usa playlists/vídeos largos de YouTube.
     var allowLocal = {% if task.category == 'work' or task.category == 'sport' %}true{% else %}false{% endif %};
     // Si la tarea en sí es "solo vídeo local" (se eligió así al crearla,
     // sin ningún vídeo de YouTube de respaldo) — no hay a qué volver si
@@ -110,6 +112,29 @@
     // Vídeos de la lista que YouTube ha rechazado (privado, borrado, no
     // incrustable...) y se han saltado solos; nunca cuentan como vistos.
     var skippedVideos = 0;
+
+    // ---- Por dónde vas en la playlist ----------------------------------
+    // El servidor solo se enteraba al TERMINAR la sesión: si cerrabas a
+    // medias (o veías más vídeos de los que pedía el objetivo), la próxima
+    // vez volvías a empezar por donde empezó el día. Ahora se avisa cada vez
+    // que cambias de vídeo y al acabar uno (ver Task.record_playlist_position).
+    var sessionStartIndex = playlistStartIndex !== null ? playlistStartIndex : 0;
+    var playingIdx = -1;           // último vídeo de la lista visto sonando
+    var lastReportedIndex = null;  // último índice que se avisó al servidor
+    function reportPosition(index) {
+        if (!playlistId || index < 0 || index === lastReportedIndex) return;
+        lastReportedIndex = index;
+        fetch(positionUrl, {
+            method: 'POST',
+            keepalive: true,
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            body: JSON.stringify({ index: index }),
+        }).then(function (r) {
+            if (!r.ok) lastReportedIndex = null;
+        }).catch(function () {
+            lastReportedIndex = null; // sin red: se reintenta en el siguiente sondeo
+        });
+    }
 
     function fmtMin(s) {
         return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
@@ -137,7 +162,14 @@
             // (0 si se cortó a media reproducción por llegar al objetivo en
             // minutos) — lo usa Plan.mark_current_module_watched en tareas
             // de curso de idioma; el resto de tareas lo ignoran.
-            body: JSON.stringify({ minutes: Math.round(elapsedSeconds / 60), videos_watched: videosWatched }),
+            // playlist_start: por qué vídeo EMPEZÓ esta sesión -- la posición ya
+            // se fue guardando por el camino (reportPosition), así que el
+            // servidor cuenta desde aquí y no desde la guardada.
+            body: JSON.stringify({
+                minutes: Math.round(elapsedSeconds / 60),
+                videos_watched: videosWatched,
+                playlist_start: playlistId ? sessionStartIndex : undefined,
+            }),
         })
             .then(function (r) { return r.json(); })
             .then(function (data) {
@@ -305,6 +337,7 @@
                     if (useIdList) {
                         var startAt = playlistStartIndex === null ? 0 : playlistStartIndex;
                         if (startAt < 0 || startAt >= playlistVideoIds.length) startAt = 0;
+                        sessionStartIndex = startAt;
                         player.loadPlaylist({ playlist: playlistVideoIds, index: startAt });
                     }
                     pollId = setInterval(function () {
@@ -325,6 +358,10 @@
                         } else {
                             if (adShown) restoreHint();
                             reviewAdBoundary();
+                            if (playlistId && typeof player.getPlaylistIndex === 'function') {
+                                var pIdx = player.getPlaylistIndex();
+                                if (pIdx >= 0) { playingIdx = pIdx; reportPosition(pIdx); }
+                            }
                             elapsedSeconds += 1;
                             segCredited += 1;
                             if (targetMinutes) {
@@ -342,6 +379,9 @@
                 onStateChange: function (e) {
                     if (e.data === YT.PlayerState.ENDED) {
                         if (isFakeEnd()) return; // fin de un anuncio, no del vídeo
+                        // Este vídeo ya está visto: la próxima vez toca el siguiente
+                        // (aunque cierres justo ahora, antes de que arranque).
+                        if (playlistId) reportPosition((playingIdx >= 0 ? playingIdx : sessionStartIndex + videosWatched) + 1);
                         videosWatched += 1;
                         updateProgressLabel();
                         if (targetVideoCount && videosWatched >= targetVideoCount) {

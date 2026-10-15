@@ -44,6 +44,7 @@ urlpatterns = [
     path("reading-plans/<uuid:uuid>/", api.reading_plan_update, name="reading_plan_update"),
     path("tasks/<uuid:uuid>/course-progress/", api.course_progress_save, name="course_progress_save"),
     path("tasks/<uuid:uuid>/video/", api.video_save, name="video_save"),
+    path("tasks/<uuid:uuid>/video/position/", api.video_position, name="video_position"),
     path("videos/", api.saved_video_list, name="saved_video_list"),
     path("videos/<uuid:uuid>/", api.saved_video_delete, name="saved_video_delete"),
 

@@ -32,7 +32,7 @@ from tasks.models import (
 MODELS_TO_WIPE = [
     ("Ocurrencias (historial de tareas)", Occurrence),
     ("Sesiones de entreno (WorkoutSession)", WorkoutSession),
-    ("Sesiones de Enfoque (TimerSession)", TimerSession),
+    ("Sesiones de lectura y cronómetro (TimerSession)", TimerSession),
     ("Vídeos guardados", SavedVideo),
     ("Objetivos de plan (PlanItem)", PlanItem),
     ("Planes", Plan),

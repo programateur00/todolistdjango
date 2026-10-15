@@ -34,6 +34,7 @@ urlpatterns = [
     path("<int:pk>/lectura/guardar/", views.task_reading_save, name="task_reading_save"),
     path("<int:pk>/video/", views.task_video, name="task_video"),
     path("<int:pk>/video/guardar/", views.task_video_save, name="task_video_save"),
+    path("<int:pk>/video/posicion/", views.task_video_position, name="task_video_position"),
     path("videos/nuevo/", views.saved_video_create, name="saved_video_create"),
     path("videos/<uuid:uuid>/borrar/", views.saved_video_delete, name="saved_video_delete"),
     path("planes/", views.plan_list, name="plan_list"),

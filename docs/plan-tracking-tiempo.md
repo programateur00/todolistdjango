@@ -7,7 +7,7 @@ una. El orden importa poco salvo donde se dice explícitamente "depende de".
 
 `WorkoutSession.session_duration_seconds` y `TimerSession.minutes` ya
 guardan tiempo real por sesión con `recorded_at` y `user`. No hace falta
-trackear nada nuevo para Deporte/Enfoque — solo sumarlo.
+trackear nada nuevo para Deporte/Lectura — solo sumarlo.
 
 - Función/servicio de agregación: total de tiempo por categoría/subcategoría,
   con ventana de fechas (histórico total, este año, plan actual).

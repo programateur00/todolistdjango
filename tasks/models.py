@@ -83,7 +83,23 @@ def day_average_pace(sessions):
     return sum(sec for _, sec in use) / sum(km for km, _ in use)
 
 
+class TaskManager(models.Manager):
+    """
+    `Task.objects` NO incluye las tareas con borrado suave (deleted_at):
+    la app móvil borra así, y sin este filtro la web las seguía enseñando,
+    las cerraba como vencidas (metiendo un fallo en la racha) y las
+    proyectaba en "Por generar". Para ver también las borradas:
+    `Task.all_objects`.
+    """
+
+    def get_queryset(self):
+        return super().get_queryset().filter(deleted_at__isnull=True)
+
+
 class Task(models.Model):
+    objects = TaskManager()
+    all_objects = models.Manager()
+
     REPEAT_NONE = "none"
     REPEAT_DAILY = "daily"
     REPEAT_WEEKLY = "weekly"
@@ -677,6 +693,59 @@ class Task(models.Model):
             task_series_id=self.series_id, deleted_at__isnull=True
         ).first()
 
+    @classmethod
+    def allowed_subcategories(cls, category):
+        """Subtipos que admite cada categoría. General y Antitarea no tienen
+        ninguno; Lectura solo tiene uno (las tareas de Enfoque ya no existen)."""
+        return {
+            cls.CATEGORY_SPORT: {k for k, _ in cls.SPORT_SUBCATEGORY_CHOICES},
+            cls.CATEGORY_WORK: {k for k, _ in cls.FOCUS_SUBCATEGORY_CHOICES},
+            cls.CATEGORY_STUDY: {k for k, _ in cls.STUDY_SUBCATEGORY_CHOICES},
+        }.get(category, set())
+
+    @classmethod
+    def clean_subcategory(cls, category, requested=None, current="", empty_clears=False):
+        """
+        El subtipo que de verdad le toca a una tarea de esa categoría.
+
+        Cada categoría solo admite SUS subtipos: sin esto, cambiar una tarea
+        de Deporte a General (o a Estudio) dejaba escapar el subtipo viejo
+        ("Tren superior" en una tarea de General), y una de Lectura podía
+        guardarse sin subtipo y entonces no se enteraba ni la extensión ni
+        los planes de lectura (que buscan category=work + reading).
+
+        `requested` es lo que mandó el formulario o la app (None = no mandó
+        nada). Con algo válido manda eso. Vacío/ausente/inválido deja el que
+        ya tenía (`current`) si todavía vale -- salvo en Estudio con
+        `empty_clears` (la web: ahí «YouTube» es un radio con valor vacío y
+        significa «ningún subtipo», p. ej. pasar un Udemy a YouTube). La app
+        móvil no conoce los subtipos de Estudio (Idiomas, Udemy, Ilerna) y
+        manda "" al editar: eso NO puede borrárselos.
+        """
+        allowed = cls.allowed_subcategories(category)
+        if category == cls.CATEGORY_WORK:
+            return cls.SUBCATEGORY_READING
+        if not allowed:
+            return ""
+        if requested in allowed:
+            return requested
+        if requested == "" and empty_clears and category == cls.CATEGORY_STUDY:
+            return ""
+        return current if current in allowed else ""
+
+    def normalize_for_category(self, requested_sub=None, current_sub="", empty_sub_clears=False):
+        """Deja los campos coherentes con la categoría (ver clean_subcategory).
+        Lectura tampoco lleva vídeo ni playlist: eran de las tareas de
+        Enfoque, que ya no existen."""
+        self.subcategory = self.clean_subcategory(
+            self.category, requested_sub, current_sub, empty_sub_clears
+        )
+        if self.category == self.CATEGORY_WORK:
+            self.youtube_video_id = ""
+            self.youtube_playlist_id = ""
+            self.target_video_count = None
+            self.has_local_video = False
+
     @property
     def workout_kind(self):
         """
@@ -704,8 +773,13 @@ class Task(models.Model):
                 return "timer"
             return "camera"
 
-        # Fuera de Deporte, un vídeo puesto define la tarea entera.
-        if self.youtube_video_id or self.youtube_playlist_id or self.has_local_video:
+        # Fuera de Deporte, un vídeo puesto define la tarea entera. Lectura
+        # queda fuera: no lleva vídeo (eran de las tareas de Enfoque, que ya
+        # no existen), y una tarea vieja que aún lo conserve no debe seguir
+        # abriendo YouTube en la categoría Lectura.
+        if self.category != self.CATEGORY_WORK and (
+            self.youtube_video_id or self.youtube_playlist_id or self.has_local_video
+        ):
             return "video"
         if self.category == self.CATEGORY_GENERAL:
             # Cronómetro opcional para una tarea suelta cualquiera — ver
@@ -725,10 +799,10 @@ class Task(models.Model):
                 # de Chrome (PDF en primer plano) exactamente igual que un
                 # curso de Udemy — se completa sola al llegar al objetivo
                 # del día, nada que pulsar aquí. Sin palabra clave, sigue
-                # siendo un Enfoque normal con cronómetro manual (o el
+                # siendo una lectura normal con cronómetro manual (o el
                 # plugin de la app móvil) — no romper eso por defecto.
                 return "auto"
-            return "focus"          # temporizador de Enfoque: leer, estudiar, estirar…
+            return "focus"          # cronómetro: leer, o una tarea General con cronómetro
         if self.category == self.CATEGORY_STUDY and self.subcategory in (
             self.SUBCATEGORY_UDEMY, self.SUBCATEGORY_ILERNA,
         ):
@@ -1024,16 +1098,50 @@ class Task(models.Model):
             total = (base.month - 1) + n
             year = base.year + total // 12
             month = total % 12 + 1
-            try:
-                return base.replace(year=year, month=month)
-            except ValueError:
-                return base.replace(year=year, month=month, day=28)
+            return self._clamped_date(year, month, self._anchor_day(base))
         if self.repeat == self.REPEAT_YEARLY:
-            try:
-                return base.replace(year=base.year + n)
-            except ValueError:
-                return base.replace(year=base.year + n, day=28)
+            return self._clamped_date(base.year + n, base.month, self._anchor_day(base))
         return None
+
+    def reanchor_series_if_pattern_changed(self, old_pattern):
+        """
+        Si al editar se ha cambiado CUÁNDO se repite la tarea (fecha, tipo de
+        repetición, cada cuántos o los días marcados), el punto de partida
+        del patrón pasa a ser la fecha nueva. `series_start_date` es lo que
+        fija en qué semanas cae una tarea "cada 2 semanas" y a qué día del
+        mes vuelve una mensual: dejando el de la serie ORIGINAL, tras editar
+        la tarea saltaba una semana de más o volvía a un día que ya no era
+        el elegido. `old_pattern` = (due_date, repeat, interval, custom_days)
+        tal como estaban antes de editar.
+        """
+        if self.repeat == self.REPEAT_NONE or not self.due_date:
+            return
+        new = (self.due_date, self.repeat, int(self.interval or 1), self.custom_days)
+        if new != old_pattern:
+            self.series_start_date = self.due_date
+
+    @staticmethod
+    def _clamped_date(year, month, day):
+        """`day` de ese mes, o el último día del mes si no existe (31 de abril)."""
+        import calendar
+        return _dt.date(year, month, min(day, calendar.monthrange(year, month)[1]))
+
+    def _anchor_day(self, base):
+        """
+        Día del mes al que "quiere" volver una tarea mensual/anual. Normal-
+        mente es el de `base`, pero si `base` ya cayó en el último día de un
+        mes corto (28-feb de una tarea del 31, 28-feb de una del 29-feb) se
+        vuelve al día original de la serie: antes una tarea "el 31 de cada
+        mes" pasaba al 28 en febrero y se quedaba en el 28 para siempre.
+        """
+        import calendar
+        start = self.series_start_date
+        if (
+            start and start.day > base.day
+            and base.day == calendar.monthrange(base.year, base.month)[1]
+        ):
+            return start.day
+        return base.day
 
     def save(self, *args, **kwargs):
         if self.due_time is None:
@@ -1124,6 +1232,86 @@ class Task(models.Model):
         mismo orden (None si YouTube no da duración fija, p. ej. un directo)."""
         return [e.get("duration_seconds") for e in (self.playlist_videos_cache or []) if e.get("video_id")]
 
+    def _playlist_plan_item(self):
+        """El objetivo de Estudio · Hábito simple de cuyo plan viene esta
+        tarea, si es el que lleva ESTA playlist: ahí vive el avance
+        (PlanItem.playlist_position), porque la tarea diaria de un plan se
+        regenera y no guardaría nada. None en una tarea suelta."""
+        plan = self.plan
+        if (
+            not plan or plan.plan_type != Plan.PLAN_TYPE_STUDY
+            or plan.study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE
+        ):
+            return None
+        head = plan.headline
+        if head and head.youtube_playlist_id and head.youtube_playlist_id == self.youtube_playlist_id:
+            return head
+        return None
+
+    def record_playlist_position(self, index):
+        """
+        Guarda por qué vídeo de la playlist vas (0 = el primero). Lo llama el
+        reproductor (web y app) cada vez que cambias de vídeo y al acabar uno,
+        y también al terminar la sesión: así, si cierras a medias, la próxima
+        vez sigues por donde ibas en vez de volver a empezar por donde empezó
+        el día. `index` == nº de vídeos de la lista significa «la has visto
+        entera».
+
+        Devuelve el índice guardado, o None si no procede (la tarea no tiene
+        playlist, o `index` no es un entero >= 0).
+        """
+        if not self.youtube_playlist_id:
+            return None
+        if isinstance(index, bool) or not isinstance(index, (int, float)):
+            return None
+        try:
+            idx = int(index)
+        except (ValueError, OverflowError):  # NaN / Infinity
+            return None
+        if idx < 0:
+            return None
+        total = len(self.playlist_videos_cache or [])
+        if total:
+            idx = min(idx, total)
+        item = self._playlist_plan_item()
+        if item is not None:
+            item.playlist_position = idx
+            item.save(update_fields=["playlist_position"])
+        # La propia tarea también, para que el reproductor abra ya por ahí
+        # (en un plan, Plan.sync_task() lo volverá a calcular igual desde el
+        # objetivo).
+        self.playlist_start_index = min(idx, total - 1) if total else idx
+        self.save(update_fields=["playlist_start_index", "updated_at"])
+        return idx
+
+    @staticmethod
+    def _valid_index(value):
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+    def next_playlist_index(self, session_start, watched):
+        """
+        Dónde queda la playlist al terminar una sesión que vio `watched`
+        vídeos enteros. `session_start` es el vídeo por el que EMPEZÓ la
+        sesión (lo manda el reproductor; como ya fue guardando la posición
+        por el camino, contar desde la guardada se pasaría). Sin dato
+        (cliente antiguo, que no guarda por el camino) se parte de la
+        posición guardada, como siempre. Nunca queda por detrás de lo que el
+        reproductor ya guardó. Sin tope: >= nº de vídeos = lista vista entera.
+        """
+        base = session_start if self._valid_index(session_start) else (self.playlist_start_index or 0)
+        return max(base + max(0, int(watched or 0)), self.playlist_start_index or 0)
+
+    def advance_playlist_position(self, session_start, watched):
+        """Como next_playlist_index, pero guardándolo en el objetivo del plan
+        (tareas que vienen de un plan de Estudio con playlist). No hace nada
+        en una tarea suelta: ahí lo guarda la vista de fin de sesión."""
+        item = self._playlist_plan_item()
+        if item is None:
+            return None
+        base = session_start if self._valid_index(session_start) else (self.playlist_start_index or 0)
+        reached = base + max(0, int(watched or 0))
+        return self.record_playlist_position(max(reached, item.playlist_position or 0))
+
     def sync_playlist_videos(self):
         """
         Refresca playlist_videos_cache desde la API de YouTube -- mismo
@@ -1189,6 +1377,11 @@ class Task(models.Model):
         if self.category != self.CATEGORY_STUDY:
             return None
         if self.subcategory == self.SUBCATEGORY_UDEMY:
+            # Igual que Ilerna (más abajo): sin minutos al día no hay forma
+            # de saber cuándo "ya has estudiado suficiente", y focus_save
+            # daba el día por hecho con la primera sesión de 1 minuto.
+            if not self.target_minutes:
+                return "Curso de Udemy: pon cuántos minutos al día quieres estudiar."
             return None
         if self.subcategory == self.SUBCATEGORY_ILERNA:
             # Sin minutos al día no hay forma de saber cuándo "ya has
@@ -1611,6 +1804,19 @@ class Task(models.Model):
             course_lessons_done=self.course_lessons_done,
             course_lessons_total=self.course_lessons_total,
             target_minutes=self.target_minutes,
+            # Estos cinco se quedaban fuera igual que lo de arriba: una
+            # tarea General repetida con cronómetro (wants_timer) volvía
+            # a ser una casilla normal al día siguiente, una tarea suelta
+            # de Idiomas perdía idioma y nivel, y un curso "por tiempo en
+            # la página" volvía a exigir audio (ver Task.watch_requires_audio).
+            wants_timer=self.wants_timer,
+            language_name=self.language_name,
+            level=self.level,
+            watch_requires_audio=self.watch_requires_audio,
+            # Segundos de lectura aún sin volcar a un TimerSession (<1 min
+            # tras "Terminar sesión de hoy"): se arrastran al día siguiente
+            # en vez de tirarse.
+            reading_pending_seconds=self.reading_pending_seconds,
             target_video_count=self.target_video_count,
             target_steps=self.target_steps,
             target_distance_km=self.target_distance_km,
@@ -1786,18 +1992,27 @@ class Task(models.Model):
         repeticiones las hiciste de verdad aunque te equivocaras al
         marcar la tarea.
         """
-        # 3. La instancia futura de la serie, si sigue intacta.
+        # 3. La instancia que se generó al marcarla (y SOLO esa), si sigue
+        #    intacta. Antes se borraban TODAS las posteriores sin tocar: al
+        #    reabrir desde "Esta semana/Este mes/Todas" una tarea de hace
+        #    unos días, caía también la pendiente de HOY (la que ya está
+        #    más adelante en la cadena), y como las intermedias existen
+        #    (caducadas), marcar la reabierta ya no volvía a generar nada:
+        #    la serie entera dejaba de salir, en silencio.
         if self.repeat != self.REPEAT_NONE and self.due_date:
-            (
-                Task.objects.filter(
-                    series_id=self.series_id,
-                    due_date__gt=self.due_date,
-                    is_done=False,
-                    expired=False,
+            nxt = self.next_due_date()
+            if nxt:
+                (
+                    Task.objects.filter(
+                        series_id=self.series_id,
+                        due_date__gt=self.due_date,
+                        due_date__lte=nxt,
+                        is_done=False,
+                        expired=False,
+                    )
+                    .exclude(pk=self.pk)
+                    .delete()
                 )
-                .exclude(pk=self.pk)
-                .delete()
-            )
 
         # 2. La ocurrencia de este día.
         if self.due_date is not None:
@@ -3028,6 +3243,13 @@ class Plan(models.Model):
                     break
                 consumed += 1
 
+        # Lo que el reproductor fue guardando por el camino (ver
+        # Task.record_playlist_position) cubre lo que las sesiones cumplidas
+        # no ven: cerrar a medias, o ver más vídeos de los que pedía el día.
+        # Nunca retrocede de lo ya cumplido.
+        if head.playlist_position is not None:
+            consumed = max(consumed, head.playlist_position)
+
         finished = consumed >= total
         return {"total": total, "index": min(consumed, total - 1), "finished": finished}
 
@@ -3309,8 +3531,25 @@ class Plan(models.Model):
 
         task = pending.first()
         if task:
+            old_pattern = (task.due_date, task.repeat, int(task.interval or 1), task.custom_days)
             for k, v in fields.items():
                 setattr(task, k, v)
+            # Si se han cambiado los días del plan, la pendiente no puede
+            # quedarse en un día que ya no es suyo (un miércoles de un plan
+            # que ahora es martes/jueves): pasa al siguiente día marcado.
+            # Solo si todavía no ha pasado (las vencidas se resuelven solas).
+            marked = sorted(int(d) for d in self.custom_days_list())
+            today = timezone.localtime(timezone.now()).date()
+            if (
+                self.repeat == Task.REPEAT_CUSTOM and marked and task.due_date
+                and task.due_date >= today and task.due_date.weekday() not in marked
+            ):
+                for offset in range(1, 8):
+                    day = task.due_date + timedelta(days=offset)
+                    if day.weekday() in marked:
+                        task.due_date = day
+                        break
+            task.reanchor_series_if_pattern_changed(old_pattern)
             task.save()
         else:
             task = Task.objects.create(
@@ -3676,6 +3915,18 @@ class PlanItem(models.Model):
     # progreso sin más estado que mantener, porque el conteo simplemente
     # empieza a contar desde esta fecha en vez de desde el inicio del plan.
     playlist_synced_at = models.DateTimeField(null=True, blank=True)
+    # Qué playlist describe la caché de arriba (y playlist_position). Sirve
+    # para distinguir "he vuelto a guardar el objetivo" (la MISMA lista: el
+    # avance se conserva) de "he puesto otra playlist" (el avance empieza de
+    # cero). Antes cada guardado reiniciaba el avance al primer vídeo.
+    playlist_cache_id = models.CharField(max_length=255, blank=True)
+    # Por qué vídeo de la playlist vas: cuántos has pasado ya (0 = estás en
+    # el primero; = nº de vídeos si has visto la lista entera). Lo guarda el
+    # reproductor MIENTRAS ves (ver Task.record_playlist_position) y al
+    # terminar la sesión. Antes solo se deducía de las sesiones cumplidas, así
+    # que si cerrabas a medias, o veías más vídeos de los que pedía el
+    # objetivo, la siguiente vez volvías a empezar por donde empezó el día.
+    playlist_position = models.PositiveIntegerField(null=True, blank=True)
 
     # Cómo avanza
     sessions_per_step = models.PositiveIntegerField(
@@ -3767,10 +4018,11 @@ class PlanItem(models.Model):
         SOLO al guardar el objetivo (vista o API), nunca desde
         Plan.sync_task()/_study_target_fields() (eso se ejecuta en cada
         carga de la lista de tareas, y una llamada a la API ahí sería
-        demasiado cara/lenta). Cambiar de playlist reinicia el avance
-        sin más estado que mantener: playlist_synced_at pasa a ahora, y
-        Plan._study_playlist_progress() solo cuenta lo hecho desde esa
-        fecha en adelante.
+        demasiado cara/lenta). Volver a guardar el MISMO
+        objetivo conserva el avance (se sabe por playlist_cache_id); poner
+        OTRA playlist lo reinicia: playlist_synced_at pasa a ahora,
+        playlist_position se borra y Plan._study_playlist_progress() solo
+        cuenta lo hecho desde esa fecha en adelante.
 
         Sin youtube_playlist_id, limpia la caché (por si el objetivo
         tenía una playlist antes y se ha quitado). Si la API de YouTube
@@ -3782,10 +4034,17 @@ class PlanItem(models.Model):
         from .youtube_search import YouTubeSearchError, get_videos_details, list_playlist_items
 
         if not self.youtube_playlist_id:
-            if self.playlist_videos_cache or self.playlist_synced_at:
+            if (
+                self.playlist_videos_cache or self.playlist_synced_at
+                or self.playlist_cache_id or self.playlist_position is not None
+            ):
                 self.playlist_videos_cache = []
                 self.playlist_synced_at = None
-                self.save(update_fields=["playlist_videos_cache", "playlist_synced_at"])
+                self.playlist_cache_id = ""
+                self.playlist_position = None
+                self.save(update_fields=[
+                    "playlist_videos_cache", "playlist_synced_at", "playlist_cache_id", "playlist_position",
+                ])
             return
 
         try:
@@ -3803,8 +4062,16 @@ class PlanItem(models.Model):
             cache.append({"video_id": vid, "duration_seconds": d.get("duration_seconds")})
 
         self.playlist_videos_cache = cache
-        self.playlist_synced_at = timezone.now()
-        self.save(update_fields=["playlist_videos_cache", "playlist_synced_at"])
+        # Misma lista que la última vez (y ya sincronizada): el avance sigue
+        # donde estaba. Otra lista, o la primera vez: se empieza de cero.
+        same_list = bool(self.playlist_synced_at) and self.playlist_cache_id == self.youtube_playlist_id
+        if not same_list:
+            self.playlist_synced_at = timezone.now()
+            self.playlist_position = None
+            self.playlist_cache_id = self.youtube_playlist_id
+        self.save(update_fields=[
+            "playlist_videos_cache", "playlist_synced_at", "playlist_cache_id", "playlist_position",
+        ])
 
     def __str__(self):
         return f"{self.plan.name}: {self.display_name}"
@@ -3936,7 +4203,11 @@ class PlanItem(models.Model):
         return Occurrence.objects.filter(
             series_id=self.series_id, deleted_at__isnull=True,
             recorded_at__date__gte=self.plan.started_on,
-        ).order_by("recorded_at")
+        ).annotate(
+            # Por día al que pertenece cada registro, no por cuándo se
+            # escribió la fila (ver Occurrence.newest_first).
+            _day=Coalesce("due_date", TruncDate("recorded_at")),
+        ).order_by("_day", "recorded_at")
 
     @property
     def is_distance(self):
@@ -4858,9 +5129,9 @@ def last_set_seconds(user, exercise_slug, plan=None):
 
 class TimerSession(models.Model):
     """
-    Una sesión cronometrada de una tarea de Enfoque (category='work'):
-    leer, estudiar, estirar… lo que sea que se apoye en un temporizador
-    en vez de en la cámara o en repeticiones.
+    Una sesión cronometrada de una tarea con temporizador (Lectura, o una
+    tarea General con cronómetro): leer, estudiar, estirar… lo que sea que
+    se apoye en un temporizador en vez de en la cámara o en repeticiones.
 
     Mismo patrón que WorkoutSession: el objetivo se guarda en la sesión
     en el momento de guardarla (target_minutes), no se recalcula después,
@@ -5412,12 +5683,29 @@ class Occurrence(models.Model):
         return round(sum(pcts) / len(pcts)) if pcts else 0
 
     @classmethod
+    def newest_first(cls, qs):
+        """
+        Registros de más reciente a más antiguo POR DÍA (due_date; el día de
+        registro si no tiene). Es el orden que usan las rachas y las
+        pantallas de estadísticas: ordenar por `recorded_at` colocaba una
+        tarea reabierta y marcada de nuevo días después como "la más nueva".
+        """
+        return qs.annotate(
+            _day=Coalesce("due_date", TruncDate("recorded_at"))
+        ).order_by("-_day", "-recorded_at")
+
+    @classmethod
     def streak_stats(cls, series_id):
         """
         Calcula racha actual y máxima histórica para una serie.
         La racha se rompe en cuanto aparece un not_done.
         """
-        occs = list(cls.objects.filter(series_id=series_id).order_by("-recorded_at"))
+        # Por DÍA al que pertenece cada registro (due_date; si no tiene, el
+        # día en que se registró), no por cuándo se escribió la fila: si hoy
+        # marcas "hecha" una tarea de hace tres días que habías reabierto, esa
+        # fila es la más nueva, pero el día más reciente sigue siendo el de
+        # después, y la racha no puede saltarse los fallos que vinieron luego.
+        occs = list(cls.newest_first(cls.objects.filter(series_id=series_id)))
 
         # Racha actual: contar done consecutivos desde el más reciente
         current = 0

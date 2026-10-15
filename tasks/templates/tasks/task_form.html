@@ -138,16 +138,18 @@
         <span class="field__hint">Filtra qué ejercicios se ofrecen al entrenar.</span>
     </fieldset>
 
-    {# Lectura ya no tiene nada que elegir (era la única opción real de #}
-    {# "Enfoque" con tareas de verdad) — se manda sola por un radio #}
-    {# oculto en vez de un fieldset con una sola opción, que no aporta #}
-    {# nada como elección. Sigue siendo un radio de verdad (no un campo #}
-    {# oculto de tipo hidden) para que conviva bien con los otros grupos #}
-    {# de subcategoría que comparten el mismo name="subcategory". #}
+    {# Lectura no tiene nada que elegir (las tareas de Enfoque ya no #}
+    {# existen y es el único subtipo de la categoría) — se manda sola por #}
+    {# un radio oculto que el JS marca al elegir «Lectura». Sigue siendo #}
+    {# un radio de verdad (no un campo hidden) para convivir con los otros #}
+    {# grupos de subcategoría, que comparten el mismo name="subcategory": #}
+    {# los tres son UN solo grupo de radios, así que en cada momento solo #}
+    {# uno puede estar marcado, y tiene que ser uno de la categoría #}
+    {# elegida (ver syncSubcategoryGroup en el script de abajo). #}
     <div id="focus-subcategory-field" hidden>
         {% for value, label in focus_subcategory_choices %}
         <input type="radio" name="subcategory" value="{{ value }}"
-            {% if task and task.subcategory == value %}checked{% elif not task %}checked{% endif %}>
+            {% if task and task.subcategory == value %}checked{% endif %}>
         {% endfor %}
     </div>
 
@@ -156,7 +158,7 @@
         <div class="repeat-options">
             <label class="repeat-option">
                 <input type="radio" name="subcategory" value="" id="study-subcategory-none"
-                    {% if not task or task.subcategory not in study_subcategory_values %}checked{% endif %}>
+                    {% if not task or not task.subcategory %}checked{% endif %}>
                 <span>YouTube (vídeo o playlist)</span>
             </label>
             {% for value, label in study_subcategory_choices %}
@@ -416,10 +418,33 @@
     var categoryRadios = document.querySelectorAll('[data-category-toggle]');
 
     var avoidFields = document.getElementById('avoid-fields');
+    // Deporte, Lectura y Estudio comparten UN grupo de radios
+    // (name="subcategory"): marcar uno desmarca los demás. Al cambiar de
+    // categoría (o al abrir la tarea) hay que dejar marcado uno que valga
+    // para la categoría de ahora -- si no, p. ej. al editar una tarea de
+    // Deporte el «YouTube» de Estudio ganaba al subtipo guardado, y al
+    // elegir Lectura se quedaba marcado el de otra categoría.
+    function syncSubcategoryGroup(v){
+        var checked = document.querySelector('[name="subcategory"]:checked');
+        var inside = function (el, id) { return !!(el && el.closest('#' + id)); };
+        if (v === 'work') {
+            var reading = document.querySelector('#focus-subcategory-field [name="subcategory"]');
+            if (reading) reading.checked = true;
+        } else if (v === 'study') {
+            if (!inside(checked, 'study-subcategory-field')) {
+                document.getElementById('study-subcategory-none').checked = true;
+            }
+        } else if (v === 'sport') {
+            if (checked && !inside(checked, 'subcategory-field')) checked.checked = false;
+        } else {
+            document.getElementById('study-subcategory-none').checked = true;
+        }
+    }
     function updateSubcategory(){
         var v = (document.querySelector('[data-category-toggle]:checked') || {}).value || 'general';
+        syncSubcategoryGroup(v);
         subcategoryField.style.display = v === 'sport' ? 'block' : 'none';
-        // focus-subcategory-field se queda siempre oculto (ver el div en el HTML) — Lectura ya no tiene nada que elegir.
+        // focus-subcategory-field se queda siempre oculto (ver el div en el HTML) — Lectura no tiene nada que elegir.
 
         // Deporte: el método se elige aquí, al crear la tarea. Qué
         // métodos valen depende del subtipo — correr no se hace con
@@ -432,7 +457,7 @@
         var sub = esDeporte ? subSelValue : '';
 
         // "Curso de Udemy" vive en category=study pero cronometra igual
-        // que Enfoque (ver watch_keyword arriba) — comparte el mismo
+        // que Lectura (ver watch_keyword arriba) — comparte el mismo
         // campo de objetivo en minutos, por eso se decide aquí y no solo
         // con v === 'work'.
         var esUdemy = v === 'study' && subSelValue === 'udemy';
@@ -471,17 +496,16 @@
         var modoActual = (document.querySelector('[name="sport_mode"]:checked') || {}).value || '';
 
         // Los campos de vídeo salen en Deporte solo si el modo es vídeo.
-        var esEnfoque = v === 'work';
+        var esLectura = v === 'work';
         var esEstudio = v === 'study';
         studySubcategoryField.style.display = esEstudio ? 'block' : 'none';
         languageFields.style.display = (esEstudio && subSelValue === 'language') ? 'block' : 'none';
-        // "Lectura" (Enfoque) puede vigilarse igual que un curso de Udemy,
+        // "Lectura" puede vigilarse igual que un curso de Udemy,
         // pero con un PDF: la extensión de Chrome busca esta misma
         // palabra clave en el nombre del archivo / título de la pestaña
         // del PDF que tengas en primer plano. Comparte el mismo campo e
         // input que Udemy, con el texto cambiado, para no duplicar el
         // HTML ni arriesgarse a mandar dos "watch_keyword" a la vez.
-        var esLectura = esEnfoque && subSelValue === 'reading';
         // Udemy freestyle ya NO lleva palabra clave -- es el habito
         // generico (ver _study_link_error en el backend) -- asi que
         // enseña solo el aviso, nunca el input. Lectura sigue con su
@@ -493,15 +517,13 @@
         watchKeywordInput.placeholder = esIlerna ? "Un trozo del título de la clase, ej. 'Programación'" : 'Ej: clean-code';
         udemyGenericHint.style.display = esUdemy ? 'block' : 'none';
         var videoEnDeporte = esDeporte && modoActual === 'video';
-        // Lectura vigilada por palabra clave no necesita ni tiene sentido
-        // con un vídeo enganchado (ver esLectura más arriba) — se oculta
-        // la opción entera para no confundir con algo que no pinta nada
-        // en "leer un PDF".
-        var esEnfoqueConVideo = esEnfoque && !esLectura;
-        videoSourceField.style.display = (esEnfoqueConVideo || videoEnDeporte) ? 'block' : 'none';
+        // Lectura no lleva vídeo (las tareas de Enfoque, que sí podían, ya
+        // no existen): el vídeo solo sale en Estudio y en Deporte con modo
+        // vídeo.
+        videoSourceField.style.display = videoEnDeporte ? 'block' : 'none';
         var fuente = (document.querySelector('[name="video_source"]:checked') || {}).value || 'youtube';
         videoField.style.display =
-            (esEstudio && !esCursoExterno) || ((esEnfoqueConVideo || videoEnDeporte) && fuente === 'youtube') ? 'block' : 'none';
+            (esEstudio && !esCursoExterno) || (videoEnDeporte && fuente === 'youtube') ? 'block' : 'none';
         // "YouTube" e Idiomas SIEMPRE necesitan un vídeo o una playlist
         // -- si no, la tarea no tiene forma de saber qué estudiar ni de
         // cerrarse sola al terminarlo (ver Task.study_link_error en el
@@ -512,11 +534,11 @@
         document.querySelector('[data-label-video]').textContent =
             requiresYoutubeLink ? 'Vídeo de YouTube' : 'Vídeo de YouTube (opcional)';
         localVideoField.style.display =
-            ((esEnfoqueConVideo || videoEnDeporte) && fuente === 'local') ? 'block' : 'none';
+            (videoEnDeporte && fuente === 'local') ? 'block' : 'none';
 
         // Playlist / vídeos largos: solo tiene sentido para estudiar
         // (clases, cursos, idiomas) — dominadas no vienen en playlists
-        // de 40 horas, y Enfoque ya tiene su vídeo simple de sobra.
+        // de 40 horas.
         // "Curso de Udemy" queda fuera: no es un vídeo de YouTube, es un
         // curso externo que se sigue por la palabra clave de arriba.
         playlistField.style.display = (esEstudio && !esCursoExterno) ? 'block' : 'none';

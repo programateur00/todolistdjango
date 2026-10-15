@@ -76,6 +76,25 @@ def body(request):
     return json.loads(request.body)
 
 
+def parse_minutes(data):
+    """
+    Minutos que manda el cliente al guardar una sesión de temporizador.
+    Devuelve (minutos, error): `minutos` es un entero >= 0, o None si el
+    cuerpo no trae algo utilizable (entonces `error` es el texto del 400).
+    Sin la clave «minutes» se asume 0, como siempre. Antes un cuerpo raro
+    ("minutes": "abc", null, una lista...) acababa en un 500 sin explicación.
+    """
+    if not isinstance(data, dict):
+        return None, "JSON inválido"
+    raw = data.get("minutes", 0)
+    if isinstance(raw, bool):
+        return None, "Minutos inválidos"
+    try:
+        return max(0, int(float(raw))), None
+    except (TypeError, ValueError, OverflowError):
+        return None, "Minutos inválidos"
+
+
 def _user():
     return get_current_user()
 
@@ -102,7 +121,7 @@ def task_json(t):
         # null. La app elige el icono con esto, para no enseñar una cámara
         # en una tarea que no va a grabar nada.
         "workout_kind": t.workout_kind,
-        # Solo relevante si category="work" (Enfoque): objetivo en minutos
+        # Solo relevante si category="work" (Lectura): objetivo en minutos
         # del temporizador. None = sesión libre, sin objetivo.
         "target_minutes": t.target_minutes,
         # Solo con subcategory="udemy": palabra clave para que la
@@ -220,9 +239,10 @@ def meta(request):
     payload = {
         "categories": [{"value": v, "label": l} for v, l in Task.CATEGORY_CHOICES],
         # Separadas porque significan cosas distintas según la categoría:
-        # en Deporte filtran qué ejercicios se ofrecen; en Enfoque, qué se
-        # está cronometrando. Mezclarlas en una sola lista confundiría el
-        # selector (verías "Lectura" al elegir un ejercicio de deporte).
+        # en Deporte filtran qué ejercicios se ofrecen; en Lectura solo hay
+        # "reading" (la app ya no lo enseña como selector). Mezclarlas en
+        # una sola lista confundiría el selector (verías "Lectura" al elegir
+        # un ejercicio de deporte).
         "sport_subcategories": [{"value": v, "label": l} for v, l in Task.SPORT_SUBCATEGORY_CHOICES],
         "focus_subcategories": [{"value": v, "label": l} for v, l in Task.FOCUS_SUBCATEGORY_CHOICES],
         "study_subcategories": [{"value": v, "label": l} for v, l in Task.STUDY_SUBCATEGORY_CHOICES],
@@ -380,9 +400,9 @@ def stats_detail(request, series_id):
     detalle al tocar una tarjeta de /stats: cada ocurrencia con su fecha
     y resultado, no solo el resumen agregado que ya da stats_list.
     """
-    occurrences = Occurrence.objects.filter(
+    occurrences = Occurrence.newest_first(Occurrence.objects.filter(
         series_id=series_id, user=_user()
-    ).order_by("-recorded_at")
+    ))
     if not occurrences.exists():
         return JsonResponse({"ok": False, "error": "No hay estadísticas para esa tarea."}, status=404)
 
@@ -444,6 +464,8 @@ def stats_delete_series(request, series_id):
 def _apply_task_fields(t, data):
     """Campos editables de una tarea, validando contra los choices del
     modelo para que la app no pueda meter valores inventados."""
+    old_pattern = (t.due_date, t.repeat, int(t.interval or 1), t.custom_days)
+    old_subcategory = t.subcategory
     if "title" in data:
         title = (data.get("title") or "").strip()
         if not title:
@@ -454,9 +476,6 @@ def _apply_task_fields(t, data):
     if "category" in data:
         valid = {k for k, _ in Task.CATEGORY_CHOICES}
         t.category = data["category"] if data["category"] in valid else Task.CATEGORY_GENERAL
-    if "subcategory" in data:
-        valid = {k for k, _ in Task.SUBCATEGORY_CHOICES}
-        t.subcategory = data["subcategory"] if data["subcategory"] in valid else ""
     if "target_minutes" in data:
         raw = data["target_minutes"]
         if raw in (None, "", 0):
@@ -553,6 +572,17 @@ def _apply_task_fields(t, data):
         t.due_date = Task.first_custom_date(
             timezone.localtime(timezone.now()).date(), t.custom_days_list()
         )
+    # Cada categoría solo admite sus subtipos (y Lectura no lleva vídeo: las
+    # tareas de Enfoque ya no existen). Un subtipo vacío o ausente deja el que
+    # ya tenía: la app móvil no conoce los de Estudio (Idiomas, Udemy, Ilerna)
+    # y manda "" al editar -- antes eso se los borraba y la tarea dejaba de
+    # contarla la extensión.
+    t.normalize_for_category(
+        data.get("subcategory") if "subcategory" in data else None, old_subcategory
+    )
+    if t.pk is not None:
+        # Editar CUÁNDO se repite re-ancla el patrón (ver Task.reanchor_...).
+        t.reanchor_series_if_pattern_changed(old_pattern)
     return None
 
 
@@ -611,17 +641,40 @@ def task_detail(request, uuid):
         # listado (pesa). [] = playlist sin sincronizar.
         data["playlist_video_ids"] = t.playlist_video_ids() if t.youtube_playlist_id else []
         data["playlist_video_durations"] = t.playlist_video_durations() if t.youtube_playlist_id else []
+        # Curso de idioma: un día suele asignar UN vídeo corto, y el objetivo
+        # diario son minutos. La web encadena los siguientes del temario hasta
+        # llenarlos (task_video.html); el móvil necesita la misma cola para
+        # no dar el día por hecho tras el primer vídeo. [0] es SIEMPRE el
+        # vídeo de hoy. Vacío para cualquier otra tarea.
+        data["course_queue"] = []
+        plan = t.plan
+        if (
+            plan and plan.plan_type == Plan.PLAN_TYPE_STUDY
+            and plan.study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE
+        ):
+            data["course_queue"] = plan.upcoming_course_queue()
         return JsonResponse({"task": data})
 
     if request.method == "PATCH":
         old_playlist_id = t.youtube_playlist_id
+        was_linked = t.study_link_error() is None
         error = _apply_task_fields(t, body(request))
         if error:
             return JsonResponse({"ok": False, "error": error}, status=400)
+        # Igual que al crear (y que el formulario web): editar no puede dejar
+        # una tarea de Estudio sin nada enlazado. Si ya estaba así de antes
+        # (p. ej. la de un plan con temporizador manual) se deja editar el
+        # resto, solo se impide EMPEORARLA.
+        link_error = t.study_link_error()
+        if link_error and was_linked:
+            return JsonResponse({"ok": False, "error": link_error}, status=400)
         t.save()
         # Igual que al crear: si la playlist ha cambiado, la caché de
         # vídeos de la anterior ya no sirve.
         if t.youtube_playlist_id != old_playlist_id:
+            # Otra lista (o ninguna): la posición de la anterior no vale.
+            t.playlist_start_index = None
+            t.save(update_fields=["playlist_start_index", "updated_at"])
             t.sync_playlist_videos()
         return JsonResponse({"ok": True, "task": task_json(t), "notice": t.youtube_link_notice})
 
@@ -629,6 +682,13 @@ def task_detail(request, uuid):
     # verdad, el otro dispositivo no podría enterarse al sincronizar y la
     # resucitaría en la siguiente subida.
     from django.utils import timezone
+    if (
+        t.reading_mode == Task.READING_MODE_PLAN and t.due_date
+        and t.repeat != Task.REPEAT_NONE and not t.reading_completed_at
+    ):
+        # Igual que la web (views.task_delete): borrar el día de un plan de
+        # lectura en marcha salta esa sesión, no acaba con el plan entero.
+        t._spawn_next()
     t.deleted_at = timezone.now()
     t.save(update_fields=["deleted_at", "updated_at"])
     return JsonResponse({"ok": True})
@@ -889,45 +949,87 @@ def routine_detail(request, uuid):
 
 
 @api("POST")
+def video_position(request, uuid):
+    """
+    La app avisa de por qué vídeo de la playlist va (cada vez que cambia de
+    vídeo y al acabar uno): cerrar a medias no hace volver a empezar. Igual
+    que views.task_video_position.
+    """
+    t = get_object_or_404(tasks_qs(), uuid=uuid)
+    data = body(request)
+    saved = t.record_playlist_position(data.get("index") if isinstance(data, dict) else None)
+    if saved is None:
+        return JsonResponse({"ok": False, "error": "Posición no válida."}, status=400)
+    return JsonResponse({"ok": True, "index": saved})
+
+
+@api("POST")
 def video_save(request, uuid):
     """
-    El vídeo llegó al final en el móvil -> la tarea se marca hecha
-    directamente. Sin sesión que guardar: la tarea ENTERA es "ver el
-    vídeo", verlo entero es todo lo que hace falta.
+    La sesión de vídeo terminó en el móvil -> la tarea se marca hecha
+    directamente. Mismas reglas que la web (views.task_video_save): el
+    cliente manda `minutes` (tiempo real visto) y `videos_watched`
+    (vídeos vistos ENTEROS en esta sesión); ambos son opcionales y, sin
+    ellos, se comporta como siempre (1 vídeo).
 
-    `minutes` es opcional (el cliente móvil todavía no lo manda — ver
-    mobile-app/www/js/video-view.js, que sigue sin la lógica de la
-    IFrame API que sí tiene la web en task_video.html). Cuando lo mande,
-    se guarda igual que en la web; mientras tanto, sin body, se comporta
-    exactamente como antes.
+    Salvo el test de repaso de los cursos de idioma (CourseQuiz), que
+    todavía no tiene pantalla en la app (ver views.task_video_save /
+    api.maybe_trigger_quiz), todo lo demás es igual que en la web:
+      - Tarea suelta (sin Plan) de Estudio con un vídeo/playlist fijado:
+        el contenido puesto ES todo lo que hay que ver. Un vídeo suelto
+        cierra la serie al verlo; una playlist avanza su posición
+        (playlist_start_index) y cierra la serie al ver el último vídeo.
+      - Curso de idioma: avanza `videos_watched` módulos del temario y,
+        si con eso se acaba el curso, el plan se cierra en el momento.
     """
     t = get_object_or_404(tasks_qs(), uuid=uuid)
     data = body(request)
     raw_minutes = data.get("minutes")
     minutes_watched = max(0, int(raw_minutes)) if isinstance(raw_minutes, (int, float)) else None
+    raw_videos = data.get("videos_watched")
+    videos_watched = max(0, int(raw_videos)) if isinstance(raw_videos, (int, float)) else None
 
     # Un vídeo de Deporte (seguir una rutina en YouTube) no se marca
     # hecho aquí: falta el enfriamiento obligatorio (ver warmup-view.js
     # + api.markTask desde la app), que es quien la cierra de verdad. El
-    # resto de vídeos (Estudio, Enfoque...) sigue exactamente igual.
+    # resto de vídeos (Estudio...) sigue exactamente igual.
     if t.category == Task.CATEGORY_SPORT:
         return JsonResponse({"ok": True, "needs_cooldown": True, "task": task_json(t)})
 
-    t.mark_done(minutes_watched=minutes_watched)
+    plan = t.plan
+    if not plan and t.category == Task.CATEGORY_STUDY:
+        if t.youtube_playlist_id:
+            watched_count = videos_watched if videos_watched is not None else 1
+            # `playlist_start`: por qué vídeo EMPEZÓ la sesión (la app ya fue
+            # guardando la posición por el camino, ver video_position).
+            next_index = t.next_playlist_index(data.get("playlist_start"), watched_count)
+            t.playlist_start_index = next_index
+            if t.is_last_playlist_video(next_index - 1):
+                t.finish_recurring_series()
+                return JsonResponse({"ok": True, "task": task_json(t)})
+        elif t.youtube_video_id:
+            t.finish_recurring_series()
+            return JsonResponse({"ok": True, "task": task_json(t)})
+
+    # Tarea de un plan de Estudio con playlist: el avance vive en el objetivo
+    # y tiene que estar al día ANTES de mark_done (cierra el plan si ya viste
+    # la lista entera). Igual que views.task_video_save.
+    if plan and t.youtube_playlist_id and videos_watched is not None:
+        t.advance_playlist_position(data.get("playlist_start"), videos_watched)
+
+    closed_plan = t.mark_done(minutes_watched=minutes_watched)
 
     # Un curso de idioma (CourseModule) necesita avanzar el vídeo "actual"
     # a mano -- a diferencia de Hábito simple con playlist, que se
     # recalcula solo desde las Occurrence (ver Plan._study_playlist_progress)
     # -- o la tarea de mañana volvería a enseñar el mismo vídeo de hoy para
-    # siempre (ver Plan.mark_current_module_watched). El móvil reproduce un
-    # único vídeo por sesión, sin encadenar varios cortos como
-    # task_video.html en la web (ver docstring de arriba), así que basta
-    # con avanzar 1. El test de repaso (CourseQuiz) se deja fuera a
-    # propósito: todavía no hay pantalla en la app para hacerlo (ver
-    # views.task_video_save / api.maybe_trigger_quiz).
-    plan = t.plan
+    # siempre (ver Plan.mark_current_module_watched).
     if plan and plan.plan_type == Plan.PLAN_TYPE_STUDY and plan.study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE:
-        plan.mark_current_module_watched()
+        plan.mark_current_module_watched(count=videos_watched)
+        # Si ESTE vídeo era el que completaba el curso, mark_done() de
+        # arriba todavía no lo sabía: se vuelve a comprobar con el dato al día.
+        if not closed_plan:
+            plan.close_if_finished()
 
     return JsonResponse({"ok": True, "task": task_json(t)})
 
@@ -982,7 +1084,7 @@ def saved_video_delete(request, uuid):
     return JsonResponse({"ok": True})
 
 
-# ------------------------------------------------------------- enfoque
+# -------------------------------------------- cronómetro (lectura, general)
 
 @api("POST")
 def focus_save(request, uuid):
@@ -1012,7 +1114,9 @@ def focus_save(request, uuid):
     if t.reading_mode == Task.READING_MODE_PLAN:
         return JsonResponse({"ok": True, "ignored": True, "task": task_json(t)})
 
-    minutes = max(0, int(data.get("minutes", 0)))
+    minutes, error = parse_minutes(data)
+    if error:
+        return JsonResponse({"ok": False, "error": error}, status=400)
     source = data.get("source") if data.get("source") in dict(TimerSession.SOURCE_CHOICES) else TimerSession.SOURCE_MANUAL
     _sources_with_app_package = (TimerSession.SOURCE_APP_USAGE, TimerSession.SOURCE_PC_USAGE)
     app_package = (data.get("app_package") or "")[:120] if source in _sources_with_app_package else ""
@@ -1754,6 +1858,10 @@ def plan_json(p, detail=False):
         "is_active": p.is_active,
         "closed_at": p.closed_at.isoformat() if p.closed_at else None,
         "is_completed": p.is_completed if p.closed_at else None,
+        # El % que tenía al cerrarlo (la «foto» que guarda plan_close): la
+        # pantalla de un plan cerrado enseña ESTE, no el de ahora, igual que
+        # la web (views.plan_close / plan_list).
+        "final_progress_pct": p.final_progress_pct if p.closed_at else None,
         "reward": p.reward,
         "progress_pct": p.progress_pct(),
         "custom_days": p.custom_days_list(),
@@ -1987,7 +2095,7 @@ def _apply_plan_item_fields(item, plan, data):
         # Solo Hábito simple con PLAYLIST (Idiomas no usa estos campos —
         # su objetivo sale de CourseModule/language_daily_minutes, no de
         # un vídeo o playlist sueltos aquí; y un hábito sin vídeo ni
-        # playlist, con temporizador manual tipo Enfoque, tampoco
+        # playlist, con temporizador manual, tampoco
         # necesita esto). Con playlist, uno de los dos es obligatorio:
         # sin ninguno, Plan._study_playlist_progress se queda siempre en
         # el primer vídeo y el seguimiento de progreso no avanza nunca.
@@ -2672,14 +2780,19 @@ def maybe_trigger_quiz(plan):
         return None
 
     completed = plan.course_progress()["watched"]
-    if completed <= 0 or completed % n_every != 0:
+    # Último tramo COMPLETO de N vídeos. Una sesión puede encadenar varios
+    # vídeos cortos y saltarse el múltiplo exacto (test cada 3, se pasa de
+    # 2 a 4 vistos): con `completed % n == 0` ese test no salía nunca.
+    boundary = (completed // n_every) * n_every
+    if boundary <= 0:
         return None
 
-    last_module = modules[completed - 1]
-    if plan.quizzes.filter(up_to_order=last_module.order).exists():
-        return None  # ya se generó un test para este mismo tramo
+    last_module = modules[boundary - 1]
+    # Ya hay test para este tramo (o para uno posterior): no repetir.
+    if plan.quizzes.filter(up_to_order__gte=last_module.order).exists():
+        return None
 
-    covered = modules[max(0, completed - n_every):completed]
+    covered = modules[max(0, boundary - n_every):boundary]
     topics = [(m.topic or m.title or "").strip() for m in covered]
     topics = [t for t in topics if t]
     if not topics:

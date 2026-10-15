@@ -139,13 +139,6 @@ def _read_category(request, default=Task.CATEGORY_GENERAL):
     return raw if raw in valid else default
 
 
-def _read_subcategory(request, default=""):
-    """Lee la subcategoría (deporte o enfoque, según la categoría)."""
-    raw = request.POST.get("subcategory", default) or default
-    valid = {key for key, _ in Task.SUBCATEGORY_CHOICES}
-    return raw if raw in valid else default
-
-
 def _read_language_name(request):
     """Idioma de una tarea suelta con subcategory=Idiomas (Task.language_name)."""
     return request.POST.get("language_name", "").strip()[:40]
@@ -163,17 +156,21 @@ def _read_level(request):
     return raw if raw in valid else ""
 
 
-def _read_target_minutes(request):
+def _read_target_minutes(request, category=None):
     """
     Objetivo en minutos — un solo campo en el modelo (Task.target_minutes)
     sirve para dos cosas distintas según cuál aplique: minutos del
-    temporizador de Enfoque, o minutos vistos de un vídeo/playlist. En
-    el formulario son dos inputs separados (para no chocar cuando los
-    dos son visibles a la vez, con category=work + vídeo puesto), pero
-    aquí se funden en el campo que de verdad toca.
+    cronómetro (Lectura, General con cronómetro, cursos que cuenta la
+    extensión), o minutos vistos de un vídeo/playlist (Estudio y Deporte
+    con vídeo). En el formulario son dos inputs separados, pero aquí se
+    funden en el campo que de verdad toca. Lectura no lleva vídeo (ver
+    Task.normalize_for_category): aunque el formulario arrastre uno
+    oculto de una tarea antigua, manda siempre el campo del cronómetro.
     """
-    has_video = bool(request.POST.get("youtube_video_id", "").strip()) \
+    has_video = category != Task.CATEGORY_WORK and (
+        bool(request.POST.get("youtube_video_id", "").strip())
         or bool(request.POST.get("youtube_playlist_id", "").strip())
+    )
     field = "video_target_minutes" if has_video else "target_minutes"
     raw = request.POST.get(field, "").strip()
     if not raw:
@@ -367,6 +364,15 @@ def task_list(request):
     })
 
 
+def _read_interval(request):
+    """«Cada N»: un entero ≥ 1. Cualquier otra cosa (vacío, 0, negativo, texto)
+    se queda en 1 en vez de romper el guardado con un error 500."""
+    try:
+        return max(1, int(request.POST.get("interval") or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
 def task_create(request):
     if request.method == "POST":
         title = request.POST.get("title", "").strip()
@@ -394,15 +400,15 @@ def task_create(request):
                     due_date = Task.first_custom_date(
                         due_date, request.POST.getlist("custom_days")
                     ) or due_date
+            category = _read_category(request)
             task = Task(
                 title=title,
                 notes=request.POST.get("notes", "").strip(),
-                category=_read_category(request),
-                subcategory=_read_subcategory(request),
+                category=category,
                 language_name=_read_language_name(request),
                 level=_read_level(request),
                 watch_keyword=_read_watch_keyword(request),
-                target_minutes=_read_target_minutes(request),
+                target_minutes=_read_target_minutes(request, category),
                 youtube_video_id=_read_youtube_video_id(request),
                 youtube_playlist_id=_read_youtube_playlist_id(request),
                 target_video_count=_read_target_video_count(request),
@@ -414,7 +420,7 @@ def task_create(request):
                 due_date=due_date,
                 due_time=due_time,
                 repeat=repeat,
-                interval=request.POST.get("interval") or 1,
+                interval=_read_interval(request),
                 custom_days=",".join(request.POST.getlist("custom_days")),
                 is_important=bool(request.POST.get("is_important")),
                 wants_timer=bool(request.POST.get("wants_timer")),
@@ -423,6 +429,8 @@ def task_create(request):
                 avoid_fail_label=request.POST.get("avoid_fail_label", "").strip()[:32],
                 user=get_current_user(),
             )
+            # Cada categoría solo admite sus subtipos (y Lectura no lleva vídeo).
+            task.normalize_for_category(request.POST.get("subcategory"), "", empty_sub_clears=True)
             if task.subcategory == Task.SUBCATEGORY_UDEMY:
                 # Freestyle Udemy NUNCA lleva palabra clave (ver
                 # _study_link_error) -- si llego alguna en el POST se
@@ -478,14 +486,15 @@ def task_edit(request, pk):
         return redirect(reverse("tasks:reading_plan_edit", args=[task.pk]))
     if request.method == "POST":
         old_playlist_id = task.youtube_playlist_id
+        old_pattern = (task.due_date, task.repeat, int(task.interval or 1), task.custom_days)
+        old_subcategory = task.subcategory
         task.title = request.POST.get("title", task.title).strip()
         task.notes = request.POST.get("notes", "").strip()
         task.category = _read_category(request, default=task.category)
-        task.subcategory = _read_subcategory(request, default=task.subcategory)
         task.language_name = _read_language_name(request)
         task.level = _read_level(request)
         task.watch_keyword = _read_watch_keyword(request)
-        task.target_minutes = _read_target_minutes(request)
+        task.target_minutes = _read_target_minutes(request, task.category)
         task.youtube_video_id = _read_youtube_video_id(request)
         task.youtube_playlist_id = _read_youtube_playlist_id(request)
         task.target_video_count = _read_target_video_count(request)
@@ -507,24 +516,42 @@ def task_edit(request, pk):
                 ) or due_date
         task.due_date = due_date
         task.due_time = request.POST.get("due_time") or "23:59"
-        task.interval = request.POST.get("interval") or 1
+        task.interval = _read_interval(request)
         task.custom_days = ",".join(request.POST.getlist("custom_days"))
         task.is_important = bool(request.POST.get("is_important"))
         task.wants_timer = bool(request.POST.get("wants_timer"))
         task.avoid_question = request.POST.get("avoid_question", "").strip()[:120]
         task.avoid_success_label = request.POST.get("avoid_success_label", "").strip()[:32]
         task.avoid_fail_label = request.POST.get("avoid_fail_label", "").strip()[:32]
+        # Cada categoría solo admite sus subtipos (y Lectura no lleva vídeo).
+        task.normalize_for_category(
+            request.POST.get("subcategory"), old_subcategory, empty_sub_clears=True
+        )
         if task.subcategory == Task.SUBCATEGORY_UDEMY:
             task.watch_keyword = ""
-        link_error = task.study_link_error()
+        date_error = None
+        if isinstance(task.due_date, str):
+            try:
+                task.due_date = _dt.date.fromisoformat(task.due_date)
+            except ValueError:
+                date_error = "La fecha no es válida."
+        if task.repeat not in {k for k, _ in Task.REPEAT_CHOICES}:
+            task.repeat = Task.REPEAT_NONE
+        if not date_error:
+            task.reanchor_series_if_pattern_changed(old_pattern)
+        link_error = date_error or task.study_link_error()
         if link_error:
             messages.error(request, link_error)
         else:
             task.save()
             if task.youtube_link_notice:
                 messages.warning(request, task.youtube_link_notice)
-            if task.youtube_playlist_id and task.youtube_playlist_id != old_playlist_id:
-                task.sync_playlist_videos()
+            if task.youtube_playlist_id != old_playlist_id:
+                # Otra lista (o ninguna): la posición de la anterior no vale.
+                task.playlist_start_index = None
+                task.save(update_fields=["playlist_start_index", "updated_at"])
+                if task.youtube_playlist_id:
+                    task.sync_playlist_videos()
             messages.success(request, "Tarea actualizada.")
             return redirect(reverse("tasks:task_list"))
     return render(request, "tasks/task_form.html", {
@@ -1045,25 +1072,11 @@ def task_focus(request, pk):
     cronómetro es JS puro en la plantilla — aquí solo se enseña el
     objetivo, si lo hay.
 
-    El antiguo subtipo "Estudio" de esta categoría (antes de reducirla a
-    solo Lectura) ofrecía además un selector de vídeos guardados — se
-    quitó junto con el subtipo al no haber ninguna tarea real usándolo;
-    tasks/templates/tasks/task_focus_mode.html se queda sin usar por si
-    hiciera falta recuperar la idea más adelante.
+    Las tareas de Enfoque (con selector de vídeos guardados) ya no
+    existen: aquí solo hay cronómetro.
     """
     task = get_object_or_404(Task, pk=pk, user=get_current_user())
     task.mark_started()
-    video_id = request.GET.get("video")
-    if video_id:
-        # Mismo contexto completo que task_video: la plantilla necesita
-        # SIEMPRE estas claves, aunque sea None/"" — si falta alguna, el
-        # JS que arma con {{ target_minutes|default_if_none:"null" }}
-        # se queda con una asignación vacía y ni siquiera arranca.
-        return render(request, "tasks/task_video.html", {
-            "task": task, "video_id": video_id,
-            "playlist_id": "", "target_minutes": None, "target_video_count": None, "has_local_video": False,
-        })
-
     return render(request, "tasks/task_focus.html", {"task": task})
 
 
@@ -1081,7 +1094,9 @@ def task_focus_save(request, pk):
     except (json.JSONDecodeError, TypeError):
         return JsonResponse({"ok": False, "error": "JSON inválido"}, status=400)
 
-    minutes = max(0, int(data.get("minutes", 0)))
+    minutes, error = api.parse_minutes(data)
+    if error:
+        return JsonResponse({"ok": False, "error": error}, status=400)
 
     ts = TimerSession.objects.create(
         task=task,
@@ -1308,8 +1323,8 @@ def task_reading_save(request, pk):
     _spawn_next), sin cerrar el plan -- para eso hace falta llegar de
     verdad a la última página (ver task_reading_progress). Independiente
     del progreso de página en sí, que ya se reporta aparte según se va
-    leyendo: aquí solo se resuelve el día, como cualquier otra tarea de
-    Enfoque.
+    leyendo: aquí solo se resuelve el día, como cualquier otra tarea con
+    temporizador.
 
     También vuelca aquí el tiempo real de lectura acumulado en esta
     sesión (ver Task._flush_reading_time) -- ANTES de mirar
@@ -1448,12 +1463,33 @@ def task_video(request, pk):
 
 
 @require_POST
+def task_video_position(request, pk):
+    """
+    El reproductor avisa de por qué vídeo de la playlist va (cada vez que
+    cambia de vídeo y al acabar uno), para que cerrar a medias no haga
+    volver a empezar -- ver Task.record_playlist_position. Ligero a
+    propósito: solo guarda la posición, no marca nada hecho.
+    """
+    task = get_object_or_404(Task, pk=pk, user=get_current_user())
+    try:
+        data = json.loads(request.body or b"{}")
+    except (json.JSONDecodeError, TypeError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    saved = task.record_playlist_position(data.get("index"))
+    if saved is None:
+        return JsonResponse({"ok": False, "error": "Posición no válida."}, status=400)
+    return JsonResponse({"ok": True, "index": saved})
+
+
+@require_POST
 def task_video_save(request, pk):
     """
     El vídeo llegó al objetivo en minutos, o al final (evento ENDED en
     el navegador) -> la tarea se marca hecha directamente. No hay
     objetivo que comparar contra un mínimo para dejarla pendiente (a
-    diferencia de Enfoque): aquí target_minutes solo decide CUÁNDO
+    diferencia del temporizador): aquí target_minutes solo decide CUÁNDO
     cortar, no si la tarea vale o no — ver task_video.html.
 
     `minutes` son los minutos reales vistos, contados en el navegador
@@ -1501,7 +1537,10 @@ def task_video_save(request, pk):
     if not plan and task.category == Task.CATEGORY_STUDY:
         if task.youtube_playlist_id:
             watched_count = videos_watched if videos_watched is not None else 1
-            next_index = (task.playlist_start_index or 0) + watched_count
+            # `playlist_start`: por qué vídeo EMPEZÓ esta sesión (el reproductor
+            # ya fue guardando la posición por el camino, ver
+            # task_video_position, así que contar desde la guardada se pasaría).
+            next_index = task.next_playlist_index(data.get("playlist_start"), watched_count)
             task.playlist_start_index = next_index
             if task.is_last_playlist_video(next_index - 1):
                 task.finish_recurring_series()
@@ -1511,6 +1550,12 @@ def task_video_save(request, pk):
             task.finish_recurring_series()
             messages.success(request, "Vídeo visto — tarea completada.")
             return JsonResponse({"ok": True, "redirect_url": reverse("tasks:task_list")})
+
+    # Tarea de un plan de Estudio con playlist: el avance vive en el objetivo
+    # (ver Task.advance_playlist_position) y tiene que estar al día ANTES de
+    # mark_done, que cierra el plan si ya viste la lista entera.
+    if plan and task.youtube_playlist_id and videos_watched is not None:
+        task.advance_playlist_position(data.get("playlist_start"), videos_watched)
 
     closed_plan = task.mark_done(minutes_watched=minutes_watched)
     messages.success(request, "Vídeo visto — tarea completada.")
@@ -1934,9 +1979,9 @@ def _stats_chart_points(occurrences, limit=60):
 
 
 def stats_detail(request, series_id):
-    occurrences = Occurrence.objects.filter(
+    occurrences = Occurrence.newest_first(Occurrence.objects.filter(
         series_id=series_id, user=get_current_user()
-    ).order_by("-recorded_at")
+    ))
     if not occurrences.exists():
         messages.error(request, "No hay estadísticas para esa tarea.")
         return redirect(reverse("tasks:stats_list"))
@@ -2849,6 +2894,74 @@ def plan_ai_form(request):
     })
 
 
+def _study_objective_from_post(post):
+    """
+    Lee del formulario el objetivo de un plan de Estudio · Hábito simple
+    (curso de Udemy, clases de Ilerna, vídeo, playlist o temporizador) y lo
+    valida. Devuelve (campos, error); con error no hay campos.
+
+    Se llama ANTES de guardar nada del plan: un error tiene que significar
+    «no se ha guardado nada», no un plan a medias (con su tarea diaria sin
+    nada enlazado) que además hay que volver a empezar.
+    """
+    fields = {
+        "youtube_video_id": post.get("youtube_video_id", "").strip()[:255],
+        "youtube_playlist_id": post.get("youtube_playlist_id", "").strip()[:255],
+    }
+    # Clases de Ilerna (Zoom): no es un curso de Udemy aunque lleve palabra
+    # clave (asignatura, opcional) -- watch_site lo distingue. La palabra
+    # clave de cada fuente viaja en su propio input (los de las fuentes no
+    # elegidas llegan deshabilitados, ver refreshStudySource en
+    # plan_form.html).
+    is_ilerna = post.get("study_source") == "ilerna"
+    if is_ilerna:
+        fields["watch_site"] = PlanItem.SITE_ILERNA
+        fields["watch_keyword"] = post.get("ilerna_keyword", "").strip()[:120]
+    else:
+        fields["watch_site"] = ""
+        fields["watch_keyword"] = post.get("watch_keyword", "").strip()[:120]
+    # Solo tiene sentido con watch_keyword puesto (Curso de Udemy) -- toggle
+    # "por vídeos vistos" (exige audio, de siempre) vs "por tiempo en la
+    # página" (vídeo + ejercicios, sin exigir audio, ver
+    # Task.watch_requires_audio).
+    fields["watch_requires_audio"] = post.get("watch_track_mode") != "time"
+    # Igual que una tarea suelta de Estudio (ver _study_link_error): sin nada
+    # de esto puesto, el plan saldría con una tarea diaria "Estudio simple"
+    # sin nada que comprobar ni forma de cerrarse solo.
+    if not (fields["youtube_video_id"] or fields["youtube_playlist_id"] or fields["watch_keyword"] or is_ilerna):
+        return None, (
+            "Pon algo enlazado: un curso de Udemy (palabra clave), un vídeo "
+            "o una playlist de YouTube — un plan de Estudio necesita saber "
+            "qué vas a estudiar."
+        )
+    raw_minutes = post.get("target_minutes", "").strip()
+    try:
+        fields["target_minutes"] = max(1, int(raw_minutes)) if raw_minutes else None
+    except (TypeError, ValueError):
+        fields["target_minutes"] = None
+    if is_ilerna and not fields["target_minutes"]:
+        return None, "Clases de Ilerna: pon los minutos de clase al día."
+    # Igual que Ilerna: sin minutos, la extensión daba el día por cumplido
+    # con la primera sesión de 1 minuto.
+    if not is_ilerna and fields["watch_keyword"] and not fields["target_minutes"]:
+        return None, "Curso de Udemy: pon los minutos al día que quieres estudiar."
+    raw_count = post.get("target_video_count", "").strip()
+    try:
+        fields["target_video_count"] = max(1, int(raw_count)) if raw_count else None
+    except (TypeError, ValueError):
+        fields["target_video_count"] = None
+    # Con playlist, uno de los dos es obligatorio: sin ninguno, el
+    # seguimiento de progreso (Plan._study_playlist_progress) se quedaría
+    # siempre en el primer vídeo y no avanzaría nunca. Un hábito sin vídeo ni
+    # playlist (temporizador manual) no necesita esto.
+    if fields["youtube_playlist_id"] and not (fields["target_minutes"] or fields["target_video_count"]):
+        return None, (
+            "Con una playlist, pon minutos al día o número de vídeos al día — "
+            "hace falta uno de los dos."
+        )
+    return fields, None
+
+
 def plan_form(request, pk=None):
     """Crear o editar un plan. Los objetivos se editan uno a uno."""
     plan = get_object_or_404(_plans_qs(), pk=pk) if pk else None
@@ -2907,11 +3020,19 @@ def plan_form(request, pk=None):
             # `required`, pero el de minutos es en verdad un campo oculto
             # que rellena JS — el navegador no lo valida solo — así que el
             # mínimo se repite aquí en el servidor.
+            # Estudio · Hábito simple: el objetivo (qué se estudia) se lee y
+            # se valida aquí, ANTES de tocar nada -- ver
+            # _study_objective_from_post.
+            study_fields, study_error = (
+                _study_objective_from_post(request.POST) if is_study_general else (None, None)
+            )
             if is_language and not (plan.known_languages and plan.language_daily_minutes):
                 messages.error(
                     request,
                     "Un plan de idiomas necesita el idioma que ya sabes y los minutos de vídeo al día.",
                 )
+            elif study_error:
+                messages.error(request, study_error)
             else:
                 plan.name = name[:80]
                 plan.notes = request.POST.get("notes", "").strip()
@@ -2993,67 +3114,8 @@ def plan_form(request, pk=None):
                         item.series_id = plan.task_series_id
                         item.progression = PlanItem.PROG_COMPLETION
                         item.is_headline = True
-                        item.youtube_video_id = request.POST.get("youtube_video_id", "").strip()[:255]
-                        item.youtube_playlist_id = request.POST.get("youtube_playlist_id", "").strip()[:255]
-                        # Clases de Ilerna (Zoom): no es un curso de Udemy aunque
-                        # lleve palabra clave (asignatura, opcional) -- watch_site
-                        # lo distingue. La palabra clave de cada fuente viaja en su
-                        # propio input (los de las fuentes no elegidas llegan
-                        # deshabilitados, ver refreshStudySource en plan_form.html).
-                        is_ilerna = request.POST.get("study_source") == "ilerna"
-                        if is_ilerna:
-                            item.watch_site = PlanItem.SITE_ILERNA
-                            item.watch_keyword = request.POST.get("ilerna_keyword", "").strip()[:120]
-                        else:
-                            item.watch_site = ""
-                            item.watch_keyword = request.POST.get("watch_keyword", "").strip()[:120]
-                        # Solo tiene sentido con watch_keyword puesto (Curso de
-                        # Udemy) -- toggle "por vídeos vistos" (exige audio, de
-                        # siempre) vs "por tiempo en la página" (vídeo + ejercicios,
-                        # sin exigir audio, ver Task.watch_requires_audio).
-                        item.watch_requires_audio = request.POST.get("watch_track_mode") != "time"
-                        # Igual que una tarea suelta de Estudio (ver
-                        # _study_link_error): sin nada de esto puesto, el
-                        # plan sale con una tarea diaria "Estudio simple"
-                        # sin nada que comprobar ni forma de cerrarse solo
-                        # -- ya no se deja crear/guardar así.
-                        if not (item.youtube_video_id or item.youtube_playlist_id or item.watch_keyword or is_ilerna):
-                            messages.error(
-                                request,
-                                "Pon algo enlazado: un curso de Udemy (palabra clave), un vídeo "
-                                "o una playlist de YouTube — un plan de Estudio necesita saber "
-                                "qué vas a estudiar.",
-                            )
-                            return redirect(
-                                reverse("tasks:plan_edit", args=[plan.pk]) if plan.pk
-                                else reverse("tasks:plan_create")
-                            )
-                        raw_minutes = request.POST.get("target_minutes", "").strip()
-                        try:
-                            item.target_minutes = max(1, int(raw_minutes)) if raw_minutes else None
-                        except (TypeError, ValueError):
-                            item.target_minutes = None
-                        if is_ilerna and not item.target_minutes:
-                            messages.error(request, "Clases de Ilerna: pon los minutos de clase al día.")
-                            return redirect(reverse("tasks:plan_edit", args=[plan.pk]))
-                        raw_count = request.POST.get("target_video_count", "").strip()
-                        try:
-                            item.target_video_count = max(1, int(raw_count)) if raw_count else None
-                        except (TypeError, ValueError):
-                            item.target_video_count = None
-                        # Con playlist, uno de los dos es obligatorio: sin
-                        # ninguno, el seguimiento de progreso
-                        # (Plan._study_playlist_progress) se quedaría
-                        # siempre en el primer vídeo y no avanzaría nunca.
-                        # Un hábito sin vídeo ni playlist (temporizador
-                        # manual, tipo Enfoque) no necesita esto.
-                        if item.youtube_playlist_id and not (item.target_minutes or item.target_video_count):
-                            messages.error(
-                                request,
-                                "Con una playlist, pon minutos al día o número de vídeos al día — "
-                                "hace falta uno de los dos.",
-                            )
-                            return redirect(reverse("tasks:plan_edit", args=[plan.pk]))
+                        for field, value in study_fields.items():
+                            setattr(item, field, value)
                         item.save()
                         # Playlist con seguimiento de progreso: se refresca
                         # la caché de vídeos justo al guardar (nunca desde
@@ -3324,8 +3386,8 @@ def plan_item_form(request, plan_pk, pk=None):
             # Con playlist, uno de los dos es obligatorio: sin ninguno, el
             # seguimiento de progreso (Plan._study_playlist_progress) se
             # quedaría siempre en el primer vídeo y no avanzaría nunca. Un
-            # hábito sin vídeo ni playlist (temporizador manual, tipo
-            # Enfoque) no necesita esto.
+            # hábito sin vídeo ni playlist (temporizador manual) no
+            # necesita esto.
             if item.youtube_playlist_id and not (item.target_minutes or item.target_video_count):
                 messages.error(
                     request,
@@ -3663,6 +3725,10 @@ def plan_item_bulk_form(request, plan_pk):
 def plan_item_delete(request, plan_pk, pk):
     plan = get_object_or_404(_plans_qs(), pk=plan_pk)
     get_object_or_404(PlanItem, pk=pk, plan=plan).delete()
+    # La tarea diaria del plan copia el vídeo/playlist/objetivo del
+    # principal (ver Plan.sync_task): sin esto seguía enlazada al que se
+    # acaba de quitar hasta la próxima vez que se abría la lista.
+    plan.sync_task()
     messages.success(request, "Objetivo eliminado.")
     return redirect(reverse("tasks:plan_detail", args=[plan.pk]))
 

@@ -273,8 +273,9 @@
                     </label>
                 </div>
                 <span class="field__hint" id="watch-track-mode-hint">
-                    Por vídeos vistos: solo cuenta mientras se oye la clase (para no contar el
-                    Q&amp;A o el temario sin ver nada). Por tiempo en la página: cuenta tanto
+                    Por vídeos vistos: solo cuenta mientras el vídeo se reproduce (para no contar el
+                    Q&amp;A, el temario o el vídeo en pausa aunque muevas el ratón; se tolera una
+                    pausa de hasta 1 minuto). Por tiempo en la página: cuenta tanto
                     vídeo como ejercicios con la pestaña en primer plano, sin exigir audio —
                     pero para en cuanto te vas más de 5 minutos sin tocar ratón ni teclado, para
                     que no valga dejar el curso abierto y no estar delante.
@@ -332,6 +333,9 @@
             </label>
         </div>
         <span class="field__hint">Con playlist, uno de los dos — vídeos al día manda sobre minutos.</span>
+        <p class="field__hint field__hint--error" id="study-playlist-target-error" hidden>
+            Con una playlist, pon minutos al día o número de vídeos al día — hace falta uno de los dos.
+        </p>
     </div>
 
     <div id="reading-fields">
@@ -439,6 +443,8 @@
     var studyVideoField = document.getElementById("study-source-video-field");
     var studyPlaylistField = document.getElementById("study-source-playlist-field");
     var studyVideoCountField = document.getElementById("study-source-video-count-field");
+    var studyVideoCountInput = studyVideoFields.querySelector('input[name="target_video_count"]');
+    var studyPlaylistTargetError = document.getElementById("study-playlist-target-error");
     var watchKeywordInput = studyVideoFields.querySelector('input[name="watch_keyword"]');
     var watchTrackModeRadios = studyVideoFields.querySelectorAll('input[name="watch_track_mode"]');
     var studyVideoInput = studyVideoFields.querySelector('input[name="youtube_video_id"]');
@@ -516,7 +522,7 @@
         }
         ilernaField.style.display = source === "ilerna" ? "block" : "none";
         ilernaKeywordInput.disabled = source !== "ilerna";
-        studyMinutesInput.required = source === "ilerna";
+        studyMinutesInput.required = source === "ilerna" || source === "udemy";
         studyVideoField.style.display = source === "video" ? "block" : "none";
         studyVideoInput.disabled = source !== "video";
         studyPlaylistField.style.display = source === "playlist" ? "block" : "none";
@@ -525,6 +531,7 @@
         // vídeo suelto o un curso de Udemy no tienen "vídeos", y dejarlo
         // siempre a la vista invitaba a rellenarlo sin que sirviera de nada.
         studyVideoCountField.style.display = source === "playlist" ? "block" : "none";
+        studyPlaylistTargetError.hidden = true;
     }
 
     function refresh() {
@@ -768,6 +775,13 @@
     [watchKeywordInput, studyVideoInput, studyPlaylistInput].forEach(function (input) {
         input.addEventListener("input", function () { studyVideoFieldsError.hidden = true; });
     });
+    [studyMinutesInput, studyVideoCountInput].forEach(function (input) {
+        input.addEventListener("input", function () { studyPlaylistTargetError.hidden = true; });
+    });
+    // Solo cuentan los campos de la fuente elegida: los de las otras
+    // están deshabilitados (no viajan al servidor) aunque conserven un
+    // valor escrito antes de cambiar de pestaña.
+    function hasValue(input) { return !input.disabled && input.value.trim() !== ""; }
 
     document.querySelector("form.task-form").addEventListener("submit", function (e) {
         var isStudy = selectedValue(planTypeRadios) === "study";
@@ -779,10 +793,18 @@
             dailyMinutesError.scrollIntoView({ behavior: "smooth", block: "center" });
             return;
         }
-        if (isStudyGeneral && selectedValue(studySourceRadios) !== "ilerna" && !watchKeywordInput.value.trim() && !studyVideoInput.value.trim() && !studyPlaylistInput.value.trim()) {
+        if (isStudyGeneral && selectedValue(studySourceRadios) !== "ilerna" && !hasValue(watchKeywordInput) && !hasValue(studyVideoInput) && !hasValue(studyPlaylistInput)) {
             e.preventDefault();
             studyVideoFieldsError.hidden = false;
             studyVideoFieldsError.scrollIntoView({ behavior: "smooth", block: "center" });
+            return;
+        }
+        // Con playlist hace falta minutos o vídeos al día (si no, el servidor
+        // lo rechaza y habría que volver a rellenar el formulario).
+        if (isStudyGeneral && selectedValue(studySourceRadios) === "playlist" && !hasValue(studyMinutesInput) && !hasValue(studyVideoCountInput)) {
+            e.preventDefault();
+            studyPlaylistTargetError.hidden = false;
+            studyPlaylistTargetError.scrollIntoView({ behavior: "smooth", block: "center" });
         }
     });
 })();

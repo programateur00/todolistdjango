@@ -2141,7 +2141,7 @@ class ApiTests(TestCase):
     def test_create_study_task_udemy_ignores_watch_keyword(self):
         r = self._post("/api/tasks/create/", {
             "title": "Udemy suelto", "category": "study", "subcategory": "udemy",
-            "watch_keyword": "Excel",
+            "watch_keyword": "Excel", "target_minutes": 30,
         })
         self.assertEqual(r.status_code, 201, r.content)
         self.assertEqual(r.json()["task"]["watch_keyword"], "")
@@ -2177,7 +2177,7 @@ class ApiTests(TestCase):
         r = self._post("/api/tasks/create/", {"title": "Borrame"})
         uuid_ = r.json()["task"]["uuid"]
         self.client.delete(f"/api/tasks/{uuid_}/")
-        t = Task.objects.get(uuid=uuid_)
+        t = Task.all_objects.get(uuid=uuid_)
         self.assertIsNotNone(t.deleted_at)  # la fila sigue existiendo
         listed = self.client.get("/api/tasks/").json()
         self.assertEqual(len(listed["pending"]) + len(listed["completed"]), 0)
@@ -2528,9 +2528,14 @@ class IlernaClassesTests(TestCase):
         self.assertEqual(task.watch_keyword, "")
 
     def test_ilerna_plan_needs_minutes(self):
+        # Un error de validación no guarda NADA (ni el plan ni su tarea
+        # diaria): se vuelve al formulario con el aviso.
         r = self._create_plan(target_minutes=None)
-        self.assertEqual(r.status_code, 302, r.content)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertContains(r, "Clases de Ilerna: pon los minutos")
         self.assertFalse(PlanItem.objects.filter(watch_site=PlanItem.SITE_ILERNA).exists())
+        self.assertFalse(Plan.objects.filter(name="Clases DAM").exists())
+        self.assertFalse(Task.objects.filter(title="Clases DAM").exists())
 
     def test_ilerna_plan_does_not_close_like_a_udemy_course(self):
         self._create_plan(ilerna_keyword="Bases de datos")
