@@ -13,7 +13,6 @@ mobile_releases/
 media/
 
 static/staticfiles/
-staticfiles/
 *.bak*
 
 *.bak*

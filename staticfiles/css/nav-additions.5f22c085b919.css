@@ -1,0 +1,114 @@
+/* ========================================================================
+   Mini nav (Pendientes de hoy / Todas las tareas / Estadísticas)
+   Reutiliza los tokens de styles.css (--coral, --ink, --line, etc.)
+   ======================================================================== */
+.mini-nav {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 22px;
+    flex-wrap: wrap;
+}
+
+.mini-nav__link {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--white-paper);
+    color: var(--ink-faded);
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+}
+
+.mini-nav__link:hover {
+    border-color: var(--coral);
+    color: var(--coral);
+    background: var(--coral-soft);
+}
+
+.mini-nav__link--active {
+    background: var(--coral);
+    border-color: var(--coral);
+    color: var(--white-paper);
+}
+
+/* ========================================================================
+   Pendientes de puntuar (tareas atrasadas que nunca se marcaron)
+   ======================================================================== */
+.task-section--to-score .task-section__title {
+    color: var(--coral);
+    border-bottom-color: var(--coral-soft);
+}
+
+.task-section--to-score .task-section__count {
+    background: var(--coral-soft);
+    color: #95402A;
+}
+
+.section-hint {
+    font-size: 12px;
+    color: var(--ink-faded);
+    margin: -6px 0 12px;
+    font-style: italic;
+}
+
+.task-card--to-score {
+    border-left: 3px solid var(--coral);
+}
+
+.meta-pill--overdue {
+    background: var(--coral);
+    color: var(--white-paper);
+    opacity: 0.9;
+}
+
+/* ========================================================================
+   Hechas hoy: sección desplegable (JS hace toggle)
+   ======================================================================== */
+.toggle-done-btn {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    background: transparent;
+    border: none;
+    padding: 0 0 12px;
+    margin: 0 0 12px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--line);
+    font-family: inherit;
+}
+
+.toggle-done-btn:hover .task-section__title {
+    color: var(--coral);
+}
+
+.toggle-done-btn .task-section__title {
+    border-bottom: none;
+    margin: 0;
+    padding: 0;
+}
+
+.toggle-done-icon {
+    color: var(--ink-faded);
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+}
+
+.toggle-done-btn[aria-expanded="true"] .toggle-done-icon {
+    transform: rotate(180deg);
+}
+
+.task-list--collapsed {
+    display: none;
+}
+
+/* ========================================================================
+   Vista "Todas las tareas"
+   ======================================================================== */
+.task-card--future {
+    opacity: 0.92;
+}
