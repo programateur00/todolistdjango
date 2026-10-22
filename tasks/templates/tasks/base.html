@@ -82,6 +82,38 @@
             });
         })();
     </script>
+    <script>
+        // Un doble clic en «Guardar» (o un clic impaciente mientras el servidor
+        // todavía responde, como al montar un curso de idioma) enviaba el
+        // formulario dos veces: tareas o planes duplicados. Mientras un envío
+        // sigue en curso se ignora el siguiente.
+        (function () {
+            var LOCK_MS = 20000; // red de seguridad: pasado este tiempo se puede volver a enviar
+            function unlock(form) {
+                delete form.dataset.sending;
+                if (form._lockedButton) { form._lockedButton.disabled = false; form._lockedButton = null; }
+            }
+            document.addEventListener('submit', function (e) {
+                var form = e.target;
+                if (!form || form.tagName !== 'FORM') return;
+                if (form.dataset.sending === '1') { e.preventDefault(); return; }
+                // Se espera a que acaben los demás manejadores: si alguno cancela el
+                // envío (confirmación, validación…) el formulario sigue disponible.
+                var button = e.submitter;
+                setTimeout(function () {
+                    if (e.defaultPrevented) return;
+                    form.dataset.sending = '1';
+                    if (button && !button.disabled) { button.disabled = true; form._lockedButton = button; }
+                    setTimeout(function () { unlock(form); }, LOCK_MS);
+                }, 0);
+            }, true);
+            // Volver atrás con la página guardada en memoria: el formulario debe estar libre.
+            window.addEventListener('pageshow', function (e) {
+                if (!e.persisted) return;
+                Array.prototype.forEach.call(document.forms, unlock);
+            });
+        })();
+    </script>
     <script type="module" src="{% static 'js/camera-fullscreen.js' %}"></script>
     <script src="{% static 'js/fx.js' %}" defer></script>
 </body>

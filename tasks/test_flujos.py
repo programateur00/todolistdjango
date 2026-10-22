@@ -2050,7 +2050,14 @@ class PlaylistPositionTests(TestCase):
                 self.assertEqual(plan.items.get().playlist_position, 1)
                 # Lo que hace la lista al abrirse (sync_all_tasks) NO debe pisarlo.
                 self.assertEqual(self._pending(plan).playlist_start_index, 1)
-                self.assertFalse(Occurrence.objects.exists(), "cerrar a medias no cumple el día")
+                # Solo cuenta que no quede NINGÚN día dado por cumplido. Una
+                # Occurrence 'no hecha' autoexpirada sí puede existir: las
+                # tareas de un plan vencen a las 20:00 y este test usa la hora
+                # real, así que a partir de esa hora la de hoy ya se cerró sola.
+                self.assertFalse(
+                    Occurrence.objects.filter(result=Occurrence.RESULT_DONE).exists(),
+                    "cerrar a medias no cumple el día",
+                )
 
     def test_watching_more_than_the_goal_asks_moves_the_start_further(self):
         for channel in self.CHANNELS:

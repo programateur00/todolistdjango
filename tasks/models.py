@@ -2182,19 +2182,72 @@ class Task(models.Model):
         )
 
     @classmethod
+    def _closed_in_grace_pks(cls, qs):
+        """
+        PKs de las tareas hechas A MANO pasada la medianoche, pero dentro
+        del margen que la app les da después de su hora límite.
+
+        Si abres una tarea antes de su hora límite (STARTED_GRACE_HOURS) o
+        contestas una antitarea en su margen (AVOID_GRACE_HOURS), puedes
+        terminarla ya cruzada la medianoche. completed_at cae entonces en
+        el día siguiente, pero Occurrence se guarda por due_date, así que
+        las estadísticas la cuentan para el día de su fecha límite. Esta
+        función las localiza para que Hechas diga lo mismo que las
+        estadísticas.
+
+        "Dentro del margen" = hasta el último momento en que la tarea
+        habría podido cerrarse sin caducar sola:
+        resolve_datetime() + STARTED_GRACE_HOURS (ver _expire_pass).
+        Las que se terminan pasado ese margen cuentan el día en que se
+        terminan, como cualquier tarea hecha con retraso.
+
+        Solo pueden cruzar la medianoche las que vencen tarde, así que la
+        consulta se acota por hora límite y por completed_at, y la
+        comparación fina se hace aquí en Python (aritmética de fechas con
+        horas sueltas, igual en cualquier base de datos).
+        """
+        total_grace = cls.STARTED_GRACE_HOURS + cls.AVOID_GRACE_HOURS
+        earliest = _dt.time(max(0, 24 - total_grace), 0)
+        rows = qs.filter(
+            is_done=True, expired=False,
+            due_date__isnull=False, due_time__isnull=False, due_time__gte=earliest,
+            completed_at__isnull=False,
+        ).values_list("pk", "due_date", "due_time", "completed_at", "category")
+
+        pks = []
+        for pk, due_date, due_time, completed_at, category in rows:
+            done = timezone.localtime(completed_at).replace(tzinfo=None)
+            if done.date() <= due_date:
+                continue   # no cruzó la medianoche: ya cuenta su propio día
+            hours = cls.STARTED_GRACE_HOURS
+            if category == cls.CATEGORY_AVOID:
+                hours += cls.AVOID_GRACE_HOURS
+            limit = _dt.datetime.combine(due_date, due_time) + timedelta(hours=hours)
+            if done <= limit:
+                pks.append(pk)
+        return pks
+
+    @classmethod
     def _with_completed_day(cls, qs):
         """
         Día al que pertenece una tarea hecha en la lista de Hechas.
 
         Normalmente es el de completed_at (o created_at si falta). Pero
-        una tarea CADUCADA sola a las 23:59 recibe completed_at = 00:00 del
-        día siguiente (ver mark_expired), y así aparecía en la lista de
-        Hechas de mañana. Para esas se usa su due_date, que es el día al
-        que de verdad pertenecen.
+        hay dos casos en que completed_at cae en el día siguiente al que
+        de verdad pertenece la tarea, y así aparecía en la lista de Hechas
+        de mañana. Para los dos se usa su due_date:
+          - una tarea CADUCADA sola a las 23:59 recibe completed_at =
+            00:00 del día siguiente (ver mark_expired);
+          - una tarea terminada a mano dentro del margen, ya pasada la
+            medianoche (ver _closed_in_grace_pks).
         """
+        late_pks = cls._closed_in_grace_pks(qs)
+        whens = [When(expired=True, due_date__isnull=False, then=F("due_date"))]
+        if late_pks:
+            whens.append(When(pk__in=late_pks, then=F("due_date")))
         return qs.annotate(
             _completed_day=Case(
-                When(expired=True, due_date__isnull=False, then=F("due_date")),
+                *whens,
                 default=TruncDate(Coalesce("completed_at", "created_at")),
                 output_field=DateField(),
             ),
@@ -2939,6 +2992,13 @@ class Plan(models.Model):
     # tener que volver a calcularlo cada vez que se enseña la lista de
     # cerrados, y dEja constancia de con qué dato se decidió.
     final_progress_pct = models.PositiveIntegerField(null=True, blank=True)
+    # Cuándo vio el usuario la pantalla de cierre (resultado + si llegó al
+    # umbral). Un plan que se cierra solo al pasar su fecha (ver
+    # auto_close_expired) lo hace en silencio: sin esto el usuario se
+    # enteraba al día siguiente porque la tarea "desaparecía". Mientras sea
+    # None en un plan cerrado, la lista de tareas (app y web) enseña un
+    # aviso con el resultado; se rellena al abrir la pantalla de cierre.
+    closure_seen_at = models.DateTimeField(null=True, blank=True)
 
     # A partir de qué porcentaje un cierre cuenta como "completado" en
     # vez de "terminado incompleto". Un ciclo que no lo alcanza se
@@ -3002,6 +3062,31 @@ class Plan(models.Model):
         """
         pct = self.final_progress_pct if self.closed_at else self.progress_pct()
         return pct is not None and pct >= self.COMPLETION_THRESHOLD_PCT
+
+    def last_session_notice(self, task):
+        """
+        Aviso de "esta es la ÚLTIMA sesión del plan" para la tarea dada, o
+        None si no lo es (o no se puede saber).
+
+        Solo para planes que terminan por fecha (Deporte/General): la tarea
+        es la última si su siguiente repetición cae en `ends_on` o después
+        (el plan se cerrará solo ese día, ver auto_close_expired). Los
+        planes de Estudio terminan por temario/curso, no por fecha, así que
+        no avisan. Devuelve el % de ahora y si ya alcanza el umbral, para
+        que la app pueda decir "vas al 62%, hace falta el 70%".
+        """
+        if self.closed_at or not self.is_active or self.plan_type == self.PLAN_TYPE_STUDY:
+            return None
+        nxt = task.next_due_date()
+        if nxt is not None and nxt < self.ends_on:
+            return None
+        pct = self.progress_pct()
+        return {
+            "progress_pct": pct,
+            "threshold": self.COMPLETION_THRESHOLD_PCT,
+            "on_track": pct is not None and pct >= self.COMPLETION_THRESHOLD_PCT,
+            "ends_on": self.ends_on.isoformat(),
+        }
 
     def _is_finished_now(self):
         """

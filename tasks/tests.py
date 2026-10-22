@@ -1784,6 +1784,20 @@ class ExerciseCatalogTests(TestCase):
         self.assertIn("splitjump", COUNTERS)
         self.assertNotIn("split-jump", _NEEDS_BAR_EQUIPMENT)
 
+    def test_russian_twist_is_a_seated_profile_rep_exercise_with_its_own_counter(self):
+        """Russian twists (0125): sentado de perfil, contador propio ("russiantwist", processRussianTwist en workout.js, web y
+        app; solo se arma con un hombro visible y cuenta cada giro con los dos hombros vistos), tren inferior (core), nivel
+        intermedio, sin material."""
+        from tasks.views import COUNTERS
+        from tasks.ai import _NEEDS_BAR_EQUIPMENT
+        ex = Exercise.objects.get(slug="russian-twist")
+        self.assertEqual(ex.mode, Exercise.MODE_POSE)
+        self.assertEqual(ex.counter_key, "russiantwist")
+        self.assertEqual(ex.body_area, "lower_body")
+        self.assertEqual(ex.level, "intermediate")
+        self.assertIn("russiantwist", COUNTERS)
+        self.assertNotIn("russian-twist", _NEEDS_BAR_EQUIPMENT)
+
     def test_plank_variants_count_reps_with_their_own_counters(self):
         """Plancha con toques de hombro / dinámica / lateral con cadera (0106): no son aguantes
         cronometrados sino de repeticiones, cada una con su contador (migración 0110)."""

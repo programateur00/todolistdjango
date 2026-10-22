@@ -1,4 +1,5 @@
 import json
+import logging
 
 from django.contrib import messages
 from django.db.models import Count, Q
@@ -21,6 +22,8 @@ from .models import (
 from . import calories
 from .utils import get_current_user, read_mobile_release, resolve_plan_target
 from urllib.parse import quote
+
+logger = logging.getLogger(__name__)
 
 
 # Calentamiento/enfriamiento RECOMENDADO (no obligatorio) en toda sesión
@@ -282,6 +285,22 @@ def task_list(request):
     Plan.auto_close_expired(user=get_current_user())
     Plan.sync_all_tasks(user=get_current_user())
 
+    # Planes que se cerraron solos (al pasar su fecha) sin que el usuario
+    # viera el resultado: se le dice aquí, una sola vez.
+    for closed in _plans_qs().filter(closed_at__isnull=False, closure_seen_at__isnull=True):
+        pct = closed.final_progress_pct
+        if closed.is_completed:
+            messages.success(request, f"🎉 Has completado «{closed.name}» ({pct}%). El plan ha terminado.")
+        else:
+            got = f" ({pct}%)" if pct is not None else ""
+            messages.warning(
+                request,
+                f"🏳️ El plan «{closed.name}» ha terminado sin llegar al "
+                f"{closed.COMPLETION_THRESHOLD_PCT}%{got}. Esa fue su última sesión.",
+            )
+        closed.closure_seen_at = timezone.now()
+        closed.save(update_fields=["closure_seen_at"])
+
     # Filtro opcional por categoría (?cat=sport, ?cat=study, …)
     cat = request.GET.get("cat") or ""
     valid_cats = {key for key, _ in Task.CATEGORY_CHOICES}
@@ -384,6 +403,18 @@ def task_create(request):
             messages.error(request, "Ponle un título a la tarea.")
         else:
             client_uuid = _read_client_uuid(request)
+            if client_uuid:
+                # El mismo formulario enviado dos veces (doble clic, o volver
+                # atrás y reenviar): el uuid ya existe, y guardar otra tarea con
+                # él reventaba con un error 500 aunque la primera SÍ se hubiera
+                # creado. Se da por buena la que ya está. (Un uuid de otra
+                # cuenta nunca se reutiliza: se descarta y se genera uno nuevo.)
+                already = Task.objects.filter(uuid=client_uuid).first()
+                if already is not None:
+                    if already.user_id == get_current_user().pk:
+                        messages.success(request, "Tarea creada.")
+                        return redirect(reverse("tasks:task_list"))
+                    client_uuid = None
             repeat = request.POST.get("repeat", Task.REPEAT_NONE)
             due_date = request.POST.get("due_date") or None
             if due_date is None and repeat != Task.REPEAT_NONE:
@@ -436,7 +467,16 @@ def task_create(request):
                 # _study_link_error) -- si llego alguna en el POST se
                 # ignora, es exclusiva de un Plan.
                 task.watch_keyword = ""
-            link_error = task.study_link_error()
+            # Igual que en task_edit: una fecha imposible (p. ej. un año de 5
+            # cifras tecleado sin querer en el campo de fecha) no puede acabar
+            # en un error 500 al guardar.
+            date_error = None
+            if isinstance(task.due_date, str):
+                try:
+                    task.due_date = _dt.date.fromisoformat(task.due_date)
+                except ValueError:
+                    date_error = "La fecha no es válida."
+            link_error = date_error or task.study_link_error()
             if link_error:
                 messages.error(request, link_error)
             else:
@@ -1517,6 +1557,12 @@ def task_video_save(request, pk):
     raw_videos = data.get("videos_watched")
     videos_watched = max(0, int(raw_videos)) if isinstance(raw_videos, (int, float)) else None
     plan = task.plan
+    # Petición repetida (doble toque en «Terminar», o una copia que quedó
+    # en espera y se envía después de haberse guardado ya): si la tarea YA
+    # estaba hecha, el temario del curso no se vuelve a avanzar ni se lanza
+    # otro test -- contaría el mismo vídeo dos veces y "se comería" el
+    # siguiente sin verlo.
+    already_done = task.is_done
 
     # Un vídeo de Deporte (seguir una rutina en YouTube) no se marca
     # hecho aquí: falta el enfriamiento obligatorio (task_cooldown), que
@@ -1561,7 +1607,11 @@ def task_video_save(request, pk):
     messages.success(request, "Vídeo visto — tarea completada.")
 
     quiz = None
-    if plan and plan.plan_type == Plan.PLAN_TYPE_STUDY and plan.study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE:
+    if (
+        not already_done
+        and plan and plan.plan_type == Plan.PLAN_TYPE_STUDY
+        and plan.study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE
+    ):
         plan.mark_current_module_watched(count=videos_watched)
         # El progreso del temario se acaba de actualizar -- si ESTE
         # vídeo era el que completaba el curso, mark_done() de arriba
@@ -1569,7 +1619,14 @@ def task_video_save(request, pk):
         # se vuelve a comprobar aquí ya con el dato al día.
         if not closed_plan and plan.close_if_finished():
             closed_plan = plan
-        quiz = api.maybe_trigger_quiz(plan)
+        try:
+            quiz = api.maybe_trigger_quiz(plan)
+        except Exception:
+            # El test de repaso es un extra con una IA de por medio (red
+            # cortada a medias, respuesta rara...): pase lo que pase ahí, el
+            # vídeo ya está guardado y no puede acabar en un error.
+            logger.exception("No se pudo generar el test de repaso del plan %s", plan.pk)
+            quiz = None
 
     redirect_url = (
         reverse("tasks:quiz_take", args=[quiz.uuid]) if quiz
@@ -2040,7 +2097,7 @@ def stats_delete_series(request, series_id):
 # ─────────────────────────────────────────────────────────────────────
 
 # Contadores que existen de verdad en workout.js.
-COUNTERS = {"superman", "lsit", "elephantsteps", "burpee", "pullup", "dip", "pushup", "squat", "jumpsquat", "splitsquat", "crunch", "legraise", "highlegraise", "situp", "doublecrunch", "vup", "scissor", "archerpullup", "inclinepushup", "kneepushup", "kneedeclinepushup", "archerpushup", "onearmpushup", "clappushup", "pseudoplanchepushup", "rockingpushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "hipforwardback", "scapularpull", "handstandpushup", "pistolsquat", "cossacksquat", "plankshouldertaps", "dynamicplank", "sideplankhipdips", "heelraise", "tuckjump", "switchblade", "jumprope", "toestobar", "stepup", "glutebridge", "splitjump"}
+COUNTERS = {"superman", "lsit", "elephantsteps", "burpee", "pullup", "dip", "pushup", "squat", "jumpsquat", "splitsquat", "crunch", "legraise", "highlegraise", "situp", "doublecrunch", "vup", "scissor", "archerpullup", "inclinepushup", "kneepushup", "kneedeclinepushup", "archerpushup", "onearmpushup", "clappushup", "pseudoplanchepushup", "rockingpushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "hipforwardback", "scapularpull", "handstandpushup", "pistolsquat", "cossacksquat", "plankshouldertaps", "dynamicplank", "sideplankhipdips", "heelraise", "tuckjump", "switchblade", "jumprope", "toestobar", "stepup", "glutebridge", "splitjump", "russiantwist"}
 
 # Ejercicios "timed" (se aguantan, no se cuentan en repeticiones) que
 # workout.js sabe seguir con cámara comprobando la postura — plancha,
@@ -2048,7 +2105,7 @@ COUNTERS = {"superman", "lsit", "elephantsteps", "burpee", "pullup", "dip", "pus
 # task_workout: a estos, a diferencia del resto de "timed" (bicicleta…),
 # sí se les deja entrar en el entreno individual de una tarea con cámara
 # encendida, no solo dentro de un circuito.
-POSTURE_COUNTERS = {"hollowbodyhold", "supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "tucklever", "deadhang", "handstand", "frogstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch", "elephantstepshold"}
+POSTURE_COUNTERS = {"hollowbodyhold", "supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "tucklever", "deadhang", "handstand", "frogstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch", "elephantstepshold", "butterflystretch"}
 
 
 def _plans_qs():
@@ -3221,11 +3278,7 @@ def plan_language_confirm(request):
         if error:
             messages.error(request, error)
             return redirect(reverse("tasks:plan_create"))
-        plan.save()
-
-        for module in course_modules:
-            module.plan = plan
-            module.save()
+        api.save_language_plan(plan, course_modules)
 
         plan.sync_task()
         request.session.pop("plan_language_draft", None)
@@ -3274,9 +3327,7 @@ def plan_language_retry(request, pk):
         messages.error(request, error)
         return redirect(reverse("tasks:plan_detail", args=[plan.pk]))
 
-    for module in course_modules:
-        module.plan = plan
-        module.save()
+    api.save_course_modules(plan, course_modules)
     plan.sync_task()
     messages.success(request, "Vídeos asignados — ya puedes empezar el curso.")
     return redirect(reverse("tasks:plan_detail", args=[plan.pk]))
@@ -3327,6 +3378,11 @@ def plan_close(request, pk):
         plan.is_active = False
         plan.save(update_fields=["final_progress_pct", "closed_at", "is_active", "updated_at"])
         plan.sync_task()  # retira la tarea pendiente, como al pausar
+
+    # Ver esta pantalla ES enterarse del resultado: ya no hace falta avisar.
+    if plan.closed_at and not plan.closure_seen_at:
+        plan.closure_seen_at = timezone.now()
+        plan.save(update_fields=["closure_seen_at"])
 
     return render(request, "tasks/plan_close.html", {
         "plan": plan,

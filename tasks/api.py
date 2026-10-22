@@ -95,6 +95,34 @@ def parse_minutes(data):
         return None, "Minutos inválidos"
 
 
+def _parse_date_or_none(raw):
+    """
+    Fecha que manda el cliente. parse_date lanza ValueError con una fecha bien
+    formada pero imposible (2026-02-30): aquí eso es simplemente «no válida»,
+    igual que un formato raro o un tipo que no es texto, y no un 500.
+    """
+    if isinstance(raw, _dt.date):
+        return raw
+    if not isinstance(raw, str):
+        return None
+    try:
+        return parse_date(raw)
+    except ValueError:
+        return None
+
+
+def _parse_time_or_none(raw):
+    """Igual que _parse_date_or_none, para horas (25:61, 24:00...)."""
+    if isinstance(raw, _dt.time):
+        return raw
+    if not isinstance(raw, str):
+        return None
+    try:
+        return parse_time(raw)
+    except ValueError:
+        return None
+
+
 def _user():
     return get_current_user()
 
@@ -155,6 +183,12 @@ def task_json(t):
         # pasar por el selector de ejercicios: el plan ya decidió.
         "plan_uuid": str(t.plan.uuid) if t.plan else None,
         "plan_name": t.plan.name if t.plan else None,
+        # Si esta tarea es la ÚLTIMA sesión del plan (se cierra solo después):
+        # {progress_pct, threshold, on_track, ends_on}. None en cualquier otro
+        # caso. La app lo enseña en la tarjeta para que no pille por sorpresa.
+        "plan_last_session": (
+            t.plan.last_session_notice(t) if (t.plan and not t.is_done) else None
+        ),
         "due_date": t.due_date.isoformat() if t.due_date else None,
         "due_time": t.due_time.strftime("%H:%M") if t.due_time else None,
         "repeat": t.repeat,
@@ -303,6 +337,9 @@ def task_list(request):
         # Mismo criterio que la web: la tarea de mañana no es de hoy.
         "pending": [task_json(t) for t in Task.for_today(qs.filter(is_done=False))],
         "completed": [task_json(t) for t in Task.completed_today(qs)],
+        # Planes que se cerraron (p. ej. solos, al pasar su fecha) y cuyo
+        # resultado el usuario todavía no ha visto.
+        "plans_closed_unseen": [closed_plan_json(p) for p in unseen_closed_plans()],
         "weekly": Occurrence.weekly_completion(_user()),
         "daily": Occurrence.daily_completion(_user()),
     })
@@ -529,7 +566,7 @@ def _apply_task_fields(t, data):
         if not raw:
             t.due_date = None
         else:
-            parsed = parse_date(raw) if isinstance(raw, str) else raw
+            parsed = _parse_date_or_none(raw)
             if parsed is None:
                 return "Fecha inválida (usa AAAA-MM-DD)."
             t.due_date = parsed
@@ -538,7 +575,7 @@ def _apply_task_fields(t, data):
         if not raw:
             t.due_time = _dt.time(23, 59)
         else:
-            parsed = parse_time(raw) if isinstance(raw, str) else raw
+            parsed = _parse_time_or_none(raw)
             if parsed is None:
                 return "Hora inválida (usa HH:MM)."
             t.due_time = parsed
@@ -590,6 +627,26 @@ def _apply_task_fields(t, data):
 def task_create(request):
     data = body(request)
     t = Task(user=_user())
+    # El cliente (offline-first) manda un uuid propio por tarea. Si esa
+    # tarea ya existe -- la respuesta de la primera petición se perdió y el
+    # móvil la reenvía, o la cola la mandó dos veces --, se devuelve tal
+    # cual en vez de chocar con el uuid único (que daba 500 y dejaba la cola
+    # de cambios atascada para siempre detrás de esa petición).
+    raw_uuid = (data.get("uuid") or data.get("client_uuid") or "")
+    raw_uuid = raw_uuid.strip() if isinstance(raw_uuid, str) else ""
+    wanted_uuid = None
+    if raw_uuid:
+        try:
+            wanted_uuid = uuid.UUID(raw_uuid)
+        except ValueError:
+            wanted_uuid = None
+    if wanted_uuid is not None:
+        existing = Task.objects.filter(uuid=wanted_uuid).first()
+        if existing is not None and existing.user_id == t.user_id:
+            return JsonResponse({"ok": True, "task": task_json(existing), "notice": ""})
+        if existing is not None:
+            # uuid ocupado por otra cuenta: se ignora el del cliente.
+            wanted_uuid = None
     error = _apply_task_fields(t, data)
     if error:
         return JsonResponse({"ok": False, "error": error}, status=400)
@@ -610,12 +667,8 @@ def task_create(request):
     # Si el cliente ya trae un uuid (offline-first, o porque generó uno
     # de antemano para poder guardar un vídeo local con esa clave antes
     # de crear la tarea), se respeta en vez de generar uno nuevo.
-    raw_uuid = (data.get("uuid") or data.get("client_uuid") or "").strip()
-    if raw_uuid:
-        try:
-            t.uuid = uuid.UUID(raw_uuid)
-        except ValueError:
-            pass
+    if wanted_uuid is not None:
+        t.uuid = wanted_uuid
     t.save()
     if t.youtube_playlist_id:
         t.sync_playlist_videos()
@@ -754,11 +807,28 @@ def notify_pending(request):
     notifications.js) o ?task=<uuid> (tareas sueltas o con huecos, ancladas
     a su propia fila). "Pendiente" es exactamente el mismo criterio que ya
     usa task_mark_by_series: existe una fila sin resolver.
+
+    ?date=YYYY-MM-DD (opcional, solo con ?series=): la fecha de la fila a la
+    que se refiere el aviso. Es IMPRESCINDIBLE para las tareas "cada día" y
+    las antitareas: al resolver la de hoy el servidor crea ya la de mañana
+    (sin resolver) en la misma serie, así que sin fecha "¿hay alguna fila
+    pendiente en la serie?" era SIEMPRE que sí y la comprobación previa
+    nunca cancelaba el aviso de una tarea ya hecha desde otro sitio (la web,
+    otro móvil, la extensión de Chrome). Con fecha se mira solo la fila de
+    ese día. Sin ella (apps antiguas) se conserva el comportamiento de
+    siempre.
     """
     series_id = request.GET.get("series")
     task_uuid = request.GET.get("task")
+    date_param = request.GET.get("date")
     qs = tasks_qs().filter(is_done=False)
     if series_id:
+        if date_param:
+            try:
+                day = _dt.date.fromisoformat(date_param)
+            except ValueError:
+                return JsonResponse({"ok": False, "error": "Fecha inválida"}, status=400)
+            qs = qs.filter(due_date=day)
         pending = qs.filter(series_id=series_id).exists()
     elif task_uuid:
         pending = qs.filter(uuid=task_uuid).exists()
@@ -988,6 +1058,11 @@ def video_save(request, uuid):
     minutes_watched = max(0, int(raw_minutes)) if isinstance(raw_minutes, (int, float)) else None
     raw_videos = data.get("videos_watched")
     videos_watched = max(0, int(raw_videos)) if isinstance(raw_videos, (int, float)) else None
+    # Petición repetida (la app la dejó en cola sin red y el usuario volvió
+    # a terminar, o un doble toque): si la tarea YA estaba hecha, el temario
+    # del curso no se vuelve a avanzar -- contaría el mismo vídeo dos veces
+    # y "se comería" el siguiente sin verlo. Igual que views.task_video_save.
+    already_done = t.is_done
 
     # Un vídeo de Deporte (seguir una rutina en YouTube) no se marca
     # hecho aquí: falta el enfriamiento obligatorio (ver warmup-view.js
@@ -1024,7 +1099,11 @@ def video_save(request, uuid):
     # recalcula solo desde las Occurrence (ver Plan._study_playlist_progress)
     # -- o la tarea de mañana volvería a enseñar el mismo vídeo de hoy para
     # siempre (ver Plan.mark_current_module_watched).
-    if plan and plan.plan_type == Plan.PLAN_TYPE_STUDY and plan.study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE:
+    if (
+        not already_done
+        and plan and plan.plan_type == Plan.PLAN_TYPE_STUDY
+        and plan.study_subtype == Plan.STUDY_SUBTYPE_LANGUAGE
+    ):
         plan.mark_current_module_watched(count=videos_watched)
         # Si ESTE vídeo era el que completaba el curso, mark_done() de
         # arriba todavía no lo sabía: se vuelve a comprobar con el dato al día.
@@ -1907,6 +1986,20 @@ def plans_qs():
     return Plan.objects.filter(user=_user(), deleted_at__isnull=True)
 
 
+def unseen_closed_plans():
+    return plans_qs().filter(closed_at__isnull=False, closure_seen_at__isnull=True).order_by("closed_at")
+
+
+def closed_plan_json(p):
+    return {
+        "uuid": str(p.uuid), "name": p.name,
+        "closed_at": p.closed_at.isoformat() if p.closed_at else None,
+        "final_progress_pct": p.final_progress_pct,
+        "is_completed": p.is_completed,
+        "threshold": p.COMPLETION_THRESHOLD_PCT,
+    }
+
+
 @api("GET")
 def plan_list(request):
     return JsonResponse({"plans": [plan_json(p) for p in plans_qs()]})
@@ -1975,7 +2068,7 @@ def _apply_plan_fields(p, data):
         p.notes = (data.get("notes") or "").strip()
     if "started_on" in data:
         raw = data["started_on"]
-        parsed = parse_date(raw) if isinstance(raw, str) else raw
+        parsed = _parse_date_or_none(raw)
         p.started_on = parsed or p.started_on or timezone.localtime(timezone.now()).date()
     elif not p.pk:
         p.started_on = timezone.localtime(timezone.now()).date()
@@ -2001,7 +2094,7 @@ def _apply_plan_fields(p, data):
     # ver build_plan_draft/build_language_plan_draft).
     if "due_time" in data:
         raw = data["due_time"]
-        parsed = parse_time(raw) if isinstance(raw, str) else raw
+        parsed = _parse_time_or_none(raw)
         if not parsed:
             return "Ponle una hora — la notificación y el cierre automático del día la necesitan."
         p.due_time = parsed
@@ -2052,9 +2145,20 @@ def plan_close(request, uuid):
         p.final_progress_pct = p.progress_pct()
         p.closed_at = timezone.now()
         p.is_active = False
-        p.save(update_fields=["final_progress_pct", "closed_at", "is_active", "updated_at"])
+        p.closure_seen_at = p.closed_at  # lo ha cerrado él: ya lo sabe
+        p.save(update_fields=["final_progress_pct", "closed_at", "closure_seen_at", "is_active", "updated_at"])
         p.sync_task()
     return JsonResponse({"ok": True, "plan": plan_json(p, detail=True)})
+
+
+@api("POST")
+def plan_closure_seen(request, uuid):
+    """El usuario ya ha visto el resultado del cierre: deja de avisarse."""
+    p = get_object_or_404(plans_qs(), uuid=uuid)
+    if p.closed_at and not p.closure_seen_at:
+        p.closure_seen_at = timezone.now()
+        p.save(update_fields=["closure_seen_at"])
+    return JsonResponse({"ok": True})
 
 
 def _apply_video_fields(item, data):
@@ -2698,6 +2802,15 @@ def build_language_plan_draft(
     }, None
 
 
+# Tope de vídeos que se traen de CADA playlist del catálogo al confirmar un
+# plan de idiomas. Antes eran 50 (una sola página de la API) y un curso
+# largo -- justo los de "A1 a B2 en una sola lista" que admite el catálogo,
+# ver CoursePlaylist.level_to -- se recortaba EN SILENCIO a sus primeros 50
+# vídeos. 500 es el mismo tope que ya usan las playlists de las tareas
+# (sync_playlist_cache en models.py).
+MAX_VIDEOS_PER_CATALOG_COURSE = 500
+
+
 def expand_language_selection(selected):
     """
     Convierte los cursos elegidos por la IA (todavía solo referencias al
@@ -2725,7 +2838,9 @@ def expand_language_selection(selected):
         except CoursePlaylist.DoesNotExist:
             return None, "Uno de los cursos elegidos ya no está en el catálogo — genera el plan otra vez."
         try:
-            items = list_playlist_items(entry["youtube_playlist_id"], max_results=50)
+            items = list_playlist_items(
+                entry["youtube_playlist_id"], max_results=MAX_VIDEOS_PER_CATALOG_COURSE,
+            )
             if not items:
                 return None, f"«{catalog.title}» ya no tiene vídeos — quítalo del catálogo y genera otra vez."
             details = get_videos_details([it["video_id"] for it in items])
@@ -2755,6 +2870,30 @@ def expand_language_selection(selected):
     if not modules:
         return None, "Ninguno de los cursos elegidos tenía vídeos que se pudieran incrustar. Genera el plan otra vez."
     return modules, None
+
+
+def save_course_modules(plan, course_modules):
+    """
+    Guarda de una vez el temario que devolvió `expand_language_selection`.
+    Un solo `bulk_create` (Django ya lo envuelve en una transacción): el
+    temario entero o nada, y una escritura en vez de una por vídeo -- con
+    cursos de cientos de vídeos la diferencia se nota.
+    """
+    for module in course_modules:
+        module.plan = plan
+    CourseModule.objects.bulk_create(course_modules)
+
+
+def save_language_plan(plan, course_modules):
+    """
+    Guarda el plan de idiomas Y su temario como una sola operación: o
+    entran los dos o no entra ninguno. Antes el plan se guardaba primero y
+    los vídeos después; si algo fallaba en medio (base de datos ocupada...)
+    quedaba un curso vacío y, al reintentar, otro plan duplicado.
+    """
+    with transaction.atomic():
+        plan.save()
+        save_course_modules(plan, course_modules)
 
 
 def maybe_trigger_quiz(plan):
@@ -2900,10 +3039,7 @@ def plan_language_save(request):
         _apply_language_plan_fields(plan, plan_data)
     if error:
         return JsonResponse({"ok": False, "error": error}, status=400)
-    plan.save()
-    for module in course_modules:
-        module.plan = plan
-        module.save()
+    save_language_plan(plan, course_modules)
     plan.sync_task()
     return JsonResponse({"ok": True, "plan": plan_json(plan, detail=True)}, status=201)
 

@@ -29,7 +29,7 @@ const POSE_DELEGATE = "GPU";
 // esperaba, la explicación ya no es una suposición: se ve. Cambiar este
 // valor cada vez que se toque processDip (o cualquier otra parte que use
 // logScissor) de verdad ayuda a diagnosticar.
-const WORKOUT_JS_BUILD = "2026-09-19-frontpos-v1+cindy-v2+lsithold-flow-v18+superman-v2+pikepushup-v1+forearmrotation-v2+elephantsteps-v1+burpee-v1+forearmrotation-v3+hiplateral-v6+hipforwardback-v4+standingquadstretch-v2+pikepushup-v2+dips-vis-v1+dips-lastre-v1+legrotation-v5+hiplateral-v7+websync-2026-10-08+dips-v2+kneepushup-v1+archerpushup-v1+pseudoplanche-v1+kneepushup-v2+archerclap-v2+archer-v3+cossack-v1+rockingpushup-v1+tuckjump-v1+jumprope-v1+glutebridge-v1+switchblade-v1+splitjump-v1+dips-balanceo-v1+clap-v2+archer-v4+rockingpushup-v2+clap-v3b+clap-v4+archer-v7+frogstand-v6+dips-cierre-v1";
+const WORKOUT_JS_BUILD = "2026-09-19-frontpos-v1+cindy-v2+lsithold-flow-v18+superman-v2+pikepushup-v1+forearmrotation-v2+elephantsteps-v1+burpee-v1+forearmrotation-v3+hiplateral-v6+hipforwardback-v4+standingquadstretch-v2+pikepushup-v2+dips-vis-v1+dips-lastre-v1+legrotation-v5+hiplateral-v7+websync-2026-10-08+dips-v2+kneepushup-v1+archerpushup-v1+pseudoplanche-v1+kneepushup-v2+archerclap-v2+archer-v3+cossack-v1+rockingpushup-v1+tuckjump-v1+jumprope-v1+glutebridge-v1+switchblade-v1+splitjump-v1+dips-balanceo-v1+clap-v2+archer-v4+rockingpushup-v2+clap-v3b+clap-v4+archer-v7+frogstand-v6+dips-cierre-v1+dips-walk-v1+russiantwist-v1+butterfly-v1";
 
 // Token del registro de depuración remoto (ver settings.DEBUG_LOG_TOKEN
 // en el backend) -- exportScissorLog() lo manda junto al registro para
@@ -168,6 +168,20 @@ const LIFTOFF_FACTOR = 0.04; // primer indicio de movimiento real (para medir bi
 // vídeo de referencia.
 const SCAPULARPULL_MOVE_FACTOR = 0.07;
 const SCAPULARPULL_LIFTOFF_FACTOR = 0.03;
+// 2026-10-21 (Alex: "con los pies en el suelo y doblo los brazos me lo cuenta como válida"). Antes solo se miraba que las
+// muñecas estuvieran sobre los hombros y que el hombro subiera/bajara 0.07 anchos: de pie bajo la barra, doblando los
+// brazos o las rodillas, el hombro se mueve igual y contaba. Ahora una repetición solo vale si:
+//  - el CUERPO ENTERO sube y baja: en el rango de la repetición los tobillos se mueven al menos SCAPULARPULL_FEET_FOLLOW_MIN_RATIO
+//    de lo que se mueve el hombro (colgado todo el cuerpo sube a la vez; con los pies apoyados los tobillos no se mueven).
+//    Es una medida RELATIVA (no hace falta saber dónde está el suelo). Si los tobillos no se ven en la repetición, no se juzga.
+//  - el codo sigue estirado (escapular = sin doblar el codo): más de SCAPULARPULL_BENT_MIN_FRAMES fotogramas con el
+//    ángulo hombro-codo-muñeca por debajo de SCAPULARPULL_ELBOW_BENT_MAX_DEG invalidan la repetición.
+const SCAPULARPULL_FEET_MIN_VISIBILITY = 0.5;      // tobillo con menos visibilidad = no se usa
+const SCAPULARPULL_FEET_FOLLOW_MIN_RATIO = 0.5;    // rango de tobillos / rango de hombro mínimo (colgado ~1.0, apoyado ~0-0.2)
+const SCAPULARPULL_FEET_MIN_SAMPLE_FRACTION = 0.6; // fracción mínima de fotogramas de la repetición con tobillos visibles para juzgarlos
+const SCAPULARPULL_ELBOW_MIN_VISIBILITY = 0.4;
+const SCAPULARPULL_ELBOW_BENT_MAX_DEG = 130;       // brazo estirado ~160-180
+const SCAPULARPULL_BENT_MIN_FRAMES = 3;            // fotogramas sueltos con ruido no invalidan
 
 // Toes to bar (toestobar): colgado de la barra con los brazos estirados, las piernas suben (casi rectas) hasta que
 // los pies tocan la barra y bajan con control. Se mide solo la ALTURA de los pies (tobillo o punta, el más alto que
@@ -410,7 +424,7 @@ const OUT_OF_FRAME_STABLE_MS = 1200;
 // les aplica el cierre por salir del encuadre de arriba, y también el
 // cierre por ponerte de pie en el caso de los abdominales tumbado (ver
 // ON_GROUND_STABLE_MS más abajo).
-const GROUND_STYLE_COUNTERS = new Set(["burpee", "elephantsteps", "superman", "lsit", "pushupfront", "squatfront", "squat", "jumpsquat", "splitsquat", "splitjump", "pistolsquat", "cossacksquat", "heelraise", "tuckjump", "switchblade", "jumprope", "stepup", "glutebridge", "crunch", "legraise", "highlegraise", "situp", "scissor", "doublecrunch", "vup", "plankshouldertaps", "dynamicplank", "sideplankhipdips", "pushup", "dip", "inclinepushup", "kneepushup", "kneedeclinepushup", "rockingpushup", "archerpushup", "onearmpushup", "clappushup", "pseudoplanchepushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "hipforwardback"]);
+const GROUND_STYLE_COUNTERS = new Set(["russiantwist", "burpee", "elephantsteps", "superman", "lsit", "pushupfront", "squatfront", "squat", "jumpsquat", "splitsquat", "splitjump", "pistolsquat", "cossacksquat", "heelraise", "tuckjump", "switchblade", "jumprope", "stepup", "glutebridge", "crunch", "legraise", "highlegraise", "situp", "scissor", "doublecrunch", "vup", "plankshouldertaps", "dynamicplank", "sideplankhipdips", "pushup", "dip", "inclinepushup", "kneepushup", "kneedeclinepushup", "rockingpushup", "archerpushup", "onearmpushup", "clappushup", "pseudoplanchepushup", "pikepushup", "dumbbellcurl", "jumpingjack", "benchdip", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "hipforwardback"]);
 // Plancha / plancha lateral: a diferencia del resto de GROUND_STYLE_COUNTERS
 // (que cuentan repeticiones), aquí se cuenta TIEMPO aguantando la postura
 // — el cierre de serie no es "te has puesto de pie o has salido del
@@ -420,14 +434,14 @@ const GROUND_STYLE_COUNTERS = new Set(["burpee", "elephantsteps", "superman", "l
 // las dos formas de terminar (ponerte de pie, salir del encuadre) ya
 // rompen la postura por sí solas. Por eso plank/sideplank no viven en GROUND_STYLE_COUNTERS ni
 // comparten su lógica de cierre.
-const CAMERA_POSTURE_COUNTERS = new Set(["hollowbodyhold", "supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "tucklever", "deadhang", "handstand", "frogstand", "elephantstepshold", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
+const CAMERA_POSTURE_COUNTERS = new Set(["hollowbodyhold", "supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "tucklever", "deadhang", "handstand", "frogstand", "elephantstepshold", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch", "butterflystretch"]);
 // Ejercicios de cabeza (inclinacion y giro): al llegar a target_reps pasan SIEMPRE al siguiente ejercicio del circuito,
 // aunque el plan aun tenga target_sets > 1 (pedido por Alex: "no me cambia automaticamente en cuanto he hecho 30").
 const SINGLE_GOAL_AUTO_ADVANCE_COUNTERS = new Set(["necklateral", "neckturn"]);
 // Al llegar al objetivo y pasar solo al siguiente ejercicio, se espera esto para que se oiga ENTERO el numero de la ultima repeticion
 // (finish() -> stopCamera() corta la voz). No se dice ningun otro mensaje en ese momento.
 const GOAL_VOICE_GRACE_MS = 1500;
-const NO_REST_COUNTERS = new Set(["pushupfront", "squatfront", "jumpingjack", "armcrossstretch", "tricepsoverheadstretch", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "highlegraise", "seatedhamstringstretch", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "standingquadstretch", "hipforwardback"]);
+const NO_REST_COUNTERS = new Set(["pushupfront", "squatfront", "jumpingjack", "armcrossstretch", "tricepsoverheadstretch", "armcircles", "necklateral", "armscissors", "legrotation", "kneeraises", "heelkicks", "highlegraise", "seatedhamstringstretch", "hiplateral", "neckcircles", "neckhalfturn", "neckturn", "forearmrotation", "standingquadstretch", "hipforwardback", "butterflystretch"]);
 
 // --- Contadores DE FRENTE (Cindy workout) -- primera versión, sin probar en cámara real (2026-09-19) ---
 // pushupfront: flexiones tumbado boca abajo MIRANDO a la cámara (móvil delante, a la altura del suelo o en
@@ -722,6 +736,7 @@ const DIP_FEET_QUIET_MAX_RANGE_DEG = 12;  // fondos-balanceo: si la espinilla va
 const DIP_SHANK_DOWN_MAX_DEG = 20;        // espinilla a ≤ esto de la vertical = pies apoyados en el suelo (desmonte en paralelas bajas)
 const DIP_GROUND_DECAY_PER_FRAME = 0.0003; // olvido lento de la referencia de hombro "de pie" (solo paralelas altas / piernas no visibles)
 const DIP_WALK_WINDOW_MS = 1200;          // ventana para detectar que andas por el encuadre (desmonte)
+const DIP_WALK_WRIST_MIN_RANGE = 0.25;    // dips-walk-v1: para dar "andar" por válido la MUÑECA también tiene que desplazarse esto (en troncos) en la misma ventana; agarrado a las barras casi no se mueve
 const DIP_WALK_MIN_RANGE = 0.6;           // desplazamiento horizontal de cadera (en largos de tronco) en esa ventana que se considera andar, no hacer fondos
 const DIP_TOP_REF_FOLLOW_MAX = 0.4;       // la referencia "hombro arriba" solo sigue al hombro si está a menos de esto (en troncos) de ella
 const DIP_TOP_NEAR_FACTOR = 0.2;          // "estoy arriba de verdad": hombro a ≤ esto (en troncos) por debajo de la referencia
@@ -2969,6 +2984,69 @@ const VUP_STAND_MIN_HIP_ANGLE_DEG = 140;
 const VUP_OFF_GROUND_STABLE_MS = 900;
 const VUP_IDLE_CLOSE_MS = 8000;       // tumbado sin hacer ninguna rep: se da la serie por terminada
 
+// -- Russian twists (giros rusos), SENTADO y DE PERFIL --------------------------------------------------------------
+// Pedido de Alex (2026-10-19). Técnica (Physitrack y The Gym Group): sentado en el suelo con el torso inclinado hacia atrás
+// (~45°, espalda recta), rodillas dobladas (pies en el suelo o unos centímetros levantados) y las manos juntas delante del
+// pecho; se GIRA el tronco hacia un lado y luego hacia el otro SIN mover la pelvis ni la cabeza respecto al tronco.
+//
+// Señal (idea de Alex): DE PERFIL, en la posición inicial solo se ve UN hombro (los dos están uno delante del otro). Al girar
+// el tronco hacia cualquiera de los dos lados se enseña el pecho (o la espalda) a la cámara y se ven los DOS hombros, separados.
+//   s = ((hombro der - hombro izq) . n) / largo del tronco, con n = perpendicular al eje cadera->hombros EN LA IMAGEN.
+//   Girar un ángulo t desde el perfil da |s| ~ (ancho de hombros / largo del tronco) * sen t ~ 0.8 * sen t: ~0 de perfil y ~0.8
+//   con el pecho o la espalda de cara a la cámara. Medida perpendicular al tronco, da igual lo inclinado que esté hacia atrás ni
+//   hacia qué lado mire (izquierda o derecha de la imagen). El signo de s dice a qué lado giras, pero NO se fía uno de él:
+//   MediaPipe a veces cambia las etiquetas izquierda/derecha con la espalda a cámara (ver RUSSIANTWIST_MAX_SEP_SPEED).
+// Reglas:
+//   1. ARMAR (posición inicial real, la única que vale): sentado DE PERFIL = hombros superpuestos (|s| <= ARM_MAX_SEP), tronco
+//      inclinado hacia atrás (ARM_TILT_MIN..MAX sobre la horizontal, hombros por detrás de la cadera y rodillas por delante),
+//      rodillas dobladas y quieto ARM_STABLE_MS. Ver los dos hombros SIN estar en esa posición (de frente, de pie, tumbado,
+//      sentado erguido...) NO arma, y sin armar no se cuenta nada.
+//   2. REPETICIÓN = un giro a un lado: |s| >= ENTER_SEP con los DOS hombros vistos (visibilidad >= BOTH_SHOULDERS_MIN_VISIBILITY)
+//      al menos PEAK_FRAMES frames seguidos y PEAK_MIN_MS, y con la postura sentada todavía válida. Cada lado cuenta 1.
+//   3. Entre repeticiones hay que volver hacia el centro (|s| <= EXIT_SEP, o un solo hombro visible) o pasar al lado contrario
+//      (s cambia de signo con |s| >= ENTER_SEP). Un cambio de signo imposible entre dos frames (más rápido que MAX_SEP_SPEED)
+//      es un cambio de etiquetas de MediaPipe, no un giro: no cuenta.
+//   4. Fin de serie: salir de la postura (levantarte, tumbarte...) OFF_STABLE_MS, salir del encuadre, o IDLE_CLOSE_MS sin giros.
+// Umbrales PENDIENTES de afinar con vídeo real (se calcularon con una simulación 3D, no con MediaPipe real).
+const RUSSIANTWIST_MIN_VISIBILITY = 0.5;          // armar: hombro, cadera, rodilla y tobillo (al menos uno de los dos lados de cada uno)
+const RUSSIANTWIST_HIPS_MIN_VISIBILITY = 0.35;    // seguir (si no, cuenta como ausencia)
+const RUSSIANTWIST_PART_MIN_VISIBILITY = 0.3;     // un punto de un par izq/der entra en la media si se ve al menos tanto
+const RUSSIANTWIST_BOTH_SHOULDERS_MIN_VISIBILITY = 0.4; // para dar un giro por bueno los DOS hombros se tienen que ver con esta confianza
+const RUSSIANTWIST_PROFILE_SHOULDER_MIN_VISIBILITY = 0.15; // por debajo de esto un hombro "no está": de perfil, un solo hombro visible
+const RUSSIANTWIST_MIN_TORSO = 0.04;              // largo mínimo del tronco en pantalla (anchos de imagen); menos = no es fiable
+const RUSSIANTWIST_ARM_MAX_SEP = 0.26;            // armar: |s| a lo sumo esto = hombros superpuestos = de perfil
+const RUSSIANTWIST_ENTER_SEP = 0.42;              // giro: |s| >= esto con los dos hombros vistos (~ 30° de giro)
+const RUSSIANTWIST_EXIT_SEP = 0.28;               // vuelta al centro: |s| <= esto (o un hombro sin ver) permite contar el siguiente giro
+const RUSSIANTWIST_ARM_TILT_MIN_DEG = 25;         // armar: inclinación del tronco sobre la horizontal (0° = tumbado, 90° = erguido)...
+const RUSSIANTWIST_ARM_TILT_MAX_DEG = 72;         // ...entre estos dos: sentado inclinado hacia atrás (de pie, erguido o tumbado NO)
+const RUSSIANTWIST_ARM_LEAN_MIN = 0.2;            // armar: hombros por detrás de la cadera, en largos de tronco
+const RUSSIANTWIST_ARM_KNEE_FORWARD_MIN = 0.2;    // armar: rodillas por delante de la cadera (lado contrario a los hombros), en largos de tronco
+const RUSSIANTWIST_ARM_KNEE_MAX_DEG = 160;        // armar: rodillas dobladas (cadera-rodilla-tobillo)
+const RUSSIANTWIST_ARM_STABLE_MS = 700;           // en la posición y quieto antes de armar
+const RUSSIANTWIST_ARM_NOISE_MS = 250;            // al armar, un frame suelto que no cumple no reinicia la espera hasta pasar esto
+const RUSSIANTWIST_ARM_MAX_STEP = 0.04;           // armar: movimiento de la cadera por frame, en largos de tronco
+const RUSSIANTWIST_FOLLOW_TILT_MIN_DEG = 20;      // ya armado: banda más ancha (el giro y el balanceo mueven el tronco)...
+const RUSSIANTWIST_FOLLOW_TILT_MAX_DEG = 78;      // ...pero de pie (erguido) o tumbado del todo sacan de la postura
+const RUSSIANTWIST_FOLLOW_LEAN_MIN = 0.05;        // ya armado: hombros por detrás de la cadera (solo el sentido, con holgura)
+const RUSSIANTWIST_FOLLOW_KNEE_MAX_DEG = 172;     // ya armado: rodilla (si se ve) no del todo estirada
+const RUSSIANTWIST_HIP_SEP_MIN_VISIBILITY = 0.3;  // las dos caderas se ven al menos tanto -> se puede medir si la pelvis está de perfil
+const RUSSIANTWIST_ARM_MAX_HIP_SEP = 0.15;        // armar: separación horizontal de las caderas / largo del tronco (de perfil ~0; de frente ~0.4)
+const RUSSIANTWIST_FOLLOW_MAX_HIP_SEP = 0.2;      // ya armado: la pelvis NO gira con el tronco; si se te ven las dos caderas separadas, te has puesto de frente
+const RUSSIANTWIST_MAX_HIP_DRIFT = 0.8;           // ya armado: la cadera no se aleja de donde armaste más de esto (largos de tronco)
+const RUSSIANTWIST_HIP_REF_ALPHA = 0.05;          // la referencia de cadera sigue una deriva lenta...
+const RUSSIANTWIST_HIP_REF_BAND = 0.35;           // ...solo con la cadera a menos de esto de ella
+const RUSSIANTWIST_PEAK_FRAMES = 2;               // frames seguidos con |s| >= ENTER_SEP para dar el giro por bueno (un pico suelto no cuenta)
+const RUSSIANTWIST_PEAK_MIN_MS = 60;
+// Con pocos fps un giro rápido puede dejar UN solo frame por encima de ENTER_SEP. Vale si el frame de antes ya venía girando
+// (|s| >= EXIT_SEP: una subida, no un pico suelto desde el centro).
+const RUSSIANTWIST_MAX_SEP_SPEED = 9;             // |cambio de s| / segundo: un cambio de signo más rápido que esto = cambio de etiquetas, no un giro
+const RUSSIANTWIST_MIN_REP_SECONDS = 0.2;         // solo ruido de un frame suelto
+const RUSSIANTWIST_TWIST_MSG_FRAMES = 3;          // frames girando a medias antes de avisar "gira más"
+const RUSSIANTWIST_OFF_STABLE_MS = 900;           // fuera de la postura sentada este tiempo seguido -> fin de la serie
+const RUSSIANTWIST_IDLE_CLOSE_MS = 8000;          // 8 s sin girar cierra la serie (solo si ya hay reps)
+const RUSSIANTWIST_OUT_OF_FRAME_MS = 3000;        // girando se pierde visibilidad un momento: más margen que el genérico
+const RUSSIANTWIST_WAIT_MSG = "Siéntate en el suelo DE PERFIL a la cámara, con el cuerpo entero en el encuadre: el tronco inclinado hacia atrás unos 45°, las rodillas dobladas (con los pies en el suelo o un poco levantados) y las manos juntas delante del pecho. De perfil se ve un solo hombro. Quédate quieto hasta el «Listo».";
+
 // Índices de landmarks de MediaPipe Pose que usamos
 // Exportados (además de usarse aquí dentro): circuit.js los reutiliza
 // para comprobar la postura de plancha/plancha lateral sin duplicar
@@ -4778,7 +4856,7 @@ const DEFAULT_STRETCH_TARGET_SECONDS = 30;
 // o circuito), arrancan igualmente con una cuenta atrás por defecto en
 // vez de contar libremente desde 0 - ver el constructor de
 // WorkoutSession, más abajo.
-const STRETCH_HOLD_COUNTERS = new Set(["armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch"]);
+const STRETCH_HOLD_COUNTERS = new Set(["armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch", "butterflystretch"]);
 
 /**
  * Paso 1 de cualquier estiramiento: posición "standby" - de pie,
@@ -5298,6 +5376,150 @@ export function createStandingQuadStretchChecker() {
   return check;
 }
 
+// BUTTERFLY-BEGIN
+// Mariposa (butterfly stretch / baddha konasana): estiramiento ISOMÉTRICO de aductores e ingle, con cronómetro (mode="timed",
+// counter_key="butterflystretch"). Alex lo pidió el 2026-10-19 ("busca ejemplos de cómo se hace online y aplícalo").
+//
+// Técnica (ACE Fitness "Seated Butterfly Stretch", Sportskeeda "How to do the butterfly stretch", Liforme "Bound Angle Pose"):
+// sentado en el suelo con las PLANTAS DE LOS PIES JUNTAS y acercadas a la ingle, las RODILLAS CAEN ABIERTAS hacia los lados,
+// espalda recta (se puede inclinar algo hacia delante desde la cadera, con las manos en los pies o los codos sobre los muslos),
+// sin rebotar, 15-30 s por aguante.
+//
+// DE FRENTE a la cámara (o en 3/4): de perfil las dos rodillas se tapan entre sí y no se ve que están abiertas. Es SIMÉTRICO
+// (las dos piernas a la vez), así que no hay "lado 1 y lado 2" ni paso 1 de standby: no está en STRETCH_SIDE_COUNTERS (circuit.js /
+// session-runner.js) ni en STRETCH_NO_STANDBY_COUNTERS -- solo en STRETCH_HOLD_COUNTERS, para la cuenta atrás de 30 s por defecto y el
+// reloj de "postura rota" propio de los estiramientos.
+//
+// Se mide con TRES señales, todas en múltiplos del ANCHO DE HOMBROS (no dependen de la distancia a la cámara) y con la x corregida
+// por la proporción del vídeo:
+//   1. Pies juntos (feetGap): distancia mínima entre cualquier punto del pie izquierdo (tobillo, talón, punta) y del derecho.
+//   2. Rodillas abiertas (kneesApart): distancia entre las dos rodillas.
+//   3. Sentado en el suelo (hipFeet): distancia entre el punto medio de las caderas y el de los tobillos. De pie son ~2.3+ anchos
+//      de hombros; con los pies recogidos en la ingle, ~1.
+// No se mide ningún ángulo ni la altura de las rodillas: con el torso inclinado hacia delante MediaPipe a veces da la vuelta al
+// esqueleto (hombros "debajo" de las caderas) y las tres distancias, a diferencia de un ángulo, siguen valiendo igual.
+//
+// Calibrado con MediaPipe PoseLandmarker (pose_landmarker_full, el mismo modelo de la app) sobre fotos reales de mariposa
+// (free-exercise-db "Groin and Back Stretch", cara 3/4, erguido y plegado hacia delante; más versión espejo y alejada) frente a
+// ~40 fotos de otros ejercicios (de pie, sentadillas, isquios sentado, tumbado...). Medidas en las mariposas: feetGap 0.11-0.32,
+// kneesApart 1.38-1.68, hipFeet 0.91-1.14. Lo que más se acercaba sin serlo: feetGap >= 0.70 (isquios sentado, sentadilla),
+// kneesApart <= 0.87 en todo lo de pie. Los umbrales para ARMAR quedan a medio camino; ya aguantando (holding) se aflojan, para
+// que moverte un poco, inclinarte hacia delante o un fotograma malo suelto no corte el estiramiento. Aun así, SIN PROBAR en
+// cámara real todavía: ajustar con el log de depuración si hace falta.
+const BUTTERFLY_BODY_MIN_VISIBILITY = 0.4;            // hombros y caderas (armar)
+const BUTTERFLY_LEG_MIN_VISIBILITY = 0.35;            // rodillas y tobillos (armar)
+const BUTTERFLY_BODY_MIN_VISIBILITY_HOLDING = 0.25;   // ya aguantando
+const BUTTERFLY_LEG_MIN_VISIBILITY_HOLDING = 0.2;
+const BUTTERFLY_FOOT_POINT_MIN_VISIBILITY = 0.25;     // talón / punta del pie: solo cuentan si se ven (el tobillo cuenta siempre)
+const BUTTERFLY_MIN_SHOULDER_WIDTH = 0.03;            // ancho de hombros mínimo (fracción del encuadre) para fiarse de las proporciones
+const BUTTERFLY_FEET_GAP_MAX = 0.6;                   // armar: pies casi juntos
+const BUTTERFLY_FEET_GAP_MAX_HOLDING = 0.9;
+const BUTTERFLY_KNEES_APART_MIN = 1.0;                // armar: rodillas bien abiertas
+const BUTTERFLY_KNEES_APART_MIN_HOLDING = 0.8;
+const BUTTERFLY_HIP_FEET_MAX = 1.6;                   // armar: pies recogidos cerca de la cadera (sentado en el suelo)
+const BUTTERFLY_HIP_FEET_MAX_HOLDING = 2.0;
+const BUTTERFLY_GRACE_MS = 1500;                      // un fotograma malo suelto ya aguantando no cuenta como fallo hasta pasar esto seguido
+const BUTTERFLY_WAIT_MSG = "Siéntate en el suelo de frente a la cámara, algo alejada/o, con las plantas de los pies juntas, las rodillas abiertas hacia los lados y la espalda recta. Que se vea el cuerpo entero.";
+
+/**
+ * Postura de la mariposa. `holding` = ya llevas un aguante en curso (umbrales más laxos). `aspect` = ancho/alto del vídeo (sin él se
+ * supone 1; las proporciones aguantan un desajuste normal de aspecto).
+ */
+export function checkButterflyStretch(lm, aspect, holding = false) {
+  const ar = aspect > 0 ? aspect : 1;
+  const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER];
+  const lH = lm[L_HIP], rH = lm[R_HIP];
+  const lK = lm[L_KNEE], rK = lm[R_KNEE];
+  const lA = lm[L_ANKLE], rA = lm[R_ANKLE];
+  const vis = (p) => (p ? (p.visibility ?? 1) : 0);
+  const dist = (a, b) => Math.hypot((a.x - b.x) * ar, a.y - b.y);
+
+  const bodyMin = holding ? BUTTERFLY_BODY_MIN_VISIBILITY_HOLDING : BUTTERFLY_BODY_MIN_VISIBILITY;
+  const legMin = holding ? BUTTERFLY_LEG_MIN_VISIBILITY_HOLDING : BUTTERFLY_LEG_MIN_VISIBILITY;
+  if ([lS, rS, lH, rH].some((p) => vis(p) < bodyMin) || [lK, rK, lA, rA].some((p) => vis(p) < legMin)) {
+    return {
+      ok: false,
+      reason: "No se te ven bien los hombros, las caderas, las rodillas y los pies. Siéntate de frente a la cámara, algo alejada/o, con el cuerpo entero en el encuadre.",
+      debug: { fail: "vis" },
+    };
+  }
+
+  const sw = dist(lS, rS);
+  if (sw < BUTTERFLY_MIN_SHOULDER_WIDTH) {
+    return { ok: false, reason: "No se te ven bien los hombros. Ponte de frente a la cámara, algo más cerca.", debug: { fail: "hombros" } };
+  }
+
+  // Todos los puntos del pie que se vean (el tobillo siempre): el talón y la punta pegan mejor con "plantas juntas" que el tobillo solo.
+  const footPoints = (ankle, heelIdx, toeIdx) =>
+    [ankle, lm[heelIdx], lm[toeIdx]].filter((p, i) => p && (i === 0 || vis(p) >= BUTTERFLY_FOOT_POINT_MIN_VISIBILITY));
+  const leftFoot = footPoints(lA, 29, 31);
+  const rightFoot = footPoints(rA, 30, 32);
+  let feetGap = Infinity;
+  for (const a of leftFoot) for (const b of rightFoot) feetGap = Math.min(feetGap, dist(a, b));
+  feetGap /= sw;
+
+  const kneesApart = dist(lK, rK) / sw;
+  const hipMid = { x: (lH.x + rH.x) / 2, y: (lH.y + rH.y) / 2 };
+  const ankleMid = { x: (lA.x + rA.x) / 2, y: (lA.y + rA.y) / 2 };
+  const hipFeet = dist(hipMid, ankleMid) / sw;
+
+  const gapMax = holding ? BUTTERFLY_FEET_GAP_MAX_HOLDING : BUTTERFLY_FEET_GAP_MAX;
+  const apartMin = holding ? BUTTERFLY_KNEES_APART_MIN_HOLDING : BUTTERFLY_KNEES_APART_MIN;
+  const hipFeetMax = holding ? BUTTERFLY_HIP_FEET_MAX_HOLDING : BUTTERFLY_HIP_FEET_MAX;
+  const debug = {
+    piesJuntos: feetGap.toFixed(2),
+    rodillasAbiertas: kneesApart.toFixed(2),
+    caderaPies: hipFeet.toFixed(2),
+    max_juntos: gapMax.toFixed(2),
+    min_abiertas: apartMin.toFixed(2),
+    max_caderaPies: hipFeetMax.toFixed(2),
+    aguantando: holding ? "sí" : "no",
+  };
+
+  if (hipFeet > hipFeetMax) {
+    return { ok: false, reason: "Siéntate en el suelo y recoge los pies hacia la ingle, con las plantas juntas.", debug };
+  }
+  if (feetGap > gapMax) {
+    return { ok: false, reason: "Junta las plantas de los pies, acercándolas a la ingle.", debug };
+  }
+  if (kneesApart < apartMin) {
+    return { ok: false, reason: "Abre más las rodillas hacia los lados, dejándolas caer hacia el suelo, sin forzar.", debug };
+  }
+  return { ok: true, debug };
+}
+
+/**
+ * Comprobador con memoria de la mariposa: una vez en postura, un fotograma malo suelto NO cuenta como fallo hasta que pasan
+ * BUTTERFLY_GRACE_MS seguidos sin postura (mismo patrón que createStandingQuadStretchChecker). Uno nuevo por ejercicio/aguante;
+ * reset() lo deja como recién creado. `getAspect` (opcional) da el ancho/alto del vídeo cuando quien llama no lo pasa (circuit.js
+ * y session-runner.js llaman a los comprobadores solo con los landmarks).
+ */
+export function createButterflyStretchChecker(getAspect) {
+  let lastOk = false;
+  let lastOkAt = 0;
+  const check = (lm, aspect) => {
+    const nowMs = performance.now();
+    const ar = aspect > 0 ? aspect : (typeof getAspect === "function" ? getAspect() : undefined);
+    const res = checkButterflyStretch(lm, ar, lastOk);
+    if (res.ok) {
+      lastOk = true;
+      lastOkAt = nowMs;
+      return res;
+    }
+    if (lastOk && nowMs - lastOkAt < BUTTERFLY_GRACE_MS) {
+      return { ok: true, debug: { ...res.debug, gracia: "sí" } };
+    }
+    lastOk = false;
+    return res;
+  };
+  check.reset = () => { lastOk = false; lastOkAt = 0; };
+  return check;
+}
+// BUTTERFLY-END
+
+// Estiramientos de aguante que NO empiezan con el paso 1 de standby (de pie, brazos sueltos): se empieza directamente en la postura.
+const STRETCH_NO_STANDBY_COUNTERS = new Set(["butterflystretch"]);
+
 /** Segundos aguantados -> texto para el contador grande ("14s"). */
 function formatHoldSeconds(totalSeconds) {
   return `${Math.max(0, Math.round(totalSeconds))}s`;
@@ -5487,6 +5709,17 @@ function beep() {
 function getCookie(name) {
   const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
   return match ? decodeURIComponent(match[2]) : null;
+}
+
+// Token CSRF para guardar la sesión. La cookie `csrftoken` es HttpOnly
+// (CSRF_COOKIE_HTTPONLY en settings.py): JavaScript NO puede leerla, así
+// que getCookie("csrftoken") devolvía null, el servidor respondía 403 y la
+// sesión de un entreno suelto no se guardaba. El mismo token va en el
+// <input name="csrfmiddlewaretoken"> que pinta {% csrf_token %} en
+// task_workout.html; la cookie queda solo de último recurso.
+function csrfToken() {
+  const input = document.querySelector("[name=csrfmiddlewaretoken]");
+  return (input && input.value) || getCookie("csrftoken") || "";
 }
 
 
@@ -6749,6 +6982,7 @@ class WorkoutSession {
     this.lsitHoldChecker = createLSitHoldChecker(); // L-sit en paralelas (aguante): comprobador de postura con estado propio
     this.hollowChecker = createHollowBodyChecker(); // Hollow body (aguante): comprobador con reposo aprendido -- ver el bloque HOLLOW_*
     this.standingQuadChecker = createStandingQuadStretchChecker(); // cuadriceps de pie (v2): comprobador con memoria (gracia ante fotogramas malos sueltos)
+    this.butterflyChecker = createButterflyStretchChecker(); // mariposa: comprobador con memoria (gracia ante fotogramas malos sueltos)
     this.lsitDownConfirmed = false; // lsit: ya se han visto las piernas abajo desde que se armó -- sin esto, armar ya con las piernas en L contaría una repetición sin haber visto la subida
     this.lsitUpSince = null;   // lsit: desde cuándo cumples la L seguido (debounce)
     this.lsitDownSince = null; // lsit: desde cuándo tienes las piernas abajo seguido (debounce)
@@ -7895,6 +8129,27 @@ class WorkoutSession {
       this.gluteBridgeTopSince = null;
       this.gluteBridgeUpSince = null;
       this.setStatus(GLUTEBRIDGE_WAIT_MSG);
+    } else if (this.counterKey === "russiantwist") {
+      // Sin barra que calibrar: se arma sentado de perfil (un solo hombro visible), inclinado hacia atrás y con las rodillas
+      // dobladas; cada giro a un lado con los dos hombros vistos es una repetición (ver el bloque RUSSIANTWIST_* arriba).
+      this.prepping = false;
+      this.state = null;
+      this.rtArmSince = null;
+      this.rtArmBadSince = null;
+      this.rtPrevHip = null;
+      this.rtHipRef = null;
+      this.rtPrevS = null;
+      this.rtPrevM = 0;
+      this.rtPrevT = null;
+      this.rtQual = 0;
+      this.rtQualSign = 0;
+      this.rtQualSince = null;
+      this.rtSign = 0;
+      this.rtExcMax = null;
+      this.rtExcFrames = 0;
+      this.rtOffSince = null;
+      this.rtLastRepAt = null;
+      this.setStatus(RUSSIANTWIST_WAIT_MSG);
     } else if (this.counterKey === "vup") {
       this.prepping = false;
       this.state = null;
@@ -9049,14 +9304,24 @@ class WorkoutSession {
       }
     }
     if (!this.dipPosHist) this.dipPosHist = [];
-    this.dipPosHist.push({ t: now, x: hip.x });
+    this.dipPosHist.push({ t: now, x: hip.x, wx: wrist.x });
     while (this.dipPosHist.length && now - this.dipPosHist[0].t > DIP_WALK_WINDOW_MS) this.dipPosHist.shift();
-    if (!dismountReason && this.dipPosHist.length >= 4 && now - this.dipPosHist[0].t >= DIP_WALK_WINDOW_MS * 0.8) {
+    // dips-walk-v1 (2026-10-19): "andar" exigía SOLO que la cadera se moviera
+    // > DIP_WALK_MIN_RANGE troncos en 1,2 s. Un fondo rápido (el cuerpo se
+    // inclina y las piernas dobladas se balancean) ya lo cumple, y cerraba la
+    // serie con las manos agarradas a las barras (registros 46 y 47). Andando
+    // de verdad las muñecas viajan con el cuerpo; en las barras están fijas.
+    let walkHipRange = null;
+    let walkWristRange = null;
+    if (this.dipPosHist.length >= 4 && now - this.dipPosHist[0].t >= DIP_WALK_WINDOW_MS * 0.8) {
       const xs = this.dipPosHist.map((p) => p.x);
-      if ((Math.max(...xs) - Math.min(...xs)) / torso > DIP_WALK_MIN_RANGE) dismountReason = "caminando por el encuadre";
+      const wxs = this.dipPosHist.map((p) => p.wx);
+      walkHipRange = (Math.max(...xs) - Math.min(...xs)) / torso;
+      walkWristRange = (Math.max(...wxs) - Math.min(...wxs)) / torso;
+      if (!dismountReason && walkHipRange > DIP_WALK_MIN_RANGE && walkWristRange > DIP_WALK_WRIST_MIN_RANGE) dismountReason = "caminando por el encuadre";
     }
     if (dismountReason) {
-      this.logScissor(`[DESMONTE DETECTADO] motivo=${dismountReason} espinilla=${shankDeg === null ? "-" : shankDeg.toFixed(0) + "°"} reps_serie=${this.currentSetReps} — cerrando serie`);
+      this.logScissor(`[DESMONTE DETECTADO] motivo=${dismountReason} espinilla=${shankDeg === null ? "-" : shankDeg.toFixed(0) + "°"} cadera_rango=${walkHipRange === null ? "-" : walkHipRange.toFixed(2)} muñeca_rango=${walkWristRange === null ? "-" : walkWristRange.toFixed(2)} reps_serie=${this.currentSetReps} — cerrando serie`);
       this.dipBreakSince = null;
       this.dipBreakInterruptSince = null;
       this.dipArmWin = null;
@@ -9162,6 +9427,7 @@ class WorkoutSession {
       `bajada_actual=${sinceTop.toFixed(2)} estado=${this.state} tipo=${this.dipBarType ?? "-"} ` +
       `espinilla=${shankDeg === null ? "-" : shankDeg.toFixed(0) + "°"} pies_suelo=${feetDown ? "sí" : "no"} balanceo=${feetSwaying ? "sí" : "no"} ` +
       `desmonte_sostenido=${this.dipBreakSince === null ? "-" : (now - this.dipBreakSince).toFixed(0) + "ms"} ` +
+      `cadera_rango=${walkHipRange === null ? "-" : walkHipRange.toFixed(2)} muñeca_rango=${walkWristRange === null ? "-" : walkWristRange.toFixed(2)} ` +
       `muñeca_desplaz=${(this.dipRepWristShift ?? 0).toFixed(2)} modo=${this.dipLoaded ? "con_peso" : "normal"} lado=${sideName} ` +
       `cadera_vis=${(hip.visibility ?? 0).toFixed(2)} rodilla_vis=${(knee.visibility ?? 0).toFixed(2)} tobillo_vis=${(ankle.visibility ?? 0).toFixed(2)}`
     );
@@ -16029,6 +16295,8 @@ class WorkoutSession {
         return "Túmbate boca arriba y levanta una pierna a un palmo del suelo para empezar.";
       case "glutebridge":
         return GLUTEBRIDGE_WAIT_MSG;
+      case "russiantwist":
+        return RUSSIANTWIST_WAIT_MSG;
       case "vup":
         return "Túmbate boca arriba con los brazos sobre la cabeza y las piernas estiradas y abajo para empezar.";
       case "doublecrunch":
@@ -16143,6 +16411,7 @@ class WorkoutSession {
     }
     // Pasos de elefante: mismo patrón de dos pasos que silla en pared
     // (confirmar de pie antes de pedir la postura doblada).
+    if (this.counterKey === "butterflystretch") return BUTTERFLY_WAIT_MSG;
     if (this.counterKey === "elephantstepshold") {
       return this.postureGroundConfirmed
         ? "Dobla el cuerpo por la cadera, llevando el pecho hacia las piernas y las manos hacia el suelo o los pies. Si no llegas con las piernas rectas, dobla un poco las rodillas -- sigue contando mientras notes tensión."
@@ -16401,6 +16670,8 @@ class WorkoutSession {
           ? "Postura correcta. ¡Listo! Aguanta el estiramiento, sin tirar de golpe. Para terminar, suelta el pie (vuelve a standby) o sal del encuadre."
           : this.counterKey === "standingquadstretch"
           ? "Postura correcta. ¡Listo! Aguanta el estiramiento, sin tirar de golpe. Para terminar, suelta el pie (vuelve a standby) o sal del encuadre."
+          : this.counterKey === "butterflystretch"
+          ? "Postura correcta. ¡Listo! Aguanta el estiramiento, con las plantas de los pies juntas y las rodillas abiertas, sin rebotar. Para terminar, suelta la postura o sal del encuadre."
           : "Postura correcta. ¡Listo! Aguanta la postura, apretando el abdomen y metiendo el culo hacia dentro, sin dejar caer la cadera. Para terminar una serie, rompe la postura, ponte de pie o sal del encuadre.";
       this.announceStatus(startupTip, "startup_ready", "Listo. En posición.");
     }
@@ -16613,7 +16884,7 @@ class WorkoutSession {
       : this.counterKey === "lsithold" ? LSITHOLD_INVALID_STABLE_MS
       : this.counterKey === "frogstand" ? FROGSTAND_INVALID_STABLE_MS
       : this.counterKey === "handstand" ? HANDSTAND_INVALID_STABLE_MS
-      : this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch" || this.counterKey === "seatedhamstringstretch" || this.counterKey === "standingquadstretch" ? STRETCH_INVALID_STABLE_MS
+      : this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch" || this.counterKey === "seatedhamstringstretch" || this.counterKey === "standingquadstretch" || this.counterKey === "butterflystretch" ? STRETCH_INVALID_STABLE_MS
       : this.counterKey === "plank" ? PLANK_TOLERANT_INVALID_STABLE_MS
       : PLANK_INVALID_STABLE_MS;
     if (now - this.postureInvalidSince >= invalidStableMs) {
@@ -16635,6 +16906,7 @@ class WorkoutSession {
     this.postureCandidateSince = null;
     this.sidePlankDownSide = null;
     if (this.standingQuadChecker) this.standingQuadChecker.reset();
+    if (this.butterflyChecker) this.butterflyChecker.reset();
     // Estiramientos (ver STRETCH_HOLD_COUNTERS): a diferencia del resto
     // de CAMERA_POSTURE_COUNTERS (donde, una vez confirmado el paso 1,
     // se pueden encadenar series sin volver a confirmarlo), aquí SÍ hace
@@ -16785,7 +17057,7 @@ class WorkoutSession {
     // sumarlo a los ternarios de isKneeHoldStep1/isWallsitStep1 de
     // abajo) para no complicar más esos, y porque futuros estiramientos
     // podrán compartir este mismo paso 1 sin más que añadirse aquí.
-    const isStretchStep1 = STRETCH_HOLD_COUNTERS.has(this.counterKey) && !this.postureGroundConfirmed;
+    const isStretchStep1 = STRETCH_HOLD_COUNTERS.has(this.counterKey) && !STRETCH_NO_STANDBY_COUNTERS.has(this.counterKey) && !this.postureGroundConfirmed;
     if (isStretchStep1) {
       const standby = checkStandbyPosture(lm);
       if (standby.visible && !this.startupVoiceGiven) {
@@ -16966,6 +17238,8 @@ class WorkoutSession {
         ? checkSeatedHamstringStretch(lm)
         : this.counterKey === "standingquadstretch"
         ? this.standingQuadChecker(lm)
+        : this.counterKey === "butterflystretch"
+        ? this.butterflyChecker(lm, this.videoAspect())
         : checkPlankPosture(lm, this.postureValidSince !== null);
     // Plancha normal: el margen laxo de incline (cuerpo casi plano) solo
     // se tolera PLANK_LOW_INCLINE_GRACE_MS seguidos -- ver la nota junto a
@@ -17013,7 +17287,7 @@ class WorkoutSession {
         : this.counterKey === "frogstand" ? FROGSTAND_FLICKER_STABLE_MS
         : this.counterKey === "handstand" ? HANDSTAND_FLICKER_STABLE_MS
         : this.counterKey === "standingquadstretch" ? STRETCH_QUAD_FLICKER_STABLE_MS
-        : this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch" || this.counterKey === "seatedhamstringstretch" ? STRETCH_FLICKER_STABLE_MS
+        : this.counterKey === "armcrossstretch" || this.counterKey === "tricepsoverheadstretch" || this.counterKey === "seatedhamstringstretch" || this.counterKey === "butterflystretch" ? STRETCH_FLICKER_STABLE_MS
         : POSTURE_FLICKER_STABLE_MS;
       if (now - this.postureCandidateSince >= flickerStableMs) {
         // Frog stand: los frames malos que han hecho falta para darla por rota NO eran aguante: se descuentan.
@@ -17061,6 +17335,8 @@ class WorkoutSession {
         ? "estiramiento de isquiotibiales sentado"
         : this.counterKey === "standingquadstretch"
         ? "estiramiento de cuádriceps de pie"
+        : this.counterKey === "butterflystretch"
+        ? "estiramiento mariposa"
         : "plancha";
     this.logScissor(
       `[${postureLabel}, paso 2] frame_ok=${check.ok ? "sí" : "no"} confirmado=${this.postureLastOk ? "sí" : "no"} ` +
@@ -19078,6 +19354,256 @@ class WorkoutSession {
   }
 
   /**
+   * Russian twists (giros rusos), SENTADO y DE PERFIL (ver el bloque RUSSIANTWIST_* de más arriba para la técnica, la señal y los
+   * umbrales). Estados: null (sin armar) -> "down" (armado, tronco hacia el centro) -> "up" (acabo de contar un giro a un lado y
+   * espero a que vuelvas al centro o pases al otro lado) -> "down"... Una repetición = un giro a un lado con los DOS hombros
+   * vistos; cada lado cuenta 1. Solo se arma, y solo se cuenta, con la posición inicial real: sentado de perfil (un solo hombro
+   * visible), tronco inclinado hacia atrás y rodillas dobladas. Ver los dos hombros fuera de esa postura no cuenta nada.
+   */
+  processRussianTwist(lm, now) {
+    const lS = lm[L_SHOULDER], rS = lm[R_SHOULDER], lH = lm[L_HIP], rH = lm[R_HIP];
+    const lK = lm[L_KNEE], rK = lm[R_KNEE], lA = lm[L_ANKLE], rA = lm[R_ANKLE];
+    const vis = (p) => (p ? (p.visibility ?? 1) : 0);
+    const best = (a, b) => Math.max(vis(a), vis(b));
+    // Todo en unidades de ANCHO de imagen: x ya lo está; y se multiplica por alto/ancho del vídeo.
+    const asp = (this.video && this.video.videoWidth) ? (this.video.videoHeight / this.video.videoWidth) : 1.78;
+    const flat = (p) => ({ x: p.x, y: p.y * asp });
+    // Punto medio de un par izquierda/derecha: los dos lados si se ven los dos, el que se vea si solo se ve uno, null si ninguno.
+    const mid = (a, b) => {
+      const okA = vis(a) >= RUSSIANTWIST_PART_MIN_VISIBILITY, okB = vis(b) >= RUSSIANTWIST_PART_MIN_VISIBILITY;
+      if (okA && okB) return { x: (a.x + b.x) / 2, y: ((a.y + b.y) / 2) * asp };
+      if (okA || okB) return flat(vis(a) >= vis(b) ? a : b);
+      return null;
+    };
+
+    const sh = mid(lS, rS), hip = mid(lH, rH), knee = mid(lK, rK), ankle = mid(lA, rA);
+    const torsoLen = sh && hip ? Math.hypot(sh.x - hip.x, sh.y - hip.y) : 0;
+    if (!sh || !hip || best(lH, rH) < RUSSIANTWIST_HIPS_MIN_VISIBILITY || torsoLen < RUSSIANTWIST_MIN_TORSO) {
+      if (this.state === null) {
+        this.announceStatus("No se te ven bien los hombros y las caderas. Colócate de perfil, sentado, con el cuerpo entero en el encuadre.", "russiantwist_novis");
+        this.rtArmSince = null;
+        this.rtArmBadSince = null;
+        this.rtPrevHip = null;
+      }
+      this.rtPrevS = null;
+      if (this.debugEl) this.debugEl.textContent = "[russiantwist] buscando hombros y caderas…";
+      this.noteAbsence(now, RUSSIANTWIST_OUT_OF_FRAME_MS);
+      return;
+    }
+    this.outOfFrameSince = null;
+
+    // Eje del tronco (cadera -> hombros) en la imagen y su perpendicular: la separación de los hombros se mide a lo largo de la
+    // perpendicular, así que da igual lo inclinado que esté el tronco hacia atrás o hacia qué lado mire.
+    const ux = (sh.x - hip.x) / torsoLen, uy = (sh.y - hip.y) / torsoLen;
+    const nx = -uy, ny = ux;
+    const s = ((rS.x - lS.x) * nx + (rS.y - lS.y) * asp * ny) / torsoLen;   // separación firmada (largos de tronco)
+    const m = Math.abs(s);
+    const bothSeen = vis(lS) >= RUSSIANTWIST_BOTH_SHOULDERS_MIN_VISIBILITY && vis(rS) >= RUSSIANTWIST_BOTH_SHOULDERS_MIN_VISIBILITY;
+    const bothAny = vis(lS) >= RUSSIANTWIST_PROFILE_SHOULDER_MIN_VISIBILITY && vis(rS) >= RUSSIANTWIST_PROFILE_SHOULDER_MIN_VISIBILITY;
+
+    // Postura sentada: tronco inclinado hacia atrás (hombros por detrás de la cadera, rodillas por delante) y rodillas dobladas.
+    const tilt = tiltFromHorizontal(hip, sh);
+    const shDx = sh.x - hip.x;
+    const kneeDx = knee ? knee.x - hip.x : null;
+    const leanBack = kneeDx !== null ? shDx * kneeDx < 0 : null;
+    const shBehind = Math.abs(shDx) / torsoLen;
+    const kneeForward = kneeDx !== null ? Math.abs(kneeDx) / torsoLen : 0;
+    const kneeBend = knee && ankle ? angle(hip, knee, ankle) : null;
+    // Pelvis de perfil: de perfil las dos caderas se superponen; si te pones de frente a la cámara se separan en horizontal.
+    const hipSep = (vis(lH) >= RUSSIANTWIST_HIP_SEP_MIN_VISIBILITY && vis(rH) >= RUSSIANTWIST_HIP_SEP_MIN_VISIBILITY) ? Math.abs(rH.x - lH.x) / torsoLen : 0;
+    const sepTxt = `${s >= 0 ? "+" : "-"}${m.toFixed(2)}`;
+
+    // --- Armar: la posición inicial real. Aquí NO se cuenta nada, se pase por donde se pase ---
+    if (this.state === null) {
+      const allVis = Math.min(best(lS, rS), best(lH, rH), best(lK, rK), best(lA, rA));
+      const profile = !bothAny || m <= RUSSIANTWIST_ARM_MAX_SEP;   // de perfil: un solo hombro visible / hombros superpuestos
+      const tiltOk = tilt >= RUSSIANTWIST_ARM_TILT_MIN_DEG && tilt <= RUSSIANTWIST_ARM_TILT_MAX_DEG;
+      const leanOk = leanBack === true && shBehind >= RUSSIANTWIST_ARM_LEAN_MIN && kneeForward >= RUSSIANTWIST_ARM_KNEE_FORWARD_MIN;
+      const kneeOk = kneeBend !== null && kneeBend <= RUSSIANTWIST_ARM_KNEE_MAX_DEG;
+      const hipsProfile = hipSep <= RUSSIANTWIST_ARM_MAX_HIP_SEP;
+      const step = this.rtPrevHip ? Math.hypot(hip.x - this.rtPrevHip.x, hip.y - this.rtPrevHip.y) / torsoLen : null;
+      this.rtPrevHip = { x: hip.x, y: hip.y };
+      const still = step !== null && step <= RUSSIANTWIST_ARM_MAX_STEP;
+      const posture = allVis >= RUSSIANTWIST_MIN_VISIBILITY && profile && hipsProfile && tiltOk && leanOk && kneeOk;
+      if (allVis >= RUSSIANTWIST_MIN_VISIBILITY) {
+        this.announcePreArm(now, "Te veo. Siéntate en el suelo de perfil a la cámara, con el tronco inclinado hacia atrás unos 45 grados, las rodillas dobladas y las manos juntas delante del pecho, y espera al «Listo» para empezar. Después gira el tronco a un lado y al otro, enseñando los dos hombros a la cámara. Para terminar una serie, levántate o sal del encuadre.", "Para terminar una serie, levántate o sal del encuadre.");
+      }
+      if (posture && still) {
+        this.rtArmBadSince = null;
+        if (this.rtArmSince == null) this.rtArmSince = now;
+        if (now - this.rtArmSince >= RUSSIANTWIST_ARM_STABLE_MS) {
+          this.state = "down";
+          this.rtArmSince = null;
+          this.rtArmBadSince = null;
+          this.rtHipRef = { x: hip.x, y: hip.y };
+          this.rtPrevS = null;
+          this.rtPrevM = 0;
+          this.rtPrevT = null;
+          this.rtQual = 0;
+          this.rtQualSign = 0;
+          this.rtQualSince = null;
+          this.rtSign = 0;
+          this.rtExcMax = null;
+          this.rtExcFrames = 0;
+          this.rtOffSince = null;
+          this.rtLastRepAt = now;
+          this.repStartTime = now;
+          this.idleSince = null;
+          this.announceStatus("¡Listo! Gira el tronco hacia un lado y hacia el otro, enseñando los dos hombros a la cámara.", "ready_to_go");
+        } else {
+          this.setStatus("Sentado de perfil, quieto… confirmando (no te muevas)");
+        }
+      } else if (this.rtArmSince != null) {
+        // Estaba confirmando y un frame no cumple: no se reinicia la espera hasta pasar ARM_NOISE_MS seguidos.
+        if (this.rtArmBadSince == null) this.rtArmBadSince = now;
+        if (now - this.rtArmBadSince >= RUSSIANTWIST_ARM_NOISE_MS) {
+          this.rtArmSince = null;
+          this.rtArmBadSince = null;
+        }
+      } else if (allVis < RUSSIANTWIST_MIN_VISIBILITY) {
+        this.setStatus("No se te ve el cuerpo entero. Aléjate un poco para que quepan de los hombros a los pies.");
+      } else if (!profile || !hipsProfile) {
+        this.announceStatus("Se te ven los dos hombros, pero no estás en la posición inicial: siéntate DE PERFIL a la cámara, con el tronco inclinado hacia atrás y sin girarlo (de perfil se ve un solo hombro).", "russiantwist_profile");
+      } else if (!tiltOk) {
+        this.setStatus(tilt > RUSSIANTWIST_ARM_TILT_MAX_DEG
+          ? "Inclina el tronco hacia atrás, unos 45°: ahora estás demasiado erguido."
+          : "Incorpórate un poco: el tronco a unos 45°, sin quedarte tumbado.");
+      } else if (!leanOk) {
+        this.setStatus("Inclina el tronco hacia atrás: los hombros por detrás de la cadera y las rodillas hacia delante.");
+      } else if (!kneeOk) {
+        this.setStatus("Dobla las rodillas (con los pies en el suelo o un poco levantados).");
+      } else {
+        this.setStatus(RUSSIANTWIST_WAIT_MSG);
+      }
+      if (this.debugEl) {
+        this.debugEl.textContent =
+          `[russiantwist] armando — vis ${allVis.toFixed(2)} | sep ${sepTxt} (perfil ≤${RUSSIANTWIST_ARM_MAX_SEP}: ${profile ? "sí" : "NO"}) | caderas ${hipSep.toFixed(2)} (≤${RUSSIANTWIST_ARM_MAX_HIP_SEP}: ${hipsProfile ? "sí" : "NO"}) | ` +
+          `tronco ${tilt.toFixed(0)}° (${RUSSIANTWIST_ARM_TILT_MIN_DEG}-${RUSSIANTWIST_ARM_TILT_MAX_DEG}°: ${tiltOk ? "sí" : "NO"}) | ` +
+          `inclinado atrás: ${leanOk ? "sí" : "NO"} (hombros ${shBehind.toFixed(2)}, rodillas ${kneeForward.toFixed(2)}) | ` +
+          `rodilla ${kneeBend === null ? "–" : kneeBend.toFixed(0) + "°"} (≤${RUSSIANTWIST_ARM_KNEE_MAX_DEG}°: ${kneeOk ? "sí" : "NO"}) | quieto ${still}`;
+      }
+      return;
+    }
+
+    // --- Ya armado ---
+    // Deriva lenta de la referencia de la cadera (te acomodas), pero nunca a mitad de un cambio brusco.
+    const hr = this.rtHipRef;
+    const drift = Math.hypot(hip.x - hr.x, hip.y - hr.y) / torsoLen;
+    if (drift <= RUSSIANTWIST_HIP_REF_BAND) {
+      hr.x += RUSSIANTWIST_HIP_REF_ALPHA * (hip.x - hr.x);
+      hr.y += RUSSIANTWIST_HIP_REF_ALPHA * (hip.y - hr.y);
+    }
+    const tiltOkF = tilt >= RUSSIANTWIST_FOLLOW_TILT_MIN_DEG && tilt <= RUSSIANTWIST_FOLLOW_TILT_MAX_DEG;
+    const leanOkF = leanBack === null ? true : (leanBack && shBehind >= RUSSIANTWIST_FOLLOW_LEAN_MIN);
+    const kneeOkF = kneeBend === null || kneeBend <= RUSSIANTWIST_FOLLOW_KNEE_MAX_DEG;
+    const hipsProfileF = hipSep <= RUSSIANTWIST_FOLLOW_MAX_HIP_SEP;
+    const seated = tiltOkF && leanOkF && kneeOkF && hipsProfileF && drift <= RUSSIANTWIST_MAX_HIP_DRIFT;
+
+    // Velocidad de la separación y cambio de etiquetas izq/der: un cambio de signo imposible entre dos frames no es un giro.
+    const prevM = this.rtPrevM ?? 0;
+    let labelSwap = false;
+    if (bothSeen && this.rtPrevS != null && this.rtPrevT != null) {
+      const dt = (now - this.rtPrevT) / 1000;
+      if (dt > 0.001 && Math.sign(s) !== Math.sign(this.rtPrevS) && Math.abs(s - this.rtPrevS) / dt > RUSSIANTWIST_MAX_SEP_SPEED) labelSwap = true;
+    }
+    this.rtPrevS = bothSeen ? s : null;
+    this.rtPrevM = bothSeen ? m : 0;
+    this.rtPrevT = now;
+
+    if (this.debugEl) {
+      this.debugEl.textContent =
+        `[russiantwist] sep ${sepTxt} (giro ≥${RUSSIANTWIST_ENTER_SEP}, centro ≤${RUSSIANTWIST_EXIT_SEP}) | dos hombros: ${bothSeen ? "sí" : "no"} ` +
+        `(${vis(lS).toFixed(2)}/${vis(rS).toFixed(2)}) | tronco ${tilt.toFixed(0)}° | rodilla ${kneeBend === null ? "–" : kneeBend.toFixed(0) + "°"} | ` +
+        `deriva cadera ${drift.toFixed(2)} | caderas ${hipSep.toFixed(2)} (≤${RUSSIANTWIST_FOLLOW_MAX_HIP_SEP}) | ${seated ? "sentado" : "FUERA de la postura"}${labelSwap ? " | cambio de etiquetas ignorado" : ""} | estado: ${this.state}`;
+    }
+
+    // Fuera de la postura sentada (te levantas, te tumbas, te sientas erguido, te vas): ni se cuenta ni se sigue.
+    if (!seated) {
+      this.rtQual = 0;
+      this.rtPrevM = 0;
+      this.rtExcMax = null;
+      this.rtExcFrames = 0;
+      if (this.rtOffSince == null) this.rtOffSince = now;
+      if (now - this.rtOffSince >= RUSSIANTWIST_OFF_STABLE_MS) {
+        this.rtOffSince = null;
+        this.closeActiveSet();
+      } else if (bothSeen && m >= RUSSIANTWIST_ENTER_SEP) {
+        this.announceStatus("Se te ven los dos hombros pero has salido de la postura: sentado de perfil, con el tronco inclinado hacia atrás y las rodillas dobladas.", "russiantwist_posture");
+      }
+      return;
+    }
+    this.rtOffSince = null;
+
+    // Cierre por inactividad: solo si ya hay giros en la serie.
+    if (this.currentSetReps > 0 && now - this.rtLastRepAt >= RUSSIANTWIST_IDLE_CLOSE_MS) {
+      this.logScissor(`[russiantwist] ${Math.round(RUSSIANTWIST_IDLE_CLOSE_MS / 1000)}s sin girar, cerrando serie`);
+      this.closeActiveSet();
+      return;
+    }
+
+    const candidate = bothSeen && m >= RUSSIANTWIST_ENTER_SEP;     // girado, con los dos hombros vistos
+    const centered = !bothSeen || m <= RUSSIANTWIST_EXIT_SEP;      // de vuelta hacia el perfil (o un hombro sin ver)
+    const sg = Math.sign(s);
+
+    // Cuenta un giro: PEAK_FRAMES frames seguidos (y PEAK_MIN_MS) del mismo lado con |s| >= ENTER_SEP.
+    const qualify = () => {
+      if (this.rtQual === 0 || (sg !== this.rtQualSign && !labelSwap)) {
+        this.rtQual = 1;
+        this.rtQualSince = now;
+        this.rtQualSign = sg;
+      } else {
+        this.rtQual += 1;
+      }
+      const steady = this.rtQual >= RUSSIANTWIST_PEAK_FRAMES && now - this.rtQualSince >= RUSSIANTWIST_PEAK_MIN_MS;
+      const ramped = this.rtQual === 1 && prevM >= RUSSIANTWIST_EXIT_SEP;
+      if (!steady && !ramped) return;
+      const counted = this.countRep((now - this.repStartTime) / 1000, now, "Giro", RUSSIANTWIST_MIN_REP_SECONDS);
+      this.repStartTime = now;
+      if (counted) this.rtLastRepAt = now;
+      this.state = "up";
+      this.rtSign = sg;   // el signo de AHORA (si MediaPipe cambió izq/der durante la confirmación, el de antes ya no vale)
+      this.rtQual = 0;
+      this.rtExcMax = null;
+      this.rtExcFrames = 0;
+    };
+
+    if (this.state === "down") {
+      if (candidate) {
+        qualify();
+      } else {
+        this.rtQual = 0;
+        if (bothSeen && m > RUSSIANTWIST_EXIT_SEP) {
+          // Giro a medias (entre EXIT y ENTER): si vuelves al centro sin llegar al giro completo, se avisa.
+          this.rtExcMax = Math.max(this.rtExcMax ?? 0, m);
+          this.rtExcFrames += 1;
+        } else if (centered) {
+          if (this.rtExcMax !== null && this.rtExcFrames >= RUSSIANTWIST_TWIST_MSG_FRAMES) {
+            this.announceStatus("Gira un poco más el tronco: tienen que verse bien los dos hombros.", "russiantwist_more");
+            this.logScissor(`[russiantwist] giro corto | máx ${this.rtExcMax.toFixed(2)} (hace falta ≥${RUSSIANTWIST_ENTER_SEP})`);
+          }
+          this.rtExcMax = null;
+          this.rtExcFrames = 0;
+        }
+      }
+    } else if (centered) {
+      // "up" -> "down": has vuelto hacia el centro, el siguiente giro (a cualquier lado) cuenta.
+      this.state = "down";
+      this.rtQual = 0;
+      this.rtExcMax = null;
+      this.rtExcFrames = 0;
+    } else if (candidate && labelSwap) {
+      // Salto de signo imposible en un frame: MediaPipe ha cambiado izquierda/derecha, sigues girado del mismo lado.
+      this.rtSign = sg;
+      this.rtQual = 0;
+    } else if (candidate && sg !== this.rtSign) {
+      // Pasas de un lado al otro entre dos frames sin llegar a ver el centro: giro nuevo al lado contrario.
+      qualify();
+    } else {
+      this.rtQual = 0;
+    }
+  }
+
+  /**
    * V-up: se suben a la vez el torso y las piernas RECTAS hasta formar una
    * V, con las manos llegando a los talones, y se baja. Ver el bloque
    * VUP_* junto a DOUBLECRUNCH_STAND_MAX_FACTOR para el porqué de cada
@@ -19575,10 +20101,20 @@ class WorkoutSession {
       const waitedSeconds = Math.floor((now - this.prepStartTs) / 1000);
       if ((wristVisible || elbowVisible) && !this.startupVoiceGiven) {
         this.startupVoiceGiven = true;
-        this.announceStatus("Cuélgate de la barra con los brazos estirados para empezar.", "startup_ready", "Cuélgate de la barra.");
+        this.announceStatus(
+          "Cuélgate de la barra con los brazos estirados y las rodillas dobladas hacia atrás (posición de dead hang) para empezar.",
+          "startup_ready",
+          "Cuélgate de la barra con las rodillas dobladas."
+        );
       }
 
-      if (armsUpNow) {
+      // 2026-10-21 (Alex): la posición inicial es un DEAD HANG de verdad (colgado, pies sin tocar el suelo); no se empieza
+      // a calibrar ni a contar hasta verla. Mismo criterio que el ejercicio dead hang (checkDeadHangPosture): de pie con los
+      // brazos arriba no se distingue de colgado con las piernas rectas, así que se piden las rodillas dobladas hacia atrás.
+      const hangPose = armsUpNow ? checkDeadHangPosture(lm, false) : null;
+      const hangPoseOk = armsUpNow && hangPose.ok;
+
+      if (hangPoseOk) {
         if (this.hangStableSince === null) this.hangStableSince = now;
         if (now - this.hangStableSince >= HANG_STABLE_MS) {
           this.prepping = false;
@@ -19588,6 +20124,9 @@ class WorkoutSession {
         } else {
           this.setStatus("Te veo colgado… confirmando (no te muevas)");
         }
+      } else if (armsUpNow) {
+        this.hangStableSince = null;
+        this.setStatus(`Agarrado a la barra, pero aún no cuenta: despega los pies del suelo y dobla las rodillas hacia atrás (dead hang). ${hangPose.reason ?? ""}`.trim());
       } else {
         this.hangStableSince = null;
         this.setStatus(
@@ -19597,13 +20136,14 @@ class WorkoutSession {
         );
       }
       if (this.debugEl) {
-        this.debugEl.textContent = `brazos en alto: ${armsUpNow ? "sí" : "no"} | espera: ${waitedSeconds}s`;
+        this.debugEl.textContent = `brazos en alto: ${armsUpNow ? "sí" : "no"} | dead hang: ${hangPoseOk ? "sí" : "no"}` +
+          `${hangPose && hangPose.debug ? ` (${hangPose.debug.piernaIzq ?? hangPose.debug.fail ?? ""} / ${hangPose.debug.piernaDer ?? ""})` : ""} | espera: ${waitedSeconds}s`;
       }
       return;
     }
 
     if (this.calibrating) {
-      if (!armsUpNow) {
+      if (!armsUpNow || !checkDeadHangPosture(lm, true).ok) {
         this.prepping = true;
         this.calibrating = false;
         this.hangStableSince = null;
@@ -19682,6 +20222,49 @@ class WorkoutSession {
 
     const moveThresh = SCAPULARPULL_MOVE_FACTOR * this.shoulderWidth;
 
+    // --- Cuerpo entero + codo estirado (ver SCAPULARPULL_FEET_FOLLOW_MIN_RATIO) ---
+    const ankleYs = [lm[L_ANKLE], lm[R_ANKLE]]
+      .filter((p) => p && (p.visibility ?? 1) >= SCAPULARPULL_FEET_MIN_VISIBILITY)
+      .map((p) => p.y);
+    const ankleYRaw = ankleYs.length ? ankleYs.reduce((s, v) => s + v, 0) / ankleYs.length : null;
+    if (ankleYRaw !== null) {
+      this.spAnkleSmoothY = this.spAnkleSmoothY == null ? ankleYRaw : this.spAnkleSmoothY + 0.5 * (ankleYRaw - this.spAnkleSmoothY);
+    } else {
+      this.spAnkleSmoothY = null;
+    }
+    const ankleY = ankleYRaw === null ? null : this.spAnkleSmoothY;
+    const armAngles = [[lShoulder, lElbow, lWrist], [rShoulder, rElbow, rWrist]]
+      .filter((arm) => arm.every((p) => (p.visibility ?? 1) >= SCAPULARPULL_ELBOW_MIN_VISIBILITY))
+      .map((arm) => angle(arm[0], arm[1], arm[2]))
+      .filter((a) => a !== null);
+    const elbowDeg = armAngles.length ? armAngles.reduce((s, v) => s + v, 0) / armAngles.length : null;
+
+    // Ventana de la repetición en curso: desde el último punto más bajo del hombro hasta contarla. Se descarta la de
+    // otra serie/calibración (calibrationStartTs cambia en cada calibración).
+    const resetRepWindow = () => {
+      this.spWinCal = this.calibrationStartTs;
+      this.spAnkleLo = null;
+      this.spAnkleHi = null;
+      this.spAnkleFrames = 0;
+      this.spFrames = 0;
+      this.spBentFrames = 0;
+      this.spElbowMin = null;
+    };
+    if (this.spWinCal !== this.calibrationStartTs) resetRepWindow();
+
+    if (this.state === "down" && (this.localBottomY === null || y > this.localBottomY)) resetRepWindow();
+
+    this.spFrames++;
+    if (ankleY !== null) {
+      this.spAnkleFrames++;
+      this.spAnkleLo = this.spAnkleLo === null ? ankleY : Math.min(this.spAnkleLo, ankleY);
+      this.spAnkleHi = this.spAnkleHi === null ? ankleY : Math.max(this.spAnkleHi, ankleY);
+    }
+    if (elbowDeg !== null) {
+      this.spElbowMin = this.spElbowMin === null ? elbowDeg : Math.min(this.spElbowMin, elbowDeg);
+      if (elbowDeg < SCAPULARPULL_ELBOW_BENT_MAX_DEG) this.spBentFrames++;
+    }
+
     if (this.state === "down") {
       if (this.localBottomY === null || y > this.localBottomY) {
         this.localBottomY = y;
@@ -19704,10 +20287,30 @@ class WorkoutSession {
       }
       const fallenFromTop = y - this.localTopY;
       if (fallenFromTop > moveThresh) {
-        this.logScissor(`[REP intentada] duración=${((now - this.repStartTime) / 1000).toFixed(2)}s`);
-        this.countRep((now - this.repStartTime) / 1000, now, "Dominada escapular");
+        const shoulderRange = this.localBottomY - this.localTopY;
+        const ankleRange = this.spAnkleLo !== null ? this.spAnkleHi - this.spAnkleLo : null;
+        const feetJudgeable = ankleRange !== null && shoulderRange > 0 &&
+          this.spAnkleFrames >= Math.max(3, SCAPULARPULL_FEET_MIN_SAMPLE_FRACTION * this.spFrames);
+        const feetPlanted = feetJudgeable && ankleRange < SCAPULARPULL_FEET_FOLLOW_MIN_RATIO * shoulderRange;
+        const armsBent = this.spBentFrames >= SCAPULARPULL_BENT_MIN_FRAMES;
+        const detail =
+          `hombro_rango=${shoulderRange.toFixed(3)} tobillo_rango=${ankleRange === null ? "-" : ankleRange.toFixed(3)} ` +
+          `tobillos_juzgables=${feetJudgeable ? "sí" : "no"} codo_min=${this.spElbowMin === null ? "-" : this.spElbowMin.toFixed(0)}° ` +
+          `fotogramas_codo_doblado=${this.spBentFrames}`;
+        if (feetPlanted || armsBent) {
+          this.logScissor(`[REP descartada] motivo=${feetPlanted ? "pies en el suelo" : "codo doblado"} ${detail}`);
+          if (feetPlanted) {
+            this.announceStatus("Despega los pies del suelo: cuélgate de verdad de la barra para que cuente.", "scapularpull_feet", "Despega los pies del suelo.");
+          } else {
+            this.announceStatus("No dobles los codos: sube solo con los omóplatos, con los brazos estirados.", "scapularpull_elbow", "No dobles los codos.");
+          }
+        } else {
+          this.logScissor(`[REP intentada] duración=${((now - this.repStartTime) / 1000).toFixed(2)}s ${detail}`);
+          this.countRep((now - this.repStartTime) / 1000, now, "Dominada escapular");
+        }
         this.state = "down";
         this.localBottomY = y;
+        resetRepWindow();
       }
     }
 
@@ -20622,6 +21225,10 @@ if (this.counterKey === "crunch") {
       this.processGluteBridge(lm, now);
       return;
     }
+    if (this.counterKey === "russiantwist") {
+      this.processRussianTwist(lm, now);
+      return;
+    }
     if (this.counterKey === "vup") {
       this.processVUp(this.landscapeLm(lm), now);
       return;
@@ -21100,7 +21707,7 @@ if (this.counterKey === "crunch") {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-CSRFToken": getCookie("csrftoken"),
+          "X-CSRFToken": csrfToken(),
         },
         body: JSON.stringify(payload),
       });

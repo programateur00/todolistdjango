@@ -45,7 +45,7 @@ SECONDS_PER_REP = {
     "archer-push-up": 4.0, "one-arm-push-up": 5.0, "clap-push-up": 2.5,
     "pseudo-planche-push-up": 4.0, "rocking-push-up": 4.0,
     "jump-squat": 2.5, "tuck-jump": 2.0, "split-jump": 2.5, "bulgarian-split-squat": 4.0,
-    "v-up": 2.5, "dynamic-plank": 3.0,
+    "v-up": 2.5, "dynamic-plank": 3.0, "russian-twist": 1.5,
 }
 
 # MET por defecto cuando Exercise.met está vacío.

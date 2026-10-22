@@ -19,7 +19,7 @@
 
     <div id="reading-status" class="reading-status">
         {% if status %}
-        <span>Página {{ status.current_page }} de {{ status.last_page }}</span>
+        <span id="reading-status-page">Página {{ status.current_page }} de {{ status.last_page }}</span>
         <span>·</span>
         <span id="reading-pace">
             {% if status.is_overdue %}Vas {{ status.days_left|cut:"-" }} días tarde
@@ -46,7 +46,7 @@
             <span id="reading-page-label" class="reading-toolbar__page">—</span>
             <span class="reading-toolbar__spacer"></span>
             <button type="button" class="ghost-btn reading-toolbar__btn" id="reading-dark-toggle" title="Modo noche (invierte los colores de la página, no del sitio)" aria-pressed="false">🌙 Modo noche</button>
-            <button type="button" class="ghost-btn reading-toolbar__btn" id="reading-fullscreen-btn" title="Pantalla completa">⛶ Pantalla completa</button>
+            <button type="button" class="ghost-btn reading-toolbar__btn" id="reading-fullscreen-btn" title="Pantalla completa (F)">⛶ Pantalla completa</button>
         </div>
         <div class="reading-scroll" id="reading-scroll"></div>
     </div>
@@ -83,7 +83,7 @@
     .reading-toolbar__page { font-variant-numeric: tabular-nums; font-size: .85em; opacity: .85; }
     .reading-toolbar__spacer { flex: 1; }
     .reading-scroll {
-        flex: 1; overflow-y: auto; overflow-x: auto;
+        flex: 1; overflow-y: auto; overflow-x: auto; position: relative; /* offsetTop de cada página, relativo a este contenedor */
         padding: 1em 0; display: flex; flex-direction: column; align-items: center; gap: .75em;
         min-height: 50vh; max-height: 78vh; scroll-behavior: auto;
     }
@@ -149,6 +149,7 @@
     var numPages = 0;
     var reportTimer = null;
     var pendingPage = null; // última página pedida por reportPage() todavía sin confirmar guardada -- la usan flushReport()/beaconFlush()
+    var sendSeq = 0;        // nº del último envío lanzado -- ver el catch de sendProgress()
     var finished = false;
 
     if (!supportsLocal) {
@@ -310,22 +311,89 @@
     function relayout() {
         if (!baseViewportSize) return;
         var anchor = currentPage;
+        var token = ++layoutToken;
+        settling = true; // los 'scroll' que provoca el cambio de tamaño no son lectura
+        programmaticTop = null;
         if (io) { io.disconnect(); io = null; }
         applyLayout();
         requestAnimationFrame(function () {
             var target = pages[anchor - 1];
             if (target) scrollPageToTop(target.div);
-            requestAnimationFrame(observePages);
+            programmaticTop = scrollEl.scrollTop;
+            requestAnimationFrame(function () {
+                observePages();
+                if (token === layoutToken) settling = false; // solo el último relayout reabre el seguimiento
+            });
         });
     }
 
+    // ---- Página actual: SIEMPRE por geometría del scroll, nunca por
+    // IntersectionObserver. Antes la decidía el observer, y fallaba de dos
+    // maneras: (1) con rootMargin 100% las páginas de la zona de margen
+    // (fuera de pantalla) cuentan como "intersecting" con ratio 1, y
+    // ganaban a la página que de verdad se veía -> contaba una de más
+    // (incluida la última, que además cierra el plan); (2) solo recibía
+    // las entradas que cambiaban en ese callback, no todas las visibles,
+    // así que con scroll rápido/teclas elegía entre dos vecinas al azar ->
+    // una de más, luego una de menos. Ahora es una función pura del
+    // scrollTop: la página que cruza la línea del 50% de la altura visible
+    // (igual que el visor de la app y que el de Chrome).
+    var PROBE_FRACTION = 0.5;
+    var settling = true;        // true mientras se abre/redimensiona: el scroll de ese momento no es lectura
+    var programmaticTop = null; // scrollTop que dejó un salto nuestro: su evento 'scroll' no cuenta como lectura
+    var layoutToken = 0;
+    var trackRAF = 0;
+
+    function pageIndexAt(y) {   // índice (0-based) de la última página con offsetTop <= y
+        var lo = 0, hi = pages.length - 1;
+        while (lo < hi) {
+            var mid = (lo + hi + 1) >> 1;
+            if (pages[mid].div.offsetTop <= y) lo = mid; else hi = mid - 1;
+        }
+        return lo;
+    }
+
+    function computeCurrentPage() {
+        if (!pages.length) return currentPage;
+        var maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
+        // Abajo del todo la última página siempre cuenta (con zoom pequeño
+        // su borde superior puede no llegar nunca a la línea del 50%).
+        if (maxScroll > 0 && scrollEl.scrollTop >= maxScroll - 2) return pages.length;
+        var y = scrollEl.scrollTop + scrollEl.clientHeight * PROBE_FRACTION;
+        return pageIndexAt(y) + 1;
+    }
+
+    function updateCurrentPage() {
+        trackRAF = 0;
+        if (settling || !pdfDoc || !pages.length) return;
+        setCurrentPage(computeCurrentPage());
+    }
+
+    scrollEl.addEventListener('scroll', function () {
+        if (settling || !pdfDoc) return;
+        if (programmaticTop !== null) {
+            if (Math.abs(scrollEl.scrollTop - programmaticTop) <= 2) return; // eco de nuestro propio salto
+            programmaticTop = null; // lo ha movido el usuario (rueda, barra, teclas...)
+        }
+        if (!trackRAF) trackRAF = requestAnimationFrame(updateCurrentPage);
+    }, { passive: true });
+
+    // Salto deliberado (flechas izquierda/derecha): cuenta como leer la
+    // página destino y fija la página actual AL MOMENTO, sin esperar a la
+    // geometría -- con zoom pequeño la línea del 50% puede caer varias
+    // páginas más abajo y la siguiente pulsación se saltaría páginas.
     function jumpToPage(n) {
+        if (!pages.length) return;
         n = Math.max(1, Math.min(numPages, n));
         var target = pages[n - 1];
-        if (target) scrollPageToTop(target.div);
+        if (!target) return;
+        scrollPageToTop(target.div);
+        programmaticTop = scrollEl.scrollTop;
+        setCurrentPage(n);
     }
 
     function setCurrentPage(n) {
+        n = Math.max(1, Math.min(numPages || 1, n));
         if (n === currentPage) return;
         currentPage = n;
         pageLabel.textContent = n + ' / ' + numPages + (lastPageReal && n === lastPageReal ? ' (fin del contenido)' : '');
@@ -351,20 +419,19 @@
     function observePages() {
         if (io) io.disconnect();
         io = new IntersectionObserver(function (entries) {
-            var best = null;
+            // Solo dibuja/vacía canvas. La página actual NO sale de aquí (ver
+            // computeCurrentPage).
             entries.forEach(function (entry) {
                 var p = pages[parseInt(entry.target.dataset.pageNum, 10) - 1];
                 if (entry.isIntersecting) {
                     renderPageCanvas(p);
-                    if (!best || entry.intersectionRatio > best.ratio) best = { num: p.num, ratio: entry.intersectionRatio };
                 } else if (Math.abs(p.num - currentPage) > 6) {
                     // Lejos de verdad -- si no, un scroll pequeño de ida
                     // y vuelta estaría vaciando y redibujando sin parar.
                     freePageCanvas(p);
                 }
             });
-            if (best) setCurrentPage(best.num);
-        }, { root: scrollEl, rootMargin: '100% 0px', threshold: [0, 0.25, 0.5, 0.75, 1] });
+        }, { root: scrollEl, rootMargin: '100% 0px', threshold: [0] });
         pages.forEach(function (p) { io.observe(p.div); });
     }
 
@@ -408,13 +475,14 @@
     });
     setNightMode(localStorage.getItem(NIGHT_MODE_KEY) === '1');
 
-    fullscreenBtn.addEventListener('click', function () {
+    function toggleFullscreen() {
         if (document.fullscreenElement) {
             document.exitFullscreen();
         } else if (viewerEl.requestFullscreen) {
             viewerEl.requestFullscreen();
         }
-    });
+    }
+    fullscreenBtn.addEventListener('click', toggleFullscreen);
     document.addEventListener('fullscreenchange', function () {
         var isFull = document.fullscreenElement === viewerEl;
         fullscreenBtn.textContent = isFull ? '⛶ Salir de pantalla completa' : '⛶ Pantalla completa';
@@ -433,18 +501,38 @@
     // directas a la página anterior/siguiente (alineada arriba del
     // todo), como los botones "Anterior"/"Siguiente" de antes.
     var ARROW_NUDGE_PX = 48;
-    var ARROW_HOLD_PX_PER_FRAME = 12;
+    var ARROW_HOLD_PX_PER_SEC = 720; // = 12 px/fotograma a 60 Hz, pero igual en pantallas de 120/144 Hz
     var arrowScrollDirection = 0;
     var arrowScrollRAF = null;
+    var arrowLastTs = 0;
 
-    function stepArrowScroll() {
-        if (!arrowScrollDirection) { arrowScrollRAF = null; return; }
-        scrollEl.scrollTop += arrowScrollDirection * ARROW_HOLD_PX_PER_FRAME;
+    function stepArrowScroll(ts) {
+        if (!arrowScrollDirection) { arrowScrollRAF = null; arrowLastTs = 0; return; }
+        var dt = arrowLastTs ? Math.min(50, ts - arrowLastTs) : 16.7;
+        arrowLastTs = ts;
+        scrollEl.scrollTop += arrowScrollDirection * ARROW_HOLD_PX_PER_SEC * dt / 1000;
         arrowScrollRAF = requestAnimationFrame(stepArrowScroll);
     }
 
     document.addEventListener('keydown', function (e) {
         if (finished || !pdfDoc) return;
+        // Con Ctrl/Alt/Cmd son atajos del navegador (Alt+← = atrás, Ctrl+↑...)
+        // y escribiendo en un campo las flechas no son del visor.
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        var tgt = e.target;
+        if (tgt && (tgt.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tgt.tagName))) return;
+        // F = pantalla completa (alterna). Se ignora con Ctrl/Cmd/Alt
+        // (Ctrl+F es "buscar" del navegador) y si se está escribiendo en
+        // un campo de texto.
+        if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            var t = e.target;
+            var typing = t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+            if (!typing) {
+                e.preventDefault();
+                if (!e.repeat) toggleFullscreen();
+                return;
+            }
+        }
         if (e.key === 'PageDown' || e.key === ' ') {
             e.preventDefault();
             scrollEl.scrollBy({ top: scrollEl.clientHeight * 0.9, behavior: 'smooth' });
@@ -469,14 +557,14 @@
             }
         } else if (e.key === 'ArrowRight') {
             e.preventDefault();
-            jumpToPage(currentPage + 1);
+            if (!e.repeat) jumpToPage(currentPage + 1);
         } else if (e.key === 'ArrowLeft') {
             e.preventDefault();
-            jumpToPage(currentPage - 1);
+            if (!e.repeat) jumpToPage(currentPage - 1);
         }
     });
     document.addEventListener('keyup', function (e) {
-        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') arrowScrollDirection = 0;
+        if ((e.key === 'ArrowDown' && arrowScrollDirection === 1) || (e.key === 'ArrowUp' && arrowScrollDirection === -1)) arrowScrollDirection = 0;
     });
     // Si se suelta la tecla fuera de foco (cambio de pestaña/ventana con
     // la flecha mantenida) el keyup nunca llega -- esto evita que se
@@ -521,6 +609,9 @@
             // contenido real -- no en la portada/índice, que nadie
             // necesita "leer" de verdad (ver reading_first_page).
             currentPage = Math.min(Math.max(1, startPage || firstPageReal), numPages);
+            settling = true; // restaurar el sitio al abrir no es leer
+            programmaticTop = null;
+            var openToken = ++layoutToken;
             toolbar.hidden = false;
             pickActions.hidden = true;
             permissionPrompt.hidden = true;
@@ -534,10 +625,19 @@
             requestAnimationFrame(function () {
                 var target = pages[currentPage - 1];
                 if (target) scrollPageToTop(target.div);
+                programmaticTop = scrollEl.scrollTop;
+                requestAnimationFrame(function () { if (openToken === layoutToken) settling = false; });
             });
         }).catch(function (err) {
             console.error('openFile:', err);
             hint.textContent = 'No se pudo abrir ese PDF (' + (err && (err.name || err.message) || err) + ').';
+            // Si el archivo guardado en este navegador (o el bajado del
+            // servidor) estaba dañado, antes no quedaba ningún botón para
+            // elegir otro: el selector solo salía cuando NO había copia.
+            if (supportsLocal) {
+                pickActions.hidden = false;
+                hint.textContent += ' Puedes elegir el archivo otra vez.';
+            }
         });
     }
 
@@ -547,6 +647,8 @@
     function applyProgressResponse(data) {
         if (!data.ok) return false;
         if (data.status) {
+            var statusPage = document.getElementById('reading-status-page');
+            if (statusPage) statusPage.textContent = 'Página ' + data.status.current_page + ' de ' + data.status.last_page;
             progressBar.style.width = data.status.pct + '%';
             paceLabel.textContent = data.status.is_overdue
                 ? ('Vas ' + Math.abs(data.status.days_left) + ' días tarde')
@@ -584,6 +686,7 @@
         if (pendingPage === null) return Promise.resolve();
         var page = pendingPage;
         pendingPage = null;
+        var mySeq = ++sendSeq;
         return fetch(progressUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
@@ -594,8 +697,11 @@
               // página -- pero si esa página no vuelve a cambiar (fin de
               // la sesión), se perdería sin más, así que se deja
               // pendiente otra vez para que un flush posterior
-              // (finishSessionBtn o beaconFlush) lo reintente.
-              pendingPage = page;
+              // (finishSessionBtn o beaconFlush) lo reintente. Pero solo si
+              // no hay nada más reciente: si mientras tanto se pidió (o ya se
+              // envió) una página posterior, restaurar esta -- más vieja --
+              // haría retroceder el progreso guardado.
+              if (pendingPage === null && mySeq === sendSeq) pendingPage = page;
           });
     }
 
@@ -604,7 +710,12 @@
         // una petición por cada una, solo la última tras un momento quieto.
         pendingPage = n;
         clearTimeout(reportTimer);
-        reportTimer = setTimeout(sendProgress, 400);
+        // Llegar a la última página CIERRA el plan entero y es irreversible
+        // (el servidor no retrocede): ahí se exige que el visor se quede
+        // en ella un momento, para que un cruce de paso (scroll rápido,
+        // tecla mantenida) no termine el libro antes de empezarla.
+        var atEnd = lastPageReal && n >= lastPageReal;
+        reportTimer = setTimeout(sendProgress, atEnd ? 1500 : 400);
     }
 
     // Fuerza el envío inmediato de un aviso pendiente, sin esperar al
@@ -657,7 +768,7 @@
     // mientras quede algo sin confirmar, así lo más que se puede perder
     // es este margen, nunca toda la sesión.
     setInterval(function () {
-        if (pendingPage !== null) sendProgress();
+        if (pendingPage !== null && reportTimer === null) sendProgress(); // si hay debounce en marcha, que termine él
     }, 5000);
 
     markFinishedBtn.addEventListener('click', function () {

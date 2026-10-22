@@ -177,7 +177,11 @@
             })
             .catch(function () {
                 saved = false;
-                hint.textContent = 'No se pudo guardar — inténtalo otra vez.';
+                // El botón «Terminar sesión» solo salía al llegar al objetivo:
+                // si el guardado fallaba al acabar el vídeo (sin red, servidor
+                // reiniciándose...) no quedaba NADA que pulsar para reintentar.
+                hint.textContent = 'No se pudo guardar — pulsa «Terminar sesión» para reintentar.';
+                if (goalActionsEl) goalActionsEl.hidden = false;
             });
     }
 

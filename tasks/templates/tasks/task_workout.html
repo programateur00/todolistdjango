@@ -43,7 +43,7 @@
             <div class="workout__stat">
                 <span class="workout__stat-value" id="workout-reps">0</span>
                 <span class="workout__stat-label">
-                    {% if exercise.counter_key == "plank" or exercise.counter_key == "sideplank" or exercise.counter_key == "wallsit" or exercise.counter_key == "kneeholdbar" or exercise.counter_key == "lsithold" or exercise.counter_key == "supermanhold" or exercise.counter_key == "hollowbodyhold" %}segundos{% else %}{{ exercise.name|lower }}{% endif %}
+                    {% if exercise.counter_key == "plank" or exercise.counter_key == "sideplank" or exercise.counter_key == "wallsit" or exercise.counter_key == "kneeholdbar" or exercise.counter_key == "lsithold" or exercise.counter_key == "supermanhold" or exercise.counter_key == "hollowbodyhold" or exercise.counter_key == "butterflystretch" %}segundos{% else %}{{ exercise.name|lower }}{% endif %}
                 </span>
             </div>
             <div class="workout__stat">
@@ -108,6 +108,21 @@
     <p class="workout__note">
         La cámara comprueba que la cadera sube de verdad y que extiendes la cadera, no solo que arqueas la espalda. Si pasan 7 segundos
         sin hacer ninguna repetición, la serie se cierra sola.
+    </p>
+    {% elif exercise.counter_key == "russiantwist" %}
+    <p class="workout__note">
+        📐 Coloca el móvil o el portátil <strong>de PERFIL</strong> (a un lado), algo alejado, para que se vea el
+        <strong>cuerpo entero</strong> (de los hombros a los pies). Siéntate en el suelo con el <strong>tronco inclinado hacia
+        atrás unos 45°</strong>, las <strong>rodillas dobladas</strong> (con los pies en el suelo o un poco levantados) y las
+        <strong>manos juntas delante del pecho</strong>. De perfil se ve <strong>un solo hombro</strong>: quédate quieto y espera al
+        «Listo». Una repetición es <strong>girar el tronco a un lado</strong> hasta enseñar <strong>los dos hombros</strong> a la
+        cámara y volver al centro; después, al otro lado. Cada lado cuenta 1.
+    </p>
+    <p class="workout__note">
+        Solo se empieza a contar desde esa posición inicial: si se te ven los dos hombros pero no estás sentado de perfil
+        (de frente, de pie, tumbado, erguido…), no cuenta. Mueve el tronco, no la cadera ni los brazos solos. Si giras poco y no se
+        ven bien los dos hombros, el giro no cuenta y te lo dice. Para terminar una serie, levántate o sal del encuadre; si pasan
+        8 segundos sin girar, se cierra sola.
     </p>
     {% elif exercise.counter_key == "splitjump" %}
     <p class="workout__note">
@@ -456,6 +471,15 @@
         paralelas o sal del encuadre.{% else %}y aguanta las piernas rectas en L, a la altura de la cadera. Aquí no se cuentan
         repeticiones: el contador de arriba muestra los <strong>segundos aguantados</strong>. Si bajas las piernas, te bajas de
         las paralelas o sales del encuadre un par de segundos, la serie se cierra sola.{% endif %}
+    </p>
+    {% elif exercise.counter_key == "butterflystretch" %}
+    <p class="workout__note">
+        📐 Siéntate en el suelo <strong>de frente</strong> a la cámara (el móvil o el portátil delante de ti, algo alejado) y encuadra el
+        <strong>cuerpo entero</strong>: se tienen que ver los hombros, las caderas, las rodillas y los pies. Junta las <strong>plantas de
+        los pies</strong>, acércalas a la ingle y deja caer las <strong>rodillas abiertas</strong> hacia los lados, con la espalda recta
+        (puedes inclinarte hacia delante desde la cadera, sin rebotar ni forzar). Aquí no se cuentan repeticiones: el contador de arriba
+        muestra los <strong>segundos aguantados</strong>. Si sueltas la postura o sales del encuadre un par de segundos, la serie se
+        cierra sola.
     </p>
     {% elif exercise.counter_key == "jumpingjack" %}
     <p class="workout__note">

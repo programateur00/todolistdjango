@@ -20,7 +20,7 @@ import {
   angle,
   checkPlankPosture, checkSidePlankPosture, checkWallSitPosture,
   checkKneeHoldBarPosture, checkDeadHangPosture, checkTuckLeverPosture, checkHandstandPosture, checkFrogStandPosture, createLSitHoldChecker, createSupermanHoldChecker, createHollowBodyChecker, checkArmCrossStretch, checkTricepsOverheadStretch,
-  checkSeatedHamstringStretch, createStandingQuadStretchChecker, checkElephantStepsHold,
+  checkSeatedHamstringStretch, createStandingQuadStretchChecker, createButterflyStretchChecker, checkElephantStepsHold,
   speakOut, numeroEnPalabras, isVoiceEnabled, REP_VOICE_RATE, clearVoiceTransitionMute,
 } from "./workout.js";
 import { PersonGate } from "./workout.js";
@@ -127,7 +127,7 @@ import { openCameraStream } from "./camera-stream.js";
   // postura en vez de contar repeticiones. Ver checkPlankPosture /
   // checkSidePlankPosture / checkWallSitPosture / checkKneeHoldBarPosture /
   // checkHandstandPosture más abajo.
-  const POSTURE_COUNTERS = new Set(["hollowbodyhold", "supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "tucklever", "deadhang", "handstand", "frogstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch", "elephantstepshold"]);
+  const POSTURE_COUNTERS = new Set(["hollowbodyhold", "supermanhold", "lsithold", "plank", "sideplank", "wallsit", "kneeholdbar", "tucklever", "deadhang", "handstand", "frogstand", "armcrossstretch", "tricepsoverheadstretch", "seatedhamstringstretch", "standingquadstretch", "elephantstepshold", "butterflystretch"]);
 
   // Estiramientos bilaterales cronometrados (armcrossstretch/
   // tricepsoverheadstretch: un brazo y luego el otro; seatedhamstringstretch/
@@ -409,6 +409,8 @@ import { openCameraStream } from "./camera-stream.js";
         ? checkSeatedHamstringStretch
         : item.counter_key === "standingquadstretch"
         ? createStandingQuadStretchChecker()
+        : item.counter_key === "butterflystretch"
+        ? createButterflyStretchChecker(() => (video && video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : undefined))
         : item.counter_key === "elephantstepshold"
         ? checkElephantStepsHold
         : checkPlankPosture;

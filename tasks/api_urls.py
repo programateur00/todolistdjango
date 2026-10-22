@@ -58,6 +58,7 @@ urlpatterns = [
     path("plans/language-save/", api.plan_language_save, name="plan_language_save"),
     path("plans/<uuid:uuid>/", api.plan_detail, name="plan_detail"),
     path("plans/<uuid:uuid>/close/", api.plan_close, name="plan_close"),
+    path("plans/<uuid:uuid>/closure-seen/", api.plan_closure_seen, name="plan_closure_seen"),
     path("plans/<uuid:uuid>/items/", api.plan_item_create, name="plan_item_create"),
     path("plans/<uuid:uuid>/items/<int:item_id>/", api.plan_item_detail, name="plan_item_detail"),
     path("review/weekly/", api.weekly_review, name="weekly_review"),

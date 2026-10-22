@@ -112,6 +112,19 @@ body {
   color: var(--ember); margin-bottom: 4px;
 }
 .topbar__title h1 { font-size: 40px; line-height: 1; letter-spacing: .02em; }
+/* Un título largo en una pantalla estrecha se parte en vez de empujar la página hacia los lados. */
+.topbar__title { min-width: 0; }
+.topbar__title h1 { overflow-wrap: anywhere; }
+/* Texto que escribe el usuario en un plan (un enlace en las notas, un nombre sin espacios): se
+   parte en vez de ensanchar la página y dejar los botones medio fuera de la pantalla. */
+.plan-notes, .plan-card__name, .celebration__title, .celebration__text, .celebration__reward {
+  overflow-wrap: anywhere;
+}
+/* En pantallas estrechas la fila de botones (hasta 5 en el detalle de un plan) pasa a varias líneas
+   en vez de salirse de la pantalla; por encima de 720 px queda exactamente igual que antes. */
+@media (max-width: 720px) {
+  .task-form__actions { flex-wrap: wrap; gap: 10px; }
+}
 
 .stats-link, .back-link {
   display: inline-flex; align-items: center; gap: 6px;
