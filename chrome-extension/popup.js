@@ -53,6 +53,7 @@ function renderDebug(snap) {
     lines.push(`Pestaña activa — título: "${snap.tab.title}"`);
     lines.push(`Pestaña activa — URL: ${snap.tab.url ?? "(oculta — falta el permiso de acceso a archivos)"}`);
     lines.push(`Tipo de pestaña detectado: ${{ udemy: "Udemy", ilerna: "Clases de Ilerna (Zoom)", pdf: "PDF", otro: "ninguno de los tres" }[snap.tabKind]}`);
+    if (snap.udemyPlayer === false) lines.push("Esta página de Udemy NO es el reproductor del curso (…/learn/…): no cuenta tiempo aquí.");
     lines.push(`¿Suena audio en la pestaña?: ${snap.tab.audible ? "sí" : "no"}`);
   } else {
     lines.push("Pestaña activa: (no se detecta ninguna)");
@@ -74,6 +75,17 @@ function renderDebug(snap) {
   }
   lines.push(`Coincidencia encontrada ahora: ${snap.match ? `SÍ — "${snap.match.taskTitle}" (por "${snap.match.keyword}")` : "NO"}`);
   lines.push(`Sesión en curso: ${snap.currentSession ? `${snap.currentSession.taskTitle} [${snap.currentSession.subcategory}]` : "ninguna"}`);
+  if (snap.currentSession && snap.currentSession.signals) {
+    lines.push(`   señales de la sesión en curso: ${JSON.stringify(snap.currentSession.signals)}`);
+  }
+  const log = (snap.sessionLog || []).slice(-8).reverse();
+  if (log.length) {
+    lines.push("Últimas sesiones cerradas (más reciente primero):");
+    const hm = (ms) => new Date(ms).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    log.forEach((e) => {
+      lines.push(`   · ${hm(e.startedAt)}→${hm(e.endAt)} "${e.task}" [${e.mode}] contado ${e.countedSeconds}s = ${e.minutes} min — señales ${JSON.stringify(e.signals)}`);
+    });
+  }
   debugEl.textContent = lines.join("\n");
 }
 

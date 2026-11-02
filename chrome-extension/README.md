@@ -7,6 +7,9 @@ la app móvil, con `source=pc_usage` en vez de `app_usage`. Hay dos
 tipos de pestaña trackeable, cada uno emparejado con un tipo de tarea:
 
 - **Udemy** — tarea de categoría Estudio, subtipo "Curso de Udemy".
+  Solo cuenta dentro del **reproductor del curso** (URL con `/learn/`): la
+  portada de Udemy, el buscador, la ficha del curso o el carrito no suman
+  nada aunque estén en primer plano y muevas el ratón.
   Hay dos modos de contar el tiempo, elegidos por curso (ver abajo) y que
   nunca se mezclan. Por defecto es **"por vídeos vistos"**: cuenta SOLO
   mientras el vídeo suena (chrome.tabs.audible) o se está reproduciendo

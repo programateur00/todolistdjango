@@ -2399,6 +2399,44 @@ class UdemyTrackingTests(TestCase):
         self.task.refresh_from_db()
         self.assertTrue(self.task.is_done)
 
+    def _post_pc(self, minutes):
+        return self.client.post(
+            reverse("api:focus_save", args=[self.task.uuid]),
+            data=json.dumps({"minutes": minutes, "source": "pc_usage", "app_package": "udemy.com"}),
+            content_type="application/json",
+        )
+
+    def test_udemy_minutes_after_goal_are_discarded(self):
+        """Cumplido el objetivo del día, lo que se vea de más no se guarda."""
+        self.task.target_minutes = 30
+        self.task.save(update_fields=["target_minutes"])
+        self._post_pc(30)
+        self.task.refresh_from_db()
+        self.assertTrue(self.task.is_done)
+        r = self._post_pc(6)
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json().get("ignored"))
+        total = sum(TimerSession.objects.filter(series_id=self.task.series_id).values_list("minutes", flat=True))
+        self.assertEqual(total, 30)
+
+    def test_udemy_session_crossing_goal_is_capped(self):
+        self.task.target_minutes = 30
+        self.task.save(update_fields=["target_minutes"])
+        self._post_pc(20)
+        self._post_pc(25)          # solo faltaban 10
+        self.task.refresh_from_db()
+        self.assertTrue(self.task.is_done)
+        mins = sorted(TimerSession.objects.filter(series_id=self.task.series_id).values_list("minutes", flat=True))
+        self.assertEqual(mins, [10, 20])
+
+    def test_udemy_without_target_closes_day_and_ignores_the_rest(self):
+        self._post_pc(15)
+        self.task.refresh_from_db()
+        self.assertTrue(self.task.is_done)
+        self._post_pc(6)
+        total = sum(TimerSession.objects.filter(series_id=self.task.series_id).values_list("minutes", flat=True))
+        self.assertEqual(total, 15)
+
     def test_focus_save_pc_usage_does_not_double_complete(self):
         """Una vez hecha, una sesión de la extensión que llegue tarde no
         debe volver a completarla (ni duplicar la instancia de mañana)."""

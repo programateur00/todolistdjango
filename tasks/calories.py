@@ -32,7 +32,7 @@ DEFAULT_SECONDS_PER_REP = 3.0   # lo que dura una repetición típica
 SECONDS_PER_REP = {
     # rápidos
     "jumping-jack": 1.0, "jump-rope": 0.5, "switchblade-jump": 1.5, "heel-kicks": 1.0, "knee-raises": 1.0, "arm-circles": 1.5,
-    "arm-scissors": 1.5, "high-leg-raise": 1.5, "leg-rotation": 2.0, "scissor-kick": 1.5,
+    "arm-scissors": 1.5, "leg-rotation": 2.0, "scissor-kick": 1.5,
     "crunch": 2.0, "double-crunch": 2.5, "leg-raise": 2.5, "superman": 2.5,
     "scapular-pull": 2.0, "dumbbell-curl": 2.5, "neck-lateral-mobility": 2.0,
     "neck-turn-side": 2.0, "hip-forward-back": 2.0, "hip-lateral-mobility": 2.0,

@@ -14,7 +14,8 @@
  * subtipo de tarea distinto:
  *
  *   - Udemy (category="study", subcategory="udemy"): la pestaña es
- *     udemy.com Y ADEMÁS suena (chrome.tabs.audible) O hay actividad
+ *     el REPRODUCTOR del curso en udemy.com (URL con /learn/; la portada,
+ *     el buscador o la ficha del curso no cuentan nunca) Y ADEMÁS suena (chrome.tabs.audible) O hay actividad
  *     reciente de ratón/teclado — el audio es la señal POR DEFECTO desde
  *     fuera de la página de que la clase se está viendo de verdad, y la
  *     actividad cubre las pausas y ejercicios en silencio (si no, esos
@@ -191,6 +192,19 @@ function isUdemyUrl(rawUrl) {
   }
 }
 
+/** ¿Es el reproductor del curso (…/course/<curso>/learn/…)? Fuera de ahí
+ * (portada de Udemy, buscador, ficha del curso con su vídeo de presentación,
+ * carrito…) NO se está estudiando, aunque el título de la pestaña lleve la
+ * palabra clave del curso y se mueva el ratón. */
+function isUdemyPlayerUrl(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    return /(^|\.)udemy\.com$/i.test(u.hostname) && u.pathname.includes("/learn/");
+  } catch {
+    return false;
+  }
+}
+
 function isIlernaUrl(rawUrl) {
   try {
     const u = new URL(rawUrl);
@@ -229,10 +243,14 @@ async function isVideoPlayingInTab(tabId) {
     const results = await chrome.scripting.executeScript({
       target: { tabId, allFrames: true },
       func: () => {
-        if (!location.pathname.includes("/learn/") && window === window.top) return false;
-        return Array.from(document.querySelectorAll("video")).some(
-          (v) => !v.paused && !v.ended && v.readyState > 2
-        );
+        // Solo vale el vídeo de una lección: no una vista previa en bucle ni
+        // un vídeo diminuto/oculto (anuncios, miniaturas). La comprobación de
+        // que la pestaña es el reproductor del curso ya la hace quien llama.
+        return Array.from(document.querySelectorAll("video")).some((v) => {
+          if (v.paused || v.ended || v.readyState <= 2 || v.loop) return false;
+          const r = v.getBoundingClientRect();
+          return r.width >= 120 && r.height >= 68;
+        });
       },
     });
     return results.some((r) => r && r.result === true);
@@ -272,6 +290,12 @@ async function getActiveMatch() {
     const ilerna = !udemy && isIlernaUrl(tab.url);
     const pdf = !udemy && !ilerna && isPdfUrl(tab.url);
     if (!udemy && !ilerna && !pdf) return null;
+    // Udemy solo cuenta dentro del reproductor del curso, en los dos modos.
+    // Antes bastaba con cualquier página de udemy.com cuyo título llevara la
+    // palabra clave (la ficha del curso, por ejemplo) y, en "por tiempo en
+    // la página", con mover el ratón: un curso dejado en primer plano sin
+    // ver nada sumaba minutos.
+    if (udemy && !isUdemyPlayerUrl(tab.url)) return null;
 
     // Qué tarea encaja se mira ANTES de decidir qué se exige para
     // contar -- en Udemy la exigencia (audio o solo inactividad) depende
@@ -283,6 +307,10 @@ async function getActiveMatch() {
     if (!found) return null;
 
     let videoMode = false;
+    // Qué señal dio por buena la pestaña en ESTA comprobación (para el
+    // registro de sesiones del popup): "audio", "video", "pausa" (vídeo
+    // parado pero dentro de la pausa tolerada) o "actividad".
+    let signal = "actividad";
     // Sesión que SOLO se sostiene con actividad de ratón/teclado (Udemy "por
     // tiempo en la página" y PDF). Al cerrarla, los minutos de inactividad
     // que hicieron falta para detectar que te fuiste no cuentan (ver endSession).
@@ -316,16 +344,20 @@ async function getActiveMatch() {
         // ratón/teclado NO basta aquí -- eso es del modo "por tiempo en
         // la página" (rama de más abajo) y no se mezclan.
         const now = Date.now();
-        const playing = tab.audible || (await isVideoPlayingInTab(tab.id));
+        const videoNow = tab.audible ? false : await isVideoPlayingInTab(tab.id);
+        const playing = tab.audible || videoNow;
         if (playing) {
           await markPlaying(tab.id, now);
+          signal = tab.audible ? "audio" : "video";
         } else {
           const last = await getLastPlaying(tab.id);
           if (!last || now - last > VIDEO_PAUSE_GRACE_SECONDS * 1000) return null;
+          signal = "pausa";
         }
         videoMode = true;
       } else if (requiresAudio) {
-        if (!tab.audible) {
+        if (tab.audible) signal = "audio";
+        else {
           const idleState = await chrome.idle.queryState(IDLE_DETECTION_SECONDS);
           if (idleState !== "active") return null;
         }
@@ -348,6 +380,7 @@ async function getActiveMatch() {
       appPackage: udemy ? "udemy.com" : ilerna ? "ilernaonline.zoom.us" : pdfFileName(tab.url),
       videoMode,
       activityOnly,
+      signal,
     };
   } catch (err) {
     console.warn("[Libreta] getActiveMatch falló:", err);
@@ -597,9 +630,13 @@ async function detectCourseProgressInPage() {
       if (fractions.length >= COURSE_PROGRESS_MIN_FRACTIONS) {
         const done = fractions.reduce((sum, [d]) => sum + d, 0);
         const total = fractions.reduce((sum, [, t]) => sum + t, 0);
+        // El % llega a 100 SOLO si todas las fracciones cuadran: redondear
+        // (399/400 = 99,75 -> 100) enseñaba la barra al 100% con el curso
+        // sin acabar, y el servidor cierra el plan al recibir un 100.
+        const complete = fractions.every(([d, t]) => d === t);
         return {
-          complete: fractions.every(([d, t]) => d === t),
-          pct: total > 0 ? Math.round((done / total) * 100) : null,
+          complete,
+          pct: total > 0 ? (complete ? 100 : Math.min(99, Math.round((done / total) * 100))) : null,
           done,
           total,
         };
@@ -648,7 +685,13 @@ async function checkCourseCompletion(taskUuid, tabId, itemId = null) {
   // independientes (ver Task.record_course_progress vs
   // finish_recurring_series), así que uno puede fallar sin bloquear al
   // otro.
-  if (progress.pct !== null && progress.pct !== undefined) {
+  // Si el respaldo de texto dice "curso completado" no hay número, pero sí
+  // hay 100%: se manda igual, para que el servidor cierre el plan también
+  // por la vía pasiva (sin sesión, sin tarea).
+  const pctToSend = progress.pct !== null && progress.pct !== undefined
+    ? progress.pct
+    : (progress.complete ? 100 : null);
+  if (pctToSend !== null) {
     try {
       const progressUrl = itemId
         ? `/plan-items/${itemId}/course-progress/`
@@ -656,7 +699,7 @@ async function checkCourseCompletion(taskUuid, tabId, itemId = null) {
       const res = await fetch(apiUrl(cfg, progressUrl), {
         method: "POST",
         headers: { Authorization: authHeader(cfg), "Content-Type": "application/json" },
-        body: JSON.stringify({ pct: progress.pct, done: progress.done, total: progress.total }),
+        body: JSON.stringify({ pct: pctToSend, done: progress.done, total: progress.total }),
       });
       console.log("[Libreta] % del curso enviado al servidor -> HTTP", res.status);
     } catch (err) {
@@ -741,9 +784,42 @@ async function endSession(session) {
     const { idleSince } = await chrome.storage.session.get("idleSince");
     if (idleSince && idleSince > session.startedAt) endAt = Math.min(endAt, idleSince);
   }
-  const minutes = await takeWholeMinutes(session.task.uuid, Math.max(0, endAt - session.startedAt));
+  const countedMs = Math.max(0, endAt - session.startedAt);
+  const minutes = await takeWholeMinutes(session.task.uuid, countedMs);
+  await logSession(session, endAt, countedMs, minutes);
   if (minutes < MIN_SESSION_MINUTES_TO_SEND) return;
   await sendSessionMinutes(session.task.uuid, minutes, session.appPackage);
+}
+
+// Registro de las últimas sesiones cerradas (para el panel de diagnóstico):
+// cuándo empezó, hasta cuándo se contó, cuántos minutos salieron y QUÉ señales
+// la mantuvieron viva (cuántas comprobaciones por audio, vídeo en marcha,
+// pausa tolerada o actividad). Así, si cuenta tiempo "de la nada", se ve por qué.
+const SESSION_LOG_MAX = 15;
+async function logSession(session, endAt, countedMs, minutes) {
+  try {
+    const { sessionLog } = await chrome.storage.local.get("sessionLog");
+    const list = Array.isArray(sessionLog) ? sessionLog : [];
+    list.push({
+      task: session.task.title,
+      mode: session.videoMode ? "vídeos" : session.activityOnly ? "tiempo en página" : "audio/actividad",
+      startedAt: session.startedAt,
+      endAt,
+      countedSeconds: Math.round(countedMs / 1000),
+      minutes,
+      signals: session.signals || {},
+    });
+    await chrome.storage.local.set({ sessionLog: list.slice(-SESSION_LOG_MAX) });
+  } catch (err) {
+    console.warn("[Libreta] no se pudo guardar el registro de sesión:", err);
+  }
+}
+
+async function noteSignal(current, signal) {
+  if (!current || !signal) return;
+  const signals = Object.assign({}, current.signals);
+  signals[signal] = (signals[signal] || 0) + 1;
+  await setCurrentSession(Object.assign({}, current, { signals }));
 }
 
 async function startSession(match) {
@@ -754,6 +830,7 @@ async function startSession(match) {
     videoMode: Boolean(match.videoMode),
     activityOnly: Boolean(match.activityOnly),
     startedAt: Date.now(),
+    signals: match.signal ? { [match.signal]: 1 } : {},
   });
 }
 
@@ -776,6 +853,7 @@ async function reevaluate({ allowEndOnNoMatch = true } = {}) {
   }
 
   if (current && current.task.uuid === match.task.uuid && current.tabId === match.tabId) {
+    await noteSignal(current, match.signal);
     return; // misma sesión, sigue contando sola — nada que hacer aquí
   }
 
@@ -956,6 +1034,7 @@ async function debugSnapshot() {
     tab: tab ? { url: tab.url || null, title: tab.title, audible: Boolean(tab.audible) } : null,
     noUrlButFileTab, // pestaña file:// sin el permiso "acceso a URLs de archivo" concedido
     tabKind,
+    udemyPlayer: isUdemyTab ? isUdemyPlayerUrl(tab.url) : null, // false = en Udemy pero fuera del reproductor: no cuenta
     idleState,
     tasksCount: tasks.length,
     tasksCacheAgeSeconds: tasksCacheAt ? Math.round((Date.now() - tasksCacheAt) / 1000) : null,
@@ -965,8 +1044,9 @@ async function debugSnapshot() {
     })),
     match: match ? { taskTitle: match.task.title, keyword: match.keyword } : null,
     currentSession: current
-      ? { taskTitle: current.task.title, subcategory: current.task.subcategory, startedAt: current.startedAt }
+      ? { taskTitle: current.task.title, subcategory: current.task.subcategory, startedAt: current.startedAt, signals: current.signals || {} }
       : null,
+    sessionLog: (await chrome.storage.local.get("sessionLog")).sessionLog || [],
   };
 }
 

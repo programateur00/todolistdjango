@@ -3136,13 +3136,70 @@ class Plan(models.Model):
             return progress["total"] > 0 and progress["finished"]
         if has_udemy_course:
             # Igual que Idiomas/playlist: el fin es terminar el curso,
-            # no cumplir `weeks` — lo dice course_completed_at en la
-            # tarea vigente, puesto por finish_recurring_series() cuando
-            # la extensión de Chrome detecta el 100% en Udemy.
-            current_task = Task.objects.filter(series_id=self.task_series_id).order_by("-due_date").first()
-            return bool(current_task and current_task.course_completed_at)
+            # no cumplir `weeks`. Se da por terminado si CUALQUIER tarea
+            # de la serie lleva course_completed_at (puesto por
+            # finish_recurring_series() cuando la extensión detecta el
+            # 100%) o si el % guardado del curso ya es 100 -- el que
+            # enseña la barra. Antes solo miraba la tarea de fecha más
+            # reciente: si hoy ya estaba hecha y mañana ya había nacido,
+            # el sello quedaba en la de hoy y el plan no se cerraba; y si
+            # el 100% llegaba por la vía pasiva de la extensión (sin
+            # sesión contando) solo se guardaba el %, nunca el sello.
+            return self._udemy_course_done(head)
         today = timezone.localtime(timezone.now()).date()
         return today >= self.ends_on or self._all_items_reached_goal()
+
+    def _udemy_course_done(self, head):
+        """
+        True si el curso de Udemy del objetivo `head` ya está terminado:
+        alguna tarea de la serie lleva course_completed_at, o el % que
+        reportó Udemy (el de la barra) es 100. Una sola definición para
+        que "barra al 100%" y "plan cerrado" no puedan divergir.
+        """
+        if self.task_series_id and Task.objects.filter(
+            series_id=self.task_series_id, course_completed_at__isnull=False,
+        ).exists():
+            return True
+        info = head.course_progress()
+        return bool(info and info["pct"] is not None and info["pct"] >= 100)
+
+    def finish_udemy_course(self):
+        """
+        Udemy reportó el curso de este plan al 100%: para la serie
+        (course_completed_at + repeat=NONE) y cierra el plan al momento.
+
+        Es lo que faltaba en la vía "pasiva" de la extensión (pestaña de
+        Udemy abierta sin sesión de tiempo contando, por ejemplo porque el
+        objetivo de hoy ya estaba cumplido): esa solo mandaba el %, y el
+        cierre (`course-complete` de la tarea) exigía una sesión en marcha.
+
+        Elige la tarea de hoy (la más reciente con fecha <= hoy). Si ya
+        estaba hecha no se vuelve a marcar -- no inventa una sesión de
+        estudio que no ocurrió --, solo se le pone el sello y se detiene
+        la serie. Idempotente. Devuelve True si el plan ha quedado cerrado
+        por esta llamada.
+        """
+        if self.closed_at or self.deleted_at or self.plan_type != self.PLAN_TYPE_STUDY:
+            return False
+        series = Task.objects.filter(series_id=self.task_series_id) if self.task_series_id else Task.objects.none()
+        today = timezone.localtime(timezone.now()).date()
+        task = series.filter(due_date__lte=today).order_by("-due_date").first() or series.order_by("due_date").first()
+        if task is None:
+            task = self.sync_task()
+        if task is not None:
+            if task.is_done:
+                if task.repeat != Task.REPEAT_NONE or not task.course_completed_at:
+                    task.repeat = Task.REPEAT_NONE
+                    task.course_completed_at = task.course_completed_at or timezone.now()
+                    task.save(update_fields=["repeat", "course_completed_at"])
+            else:
+                task.finish_recurring_series()  # hace mark_done() y puede cerrar el plan
+        # mark_done() cierra una copia distinta del plan: recargar antes de decidir.
+        # (al entrar estaba abierto, así que si ya está cerrado fue en esta llamada).
+        self.refresh_from_db()
+        if self.closed_at:
+            return True
+        return self.close_if_finished()
 
     def _all_items_reached_goal(self):
         """

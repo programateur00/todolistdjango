@@ -194,3 +194,62 @@ test("los segundos sueltos se arrastran entre sesiones (40 s x3 = 2 min)", async
   assert.deepEqual(got, [1, 0, 1]);
   assert.equal(got.reduce((a, b) => a + b, 0), 2);
 });
+
+// ------------------------------- Udemy solo cuenta dentro del reproductor
+test("fuera del reproductor (portada, ficha del curso) NO cuenta, en ningún modo", async () => {
+  for (const requiresAudio of [true, false]) {
+    for (const url of [
+      "https://www.udemy.com/",
+      "https://www.udemy.com/home/my-courses/learning/",
+      "https://www.udemy.com/course/python/",
+      "https://www.udemy.com/courses/search/?q=python",
+    ]) {
+      const env = makeEnv(); env.setTasks([udemyTask({ watch_requires_audio: requiresAudio })]);
+      env.tab.url = url; env.idle = "active"; env.tab.audible = true; env.videoPlaying = true;
+      assert.equal(await counts(env), false, `${url} (audio=${requiresAudio})`);
+    }
+  }
+});
+
+test("fuera del reproductor tampoco cuenta el hábito genérico de Udemy", async () => {
+  const env = makeEnv(); env.setTasks([udemyTask({ watch_keyword: "" })]);
+  env.tab.url = "https://www.udemy.com/"; env.tab.title = "Udemy"; env.idle = "active"; env.tab.audible = true;
+  assert.equal(await counts(env), false);
+});
+
+test("dentro del reproductor (y en un Udemy de empresa) sigue contando", async () => {
+  for (const url of [
+    "https://www.udemy.com/course/python/learn/lecture/123#overview",
+    "https://acme.udemy.com/course/python/learn/quiz/9",
+  ]) {
+    const env = makeEnv(); env.setTasks([udemyTask()]);
+    env.tab.url = url; env.tab.audible = true;
+    assert.equal(await counts(env), true, url);
+  }
+});
+
+test("dejar la ficha del curso abierta no suma minutos (sesión completa)", async () => {
+  const env = makeEnv(); env.configure(); env.setTasks([udemyTask({ watch_requires_audio: false })]);
+  env.tab.url = "https://www.udemy.com/course/python/"; env.idle = "active";
+  await env.ctx.reevaluate();
+  env.advance(env.minutes(6));
+  env.tab.url = "https://example.com/"; // al cambiar de pestaña se cierra y se manda lo contado
+  await env.ctx.reevaluate();
+  assert.equal(env.posts.length, 0);
+});
+
+// ------------------------------------------------ registro de sesiones
+test("el registro guarda qué señales mantuvieron viva la sesión", async () => {
+  const env = makeEnv(); env.configure(); env.setTasks([udemyTask()]);
+  env.tab.audible = true;
+  await env.ctx.reevaluate();
+  env.advance(env.minutes(3)); await env.ctx.reevaluate();
+  env.tab.audible = false; env.videoPlaying = true;
+  env.advance(env.minutes(1)); await env.ctx.reevaluate();
+  env.tab.url = "https://example.com/"; await env.ctx.reevaluate();
+  const log = env.store.local.sessionLog;
+  assert.equal(log.length, 1);
+  assert.equal(log[0].mode, "vídeos");
+  assert.deepEqual(log[0].signals, { audio: 2, video: 1 });
+  assert.equal(log[0].minutes, 4);
+});

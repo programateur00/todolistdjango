@@ -879,9 +879,15 @@ def course_progress_save(request, uuid):
     t = get_object_or_404(tasks_qs(), uuid=uuid)
     data = body(request)
     pct = data.get("pct")
+    plan_closed = False
     if isinstance(pct, (int, float)) and not isinstance(pct, bool):
         t.record_course_progress(pct, data.get("done"), data.get("total"))
-    return JsonResponse({"ok": True, "task": task_json(t)})
+        # Barra al 100% => curso terminado => plan cerrado (misma regla que
+        # Plan._udemy_course_done). Ver plan_item_course_progress_save.
+        if t.course_progress_pct is not None and t.course_progress_pct >= 100 and t.plan:
+            plan_closed = t.plan.finish_udemy_course()
+            t.refresh_from_db()
+    return JsonResponse({"ok": True, "task": task_json(t), "plan_closed": plan_closed})
 
 
 @api("GET")
@@ -905,9 +911,16 @@ def plan_item_course_progress_save(request, pk):
     )
     data = body(request)
     pct = data.get("pct")
+    plan_closed = False
     if isinstance(pct, (int, float)) and not isinstance(pct, bool):
         item.record_course_progress(pct, data.get("done"), data.get("total"))
-    return JsonResponse({"ok": True, "pct": item.course_progress_pct})
+        # Esta es la vía "pasiva" de la extensión (pestaña de Udemy abierta
+        # sin sesión de tiempo contando): antes solo guardaba el % y la barra
+        # llegaba al 100% con el plan aún abierto, porque el cierre solo se
+        # disparaba desde la tarea (`course-complete`), que exige sesión.
+        if item.is_udemy_course and item.course_progress_pct >= 100:
+            plan_closed = item.plan.finish_udemy_course()
+    return JsonResponse({"ok": True, "pct": item.course_progress_pct, "plan_closed": plan_closed})
 
 
 # --------------------------------------------------------- circuitos
@@ -1199,6 +1212,22 @@ def focus_save(request, uuid):
     source = data.get("source") if data.get("source") in dict(TimerSession.SOURCE_CHOICES) else TimerSession.SOURCE_MANUAL
     _sources_with_app_package = (TimerSession.SOURCE_APP_USAGE, TimerSession.SOURCE_PC_USAGE)
     app_package = (data.get("app_package") or "")[:120] if source in _sources_with_app_package else ""
+
+    # Curso de Udemy medido por la extensión: solo cuenta lo que pide la
+    # tarea/plan de HOY. Una vez cumplido el objetivo del día (tarea ya hecha)
+    # lo que se siga viendo de más NO se guarda, y una sesión que cruza el
+    # objetivo se recorta a lo que faltaba. Sin esto, ver unos vídeos extra
+    # después de cumplir seguía sumando minutos a las estadísticas.
+    if source == TimerSession.SOURCE_PC_USAGE and t.subcategory == Task.SUBCATEGORY_UDEMY:
+        if t.is_done:
+            return JsonResponse({"ok": True, "ignored": True, "task": task_json(t)})
+        if t.target_minutes:
+            hoy_udemy = timezone.localtime(timezone.now()).date()
+            faltan = t.target_minutes - TimerSession.auto_minutes_today(_user(), t.series_id, hoy_udemy)
+            if faltan <= 0:
+                t.mark_done()
+                return JsonResponse({"ok": True, "ignored": True, "task": task_json(t)})
+            minutes = min(minutes, faltan)
 
     ts = TimerSession.objects.create(
         task=t, user=_user(), series_id=t.series_id,

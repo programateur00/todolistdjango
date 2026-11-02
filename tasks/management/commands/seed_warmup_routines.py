@@ -110,7 +110,6 @@ ROUTINES = [
             ("jumping-jack", 1, 30),
             ("knee-raises", 1, 30),
             ("heel-kicks", 1, 30),
-            # Alex (2026-10-06): quitada la elevación de pierna alta de este calentamiento.
             # A peticion de Alex (2026-09-30): elephant steps (aguante) en
             # lugar del estiramiento de isquios sentado. Cronometrado y
             # simetrico (las dos piernas a la vez) -- una sola pantalla.

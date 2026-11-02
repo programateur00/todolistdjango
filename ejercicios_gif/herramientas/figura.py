@@ -85,9 +85,11 @@ def build_side(p):
     bel = dv(b0 + (t - 90))
     face = dv(b0 + (hdir - 90))
     J = dict(H=H, S=S, hd=hd, bel=bel, face=face, hdir=hdir, f=f)
+    J['plain_head'] = bool(p.get('plain_head', False))  # True: cabeza ovalada lisa (sin bultito de nariz/barbilla)
     for side in ('near', 'far'):
         J[side + '_arm'] = limb_arm(p[side + '_arm'], S, hd, bel)
         J[side + '_leg'] = limb_leg(p[side + '_leg'], H)
+        J[side + '_flip'] = len(p[side + '_leg']) > 4 and bool(p[side + '_leg'][4])  # 5o elemento de la pierna: pie con la planta hacia arriba
         if side + '_hand' in p:
             w = J[side + '_arm'][2]
             J[side + '_handtip'] = w + dv(p[side + '_hand']) * 0.30
@@ -208,9 +210,11 @@ def tube(p, q, r0, r1, bulge=0.0, peak=0.5, n=26, caps=True):
     return out
 
 
-def foot_poly(an, he, to):
+def foot_poly(an, he, to, consistent=False):
+    """consistent=True: el empeine queda SIEMPRE a la izquierda (antihorario) del eje talon->punta, sin el truco de 'arriba = y positivo'.
+    Sirve para un pie con la planta mirando ARRIBA (p. ej. empeine apoyado en un banco, sentadilla bulgara): talon->punta hacia la izquierda."""
     d_ = to - he; L = np.linalg.norm(d_) + 1e-9; dr = d_ / L; up = np.array([-dr[1], dr[0]])
-    if up[1] < 0:  # eje y arriba: "arriba" del pie = y positivo
+    if up[1] < 0 and not consistent:  # eje y arriba: "arriba" del pie = y positivo
         up = -up
     t_ = 1.0
     P_ = [he - dr * 0.035 * t_, to + dr * 0.04 * t_, to + dr * 0.03 * t_ + up * 0.045 * t_,
@@ -230,7 +234,7 @@ def draw_side(pen, J, props_back=None):
     def draw_leg(sd):
         hp, kn, an, he, to = J[sd + '_leg']
         shapes = tube(hp, kn, 0.20, 0.135, bulge=0.09, peak=0.4) + tube(kn, an, 0.135, 0.072, bulge=0.24, peak=0.27)
-        shapes.append(('p', foot_poly(an, he, to)))
+        shapes.append(('p', foot_poly(an, he, to, J.get(sd + '_flip', False))))
         pen.paint(shapes)
         n1 = pen.side_normal(sd + 'th', hp, kn, hint); n2 = pen.side_normal(sd + 'sk', kn, an, hint)
         sv = (an - kn) / (np.linalg.norm(an - kn) + 1e-9)
@@ -238,7 +242,7 @@ def draw_side(pen, J, props_back=None):
         pen.line(smooth_curve([kn + sv * 0.025 + n1 * 0.075, kn + sv * 0.07 + n1 * 0.045, kn + sv * 0.03]))
         pen.line(smooth_curve([kn + sv * 0.07 - n2 * 0.07, kn + (an - kn) * 0.30 - n2 * 0.085, kn + (an - kn) * 0.58 - n2 * 0.055]))
         pen.line([kn + (an - kn) * 0.30 + n2 * 0.045, kn + (an - kn) * 0.78 + n2 * 0.035], w=c.LI * 0.8)
-        dr = (to - he) / (np.linalg.norm(to - he) + 1e-9); up = np.array([-dr[1], dr[0]]); up = -up if up[1] < 0 else up
+        dr = (to - he) / (np.linalg.norm(to - he) + 1e-9); up = np.array([-dr[1], dr[0]]); up = -up if (up[1] < 0 and not J.get(sd + '_flip', False)) else up
         for off in (0.05, 0.095):
             pen.line([to - dr * off + up * 0.04, to - dr * off], w=c.LI * 0.8)
 
@@ -315,8 +319,9 @@ def draw_side(pen, J, props_back=None):
     ra, rb_ = 0.30, 0.245
     rad = ra * rb_ / np.sqrt((rb_ * np.cos(th_)) ** 2 + (ra * np.sin(th_)) ** 2)
     dth = lambda a: np.angle(np.exp(1j * (th_ + ang_ax - a)))
-    rad = rad + 0.040 * np.exp(-(dth(ang_face) / 0.20) ** 2)
-    rad = rad + 0.030 * np.exp(-(dth(ang_face + np.sign(np.sin(ang_face - ang_ax) + 1e-9) * 0.55) / 0.30) ** 2)
+    if not J.get('plain_head'):
+        rad = rad + 0.040 * np.exp(-(dth(ang_face) / 0.20) ** 2)
+        rad = rad + 0.030 * np.exp(-(dth(ang_face + np.sign(np.sin(ang_face - ang_ax) + 1e-9) * 0.55) / 0.30) ** 2)
     hc = hd + v * 0.035
     hpoly = hc + np.stack([rad * np.cos(th_ + ang_ax), rad * np.sin(th_ + ang_ax)], 1)
     pen.paint([('p', hpoly)])
@@ -325,13 +330,22 @@ def draw_side(pen, J, props_back=None):
 
 
 # ====================================================================== vista frontal / trasera
+def foot_toesup(an, ang, sgn):
+    """Pie con el TALON apoyado y las PUNTAS hacia arriba (p. ej. la pierna estirada de la sentadilla cosaca), visto de frente.
+    ang = direccion talon->punta en grados (matematicos); sgn = +1 pie derecho de la imagen, -1 izquierdo (decide de que lado queda la planta)."""
+    an = np.asarray(an, float); d = dv(ang); p = rot(d, -90 * sgn)
+    he = an + p * 0.10 - d * 0.07
+    return he, he + d * 0.44
+
+
 def build_front(p):
     H = np.array(p['hip'], float); t = p.get('torso', 90)
-    ud = dv(t); S = H + ud
+    ud = dv(t); S = H + ud * p.get('tscale', 1.0)   # tscale: torso acortado por el escorzo (tronco inclinado hacia la camara)
     n = dv(t - 90)  # hacia "R" (imagen derecha cuando está de pie)
     hdir = p.get('head', t)
     hd = S + dv(hdir) * NECK_HEAD
     J = dict(H=H, S=S, n=n, ud=ud, hd=hd, hdir=hdir, back=p.get('back', False), t=t)
+    J['R_footang'] = p.get('R_footang'); J['L_footang'] = p.get('L_footang')  # opcional: pie con las puntas arriba (grados talon->punta)
     sw = p.get('shoulder_w', 0.34); hw = 0.15
     for sd, sg in (('R', 1), ('L', -1)):
         sh = S + n * sg * sw + p.get('shrug', 0) * ud
@@ -359,6 +373,9 @@ def pts_front(J):
     pts = [J['H'], J['S'], J['hd']]
     for sd in 'RL':
         pts += list(J[sd + '_arm']) + list(J[sd + '_leg'][:3])
+        if J.get(sd + '_footang') is not None:
+            he_, to_ = foot_toesup(J[sd + '_leg'][2], J[sd + '_footang'], 1 if sd == 'R' else -1)
+            pts += [he_, to_]
     return np.array(pts)
 
 
@@ -366,7 +383,12 @@ def front_shift(J):
     lows = [J['H'][1] - 0.2, J['hd'][1] - 0.28, J['S'][1] - 0.15]
     for sd in 'RL':
         sh, e, w = J[sd + '_arm']; lows += [e[1] - 0.095, w[1] - 0.10]
-        hp, k, a, _ = J[sd + '_leg']; lows += [k[1] - 0.13, a[1] - 0.17]
+        hp, k, a, _ = J[sd + '_leg']
+        if J.get(sd + '_footang') is not None:
+            he_, to_ = foot_toesup(a, J[sd + '_footang'], 1 if sd == 'R' else -1)
+            lows += [k[1] - 0.13, foot_poly(a, he_, to_)[:, 1].min() + 0.01]
+        else:
+            lows += [k[1] - 0.13, a[1] - 0.17]
     return -min(lows)
 
 
@@ -398,7 +420,11 @@ def draw_front(pen, J):
         th = np.linspace(0, 2 * np.pi, 24, endpoint=False)
         fpoly = np.stack([foot_c[0] + 0.12 * np.cos(th) + 0.0, foot_c[1] + 0.08 * np.sin(th)], 1)
         fpoly[:, 0] += fd * 0.05
-        shapes.append(('p', fpoly))
+        if J.get(sd + '_footang') is None:
+            shapes.append(('p', fpoly))
+        else:  # puntas arriba, talon en el suelo
+            he_, to_ = foot_toesup(an, J[sd + '_footang'], sg)
+            shapes.append(('p', foot_poly(an, he_, to_)))
         pen.paint(shapes)
         # músculo
         nn1 = rot((kn - hp) / (np.linalg.norm(kn - hp) + 1e-9), 90)
@@ -573,3 +599,26 @@ def render_scene(frames, out_base, durations=None, props=None, floor=True, groun
     if not quiet:
         print('GIF', base + '.gif', os.path.getsize(base + '.gif') // 1024, 'KB', len(pil), 'frames')
     return imgs
+
+
+# ====================================================================== manos agarrando una barra (vista frontal)
+def _cap(pen, p, q, wid, fill=WHITE, ink=None):
+    """capsula (dedo) de ancho 'wid' (unidades) de p a q con borde de tinta"""
+    c = pen.c; ink = ink or int(round(c.LI * 1.35))
+    a_ = np.round(c.C(np.array([p, q], float))).astype(np.int32); w_ = int(round(wid * c.scale))
+    cv2.polylines(pen.img, [a_], False, INK, w_ + 2 * ink, cv2.LINE_AA)
+    for e in a_:
+        cv2.circle(pen.img, (int(e[0]), int(e[1])), (w_ + 2 * ink) // 2, INK, -1, cv2.LINE_AA)
+    cv2.polylines(pen.img, [a_], False, fill, w_, cv2.LINE_AA)
+    for e in a_:
+        cv2.circle(pen.img, (int(e[0]), int(e[1])), w_ // 2, fill, -1, cv2.LINE_AA)
+
+
+def draw_grip_front(pen, hand, bar_y, s=1.0):
+    """Mano en agarre PRONO vista de frente: la barra pasa POR DELANTE de la mano (se repinta encima de la palma) y los
+    cuatro dedos se enroscan por encima de ella (se ven los dedos agarrados a la barra). Se usa como 'extra' de
+    render_scene (se llama DESPUES de dibujar el muñeco). hand = centro de la mano; bar_y = altura de la barra."""
+    c = pen.c; hx = float(hand[0]); by = bar_y
+    pen.line([(hx - 0.22 * s, by), (hx + 0.22 * s, by)], w=c.LW * 1.3)                 # barra por delante de la palma
+    for dx, top in ((-0.105, 0.115), (-0.035, 0.135), (0.035, 0.130), (0.105, 0.105)):  # dedos enroscados por encima
+        _cap(pen, (hx + dx * s, by + 0.065 * s), (hx + dx * s, by + top * s), 0.064 * s)
