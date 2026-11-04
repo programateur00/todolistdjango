@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Libreta — Tiempo en Udemy",
-  "version": "1.2.4",
-  "description": "Cuenta el tiempo real que pasas viendo tus cursos de Udemy, tus clases de Ilerna (Zoom) o leyendo un PDF con la pestana en primer plano, y lo manda a tu Libreta de tareas.",
+  "name": "Libreta — Tiempo en webs",
+  "version": "1.3.0",
+  "description": "Cuenta el tiempo real que pasas en las webs que tu eliges (Udemy, Ilerna, Hyperskill...) o leyendo un PDF, con la pestana en primer plano y alguien delante, y lo manda a tu Libreta de tareas.",
   "permissions": [
     "tabs",
     "idle",
@@ -27,7 +27,7 @@
     "open_in_tab": true
   },
   "action": {
-    "default_title": "Libreta — Tiempo en Udemy",
+    "default_title": "Libreta — Tiempo en webs",
     "default_popup": "popup.html"
   },
   "icons": {

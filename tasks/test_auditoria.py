@@ -596,8 +596,8 @@ class CategorySubtypeRulesTests(TestCase):
         self.assertEqual(t.workout_kind, "auto")  # sigue contándola la extensión
         self.assertEqual(t.title, "Excel editado")
 
-    def test_ilerna_and_language_subtypes_survive_an_app_edit_too(self):
-        for sub, extra in (("ilerna", dict(target_minutes=60)),
+    def test_web_and_language_subtypes_survive_an_app_edit_too(self):
+        for sub, extra in (("web", dict(target_minutes=60, watch_url="hyperskill.org")),
                            ("language", dict(youtube_video_id="dQw4w9WgXcQ"))):
             t = self._task(category="study", subcategory=sub, **extra)
             r = self._patch(t, {"title": "X", "subcategory": ""})
@@ -684,11 +684,11 @@ class CategorySubtypeRulesTests(TestCase):
         self.assertEqual(t.youtube_video_id, "dQw4w9WgXcQ")
 
     def test_web_edit_keeps_the_subtype_if_the_form_does_not_send_one(self):
-        t = self._task(category="study", subcategory="ilerna", target_minutes=60)
-        r = self._edit(t, target_minutes="60")
+        t = self._task(category="study", subcategory="web", target_minutes=60, watch_url="hyperskill.org")
+        r = self._edit(t, target_minutes="60", watch_url="hyperskill.org")
         self.assertEqual(r.status_code, 302, r.content[:300])
         t.refresh_from_db()
-        self.assertEqual(t.subcategory, "ilerna")
+        self.assertEqual(t.subcategory, "web")
 
     def test_web_reading_task_is_saved_as_reading_without_video(self):
         # lo que el formulario viejo mandaba al elegir «Lectura»: sin subtipo y con vídeo
@@ -738,7 +738,7 @@ class CategorySubtypeRulesTests(TestCase):
             (dict(category="sport", subcategory="running"), ["running"]),
             (dict(category="work", subcategory="reading", target_minutes=30), ["reading"]),
             (dict(category="study", subcategory="udemy", target_minutes=30), ["udemy"]),
-            (dict(category="study", subcategory="ilerna", target_minutes=30), ["ilerna"]),
+            (dict(category="study", subcategory="web", target_minutes=30, watch_url="hyperskill.org"), ["web"]),
             (dict(category="study", youtube_video_id="dQw4w9WgXcQ"), [""]),
             (dict(category="general"), [""]),
             (dict(category="avoid", repeat="daily"), [""]),

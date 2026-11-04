@@ -1,0 +1,25 @@
+import re
+from django.test import TestCase
+from django.urls import reverse
+from .models import Task, Plan, PlanItem
+from .utils import get_current_user
+
+
+class TmpJsDump(TestCase):
+    def _dump(self, name, html):
+        blocks = re.findall(r"<script(?![^>]*src)[^>]*>(.*?)</script>", html, re.S)
+        for i, b in enumerate(blocks):
+            open(f"/tmp/js_out/{name}_{i}.js", "w").write(b)
+
+    def test_dump(self):
+        user = get_current_user()
+        self._dump("task_new", self.client.get(reverse("tasks:task_create")).content.decode())
+        t = Task.objects.create(title="W", category="study", subcategory="web", target_minutes=30,
+                                watch_url="hyperskill.org", watch_idle_seconds=300, watch_audio_counts=True,
+                                due_date="2026-11-04", user=user)
+        html = self.client.get(reverse("tasks:task_edit", args=[t.pk])).content.decode()
+        self._dump("task_edit", html)
+        assert 'name="watch_url"' in html and 'value="hyperskill.org"' in html
+        assert '<option value="5" selected>' in html or '<option value="5"  selected>' in html or 'value="5" selected' in html, "5min not selected"
+        assert "checked" in html[html.index('name="watch_audio_counts"'):html.index('name="watch_audio_counts"') + 120]
+        self._dump("plan_new", self.client.get(reverse("tasks:plan_create")).content.decode())

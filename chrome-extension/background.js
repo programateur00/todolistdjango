@@ -1,5 +1,5 @@
 /**
- * Service worker de la extensión "Libreta — Tiempo en Udemy y Lectura".
+ * Service worker de la extensión "Libreta — Tiempo en webs".
  *
  * Qué hace, en corto: mientras una pestaña "trackeable" está en primer
  * plano (ventana con foco, pestaña activa, sin inactividad) y su título
@@ -10,7 +10,7 @@
  * (ver mobile-app/www/js/focus-view.js), con source="pc_usage" en vez
  * de "app_usage".
  *
- * Hay dos tipos de pestaña trackeable, cada uno emparejado con un
+ * Hay tres tipos de pestaña trackeable, cada uno emparejado con un
  * subtipo de tarea distinto:
  *
  *   - Udemy (category="study", subcategory="udemy"): la pestaña es
@@ -39,15 +39,21 @@
  *     Udemy lo reporta al 100% eso además cierra la tarea entera, no
  *     solo el día.
  *
- *   - Clases de Ilerna (category="study", subcategory="ilerna"): la pestaña
- *     es ilernaonline.zoom.us (grabaciones de las clases en Zoom). Misma
- *     regla que un curso de Udemy por defecto: cuenta si la pestaña suena
- *     O hay actividad reciente de ratón/teclado (pausas, apuntes), y deja
- *     de contar si estás inactivo Y en silencio. No hay "curso completado"
- *     que leer de Zoom -- solo se cuenta tiempo; el día se da por cumplido
- *     al llegar a los minutos objetivo (focus_save, backend). La palabra
- *     clave de la tarea (asignatura) es opcional: si hay, tiene que
- *     aparecer en el título de la pestaña; si no, vale cualquier clase.
+ *   - Tiempo en una web (category="study", subcategory="web"): CUALQUIER
+ *     web que tú elijas (Ilerna, Hyperskill...). La tarea trae `watch_url`
+ *     (uno o varios trozos separados por comas; vale con que la URL de la
+ *     pestaña contenga cualquiera, sin distinguir mayúsculas) y, opcional,
+ *     `watch_keyword` (tiene que salir además en el título). Condición
+ *     anti-AFK: cuenta SOLO mientras haya actividad real de ratón/teclado
+ *     en los últimos `watch_idle_seconds` (chrome.idle) -- con la pantalla
+ *     bloqueada o sin tocar nada ese rato, para, y el rato de espera NO se
+ *     suma (ver endSession). Opcional por tarea, `watch_audio_counts`:
+ *     que la pestaña SUENE también valga como presencia (clases grabadas
+ *     que ves sin tocar nada); con la pantalla bloqueada nunca cuenta. No
+ *     hay "curso completado" que leer: el día se da por cumplido al llegar
+ *     a los minutos objetivo (focus_save, backend). Sustituye a las
+ *     antiguas "Clases de Ilerna" (ahora son una web con
+ *     ilernaonline.zoom.us).
  *
  *   - Lectura de un PDF (category="work", subcategory="reading"): la
  *     pestaña es un .pdf (local, file://, o servido por una web) visto
@@ -73,6 +79,13 @@ const MIN_SESSION_MINUTES_TO_SEND = 1;         // no se manda 0 min; el resto de
 // se tolera hasta este límite; pasado, la cuenta PARA y lo que quede de
 // pausa no se suma. Ya NO vale mover el ratón con el vídeo parado.
 const VIDEO_PAUSE_GRACE_SECONDS = 60;
+// Tiempo en una web: la extensión nunca baja de 15 s (límite de chrome.idle) ni
+// se pasa de 30 min; si la tarea no trae valor (caché vieja), 3 min.
+const WEB_IDLE_DEFAULT_SECONDS = 180;
+const WEB_IDLE_MIN_SECONDS = 15;
+const WEB_IDLE_MAX_SECONDS = 1800;
+// Los trozos de URL más cortos que esto se ignoran: "a" encajaría con todo.
+const WEB_URL_TERM_MIN_LENGTH = 3;
 const HEARTBEAT_ALARM = "libreta-udemy-heartbeat";
 const RETRY_ALARM = "libreta-udemy-retry-uploads";
 
@@ -100,7 +113,7 @@ function apiUrl(cfg, path) {
 
 async function fetchTasksFromServer(cfg) {
   // Sin filtro de categoría: aquí se necesitan tareas de dos categorías
-  // distintas (Estudio → Udemy/Ilerna, Lectura), así que se pide
+  // distintas (Estudio → Udemy/Web, Lectura), así que se pide
   // todo lo pendiente de hoy y se filtra en el cliente.
   const resp = await fetch(apiUrl(cfg, "/tasks/"), {
     headers: { Authorization: authHeader(cfg) },
@@ -121,7 +134,7 @@ async function fetchTasksFromServer(cfg) {
   // Freestyle (y Udemy) pasan por aquí.
   return pending.filter(
     (t) =>
-      (t.subcategory === "udemy" || t.subcategory === "ilerna" || t.subcategory === "reading") &&
+      (t.subcategory === "udemy" || t.subcategory === "web" || t.subcategory === "reading") &&
       t.reading_mode !== "plan"
   );
 }
@@ -132,6 +145,7 @@ async function refreshTasksCache() {
   try {
     const tasks = await fetchTasksFromServer(cfg);
     await chrome.storage.local.set({ tasksCache: tasks, tasksCacheAt: Date.now() });
+    await applyIdleDetection(tasks);
   } catch (err) {
     // Sin red o servidor caído: nos quedamos con la caché que hubiera.
     console.warn("[Libreta] no se pudo refrescar la lista de tareas:", err);
@@ -205,13 +219,83 @@ function isUdemyPlayerUrl(rawUrl) {
   }
 }
 
-function isIlernaUrl(rawUrl) {
-  try {
-    const u = new URL(rawUrl);
-    return /(^|\.)ilernaonline\.zoom\.us$/i.test(u.hostname);
-  } catch {
-    return false;
+// ---------------------------------------------- Tiempo en una web (genérico)
+
+/** Trozos de URL de una tarea web: "a.com, b.com/x" -> ["a.com", "b.com/x"]
+ * (minúsculas, sin los demasiado cortos). */
+function parseUrlTerms(raw) {
+  return String(raw || "")
+    .toLowerCase()
+    .split(/[,\n]/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= WEB_URL_TERM_MIN_LENGTH);
+}
+
+/** Segundos de inactividad de una tarea web, acotados al rango que admite Chrome. */
+function webIdleSeconds(task) {
+  const n = Number(task && task.watch_idle_seconds);
+  if (!Number.isFinite(n) || n <= 0) return WEB_IDLE_DEFAULT_SECONDS;
+  return Math.max(WEB_IDLE_MIN_SECONDS, Math.min(WEB_IDLE_MAX_SECONDS, Math.round(n)));
+}
+
+/**
+ * ¿Qué tarea "Tiempo en una web" encaja con esta pestaña? La URL tiene que
+ * contener algún trozo de `watch_url` y, si la tarea trae `watch_keyword`,
+ * el título también. Si encajan varias, gana la más específica: primero la que
+ * exige palabra del título, luego la de trozo de URL más largo. Devuelve
+ * {task, term} o null.
+ */
+function matchWebTask(tasks, tabUrl, tabTitle) {
+  const url = String(tabUrl || "").toLowerCase();
+  if (!url) return null;
+  const title = String(tabTitle || "").toLowerCase();
+  let best = null;
+  for (const t of tasks) {
+    if (t.subcategory !== "web") continue;
+    const term = parseUrlTerms(t.watch_url)
+      .filter((x) => url.includes(x))
+      .sort((a, b) => b.length - a.length)[0];
+    if (!term) continue;
+    const kw = (t.watch_keyword || "").trim().toLowerCase();
+    if (kw && !title.includes(kw)) continue;
+    const score = (kw ? 1000 + kw.length : 0) + term.length;
+    if (!best || score > best.score) best = { task: t, term, score };
   }
+  return best ? { task: best.task, term: best.term } : null;
+}
+
+/** Nombre corto para guardar como app_package de la sesión web: el host. */
+function webAppPackage(rawUrl, term) {
+  try {
+    return new URL(rawUrl).hostname.replace(/^www\./, "").slice(0, 120);
+  } catch {
+    return String(term || "web").slice(0, 120);
+  }
+}
+
+/**
+ * Ajusta el aviso de chrome.idle al umbral MÁS ESTRICTO de las tareas web:
+ * así el evento "idle" llega a tiempo y sabemos con precisión desde cuándo no
+ * tocabas nada (idleSince). Con 300 s como máximo, que es lo que usan Udemy
+ * "por tiempo en la página" y los PDFs.
+ */
+async function applyIdleDetection(tasks) {
+  let seconds = IDLE_DETECTION_SECONDS;
+  for (const t of tasks || []) {
+    if (t.subcategory === "web") seconds = Math.min(seconds, webIdleSeconds(t));
+  }
+  seconds = Math.max(WEB_IDLE_MIN_SECONDS, seconds);
+  try {
+    await chrome.storage.session.set({ detectionSeconds: seconds });
+    chrome.idle.setDetectionInterval(seconds);
+  } catch (err) {
+    console.warn("[Libreta] no se pudo ajustar el umbral de inactividad:", err);
+  }
+}
+
+async function getDetectionSeconds() {
+  const { detectionSeconds } = await chrome.storage.session.get("detectionSeconds");
+  return Number.isFinite(detectionSeconds) && detectionSeconds > 0 ? detectionSeconds : IDLE_DETECTION_SECONDS;
 }
 
 function isPdfUrl(rawUrl) {
@@ -286,10 +370,13 @@ async function getActiveMatch() {
     const tab = tabs[0];
     if (!tab || !tab.url) return null;
 
+    const tasks = await getCachedTasks();
     const udemy = isUdemyUrl(tab.url);
-    const ilerna = !udemy && isIlernaUrl(tab.url);
-    const pdf = !udemy && !ilerna && isPdfUrl(tab.url);
-    if (!udemy && !ilerna && !pdf) return null;
+    // Una web que tú eliges (ver matchWebTask) gana a un PDF servido desde
+    // ella: si pones "midominio.com" como web, sus PDFs cuentan ahí.
+    const webFound = !udemy ? matchWebTask(tasks, tab.url, tab.title) : null;
+    const pdf = !udemy && !webFound && isPdfUrl(tab.url);
+    if (!udemy && !webFound && !pdf) return null;
     // Udemy solo cuenta dentro del reproductor del curso, en los dos modos.
     // Antes bastaba con cualquier página de udemy.com cuyo título llevara la
     // palabra clave (la ficha del curso, por ejemplo) y, en "por tiempo en
@@ -301,8 +388,8 @@ async function getActiveMatch() {
     // contar -- en Udemy la exigencia (audio o solo inactividad) depende
     // de la propia tarea/curso (ver Task.watch_requires_audio), no es
     // fija como en Lectura.
-    const tasks = await getCachedTasks();
-    const candidates = tasks.filter((t) => t.subcategory === (udemy ? "udemy" : ilerna ? "ilerna" : "reading"));
+    if (webFound) return await getWebMatch(tab, webFound);
+    const candidates = tasks.filter((t) => t.subcategory === (udemy ? "udemy" : "reading"));
     const found = matchTask(candidates, tab.title);
     if (!found) return null;
 
@@ -315,7 +402,7 @@ async function getActiveMatch() {
     // tiempo en la página" y PDF). Al cerrarla, los minutos de inactividad
     // que hicieron falta para detectar que te fuiste no cuentan (ver endSession).
     let activityOnly = false;
-    if (udemy || ilerna) {
+    if (udemy) {
       // Por defecto (watch_requires_audio=true, o caché vieja sin el
       // campo), la única señal fiable desde fuera de la página de que
       // la clase se está reproduciendo de verdad es que la pestaña
@@ -328,17 +415,8 @@ async function getActiveMatch() {
       // que se dejó el curso en primer plano sin nadie delante,
       // haciendo trampa.
       //
-      // Con audio exigido, que NO suene tampoco corta ya la cuenta si
-      // estás delante: un curso de idiomas tiene pausas, ejercicios y
-      // ratos de leer/anotar en silencio, y con "solo si suena" esos
-      // minutos se perdían del todo aunque el curso estuviera en primer
-      // plano (30 min reales llegaban como 21). Ahora cuenta si suena
-      // O si hay actividad reciente de ratón/teclado; solo se deja de
-      // contar al estar inactivo Y en silencio (curso abandonado).
-      // Ilerna no tiene opción de "casi sin audio": una grabación de
-      // clase siempre suena, así que usa siempre la regla por defecto.
-      const requiresAudio = ilerna ? true : found.task.watch_requires_audio !== false;
-      if (udemy && requiresAudio) {
+      const requiresAudio = found.task.watch_requires_audio !== false;
+      if (requiresAudio) {
         // Curso "por vídeos vistos": SOLO cuenta con el vídeo sonando o
         // reproduciéndose (más la pausa corta tolerada). La actividad de
         // ratón/teclado NO basta aquí -- eso es del modo "por tiempo en
@@ -355,12 +433,6 @@ async function getActiveMatch() {
           signal = "pausa";
         }
         videoMode = true;
-      } else if (requiresAudio) {
-        if (tab.audible) signal = "audio";
-        else {
-          const idleState = await chrome.idle.queryState(IDLE_DETECTION_SECONDS);
-          if (idleState !== "active") return null;
-        }
       } else {
         const idleState = await chrome.idle.queryState(IDLE_DETECTION_SECONDS);
         if (idleState !== "active") return null;
@@ -377,7 +449,7 @@ async function getActiveMatch() {
     return {
       task: found.task,
       tabId: tab.id,
-      appPackage: udemy ? "udemy.com" : ilerna ? "ilernaonline.zoom.us" : pdfFileName(tab.url),
+      appPackage: udemy ? "udemy.com" : pdfFileName(tab.url),
       videoMode,
       activityOnly,
       signal,
@@ -386,6 +458,44 @@ async function getActiveMatch() {
     console.warn("[Libreta] getActiveMatch falló:", err);
     return null;
   }
+}
+
+/**
+ * Condición anti-AFK de "Tiempo en una web". Devuelve el match si AHORA mismo
+ * hay alguien delante, o null:
+ *   - actividad de ratón/teclado en los últimos `watch_idle_seconds`
+ *     (chrome.idle devuelve "idle" pasado ese rato y "locked" con la pantalla
+ *     bloqueada), o
+ *   - solo si la tarea lo permite (`watch_audio_counts`): la pestaña suena,
+ *     salvo con la pantalla bloqueada (ahí no hay nadie, suene lo que suene).
+ * Dejar el ordenador encendido con la página en primer plano deja de contar.
+ */
+async function getWebMatch(tab, found) {
+  const task = found.task;
+  const idleState = await chrome.idle.queryState(webIdleSeconds(task));
+  const audioCounts = task.watch_audio_counts === true;
+  let signal;
+  if (idleState === "active") {
+    signal = "actividad";
+  } else if (audioCounts && tab.audible && idleState !== "locked") {
+    signal = "audio";
+  } else {
+    return null;
+  }
+  if (audioCounts && tab.audible) await markPlaying(tab.id, Date.now());
+  return {
+    task,
+    tabId: tab.id,
+    appPackage: webAppPackage(tab.url, found.term),
+    videoMode: false,
+    // Con el audio como alternativa, irse no se detecta solo por la
+    // inactividad: el recorte al cerrar usa también la última vez que sonó
+    // (ver endSession, audioMode). Sin audio, solo la actividad manda.
+    activityOnly: !audioCounts,
+    audioMode: audioCounts,
+    web: true,
+    signal,
+  };
 }
 
 // --------------------------------------------------------- subir sesión
@@ -783,6 +893,14 @@ async function endSession(session) {
   if (session.activityOnly) {
     const { idleSince } = await chrome.storage.session.get("idleSince");
     if (idleSince && idleSince > session.startedAt) endAt = Math.min(endAt, idleSince);
+  } else if (session.audioMode) {
+    // Web que también cuenta con sonido: se estuvo "delante" hasta lo ÚLTIMO
+    // que ocurra entre dejar de tocar y dejar de sonar la pestaña.
+    const { idleSince } = await chrome.storage.session.get("idleSince");
+    if (idleSince && idleSince > session.startedAt) {
+      const lastSound = (await getLastPlaying(session.tabId)) || 0;
+      endAt = Math.min(endAt, Math.max(idleSince, lastSound));
+    }
   }
   const countedMs = Math.max(0, endAt - session.startedAt);
   const minutes = await takeWholeMinutes(session.task.uuid, countedMs);
@@ -802,7 +920,9 @@ async function logSession(session, endAt, countedMs, minutes) {
     const list = Array.isArray(sessionLog) ? sessionLog : [];
     list.push({
       task: session.task.title,
-      mode: session.videoMode ? "vídeos" : session.activityOnly ? "tiempo en página" : "audio/actividad",
+      mode: session.web
+        ? (session.audioMode ? "web · actividad o audio" : "web · solo actividad")
+        : session.videoMode ? "vídeos" : session.activityOnly ? "tiempo en página" : "audio/actividad",
       startedAt: session.startedAt,
       endAt,
       countedSeconds: Math.round(countedMs / 1000),
@@ -829,6 +949,8 @@ async function startSession(match) {
     appPackage: match.appPackage,
     videoMode: Boolean(match.videoMode),
     activityOnly: Boolean(match.activityOnly),
+    audioMode: Boolean(match.audioMode),
+    web: Boolean(match.web),
     startedAt: Date.now(),
     signals: match.signal ? { [match.signal]: 1 } : {},
   });
@@ -937,7 +1059,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
   if (changeInfo.audible === false) {
     // El vídeo acaba de dejar de sonar: ese es el último instante "viendo".
     const cur = await getCurrentSession();
-    if (cur && cur.tabId === tabId && cur.videoMode) await markPlaying(tabId, Date.now());
+    if (cur && cur.tabId === tabId && (cur.videoMode || cur.audioMode)) await markPlaying(tabId, Date.now());
   }
   if (
     changeInfo.title !== undefined ||
@@ -959,14 +1081,15 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 chrome.windows.onFocusChanged.addListener(() => reevaluate());
 chrome.idle.onStateChanged.addListener(async (state) => {
   // Se apunta CUÁNDO empezó la inactividad antes de reevaluar: "idle" llega
-  // IDLE_DETECTION_SECONDS después del último gesto; "locked" es inmediato
-  // (y si ya estabas inactivo, se conserva el instante anterior).
+  // (umbral de chrome.idle: el más estricto de las tareas web, o 300 s)
+  // después del último gesto; "locked" es inmediato (y si ya estabas
+  // inactivo, se conserva el instante anterior).
   if (state === "active") {
     await chrome.storage.session.remove("idleSince");
   } else {
     const { idleSince } = await chrome.storage.session.get("idleSince");
     if (state === "idle" || !idleSince) {
-      const since = state === "idle" ? Date.now() - IDLE_DETECTION_SECONDS * 1000 : Date.now();
+      const since = state === "idle" ? Date.now() - (await getDetectionSeconds()) * 1000 : Date.now();
       await chrome.storage.session.set({ idleSince: since });
     }
   }
@@ -974,6 +1097,9 @@ chrome.idle.onStateChanged.addListener(async (state) => {
 });
 
 chrome.idle.setDetectionInterval(IDLE_DETECTION_SECONDS);
+// Al arrancar el service worker, el umbral vuelve a ser el de las tareas web
+// que ya estén en caché (si no, hasta el próximo refresco valdría 300 s).
+getCachedTasks().then((tasks) => applyIdleDetection(tasks));
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === HEARTBEAT_ALARM) heartbeat();
@@ -1017,13 +1143,32 @@ async function debugSnapshot() {
 
   const hasUrl = Boolean(tab && tab.url);
   const isUdemyTab = hasUrl && isUdemyUrl(tab.url);
-  const isIlernaTab = hasUrl && !isUdemyTab && isIlernaUrl(tab.url);
-  const isPdfTab = hasUrl && !isUdemyTab && !isIlernaTab && isPdfUrl(tab.url);
+  const webFound = hasUrl && !isUdemyTab ? matchWebTask(tasks, tab.url, tab.title) : null;
+  const isWebTab = Boolean(webFound);
+  const isPdfTab = hasUrl && !isUdemyTab && !isWebTab && isPdfUrl(tab.url);
   const noUrlButFileTab = Boolean(tab && !tab.url);
-  const tabKind = isUdemyTab ? "udemy" : isIlernaTab ? "ilerna" : isPdfTab ? "pdf" : "otro";
+  const tabKind = isUdemyTab ? "udemy" : isWebTab ? "web" : isPdfTab ? "pdf" : "otro";
 
-  const candidates = tasks.filter((t) => t.subcategory === (isUdemyTab ? "udemy" : isIlernaTab ? "ilerna" : "reading"));
-  const match = isUdemyTab || isIlernaTab || isPdfTab ? matchTask(candidates, tab.title) : null;
+  const candidates = tasks.filter((t) => t.subcategory === (isUdemyTab ? "udemy" : "reading"));
+  let match = null;
+  if (isWebTab) {
+    match = { task: webFound.task, keyword: webFound.term };
+  } else if (isUdemyTab || isPdfTab) {
+    match = matchTask(candidates, tab.title);
+  }
+  // Para una web: ¿cuenta AHORA? Misma condición que getWebMatch().
+  let webState = null;
+  if (isWebTab) {
+    const idleFor = webIdleSeconds(webFound.task);
+    const st = await chrome.idle.queryState(idleFor).catch(() => "desconocido");
+    const audioCounts = webFound.task.watch_audio_counts === true;
+    webState = {
+      idleSeconds: idleFor,
+      idleState: st,
+      audioCounts,
+      counting: st === "active" || (audioCounts && Boolean(tab.audible) && st !== "locked"),
+    };
+  }
 
   const current = await getCurrentSession();
 
@@ -1038,9 +1183,12 @@ async function debugSnapshot() {
     idleState,
     tasksCount: tasks.length,
     tasksCacheAgeSeconds: tasksCacheAt ? Math.round((Date.now() - tasksCacheAt) / 1000) : null,
+    webState,
     tasks: tasks.map((t) => ({
       title: t.title, subcategory: t.subcategory, watch_keyword: t.watch_keyword,
       watch_requires_audio: t.watch_requires_audio,
+      watch_url: t.watch_url, watch_idle_seconds: t.watch_idle_seconds,
+      watch_audio_counts: t.watch_audio_counts,
     })),
     match: match ? { taskTitle: match.task.title, keyword: match.keyword } : null,
     currentSession: current

@@ -11,7 +11,10 @@ function makeEnv() {
   const env = {
     now: T0,
     tab: { id: 5, url: "https://www.udemy.com/course/python/learn/lecture/1", title: "Python - Udemy", audible: false },
-    idle: "active",
+    idle: "active",        // "active" | "idle" | "locked" (forzado, vale para cualquier umbral)
+    idleFor: 0,            // segundos sin tocar nada; con idle:"active", queryState(n) da "idle" si idleFor >= n
+    idleQueries: [],       // umbrales con los que se ha consultado chrome.idle.queryState
+    detection: null,       // último chrome.idle.setDetectionInterval
     videoPlaying: false,
     focused: true,
     tasks: [],
@@ -36,7 +39,16 @@ function makeEnv() {
     storage: { local: area(store.local), session: area(store.session) },
     windows: { getLastFocused: async () => ({ id: 1, focused: env.focused }), onFocusChanged: on("focus") },
     tabs: { query: async () => [env.tab], onActivated: on("tabActivated"), onUpdated: on("tabUpdated"), onRemoved: on("tabRemoved") },
-    idle: { queryState: async () => env.idle, onStateChanged: on("idle"), setDetectionInterval: noop },
+    idle: {
+      queryState: async (n) => {
+        env.idleQueries.push(n);
+        if (env.idle === "locked") return "locked";
+        if (env.idle === "idle") return "idle";
+        return env.idleFor >= n ? "idle" : "active";
+      },
+      onStateChanged: on("idle"),
+      setDetectionInterval: (n) => { env.detection = n; },
+    },
     scripting: { executeScript: async () => [{ result: env.videoPlaying }] },
     alarms: { onAlarm: on("alarm"), create: noop },
     runtime: { onInstalled: on("installed"), onStartup: on("startup"), onMessage: on("message") },
@@ -72,9 +84,14 @@ function makeEnv() {
   return env;
 }
 
+const webTask = (over = {}) => ({
+  uuid: "t-web", title: "Hyperskill", subcategory: "web", watch_url: "hyperskill.org",
+  watch_keyword: "", watch_idle_seconds: 120, watch_audio_counts: false, target_minutes: 30, ...over,
+});
+
 const udemyTask = (over = {}) => ({
   uuid: "t-udemy", title: "Curso", subcategory: "udemy", watch_keyword: "python",
   watch_requires_audio: true, target_minutes: 30, ...over,
 });
 
-module.exports = { makeEnv, udemyTask, T0 };
+module.exports = { makeEnv, udemyTask, webTask, T0 };

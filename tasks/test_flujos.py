@@ -844,9 +844,10 @@ class StudyPlanFormWebTests(TestCase):
         self.assertContains(r, "Curso de Udemy: pon los minutos")
         self._nothing_saved()
 
-    def test_ilerna_without_minutes_saves_nothing(self):
-        r = self._post(study_source="ilerna", youtube_playlist_id=None, ilerna_keyword="Programación")
-        self.assertContains(r, "Clases de Ilerna: pon los minutos")
+    def test_web_without_minutes_saves_nothing(self):
+        r = self._post(study_source="web", youtube_playlist_id=None, web_keyword="Programación",
+                       web_url="hyperskill.org")
+        self.assertContains(r, "Tiempo en una web: pon los minutos")
         self._nothing_saved()
 
     def test_playlist_with_a_video_count_creates_the_plan_and_its_linked_task(self):
@@ -870,15 +871,15 @@ class StudyPlanFormWebTests(TestCase):
         task = Task.objects.get(series_id=plan.task_series_id, is_done=False)
         self.assertEqual(task.subcategory, Task.SUBCATEGORY_UDEMY)
 
-    def test_ilerna_classes_with_minutes_mark_the_task_as_ilerna(self):
-        self._post(study_source="ilerna", youtube_playlist_id=None, ilerna_keyword="Programación",
-                   target_minutes="45")
+    def test_web_time_with_minutes_marks_the_task_as_web(self):
+        self._post(study_source="web", youtube_playlist_id=None, web_keyword="Programación",
+                   web_url="hyperskill.org", target_minutes="45")
         plan = Plan.objects.get()
         item = plan.items.get()
-        self.assertEqual((item.watch_site, item.watch_keyword, item.target_minutes),
-                         (PlanItem.SITE_ILERNA, "Programación", 45))
+        self.assertEqual((item.watch_site, item.watch_keyword, item.watch_url, item.target_minutes),
+                         (PlanItem.SITE_WEB, "Programación", "hyperskill.org", 45))
         task = Task.objects.get(series_id=plan.task_series_id, is_done=False)
-        self.assertEqual(task.subcategory, Task.SUBCATEGORY_ILERNA)
+        self.assertEqual(task.subcategory, Task.SUBCATEGORY_WEB)
 
     def test_a_failed_edit_leaves_the_plan_as_it_was(self):
         with _fake_playlist(5):
@@ -1555,8 +1556,8 @@ class EveryPageRendersTests(TestCase):
         cls.tasks["udemy"] = mk(title="Excel", category=Task.CATEGORY_STUDY, subcategory=Task.SUBCATEGORY_UDEMY,
                                 due_date=today, user=user, target_minutes=30, watch_keyword="Excel",
                                 course_progress_pct=40)
-        cls.tasks["ilerna"] = mk(title="Clase", category=Task.CATEGORY_STUDY, subcategory=Task.SUBCATEGORY_ILERNA,
-                                 due_date=today, user=user, target_minutes=45)
+        cls.tasks["web"] = mk(title="Clase", category=Task.CATEGORY_STUDY, subcategory=Task.SUBCATEGORY_WEB,
+                              due_date=today, user=user, target_minutes=45, watch_url="hyperskill.org")
         cls.tasks["reading_free"] = mk(title="Leer", category=Task.CATEGORY_WORK,
                                        subcategory=Task.SUBCATEGORY_READING, due_date=today, user=user,
                                        target_minutes=20)
@@ -1604,11 +1605,12 @@ class EveryPageRendersTests(TestCase):
                                 watch_keyword="Excel", target_minutes=30)
         udemy.sync_task()
         cls.plans["udemy"] = udemy
-        ilerna = mkp(name="Ilerna (plan)", plan_type=Plan.PLAN_TYPE_STUDY, **base)
-        PlanItem.objects.create(plan=ilerna, progression=PlanItem.PROG_COMPLETION, is_headline=True,
-                                watch_site=PlanItem.SITE_ILERNA, watch_keyword="Programación", target_minutes=45)
-        ilerna.sync_task()
-        cls.plans["ilerna"] = ilerna
+        web = mkp(name="Web (plan)", plan_type=Plan.PLAN_TYPE_STUDY, **base)
+        PlanItem.objects.create(plan=web, progression=PlanItem.PROG_COMPLETION, is_headline=True,
+                                watch_site=PlanItem.SITE_WEB, watch_url="hyperskill.org",
+                                watch_keyword="Programación", target_minutes=45)
+        web.sync_task()
+        cls.plans["web"] = web
         language = mkp(name="Alemán (plan)", plan_type=Plan.PLAN_TYPE_STUDY,
                        study_subtype=Plan.STUDY_SUBTYPE_LANGUAGE, language_name="Alemán", level_from="A1",
                        level_to="A2", language_daily_minutes=30, known_languages="español", quiz_every_n_videos=2,
@@ -1679,7 +1681,7 @@ class EveryPageRendersTests(TestCase):
         self._ok(reverse("tasks:task_focus", args=[t["timer"].pk]))
         self._ok(reverse("tasks:task_focus", args=[t["reading_free"].pk]))
         self._ok(reverse("tasks:task_focus", args=[t["udemy"].pk]))
-        for key in ("video", "playlist", "udemy", "ilerna"):
+        for key in ("video", "playlist", "udemy", "web"):
             self._ok(reverse("tasks:task_video", args=[t[key].pk]), codes=(200, 302))
         self._ok(reverse("tasks:task_reading", args=[t["reading_plan"].pk]))
         # deporte: solo comprobar que abren

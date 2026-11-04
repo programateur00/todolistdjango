@@ -152,14 +152,14 @@ class UdemyPlanClosureTests(TestCase):
         sport.refresh_from_db()
         self.assertIsNone(sport.closed_at)
 
-    def test_ilerna_plan_is_not_a_udemy_course(self):
+    def test_web_plan_is_not_a_udemy_course(self):
         ilerna = Plan.objects.create(
             name="Clases", user=self.user, plan_type=Plan.PLAN_TYPE_STUDY,
             study_subtype=Plan.STUDY_SUBTYPE_GENERAL, weeks=12, repeat="daily",
         )
         it = PlanItem.objects.create(
             plan=ilerna, is_headline=True, progression=PlanItem.PROG_COMPLETION,
-            watch_keyword="Redes", watch_site=PlanItem.SITE_ILERNA, course_progress_pct=100,
+            watch_keyword="Redes", watch_site=PlanItem.SITE_WEB, course_progress_pct=100,
         )
         Plan.auto_close_expired(user=self.user)
         ilerna.refresh_from_db()

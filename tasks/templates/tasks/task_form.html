@@ -213,6 +213,41 @@
         </label>
     </div>
 
+    <div id="web-fields">
+        <label class="field">
+            <span class="field__label">Dirección de la web (un trozo)</span>
+            <input type="text" name="watch_url" id="watch-url-input" maxlength="200" value="{{ task.watch_url|default:'' }}"
+                placeholder="Ej: hyperskill.org — o varias separadas por comas">
+            <details class="hint-details">
+                <summary>¿cómo lo detecta?</summary>
+                <span class="field__hint">
+                    La extensión de Chrome cuenta el tiempo mientras la pestaña en primer plano
+                    tenga ese texto en su dirección (da igual https, www o la subpágina:
+                    "hyperskill.org" vale para todas). Con la palabra del título de abajo puedes
+                    afinar más (ej. una asignatura concreta).
+                </span>
+            </details>
+        </label>
+        <label class="field">
+            <span class="field__label">Dejar de contar si no tocas ratón ni teclado durante…</span>
+            <input type="number" name="watch_idle_minutes" min="1" max="30" step="1" inputmode="numeric"
+                value="{% if task.pk and task.subcategory == 'web' %}{% widthratio task.watch_idle_seconds 60 1 %}{% else %}3{% endif %}">
+            <span class="field__hint">
+                Minutos (1 a 30). Para que no valga dejar el ordenador encendido con la página
+                delante e irte: pasado este rato sin actividad (o con la pantalla bloqueada) deja de contar, y
+                ese rato de espera no se suma.
+            </span>
+        </label>
+        <label class="repeat-option">
+            <input type="checkbox" name="watch_audio_counts" value="1"
+                {% if task.subcategory == 'web' and task.watch_audio_counts %}checked{% endif %}>
+            <span>Contar también si la pestaña suena (clases o vídeos que ves sin tocar nada)</span>
+        </label>
+        <span class="field__hint">
+            Ojo: con esto marcado, irte con el sonido puesto sigue contando.
+        </span>
+    </div>
+
     <div id="udemy-generic-hint" class="field">
         <span class="field__hint">Hábito genérico: cuenta el tiempo en cualquier curso de Udemy, nunca se cierra solo.</span>
         <details class="hint-details">
@@ -395,6 +430,8 @@
     var studySubcategoryField = document.getElementById('study-subcategory-field');
     var languageFields = document.getElementById('language-fields');
     var udemyFields = document.getElementById('udemy-fields');
+    var webFields = document.getElementById('web-fields');
+    var watchUrlInput = document.getElementById('watch-url-input');
     var udemyGenericHint = document.getElementById('udemy-generic-hint');
     var watchKeywordLabel = document.getElementById('watch-keyword-label');
     var watchKeywordInput = document.getElementById('watch-keyword-input');
@@ -461,11 +498,12 @@
         // campo de objetivo en minutos, por eso se decide aquí y no solo
         // con v === 'work'.
         var esUdemy = v === 'study' && subSelValue === 'udemy';
-        // Clases de Ilerna (Zoom): como Udemy cronometra con la
-        // extensión y comparte el campo de minutos, pero SÍ admite
-        // palabra clave (asignatura, opcional) y no necesita vídeo.
-        var esIlerna = v === 'study' && subSelValue === 'ilerna';
-        var esCursoExterno = esUdemy || esIlerna;
+        // Tiempo en una web (Ilerna, Hyperskill...): como Udemy cronometra
+        // con la extensión y comparte el campo de minutos, pero lleva la
+        // dirección de la web, admite palabra del título (opcional) y no
+        // necesita vídeo.
+        var esWeb = v === 'study' && subSelValue === 'web';
+        var esCursoExterno = esUdemy || esWeb;
         var esGeneral = v === 'general';
         generalTimerField.style.display = esGeneral ? 'block' : 'none';
         var esGeneralConTimer = esGeneral && wantsTimerInput.checked;
@@ -510,11 +548,16 @@
         // generico (ver _study_link_error en el backend) -- asi que
         // enseña solo el aviso, nunca el input. Lectura sigue con su
         // input de siempre, sin cambios.
-        udemyFields.style.display = (esLectura || esIlerna) ? 'block' : 'none';
-        // El mismo input sirve a Lectura (PDF) y a Ilerna (asignatura):
+        udemyFields.style.display = (esLectura || esWeb) ? 'block' : 'none';
+        // El mismo input sirve a Lectura (PDF) y a la web (palabra del título):
         // solo cambia el texto, para no mandar dos watch_keyword.
-        watchKeywordLabel.textContent = esIlerna ? 'Asignatura (opcional)' : 'Palabra clave del PDF (opcional)';
-        watchKeywordInput.placeholder = esIlerna ? "Un trozo del título de la clase, ej. 'Programación'" : 'Ej: clean-code';
+        watchKeywordLabel.textContent = esWeb ? 'Palabra en el título de la pestaña (opcional)' : 'Palabra clave del PDF (opcional)';
+        watchKeywordInput.placeholder = esWeb ? "Ej: 'Programación' — solo cuenta si el título la lleva" : 'Ej: clean-code';
+        // Los campos de la web solo se mandan si el subtipo es "web": los
+        // demás llegan deshabilitados (si no, un valor viejo viajaría igual).
+        webFields.style.display = esWeb ? 'block' : 'none';
+        webFields.querySelectorAll('input, select').forEach(function (el) { el.disabled = !esWeb; });
+        watchUrlInput.required = esWeb;
         udemyGenericHint.style.display = esUdemy ? 'block' : 'none';
         var videoEnDeporte = esDeporte && modoActual === 'video';
         // Lectura no lleva vídeo (las tareas de Enfoque, que sí podían, ya

@@ -18,6 +18,7 @@ from . import time_stats
 from .models import (
     CourseQuiz, Exercise, Occurrence, Plan, PlanItem, ReadingPdf, Routine, RoutineItem, SavedVideo, Task,
     TimerSession, UserSettings, WarmupStatus, WorkoutSession, last_set_reps, last_set_seconds,
+    WEB_IDLE_DEFAULT_SECONDS, clamp_web_idle_seconds,
 )
 from . import calories
 from .utils import get_current_user, read_mobile_release, resolve_plan_target
@@ -157,6 +158,34 @@ def _read_level(request):
     raw = request.POST.get("level", "")
     valid = {k for k, _ in Task.CEFR_LEVEL_CHOICES}
     return raw if raw in valid else ""
+
+
+def _read_watch_url(post):
+    """Trozo(s) de URL de una tarea/objetivo "Tiempo en una web" (Task.watch_url).
+    Se limpia lo que el usuario suele pegar de más: espacios, comillas, el
+    esquema y el "www." ("https://www.hyperskill.org/learn" -> "hyperskill.org/learn")
+    y se aceptan varios separados por comas o saltos de línea."""
+    raw = post.get("watch_url") or post.get("web_url") or ""
+    parts = []
+    for chunk in raw.replace("\n", ",").split(","):
+        chunk = chunk.strip().strip("\"'").strip()
+        for prefix in ("https://", "http://"):
+            if chunk.lower().startswith(prefix):
+                chunk = chunk[len(prefix):]
+        if chunk.lower().startswith("www."):
+            chunk = chunk[4:]
+        if chunk:
+            parts.append(chunk)
+    return ",".join(parts)[:200]
+
+
+def _read_web_idle_seconds(post):
+    """Minutos sin actividad del formulario (1, 2, 5...) -> segundos, acotados."""
+    raw = post.get("watch_idle_minutes") or post.get("web_idle_minutes") or ""
+    try:
+        return clamp_web_idle_seconds(float(raw) * 60)
+    except (TypeError, ValueError):
+        return WEB_IDLE_DEFAULT_SECONDS
 
 
 def _read_target_minutes(request, category=None):
@@ -439,6 +468,9 @@ def task_create(request):
                 language_name=_read_language_name(request),
                 level=_read_level(request),
                 watch_keyword=_read_watch_keyword(request),
+                watch_url=_read_watch_url(request.POST),
+                watch_idle_seconds=_read_web_idle_seconds(request.POST),
+                watch_audio_counts=bool(request.POST.get("watch_audio_counts")),
                 target_minutes=_read_target_minutes(request, category),
                 youtube_video_id=_read_youtube_video_id(request),
                 youtube_playlist_id=_read_youtube_playlist_id(request),
@@ -467,6 +499,11 @@ def task_create(request):
                 # _study_link_error) -- si llego alguna en el POST se
                 # ignora, es exclusiva de un Plan.
                 task.watch_keyword = ""
+            if task.subcategory != Task.SUBCATEGORY_WEB:
+                # Los campos de "Tiempo en una web" solo valen en ese subtipo.
+                task.watch_url = ""
+                task.watch_idle_seconds = WEB_IDLE_DEFAULT_SECONDS
+                task.watch_audio_counts = False
             # Igual que en task_edit: una fecha imposible (p. ej. un año de 5
             # cifras tecleado sin querer en el campo de fecha) no puede acabar
             # en un error 500 al guardar.
@@ -534,6 +571,9 @@ def task_edit(request, pk):
         task.language_name = _read_language_name(request)
         task.level = _read_level(request)
         task.watch_keyword = _read_watch_keyword(request)
+        task.watch_url = _read_watch_url(request.POST)
+        task.watch_idle_seconds = _read_web_idle_seconds(request.POST)
+        task.watch_audio_counts = bool(request.POST.get("watch_audio_counts"))
         task.target_minutes = _read_target_minutes(request, task.category)
         task.youtube_video_id = _read_youtube_video_id(request)
         task.youtube_playlist_id = _read_youtube_playlist_id(request)
@@ -569,6 +609,10 @@ def task_edit(request, pk):
         )
         if task.subcategory == Task.SUBCATEGORY_UDEMY:
             task.watch_keyword = ""
+        if task.subcategory != Task.SUBCATEGORY_WEB:
+            task.watch_url = ""
+            task.watch_idle_seconds = WEB_IDLE_DEFAULT_SECONDS
+            task.watch_audio_counts = False
         date_error = None
         if isinstance(task.due_date, str):
             try:
@@ -2954,7 +2998,7 @@ def plan_ai_form(request):
 def _study_objective_from_post(post):
     """
     Lee del formulario el objetivo de un plan de Estudio · Hábito simple
-    (curso de Udemy, clases de Ilerna, vídeo, playlist o temporizador) y lo
+    (curso de Udemy, tiempo en una web, vídeo, playlist o temporizador) y lo
     valida. Devuelve (campos, error); con error no hay campos.
 
     Se llama ANTES de guardar nada del plan: un error tiene que significar
@@ -2965,18 +3009,24 @@ def _study_objective_from_post(post):
         "youtube_video_id": post.get("youtube_video_id", "").strip()[:255],
         "youtube_playlist_id": post.get("youtube_playlist_id", "").strip()[:255],
     }
-    # Clases de Ilerna (Zoom): no es un curso de Udemy aunque lleve palabra
-    # clave (asignatura, opcional) -- watch_site lo distingue. La palabra
+    # Tiempo en una web: no es un curso de Udemy aunque lleve palabra clave
+    # (texto del título, opcional) -- watch_site lo distingue. La palabra
     # clave de cada fuente viaja en su propio input (los de las fuentes no
     # elegidas llegan deshabilitados, ver refreshStudySource en
     # plan_form.html).
-    is_ilerna = post.get("study_source") == "ilerna"
-    if is_ilerna:
-        fields["watch_site"] = PlanItem.SITE_ILERNA
-        fields["watch_keyword"] = post.get("ilerna_keyword", "").strip()[:120]
+    is_web = post.get("study_source") == "web"
+    if is_web:
+        fields["watch_site"] = PlanItem.SITE_WEB
+        fields["watch_keyword"] = post.get("web_keyword", "").strip()[:120]
+        fields["watch_url"] = _read_watch_url(post)
+        fields["watch_idle_seconds"] = _read_web_idle_seconds(post)
+        fields["watch_audio_counts"] = bool(post.get("web_audio_counts"))
     else:
         fields["watch_site"] = ""
         fields["watch_keyword"] = post.get("watch_keyword", "").strip()[:120]
+        fields["watch_url"] = ""
+        fields["watch_idle_seconds"] = WEB_IDLE_DEFAULT_SECONDS
+        fields["watch_audio_counts"] = False
     # Solo tiene sentido con watch_keyword puesto (Curso de Udemy) -- toggle
     # "por vídeos vistos" (exige audio, de siempre) vs "por tiempo en la
     # página" (vídeo + ejercicios, sin exigir audio, ver
@@ -2985,7 +3035,7 @@ def _study_objective_from_post(post):
     # Igual que una tarea suelta de Estudio (ver _study_link_error): sin nada
     # de esto puesto, el plan saldría con una tarea diaria "Estudio simple"
     # sin nada que comprobar ni forma de cerrarse solo.
-    if not (fields["youtube_video_id"] or fields["youtube_playlist_id"] or fields["watch_keyword"] or is_ilerna):
+    if not (fields["youtube_video_id"] or fields["youtube_playlist_id"] or fields["watch_keyword"] or is_web):
         return None, (
             "Pon algo enlazado: un curso de Udemy (palabra clave), un vídeo "
             "o una playlist de YouTube — un plan de Estudio necesita saber "
@@ -2996,11 +3046,13 @@ def _study_objective_from_post(post):
         fields["target_minutes"] = max(1, int(raw_minutes)) if raw_minutes else None
     except (TypeError, ValueError):
         fields["target_minutes"] = None
-    if is_ilerna and not fields["target_minutes"]:
-        return None, "Clases de Ilerna: pon los minutos de clase al día."
-    # Igual que Ilerna: sin minutos, la extensión daba el día por cumplido
+    if is_web and not fields["watch_url"]:
+        return None, "Tiempo en una web: pon un trozo de la dirección de la web, ej. hyperskill.org."
+    if is_web and not fields["target_minutes"]:
+        return None, "Tiempo en una web: pon los minutos al día que quieres pasar en ella."
+    # Igual que la web: sin minutos, la extensión daba el día por cumplido
     # con la primera sesión de 1 minuto.
-    if not is_ilerna and fields["watch_keyword"] and not fields["target_minutes"]:
+    if not is_web and fields["watch_keyword"] and not fields["target_minutes"]:
         return None, "Curso de Udemy: pon los minutos al día que quieres estudiar."
     raw_count = post.get("target_video_count", "").strip()
     try:

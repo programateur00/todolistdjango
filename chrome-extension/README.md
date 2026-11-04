@@ -1,9 +1,9 @@
-# Libreta — Tiempo en Udemy y Lectura (extensión de Chrome)
+# Libreta — Tiempo en webs (extensión de Chrome)
 
 Cuenta el tiempo real que pasas con una pestaña "trackeable" en primer
 plano (ventana con foco, sin inactividad), y manda esa sesión a
 `/api/tasks/<uuid>/focus/` — igual que ya hace el plugin de lectura de
-la app móvil, con `source=pc_usage` en vez de `app_usage`. Hay dos
+la app móvil, con `source=pc_usage` en vez de `app_usage`. Hay tres
 tipos de pestaña trackeable, cada uno emparejado con un tipo de tarea:
 
 - **Udemy** — tarea de categoría Estudio, subtipo "Curso de Udemy".
@@ -35,17 +35,31 @@ tipos de pestaña trackeable, cada uno emparejado con un tipo de tarea:
   minutos (chrome.idle), igual que Lectura de PDF más abajo. Cuando te
   vas, esos 5 minutos de inactividad que hicieron falta para detectarlo
   NO se suman.
-- **Clases de Ilerna (Zoom)** — tarea de categoría Estudio, subtipo
-  "Clases de Ilerna (Zoom)" (o plan de Estudio → "Clases de Ilerna").
-  Cuenta tiempo mientras tienes una grabación de `ilernaonline.zoom.us`
-  en primer plano y suena (o tocas ratón/teclado; para tras 5 min
-  inactivo Y en silencio). Sin curso que terminar: la tarea del día se da
-  por cumplida al llegar a los minutos objetivo, y el plan se cierra por
-  semanas como cualquier hábito de Estudio. La palabra clave (asignatura)
-  es opcional — si la pones, tiene que aparecer en el título de la
-  pestaña de Zoom; si no, cuenta cualquier clase de Ilerna. Para ver qué
-  título tiene la pestaña, abre el popup de la extensión (panel de
-  diagnóstico).
+- **Tiempo en una web** — tarea de categoría Estudio, subtipo "Tiempo en
+  una web" (o plan de Estudio → "Tiempo en una web"). Sirve para CUALQUIER
+  web que elijas (Ilerna, Hyperskill, un campus, la documentación de lo que
+  estés aprendiendo…) y sustituye a las antiguas "Clases de Ilerna": las
+  que ya tenías se convirtieron solas en una web con `ilernaonline.zoom.us`
+  y el sonido contando, como funcionaban. Se configura con:
+  - **Dirección de la web (un trozo)**: la pestaña cuenta si su URL
+    CONTIENE ese texto, sin distinguir mayúsculas y sin importar https, www
+    o la subpágina. `hyperskill.org` vale para todo Hyperskill;
+    `ilernaonline.zoom.us/rec` solo para las grabaciones. Puedes poner
+    varios separados por comas (vale cualquiera). Los trozos de menos de 3
+    letras se ignoran. Al guardar se limpia lo que pegues de más
+    (`https://www.hyperskill.org/learn` → `hyperskill.org/learn`).
+  - **Palabra en el título (opcional)**: además tiene que salir en el
+    título de la pestaña (p. ej. una asignatura). Si encajan varias
+    tareas con la misma pestaña, gana la que pide palabra del título y,
+    luego, la de trozo de URL más largo.
+  - **Condición anti-AFK** (ver abajo): minutos sin tocar ratón/teclado a
+    partir de los cuales deja de contar (el número que quieras, de 1 a 30; por defecto 3),
+    y si el sonido de la pestaña también cuenta como "estoy aquí".
+  Sin curso que terminar: la tarea del día se da por cumplida al llegar a
+  los minutos objetivo (obligatorios), y el plan se cierra por semanas como
+  cualquier hábito de Estudio. Para ver por qué una pestaña cuenta o no,
+  abre el popup de la extensión (panel de diagnóstico: dice si la web
+  encaja y si ahora mismo cuenta).
 - **Lectura de un PDF (modo Freestyle)** — tarea de categoría
   "Lectura". Si el título de la pestaña activa es un `.pdf` (local o
   de una web) y coincide con la palabra clave de la tarea, cuenta
@@ -84,6 +98,12 @@ acciones `focus_save`/`course-complete` en `tasks/api.py` — todo ya en
 `main` de este repo. Sin eso desplegado, "Probar conexión" avisa de que
 falta el subtipo.
 
+Para "Tiempo en una web" hace falta además la migración `0128_tiempo_en_una_web`
+(campos `watch_url`, `watch_idle_seconds`, `watch_audio_counts`; convierte
+también las clases de Ilerna que ya tenías). Después de desplegar: ejecuta
+`python manage.py migrate` y, en `chrome://extensions`, pulsa el botón de
+recargar de esta extensión (cambió el manifest a la 1.3.0).
+
 ## Uso
 
 ### Cursos de Udemy
@@ -93,6 +113,22 @@ falta el subtipo.
    (ej. "Linux" para un curso que se llame "Curso completo de Linux").
 2. Ponte a ver el curso en Chrome, con esa pestaña en primer plano.
    No hace falta hacer nada más — la extensión cuenta sola.
+
+### Tiempo en una web (Ilerna, Hyperskill, la que quieras)
+
+1. Crea una tarea de categoría "Estudio" → subtipo "Tiempo en una web" (o
+   un plan de Estudio → "Tiempo en una web") y rellena:
+   - la dirección: un trozo que tenga la URL (`hyperskill.org`),
+   - los minutos al día (obligatorios),
+   - opcional: una palabra del título de la pestaña,
+   - tras cuántos minutos sin tocar ratón/teclado deja de contar,
+   - opcional: si el sonido de la pestaña también cuenta.
+2. Ponte con la web en Chrome, con esa pestaña en primer plano. La
+   extensión cuenta sola mientras estés usándola.
+3. Si te vas con el ordenador encendido: pasado el tiempo que elegiste sin
+   tocar nada (o al bloquear la pantalla) deja de contar, y esos minutos de
+   espera no se suman. Para saber por qué una pestaña cuenta o no, abre el
+   popup → "Diagnóstico".
 
 ### Lectura de un PDF (libro, apuntes...)
 
@@ -112,7 +148,7 @@ falta el subtipo.
    primer plano mientras lees. También funciona con un PDF alojado en
    una web (no hace falta que sea un archivo local).
 
-### En ambos casos
+### En todos los casos
 
 - Si cambias de pestaña, minimizas la ventana o dejas de cumplir la
   condición de tu modo, esa sesión se cierra y se manda; al volver,
@@ -124,8 +160,13 @@ falta el subtipo.
     en primer plano y actividad de ratón/teclado en los últimos 5
     minutos; si te vas, la sesión acaba en el instante en que dejaste de
     tocar (no se suman los 5 minutos de espera).
-  - **Clases de Ilerna (Zoom)**: cuenta si suena O hay actividad de
-    ratón/teclado; para al estar en silencio Y 5 minutos inactivo.
+  - **Tiempo en una web**: cuenta SOLO con actividad de ratón/teclado en
+    los últimos N minutos (el que elijas por tarea, de 1 a 30; 3 por defecto). Con la
+    pantalla bloqueada nunca cuenta. Si activas "contar también si la
+    pestaña suena", suena = presente (para clases grabadas que ves sin
+    tocar nada) — a cambio, irte con el sonido puesto sigue contando; con
+    la pantalla bloqueada tampoco. Sea cual sea el caso, cuando te vas, el
+    rato de espera hasta detectarlo NO se suma.
 - Los segundos sueltos de cada trozo no se pierden: lo que sobra (o
   falta) para el minuto entero se arrastra al siguiente trozo de esa
   tarea el mismo día (`takeWholeMinutes`), así que salir y volver varias

@@ -96,6 +96,24 @@ class TaskManager(models.Manager):
         return super().get_queryset().filter(deleted_at__isnull=True)
 
 
+# "Tiempo en una web": cuánto rato sin tocar ratón ni teclado hace falta para
+# dar por hecho que te has ido (ver chrome-extension/background.js). Es el
+# freno contra dejar el ordenador encendido con la página delante. Por
+# defecto 3 min; el rango evita valores absurdos (la API de Chrome no baja
+# de 15 s).
+WEB_IDLE_DEFAULT_SECONDS = 180
+WEB_IDLE_MIN_SECONDS = 30
+WEB_IDLE_MAX_SECONDS = 1800
+
+
+def clamp_web_idle_seconds(value, default=WEB_IDLE_DEFAULT_SECONDS):
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(WEB_IDLE_MIN_SECONDS, min(WEB_IDLE_MAX_SECONDS, value))
+
+
 class Task(models.Model):
     objects = TaskManager()
     all_objects = models.Manager()
@@ -252,19 +270,20 @@ class Task(models.Model):
     # para dar la tarea por terminada del todo (ver
     # Task.finish_recurring_series).
     SUBCATEGORY_UDEMY = "udemy"
-    # Clases de Ilerna (FP a distancia): las clases son grabaciones de
-    # Zoom en ilernaonline.zoom.us. Misma idea que Udemy (la extensión de
-    # Chrome cuenta el tiempo con esa pestaña en primer plano y suena o
-    # hay actividad, ver chrome-extension/background.js), pero SIN
-    # "curso completado al 100%": no hay nada que leer de Zoom, así que
-    # es un hábito de "ver X minutos de clase al día" que se cierra por
-    # semanas como cualquier plan de Estudio. watch_keyword es opcional
-    # (nombre de la asignatura tal y como sale en el título de la pestaña).
-    SUBCATEGORY_ILERNA = "ilerna"
+    # Tiempo en una web cualquiera (Ilerna, Hyperskill, la que quieras): la
+    # extensión de Chrome cuenta el tiempo con una pestaña en primer plano
+    # cuya URL contiene `watch_url` (y, si se pone, cuyo título contiene
+    # `watch_keyword`), mientras haya actividad real de ratón/teclado (ver
+    # watch_idle_seconds / watch_audio_counts y chrome-extension/background.js).
+    # SIN "curso completado al 100%": es un hábito de "X minutos al día en
+    # esta web" que se cierra por semanas como cualquier plan de Estudio.
+    # Sustituye a las antiguas "Clases de Ilerna" (subtipo "ilerna"), que la
+    # migración 0128 convierte en una web con ilernaonline.zoom.us.
+    SUBCATEGORY_WEB = "web"
     STUDY_SUBCATEGORY_CHOICES = [
         (SUBCATEGORY_LANGUAGE, "Idiomas"),
         (SUBCATEGORY_UDEMY, "Curso de Udemy"),
-        (SUBCATEGORY_ILERNA, "Clases de Ilerna (Zoom)"),
+        (SUBCATEGORY_WEB, "Tiempo en una web"),
     ]
 
     SUBCATEGORY_CHOICES = SPORT_SUBCATEGORY_CHOICES + FOCUS_SUBCATEGORY_CHOICES + STUDY_SUBCATEGORY_CHOICES
@@ -344,6 +363,19 @@ class Task(models.Model):
     # Udemy freestyle nunca lleva palabra clave (ver study_link_error
     # más abajo), así que ahí esto no tiene efecto.
     watch_requires_audio = models.BooleanField(default=True)
+    # Solo con subcategory=SUBCATEGORY_WEB: trozo de la URL que debe tener la
+    # pestaña para contar (ej. "hyperskill.org" o "ilernaonline.zoom.us/rec").
+    # Se pueden poner varios separados por comas (vale cualquiera). Sin
+    # distinguir mayúsculas. watch_keyword, si se pone, además tiene que salir
+    # en el título de la pestaña.
+    watch_url = models.CharField(max_length=200, blank=True)
+    # Solo con subcategory=SUBCATEGORY_WEB: segundos sin tocar ratón ni teclado
+    # a partir de los cuales se da por hecho que te fuiste y se deja de contar.
+    watch_idle_seconds = models.PositiveIntegerField(default=WEB_IDLE_DEFAULT_SECONDS)
+    # Solo con subcategory=SUBCATEGORY_WEB: si la pestaña suena, cuenta aunque
+    # no toques nada (clases/vídeos grabados). Desactivado por defecto: con él
+    # activado, irte con el sonido puesto sigue contando.
+    watch_audio_counts = models.BooleanField(default=False)
     # Se pone al llamar finish_recurring_series() — señal inequívoca de
     # "esto era un curso y Udemy lo reportó al 100%", distinta de
     # is_done/repeat=NONE (que también los ponen otras cosas, como una
@@ -804,9 +836,9 @@ class Task(models.Model):
                 return "auto"
             return "focus"          # cronómetro: leer, o una tarea General con cronómetro
         if self.category == self.CATEGORY_STUDY and self.subcategory in (
-            self.SUBCATEGORY_UDEMY, self.SUBCATEGORY_ILERNA,
+            self.SUBCATEGORY_UDEMY, self.SUBCATEGORY_WEB,
         ):
-            # Curso de Udemy / clases de Ilerna: se completa sola cuando la extensión de
+            # Curso de Udemy / tiempo en una web: se completa sola cuando la extensión de
             # Chrome manda minutos suficientes — no hay nada que pulsar
             # aquí, igual que running ("distance") no ofrece nada porque
             # se completa sola al importar de Health Connect.
@@ -1383,12 +1415,14 @@ class Task(models.Model):
             if not self.target_minutes:
                 return "Curso de Udemy: pon cuántos minutos al día quieres estudiar."
             return None
-        if self.subcategory == self.SUBCATEGORY_ILERNA:
+        if self.subcategory == self.SUBCATEGORY_WEB:
+            if not (self.watch_url or "").strip():
+                return "Tiempo en una web: pon un trozo de la dirección (URL) de la web, ej. 'hyperskill.org'."
             # Sin minutos al día no hay forma de saber cuándo "ya has
-            # visto clase suficiente" -- focus_save la daría por hecha con
-            # la primera sesión de 1 minuto.
+            # estado suficiente" -- focus_save la daría por hecha con la
+            # primera sesión de 1 minuto.
             if not self.target_minutes:
-                return "Clases de Ilerna: pon cuántos minutos de clase al día quieres ver."
+                return "Tiempo en una web: pon cuántos minutos al día quieres pasar en ella."
             return None
         if not (self.youtube_video_id or self.youtube_playlist_id):
             return (
@@ -1813,6 +1847,9 @@ class Task(models.Model):
             language_name=self.language_name,
             level=self.level,
             watch_requires_audio=self.watch_requires_audio,
+            watch_url=self.watch_url,
+            watch_idle_seconds=self.watch_idle_seconds,
+            watch_audio_counts=self.watch_audio_counts,
             # Segundos de lectura aún sin volcar a un TimerSession (<1 min
             # tras "Terminar sesión de hoy"): se arrastran al día siguiente
             # en vez de tirarse.
@@ -3126,7 +3163,7 @@ class Plan(models.Model):
             head and not is_language and head.youtube_playlist_id and head.playlist_videos_cache
         )
         has_udemy_course = bool(
-            head and not is_language and head.watch_keyword and head.watch_site != PlanItem.SITE_ILERNA
+            head and not is_language and head.watch_keyword and head.watch_site != PlanItem.SITE_WEB
         )
         if is_language:
             progress = self.course_progress()
@@ -3423,6 +3460,9 @@ class Plan(models.Model):
             "youtube_playlist_id": head.youtube_playlist_id,
             "watch_keyword": head.watch_keyword,
             "watch_requires_audio": head.watch_requires_audio,
+            "watch_url": head.watch_url,
+            "watch_idle_seconds": head.watch_idle_seconds,
+            "watch_audio_counts": head.watch_audio_counts,
             "target_minutes": head.target_minutes,
             "target_video_count": head.target_video_count,
             "playlist_start_index": None,
@@ -3642,6 +3682,9 @@ class Plan(models.Model):
             youtube_playlist_id="",
             watch_keyword="",
             watch_requires_audio=True,
+            watch_url="",
+            watch_idle_seconds=WEB_IDLE_DEFAULT_SECONDS,
+            watch_audio_counts=False,
             target_minutes=None,
             target_video_count=None,
             playlist_start_index=None,
@@ -3661,10 +3704,10 @@ class Plan(models.Model):
                 # vez de vídeo/playlist — igual que un headline con
                 # youtube_video_id hace que la tarea sea "de vídeo".
                 head = self.headline
-                if head and head.watch_site == PlanItem.SITE_ILERNA:
-                    # Clases de Ilerna: aunque lleve palabra clave
-                    # (asignatura), NO es un curso de Udemy.
-                    fields["subcategory"] = Task.SUBCATEGORY_ILERNA
+                if head and head.watch_site == PlanItem.SITE_WEB:
+                    # Tiempo en una web: aunque lleve palabra clave (texto
+                    # del título), NO es un curso de Udemy.
+                    fields["subcategory"] = Task.SUBCATEGORY_WEB
                 elif fields.get("watch_keyword"):
                     fields["subcategory"] = Task.SUBCATEGORY_UDEMY
         elif self.plan_type == self.PLAN_TYPE_SPORT:
@@ -4022,12 +4065,17 @@ class PlanItem(models.Model):
     # copia a la tarea diaria en Plan._study_target_fields().
     watch_requires_audio = models.BooleanField(default=True)
     # De dónde sale lo que se vigila con la extensión de Chrome: "" =
-    # Udemy (de siempre, cuando hay watch_keyword) y "ilerna" = clases de
-    # Zoom de Ilerna, donde watch_keyword es OPCIONAL (asignatura) y no
-    # hay "curso completado" que detectar -- por eso NO puede deducirse
-    # solo de watch_keyword (ver is_udemy_course).
-    SITE_ILERNA = "ilerna"
+    # Udemy (de siempre, cuando hay watch_keyword) y "web" = tiempo en una
+    # web cualquiera (watch_url), donde watch_keyword es OPCIONAL (texto del
+    # título) y no hay "curso completado" que detectar -- por eso NO puede
+    # deducirse solo de watch_keyword (ver is_udemy_course).
+    SITE_WEB = "web"
     watch_site = models.CharField(max_length=8, blank=True, default="")
+    # Igual que Task.watch_url / watch_idle_seconds / watch_audio_counts (mismo
+    # significado): se copian a la tarea diaria en Plan._study_target_fields().
+    watch_url = models.CharField(max_length=200, blank=True)
+    watch_idle_seconds = models.PositiveIntegerField(default=WEB_IDLE_DEFAULT_SECONDS)
+    watch_audio_counts = models.BooleanField(default=False)
     # Progreso del curso guardado EN el propio objetivo (lo manda la
     # extensión de Chrome desde la API de Udemy). No depende de que la
     # tarea diaria del plan exista/tenga la misma serie/palabra clave.
@@ -4234,8 +4282,8 @@ class PlanItem(models.Model):
     @property
     def is_udemy_course(self):
         """Objetivo de "Curso de Udemy": palabra clave puesta, sin ejercicio
-        y que NO sea de Ilerna (que también puede llevar palabra clave)."""
-        return bool(self.watch_keyword and not self.exercise_id and self.watch_site != self.SITE_ILERNA)
+        y que NO sea de una web (que también puede llevar palabra clave)."""
+        return bool(self.watch_keyword and not self.exercise_id and self.watch_site != self.SITE_WEB)
 
     def current_course_progress_pct(self):
         """
@@ -4274,7 +4322,7 @@ class PlanItem(models.Model):
         Mira la última tarea de la serie QUE TENGA dato (no simplemente
         la de fecha más reciente: la del día siguiente nace vacía).
         """
-        if not self.watch_keyword or self.watch_site == self.SITE_ILERNA:
+        if not self.watch_keyword or self.watch_site == self.SITE_WEB:
             return None
         if self.course_progress_pct is not None:
             done, total = self.course_lessons_done, self.course_lessons_total
@@ -4310,10 +4358,11 @@ class PlanItem(models.Model):
         arrastraba. Las plantillas llaman a esto en vez de leer
         pack.target.sets/reps cuando self.exercise es None.
         """
-        if self.watch_site == self.SITE_ILERNA:
+        if self.watch_site == self.SITE_WEB:
+            where = (self.watch_url or "la web").split(",")[0].strip() or "la web"
             if self.target_minutes:
-                return f"{self.target_minutes} min de clase"
-            return "ver las clases de hoy"
+                return f"{self.target_minutes} min en {where}"
+            return f"pasar tiempo en {where}"
         if self.watch_keyword:
             pct = self.current_course_progress_pct()
             return f"{pct}% del curso completado" if pct is not None else "sigue el curso de Udemy"

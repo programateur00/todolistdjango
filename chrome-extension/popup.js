@@ -52,7 +52,7 @@ function renderDebug(snap) {
   if (snap.tab) {
     lines.push(`Pestaña activa — título: "${snap.tab.title}"`);
     lines.push(`Pestaña activa — URL: ${snap.tab.url ?? "(oculta — falta el permiso de acceso a archivos)"}`);
-    lines.push(`Tipo de pestaña detectado: ${{ udemy: "Udemy", ilerna: "Clases de Ilerna (Zoom)", pdf: "PDF", otro: "ninguno de los tres" }[snap.tabKind]}`);
+    lines.push(`Tipo de pestaña detectado: ${{ udemy: "Udemy", web: "Web de una tarea de 'Tiempo en una web'", pdf: "PDF", otro: "ninguno (ninguna tarea encaja con esta pestaña)" }[snap.tabKind]}`);
     if (snap.udemyPlayer === false) lines.push("Esta página de Udemy NO es el reproductor del curso (…/learn/…): no cuenta tiempo aquí.");
     lines.push(`¿Suena audio en la pestaña?: ${snap.tab.audible ? "sí" : "no"}`);
   } else {
@@ -61,17 +61,24 @@ function renderDebug(snap) {
   if (snap.noUrlButFileTab) {
     lines.push('Aviso: hay una pestaña sin URL visible — probablemente un archivo local sin el permiso "acceso a URLs de archivo" activado.');
   }
-  lines.push(`Estado de inactividad (chrome.idle): ${snap.idleState}`);
+  lines.push(`Estado de inactividad (chrome.idle, umbral 5 min): ${snap.idleState}`);
+  if (snap.webState) {
+    const w = snap.webState;
+    lines.push(`Esta web: ${w.counting ? "CUENTA ahora" : "NO cuenta ahora"} — sin tocar ratón/teclado más de ${w.idleSeconds}s (o con la pantalla bloqueada) para de contar; estado a ese umbral: ${w.idleState}${w.audioCounts ? "; el sonido de la pestaña también cuenta" : ""}`);
+  }
   lines.push(`Tareas trackeables en caché: ${snap.tasksCount}${snap.tasksCacheAgeSeconds !== null ? ` (actualizada hace ${snap.tasksCacheAgeSeconds}s)` : " (nunca se ha cargado)"}`);
   if (snap.tasks.length) {
     snap.tasks.forEach((t) => {
       const audioNote = t.subcategory === "udemy"
         ? (t.watch_requires_audio === false ? " — por tiempo en la página (idle)" : " — por vídeos vistos (solo con vídeo sonando/en marcha)")
         : "";
-      lines.push(`   · [${t.subcategory}] "${t.title}" — palabra clave: "${t.watch_keyword}"${audioNote}`);
+      const webNote = t.subcategory === "web"
+        ? ` — URL con: "${t.watch_url}", inactividad ${t.watch_idle_seconds}s${t.watch_audio_counts ? ", cuenta también con sonido" : ""}`
+        : "";
+      lines.push(`   · [${t.subcategory}] "${t.title}" — palabra clave: "${t.watch_keyword}"${audioNote}${webNote}`);
     });
   } else {
-    lines.push('   (ninguna — revisa que la tarea sea de hoy: Estudio → "Curso de Udemy" / "Clases de Ilerna", o Lectura)');
+    lines.push('   (ninguna — revisa que la tarea sea de hoy: Estudio → "Curso de Udemy" / "Tiempo en una web", o Lectura)');
   }
   lines.push(`Coincidencia encontrada ahora: ${snap.match ? `SÍ — "${snap.match.taskTitle}" (por "${snap.match.keyword}")` : "NO"}`);
   lines.push(`Sesión en curso: ${snap.currentSession ? `${snap.currentSession.taskTitle} [${snap.currentSession.subcategory}]` : "ninguna"}`);

@@ -174,14 +174,25 @@ const SCAPULARPULL_LIFTOFF_FACTOR = 0.03;
 //  - el CUERPO ENTERO sube y baja: en el rango de la repetición los tobillos se mueven al menos SCAPULARPULL_FEET_FOLLOW_MIN_RATIO
 //    de lo que se mueve el hombro (colgado todo el cuerpo sube a la vez; con los pies apoyados los tobillos no se mueven).
 //    Es una medida RELATIVA (no hace falta saber dónde está el suelo). Si los tobillos no se ven en la repetición, no se juzga.
-//  - el codo sigue estirado (escapular = sin doblar el codo): más de SCAPULARPULL_BENT_MIN_FRAMES fotogramas con el
-//    ángulo hombro-codo-muñeca por debajo de SCAPULARPULL_ELBOW_BENT_MAX_DEG invalidan la repetición.
+//  - el codo no se dobla de forma clara al subir (ver el bloque de 2026-11-02 más abajo: ya no hace falta el brazo
+//    perfectamente recto, solo no tirar con los brazos).
 const SCAPULARPULL_FEET_MIN_VISIBILITY = 0.5;      // tobillo con menos visibilidad = no se usa
 const SCAPULARPULL_FEET_FOLLOW_MIN_RATIO = 0.5;    // rango de tobillos / rango de hombro mínimo (colgado ~1.0, apoyado ~0-0.2)
 const SCAPULARPULL_FEET_MIN_SAMPLE_FRACTION = 0.6; // fracción mínima de fotogramas de la repetición con tobillos visibles para juzgarlos
-const SCAPULARPULL_ELBOW_MIN_VISIBILITY = 0.4;
-const SCAPULARPULL_ELBOW_BENT_MAX_DEG = 130;       // brazo estirado ~160-180
-const SCAPULARPULL_BENT_MIN_FRAMES = 3;            // fotogramas sueltos con ruido no invalidan
+// 2026-11-02 (Alex: "me dice que no doble los codos y un poco sí que los puedo doblar"): el chequeo de codo era demasiado
+// estricto y rechazaba repeticiones buenas. Causas: (1) 130 grados fijos y solo 3 fotogramas: el ángulo 2D de MediaPipe con los
+// brazos en alto fluctúa y una flexión natural de 10-30 grados ya lo disparaba; (2) la ventana de la repetición NO se reiniciaba
+// mientras esperabas abajo entre repeticiones (solo con un nuevo punto más bajo), así que los fotogramas "doblados" sueltos se
+// iban sumando hasta rechazar una repetición perfecta. Ahora: ángulo suavizado (mediana de SCAPULARPULL_ELBOW_SMOOTH_FRAMES),
+// límite más bajo y RELATIVO a tu codo en la calibración (colgado), la ventana es solo la subida (del despegue a la cima) y se
+// exige que el codo esté doblado en una FRACCIÓN de la subida, no en 3 fotogramas sueltos. Los pies siguen sin poder estar en el suelo.
+const SCAPULARPULL_ELBOW_MIN_VISIBILITY = 0.5;     // codo/muñeca poco visibles (muñeca fuera de encuadre) = no se juzga
+const SCAPULARPULL_ELBOW_BENT_MAX_DEG = 120;       // codo claramente doblado (tirar con los brazos); estirado ~160-180, flexión natural ~135-150
+const SCAPULARPULL_ELBOW_BENT_DROP_DEG = 40;       // o 40 grados menos que tu codo colgado en la calibración (el más bajo de los dos límites)
+const SCAPULARPULL_ELBOW_BENT_FLOOR_DEG = 80;      // el límite nunca baja de aquí
+const SCAPULARPULL_BENT_MIN_FRAMES = 3;            // mínimo de fotogramas doblados para invalidar
+const SCAPULARPULL_BENT_MIN_FRACTION = 0.4;        // ... y que sean al menos el 40 % de los fotogramas de la subida
+const SCAPULARPULL_ELBOW_SMOOTH_FRAMES = 5;        // mediana de los últimos N fotogramas (quita picos de ruido)
 
 // Toes to bar (toestobar): colgado de la barra con los brazos estirados, las piernas suben (casi rectas) hasta que
 // los pies tocan la barra y bajan con control. Se mide solo la ALTURA de los pies (tobillo o punta, el más alto que
@@ -5499,6 +5510,17 @@ export function createButterflyStretchChecker(getAspect) {
 // Estiramientos de aguante que NO empiezan con el paso 1 de standby (de pie, brazos sueltos): se empieza directamente en la postura.
 const STRETCH_NO_STANDBY_COUNTERS = new Set(["butterflystretch"]);
 
+/**
+ * Versión HABLADA de los avisos de "no se te ve" (la de pantalla se queda entera): en vez de recitar
+ * todos los puntos del cuerpo que faltan ("no se te ven bien el hombro, el codo, la muñeca, la cadera
+ * y el tobillo, ponte de perfil…"), por voz basta "No te veo bien. Ponte de perfil a la cámara."
+ */
+function shortenNotVisibleSpeech(text) {
+  if (!/^No se te (ve|ven)\b/.test(text)) return text;
+  const m = text.match(/[.!]\s+((?:Ponte|Colócate|Colocate|Túmbate|Tumbate|Siéntate)[^.,]*)/);
+  return m ? `No te veo bien. ${m[1]}.` : "No te veo bien.";
+}
+
 /** Segundos aguantados -> texto para el contador grande ("14s"). */
 function formatHoldSeconds(totalSeconds) {
   return `${Math.max(0, Math.round(totalSeconds))}s`;
@@ -7154,16 +7176,24 @@ class WorkoutSession {
    */
   announcePreArm(now, text, tip = "") {
     if (this.startupVoiceGiven) return;
+    // "Cuerpo entero / Hombros y muñecas… a la vista" afirmaba más de lo que se comprueba (la visibilidad es
+    // un umbral medio, y a veces falta un pie o una mano) -> "Te veo." a secas, que siempre es verdad.
+    text = text.replace(/^[^.]{2,80} a la vista\.\s*/, "Te veo. ");
+    // POR VOZ no se repite la descripción del movimiento ("Después, gira el tronco…"): el "¡Listo!" de
+    // armado ya la dice justo después. En pantalla el texto sigue entero.
+    const _sent = text.match(/[^.!?]+[.!?]+\s*/g) || [text];
+    const _speech = _sent.filter((s) => !/^\s*Despu[ée]s\b/.test(s)).join("").trim() || text;
     this.startupPreArmSeen = true;
     this.startupPreArmTip = tip || "";
     if (this.state !== null) return;
     if (this.preArmSince == null) this.preArmSince = now;
     if (now - this.preArmSince < PREARM_HINT_DELAY_MS) return;
     this.startupVoiceGiven = true;
-    this.announceStatus(text, "startup_ready");
+    this.announceStatus(text, "startup_ready", _speech);
   }
 
   announceStatus(text, key = text, speechText = text, force = false) {
+    if (speechText === text) speechText = shortenNotVisibleSpeech(text);
     // Primer "¡Listo!" de la sesion en un ejercicio con aviso previo: aqui ya esta armado.
     if (key === "ready_to_go" && !this.startupVoiceGiven && this.startupPreArmSeen) {
       this.startupVoiceGiven = true;
@@ -7235,7 +7265,7 @@ class WorkoutSession {
     // exactas): la detección se pausa hasta que acabe (ver restPauseUntil).
     if (!skipsRest && !this.exactReps) this.restPauseUntil = performance.now() + MIN_REST_MS;
     const restNoteFull = skipsRest ? "" : `Descanso obligatorio: mínimo ${Math.round(MIN_REST_MS / 1000)} segundos. `;
-    const restNoteShort = `Descanso. Quedan ${Math.round(MIN_REST_MS / 1000)} segundos. `;
+    const restNoteShort = "Descanso. "; // por voz, a partir de la 2ª serie: sin repetir cuánto dura
     const fullText = `${prefix} terminada. ${restNoteFull} ${waitingMessage}`;
     this.setStatus(fullText);
     // Con descanso obligatorio de por medio, "cómo colocarte para la
@@ -7257,8 +7287,10 @@ class WorkoutSession {
     const anyGap = this.lastSpokenStatusAt === null ? Infinity : now - this.lastSpokenStatusAt;
     if (anyGap < STATUS_VOICE_MIN_GAP_MS) return;
     this.lastSpokenStatusAt = now;
+    // Calentamientos/estiramientos (sin descanso): por voz solo "Serie de N terminada." -- y, si hay cambio de
+    // sentido/lado ("Ahora hacia atrás."), eso. El "cómo colocarte" largo se queda en pantalla (fullText).
     const immediateVoiceText = skipsRest
-      ? fullText
+      ? (/^Ahora /.test(waitingMessage || "") ? `${prefix} terminada. ${waitingMessage}` : `${prefix} terminada.`)
       : `${prefix} terminada. ${isFirst ? restNoteFull : restNoteShort}`;
     this.speak(immediateVoiceText, { flush: false });
   }
@@ -7273,8 +7305,29 @@ class WorkoutSession {
    * que tocar cada uno por separado.
    */
   maybeAnnounceRestEnd(now) {
-    if (!this.pendingRestEndMessage || this.setClosedAt === null) return;
+    if (this.setClosedAt === null) return;
     if (now - this.setClosedAt < MIN_REST_MS) return;
+    // "Se acabó el descanso": UNA vez por serie cerrada, justo al cumplirse el descanso obligatorio. Antes salía
+    // por announceStatus("Descanso acabado") en tickRestTimer, pero desde que los avisos hablados se limitaron
+    // a la 1ª serie (2026-10-10) ese aviso se descartaba en silencio en cuanto había una serie cerrada -- y en
+    // los aguantes (plancha…) nunca llegaba a dispararse (lastRepTime es null). Aquí vale para todos.
+    if (this.restEndSpokenFor !== this.setClosedAt) {
+      this.restEndSpokenFor = this.setClosedAt;
+      if (!NO_REST_COUNTERS.has(this.counterKey) && !this.autoAdvanceOnGoal && !this.exactReps) {
+        this.restVoiceQuiet = false; // fin del descanso: la voz vuelve (ver restVoiceQuiet)
+        if (this.voiceEnabled) {
+          // Si hay "cómo colocarte" pendiente (1ª serie), va en la MISMA frase, solo su primera oración.
+          const pend = this.pendingRestEndMessage ? String(this.pendingRestEndMessage) : "";
+          this.pendingRestEndMessage = null;
+          const mm = pend.match(/^[\s\S]*?[.!?](?:\s|$)/);
+          const place = (mm ? mm[0] : pend).trim();
+          this.lastSpokenStatusAt = now;
+          this.speak(place ? `Se acabó el descanso. ${place}` : "Se acabó el descanso.", { flush: false });
+          return;
+        }
+      }
+    }
+    if (!this.pendingRestEndMessage) return;
     const text = this.pendingRestEndMessage;
     this.pendingRestEndMessage = null;
     if (!this.voiceEnabled) return;
@@ -7312,7 +7365,7 @@ class WorkoutSession {
     if (anyGap < STATUS_VOICE_MIN_GAP_MS) return;
     this.restBlockedVoiceGiven = true;
     this.lastSpokenStatusAt = now;
-    speakOut(text, { flush: false });
+    speakOut(`Todavía en descanso. Quedan ${remaining} segundos.`, { flush: false }); // en pantalla va el texto entero
   }
 
   async start() {
@@ -8484,8 +8537,8 @@ class WorkoutSession {
       ? `${serie}.`
       : i < last.length
         ? (this.lastIsSeconds
-            ? `${serie}. La última vez aguantaste ${secondsLabel(last[i])} en esta serie.`
-            : `${serie}. La última vez hiciste ${reps(last[i])} en esta serie.`)
+            ? `${serie}. La última vez aguantaste ${secondsLabel(last[i])}.`
+            : `${serie}. La última vez hiciste ${reps(last[i])}.`)
         : `${serie}, extra. La última vez hiciste ${last.length} ${last.length === 1 ? "serie" : "series"}.`;
     this.speak(text, { flush: false });
   }
@@ -8833,7 +8886,7 @@ class WorkoutSession {
           ? (this.armCircleForwardTotal + this.armCircleBackwardTotal) >= this.targetReps
           : (this.armCircleForwardTotal >= this.targetReps && this.armCircleBackwardTotal >= this.targetReps))) {
       this.targetAnnounced = true;
-      if (this.voiceEnabled && !((NO_REST_COUNTERS.has(this.counterKey) || this.counterKey === "pushup") && typeof window.__workoutSubmit === "function")) speakOut("Has llegado al objetivo de series y repeticiones de este ejercicio. Puedes seguir si quieres, o terminar la sesión.", { flush: false });
+      if (this.voiceEnabled && !((NO_REST_COUNTERS.has(this.counterKey) || this.counterKey === "pushup") && typeof window.__workoutSubmit === "function")) speakOut("Objetivo cumplido. Puedes seguir o terminar la sesión.", { flush: false });
       if (this.goalBannerEl) {
         this.goalBannerEl.hidden = false;
         this.goalBannerEl.textContent = `🎯 ¡Has llegado al objetivo de series y repeticiones de este ejercicio! (${this.armCircleLockedPhase ? `${this.targetReps} ${this.armCircleLockedPhase === "forward" ? "hacia delante" : "hacia atrás"}` : this.armCircleAnyDirection ? `${this.targetReps}` : `${this.targetReps} de cada sentido`}) Puedes seguir si quieres, o terminar la sesión.`;
@@ -8867,7 +8920,7 @@ class WorkoutSession {
     if (this.counterKey === "legrotation" && this.targetSets && this.targetReps && !this.targetAnnounced &&
         this.legRotationLeftTotal >= this.targetReps && this.legRotationRightTotal >= this.targetReps) {
       this.targetAnnounced = true;
-      if (this.voiceEnabled && !((NO_REST_COUNTERS.has(this.counterKey) || this.counterKey === "pushup") && typeof window.__workoutSubmit === "function")) speakOut("Has llegado al objetivo de series y repeticiones de este ejercicio. Puedes seguir si quieres, o terminar la sesión.", { flush: false });
+      if (this.voiceEnabled && !((NO_REST_COUNTERS.has(this.counterKey) || this.counterKey === "pushup") && typeof window.__workoutSubmit === "function")) speakOut("Objetivo cumplido. Puedes seguir o terminar la sesión.", { flush: false });
       if (this.goalBannerEl) {
         this.goalBannerEl.hidden = false;
         this.goalBannerEl.textContent = `🎯 ¡Has llegado al objetivo de series y repeticiones de este ejercicio! (${this.targetReps} de cada pierna) Puedes seguir si quieres, o terminar la sesión.`;
@@ -8924,7 +8977,7 @@ class WorkoutSession {
         this.reps >= this.targetSets * this.targetReps) {
       this.targetAnnounced = true;
       const inCircuit = typeof window.__workoutSubmit === "function";
-      if (this.voiceEnabled && !inCircuit) speakOut("Has llegado al objetivo de este ejercicio. Puedes seguir si quieres, o terminar la sesión.", { flush: false }); // en circuito pasa solo al siguiente: sin voz, se cortaba
+      if (this.voiceEnabled && !inCircuit) speakOut("Objetivo cumplido. Puedes seguir o terminar la sesión.", { flush: false }); // en circuito pasa solo al siguiente: sin voz, se cortaba
       if (this.goalBannerEl) {
         this.goalBannerEl.hidden = false;
         this.goalBannerEl.textContent = inCircuit
@@ -8964,7 +9017,7 @@ class WorkoutSession {
         // cancelarlo (flush:false) — cancel() en speakRep() ya se encargó
         // de que no se pisen entre sí.
         const willAutoAdvance = this.autoAdvanceOnGoal || ((NO_REST_COUNTERS.has(this.counterKey) || this.counterKey === "pushup") && typeof window.__workoutSubmit === "function");
-        if (this.voiceEnabled && !willAutoAdvance) speakOut("Has llegado al objetivo de series y repeticiones de este ejercicio. Puedes seguir si quieres, o terminar la sesión.", { flush: false }); // si pasa solo al siguiente ejercicio: sin voz, se cortaba
+        if (this.voiceEnabled && !willAutoAdvance) speakOut("Objetivo cumplido. Puedes seguir o terminar la sesión.", { flush: false }); // si pasa solo al siguiente ejercicio: sin voz, se cortaba
         if (this.goalBannerEl) {
           this.goalBannerEl.hidden = false;
           this.goalBannerEl.textContent = willAutoAdvance
@@ -9549,7 +9602,7 @@ class WorkoutSession {
           if (!this.startupVoiceGiven) {
             this.startupVoiceGiven = true;
             this.announceStatus(
-              "Te veo. ¡Listo! Puedes empezar. Para terminar una serie, ponte de pie, sal del " +
+              "Te veo. ¡Listo! Puedes empezar. Para terminar una serie, ponte de pie o sal del " +
               "encuadre.",
               "startup_ready"
             );
@@ -9713,7 +9766,7 @@ class WorkoutSession {
           if (!this.startupVoiceGiven) {
             this.startupVoiceGiven = true;
             this.announceStatus(
-              "Te veo. ¡Listo! Puedes empezar. Para terminar una serie, ponte de pie, sal del " +
+              "Te veo. ¡Listo! Puedes empezar. Para terminar una serie, ponte de pie o sal del " +
               "encuadre.",
               "startup_ready"
             );
@@ -9879,7 +9932,7 @@ class WorkoutSession {
         if (!this.startupVoiceGiven) {
           this.startupVoiceGiven = true;
           this.announceStatus(
-            "Te veo. ¡Listo! Puedes empezar. Para terminar una serie, ponte de pie, sal del " +
+            "Te veo. ¡Listo! Puedes empezar. Para terminar una serie, ponte de pie o sal del " +
             "encuadre.",
             "startup_ready"
           );
@@ -10616,7 +10669,7 @@ class WorkoutSession {
           if (!this.startupVoiceGiven) {
             this.startupVoiceGiven = true;
             this.announceStatus(
-              "Te veo. ¡Listo! Puedes empezar. Para terminar una serie, ponte de pie, sal del encuadre.",
+              "Te veo. ¡Listo! Puedes empezar. Para terminar una serie, ponte de pie o sal del encuadre.",
               "startup_ready"
             );
           } else {
@@ -10766,7 +10819,7 @@ class WorkoutSession {
           if (!this.startupVoiceGiven) {
             this.startupVoiceGiven = true;
             this.announceStatus(
-              "Te veo. ¡Listo! Puedes empezar. Para terminar una serie, ponte de pie, sal del encuadre.",
+              "Te veo. ¡Listo! Puedes empezar. Para terminar una serie, ponte de pie o sal del encuadre.",
               "startup_ready"
             );
           } else {
@@ -10907,7 +10960,7 @@ class WorkoutSession {
           if (!this.startupVoiceGiven) {
             this.startupVoiceGiven = true;
             this.announceStatus(
-              "Te veo. ¡Listo! Puedes empezar. Para terminar una serie, ponte de pie, sal del " +
+              "Te veo. ¡Listo! Puedes empezar. Para terminar una serie, ponte de pie o sal del " +
               "encuadre.",
               "startup_ready"
             );
@@ -11405,7 +11458,7 @@ class WorkoutSession {
           if (!this.startupVoiceGiven) {
             this.startupVoiceGiven = true;
             this.announceStatus(
-              "Te veo. ¡Listo! Puedes empezar. Para terminar una serie, ponte de pie, sal del " +
+              "Te veo. ¡Listo! Puedes empezar. Para terminar una serie, ponte de pie o sal del " +
               "encuadre.",
               "startup_ready"
             );
@@ -15459,7 +15512,7 @@ class WorkoutSession {
         if (this.legRotationLastCountedSide !== null && this.legRotationLastCountedSide !== side) {
           this.announceStatus(
             side === "left" ? "Pierna izquierda." : "Pierna derecha.",
-            `legrotation_side_${side}`
+            `legrotation_side_${side}`, ""
           );
         }
       }
@@ -15719,11 +15772,11 @@ class WorkoutSession {
           if (!this.startupVoiceGiven) {
             this.startupVoiceGiven = true;
             this.announceStatus(
-              "Listo, te veo entero, puedes empezar.",
+              "Listo, puedes empezar.",
               "startup_ready"
             );
           } else {
-            this.setStatus("Listo, te veo entero, puedes empezar.");
+            this.setStatus("Listo, puedes empezar.");
           }
         } else {
           this.setStatus("De pie, con las dos piernas apoyadas… confirmando (no te muevas)");
@@ -15931,11 +15984,11 @@ class WorkoutSession {
         if (!this.startupVoiceGiven) {
           this.startupVoiceGiven = true;
           this.announceStatus(
-            "Listo, te veo entero, puedes empezar.",
+            "Listo, puedes empezar.",
             "startup_ready"
           );
         } else {
-          this.setStatus("Listo, te veo entero, puedes empezar.");
+          this.setStatus("Listo, puedes empezar.");
         }
       } else {
         this.setStatus(pos.moving ? "Quédate quieto en tu sitio un momento…" : "Te veo. Quieto un momento para empezar…");
@@ -16080,7 +16133,7 @@ class WorkoutSession {
           this.forearmRotationLastActivityAt = now;
           this.forearmRotationRepStartTime = now;
           if (this.forearmRotationLastCountedSide !== null && this.forearmRotationLastCountedSide !== side) {
-            this.announceStatus(side === "left" ? "Brazo izquierdo." : "Brazo derecho.", `forearmrotation_side_${side}`);
+            this.announceStatus(side === "left" ? "Brazo izquierdo." : "Brazo derecho.", `forearmrotation_side_${side}`, "");
           }
           this.announceStatus("¡Listo! Empieza a girar el brazo.", "ready_to_go");
         } else {
@@ -16148,7 +16201,7 @@ class WorkoutSession {
           this.forearmRotationRepStartTime = now;
           this.forearmRotationLastActivityAt = now;
           if (this.forearmRotationLastCountedSide !== null && this.forearmRotationLastCountedSide !== otherSide) {
-            this.announceStatus(otherSide === "left" ? "Brazo izquierdo." : "Brazo derecho.", `forearmrotation_side_${otherSide}`);
+            this.announceStatus(otherSide === "left" ? "Brazo izquierdo." : "Brazo derecho.", `forearmrotation_side_${otherSide}`, "");
           }
           return;
         }
@@ -16511,7 +16564,7 @@ class WorkoutSession {
         this.targetAnnounced = true;
         failureAutoAdvance = typeof window.__workoutSubmit === "function";
         // En plan/circuito (failureAutoAdvance) se pasa solo al descanso: sin voz, porque se cortaba al cambiar de pantalla.
-        if (this.voiceEnabled && !failureAutoAdvance) speakOut("Has llegado al objetivo de las series de esta sesión. Puedes seguir si quieres, o pasar al siguiente ejercicio.", { flush: false });
+        if (this.voiceEnabled && !failureAutoAdvance) speakOut("Series completadas. Puedes seguir o pasar al siguiente ejercicio.", { flush: false });
         if (this.goalBannerEl) {
           this.goalBannerEl.hidden = false;
           this.goalBannerEl.textContent = failureAutoAdvance
@@ -16945,7 +16998,7 @@ class WorkoutSession {
         this.targetAnnounced = true;
         failureAutoAdvance = typeof window.__workoutSubmit === "function";
         // En plan/circuito (failureAutoAdvance) se pasa solo al descanso: sin voz, porque se cortaba al cambiar de pantalla.
-        if (this.voiceEnabled && !failureAutoAdvance) speakOut("Has llegado al objetivo de las series de esta sesión. Puedes seguir si quieres, o pasar al siguiente ejercicio.", { flush: false });
+        if (this.voiceEnabled && !failureAutoAdvance) speakOut("Series completadas. Puedes seguir o pasar al siguiente ejercicio.", { flush: false });
         if (this.goalBannerEl) {
           this.goalBannerEl.hidden = false;
           this.goalBannerEl.textContent = failureAutoAdvance
@@ -17425,7 +17478,7 @@ class WorkoutSession {
   announceNotOnBack() {
     this.announceStatus(
       "Túmbate boca arriba, con la espalda en el suelo. A cuatro patas, de rodillas o boca abajo no cuenta.",
-      "not_on_back"
+      "not_on_back", "Túmbate boca arriba."
     );
   }
 
@@ -19784,7 +19837,7 @@ class WorkoutSession {
         // termina de verdad (ver pendingHangReminder).
         if (this.setClosedAt === null || now - this.setClosedAt >= MIN_REST_MS) {
           this.announceStatus(
-            "¡Listo! Empieza a hacer dominadas de arquero: al subir, lleva un brazo a 90° y estira el otro, alternando de lado en cada repetición."
+            "¡Listo! Empieza a hacer dominadas de arquero: al subir, lleva un brazo a 90° y estira el otro, alternando de lado en cada repetición.", "ready_to_go", "Listo. Sube con un brazo doblado y el otro estirado, alternando."
           );
         }
       }
@@ -19963,6 +20016,15 @@ class WorkoutSession {
     return null;
   }
 
+  /** Ángulo medio del codo (hombro-codo-muñeca) de los brazos visibles, o null si no se ve fiable (escapulares). */
+  scapularElbowDeg(lm) {
+    const arms = [[lm[L_SHOULDER], lm[L_ELBOW], lm[L_WRIST]], [lm[R_SHOULDER], lm[R_ELBOW], lm[R_WRIST]]]
+      .filter((arm) => arm.every((p) => p && (p.visibility ?? 1) >= SCAPULARPULL_ELBOW_MIN_VISIBILITY))
+      .map((arm) => angle(arm[0], arm[1], arm[2]))
+      .filter((a) => a !== null);
+    return arms.length ? arms.reduce((s, v) => s + v, 0) / arms.length : null;
+  }
+
   /**
    * Dominadas escapulares (scapularpull): te cuelgas de la barra con los
    * brazos totalmente estirados (misma comprobación de partida que las
@@ -20060,7 +20122,7 @@ class WorkoutSession {
         this.calibrationSamples = [];
         return;
       }
-      this.calibrationSamples.push({ y, shoulderWidth });
+      this.calibrationSamples.push({ y, shoulderWidth, elbowDeg: this.scapularElbowDeg(lm) });
       const elapsed = now - this.calibrationStartTs;
       const remaining = Math.max(0, Math.ceil((CALIBRATION_MS - elapsed) / 1000));
       this.setStatus(`Calibrando, quédate colgado y quieto… (${remaining || 1}s)`);
@@ -20075,10 +20137,14 @@ class WorkoutSession {
         this.lastRepTime = now;
         this.restAlerted = false;
         this.updateSetDisplay();
-        this.logScissor(`[CALIBRADL] hombro_y=${this.localBottomY.toFixed(3)} hombros=${this.shoulderWidth.toFixed(3)}`);
+        // Codo de referencia: cómo mide TU codo colgado y quieto (si ya lo tienes algo flexionado, el límite baja con él).
+        const elbowRefs = this.calibrationSamples.map((s) => s.elbowDeg).filter((v) => v != null && v !== undefined).sort((a, b) => a - b);
+        this.spElbowBase = elbowRefs.length >= 3 ? elbowRefs[Math.floor(elbowRefs.length / 2)] : null;
+        this.spElbowHist = [];
+        this.logScissor(`[CALIBRADL] hombro_y=${this.localBottomY.toFixed(3)} hombros=${this.shoulderWidth.toFixed(3)} codo_base=${this.spElbowBase === null ? "-" : this.spElbowBase.toFixed(0) + "°"}`);
         if (this.setClosedAt === null || now - this.setClosedAt >= MIN_REST_MS) {
           this.announceStatus(
-            "¡Listo! Empieza las dominadas escapulares: sin doblar el codo, baja los omóplatos para subir un poco el cuerpo y vuelve a bajar con control."
+            "¡Listo! Empieza las dominadas escapulares: sin doblar el codo, baja los omóplatos para subir un poco el cuerpo y vuelve a bajar con control.", "ready_to_go", "Listo. Sube y baja los omóplatos, sin doblar los codos."
           );
         }
       }
@@ -20142,22 +20208,43 @@ class WorkoutSession {
       this.spAnkleSmoothY = null;
     }
     const ankleY = ankleYRaw === null ? null : this.spAnkleSmoothY;
-    const armAngles = [[lShoulder, lElbow, lWrist], [rShoulder, rElbow, rWrist]]
-      .filter((arm) => arm.every((p) => (p.visibility ?? 1) >= SCAPULARPULL_ELBOW_MIN_VISIBILITY))
-      .map((arm) => angle(arm[0], arm[1], arm[2]))
-      .filter((a) => a !== null);
-    const elbowDeg = armAngles.length ? armAngles.reduce((s, v) => s + v, 0) / armAngles.length : null;
+    // Codo suavizado (mediana de los últimos fotogramas) y su límite de "doblado" (ver las constantes de 2026-11-02).
+    const elbowRaw = this.scapularElbowDeg(lm);
+    const elbowHist = (this.spElbowHist = this.spElbowHist || []);
+    let elbowDeg = null;
+    if (elbowRaw !== null) {
+      elbowHist.push(elbowRaw);
+      while (elbowHist.length > SCAPULARPULL_ELBOW_SMOOTH_FRAMES) elbowHist.shift();
+      const sortedHist = [...elbowHist].sort((a, b) => a - b);
+      elbowDeg = sortedHist[Math.floor(sortedHist.length / 2)];
+    }
+    const elbowBase = this.spElbowBase ?? null;
+    const bentLimit = elbowBase === null
+      ? SCAPULARPULL_ELBOW_BENT_MAX_DEG
+      : Math.max(SCAPULARPULL_ELBOW_BENT_FLOOR_DEG, Math.min(SCAPULARPULL_ELBOW_BENT_MAX_DEG, elbowBase - SCAPULARPULL_ELBOW_BENT_DROP_DEG));
 
     // Ventana de la repetición en curso: desde el último punto más bajo del hombro hasta contarla. Se descarta la de
     // otra serie/calibración (calibrationStartTs cambia en cada calibración).
+    // La ventana del CODO es solo la subida (del despegue a la cima): se vacía mientras esperas abajo y deja de contar al empezar a bajar.
+    const resetElbowWindow = () => {
+      this.spBentFrames = 0;
+      this.spRiseFrames = 0;
+      this.spElbowMin = null;
+      this.spRiseDone = false;
+    };
+    const noteElbow = () => {
+      if (elbowDeg === null) return;
+      this.spRiseFrames++;
+      this.spElbowMin = this.spElbowMin === null ? elbowDeg : Math.min(this.spElbowMin, elbowDeg);
+      if (elbowDeg < bentLimit) this.spBentFrames++;
+    };
     const resetRepWindow = () => {
       this.spWinCal = this.calibrationStartTs;
       this.spAnkleLo = null;
       this.spAnkleHi = null;
       this.spAnkleFrames = 0;
       this.spFrames = 0;
-      this.spBentFrames = 0;
-      this.spElbowMin = null;
+      resetElbowWindow();
     };
     if (this.spWinCal !== this.calibrationStartTs) resetRepWindow();
 
@@ -20168,10 +20255,6 @@ class WorkoutSession {
       this.spAnkleFrames++;
       this.spAnkleLo = this.spAnkleLo === null ? ankleY : Math.min(this.spAnkleLo, ankleY);
       this.spAnkleHi = this.spAnkleHi === null ? ankleY : Math.max(this.spAnkleHi, ankleY);
-    }
-    if (elbowDeg !== null) {
-      this.spElbowMin = this.spElbowMin === null ? elbowDeg : Math.min(this.spElbowMin, elbowDeg);
-      if (elbowDeg < SCAPULARPULL_ELBOW_BENT_MAX_DEG) this.spBentFrames++;
     }
 
     if (this.state === "down") {
@@ -20185,6 +20268,10 @@ class WorkoutSession {
         this.liftoffTime = now;
       }
 
+      // Esperando abajo: la ventana del codo se vacía; solo cuenta desde que despegas.
+      if (risenFromBottom <= SCAPULARPULL_LIFTOFF_FACTOR * this.shoulderWidth) resetElbowWindow();
+      else noteElbow();
+
       if (risenFromBottom > moveThresh) {
         this.state = "up";
         this.localTopY = y;
@@ -20195,23 +20282,26 @@ class WorkoutSession {
         this.localTopY = y;
       }
       const fallenFromTop = y - this.localTopY;
+      if (fallenFromTop > SCAPULARPULL_LIFTOFF_FACTOR * this.shoulderWidth) this.spRiseDone = true;
+      if (!this.spRiseDone) noteElbow();
       if (fallenFromTop > moveThresh) {
         const shoulderRange = this.localBottomY - this.localTopY;
         const ankleRange = this.spAnkleLo !== null ? this.spAnkleHi - this.spAnkleLo : null;
         const feetJudgeable = ankleRange !== null && shoulderRange > 0 &&
           this.spAnkleFrames >= Math.max(3, SCAPULARPULL_FEET_MIN_SAMPLE_FRACTION * this.spFrames);
         const feetPlanted = feetJudgeable && ankleRange < SCAPULARPULL_FEET_FOLLOW_MIN_RATIO * shoulderRange;
-        const armsBent = this.spBentFrames >= SCAPULARPULL_BENT_MIN_FRAMES;
+        const armsBent = this.spBentFrames >= SCAPULARPULL_BENT_MIN_FRAMES &&
+          this.spBentFrames >= SCAPULARPULL_BENT_MIN_FRACTION * this.spRiseFrames;
         const detail =
           `hombro_rango=${shoulderRange.toFixed(3)} tobillo_rango=${ankleRange === null ? "-" : ankleRange.toFixed(3)} ` +
           `tobillos_juzgables=${feetJudgeable ? "sí" : "no"} codo_min=${this.spElbowMin === null ? "-" : this.spElbowMin.toFixed(0)}° ` +
-          `fotogramas_codo_doblado=${this.spBentFrames}`;
+          `fotogramas_codo_doblado=${this.spBentFrames}/${this.spRiseFrames} limite_codo=${bentLimit.toFixed(0)}° codo_base=${elbowBase === null ? "-" : elbowBase.toFixed(0) + "°"}`;
         if (feetPlanted || armsBent) {
           this.logScissor(`[REP descartada] motivo=${feetPlanted ? "pies en el suelo" : "codo doblado"} ${detail}`);
           if (feetPlanted) {
             this.announceStatus("Despega los pies del suelo: cuélgate de verdad de la barra para que cuente.", "scapularpull_feet", "Despega los pies del suelo.");
           } else {
-            this.announceStatus("No dobles los codos: sube solo con los omóplatos, con los brazos estirados.", "scapularpull_elbow", "No dobles los codos.");
+            this.announceStatus("Sube con los omóplatos, sin tirar con los brazos: casi sin doblar los codos.", "scapularpull_elbow", "Sin tirar con los brazos.");
           }
         } else {
           this.logScissor(`[REP intentada] duración=${((now - this.repStartTime) / 1000).toFixed(2)}s ${detail}`);
@@ -20226,7 +20316,8 @@ class WorkoutSession {
     if (this.debugEl) {
       this.debugEl.textContent =
         `estado: ${this.state} | hombro_y: ${y.toFixed(3)} | ref abajo: ${this.localBottomY === null ? "-" : this.localBottomY.toFixed(3)} ` +
-        `| ref arriba: ${this.localTopY === null ? "-" : this.localTopY.toFixed(3)} | umbral: ${moveThresh.toFixed(3)} (${SCAPULARPULL_MOVE_FACTOR})`;
+        `| ref arriba: ${this.localTopY === null ? "-" : this.localTopY.toFixed(3)} | umbral: ${moveThresh.toFixed(3)} (${SCAPULARPULL_MOVE_FACTOR}) ` +
+        `| codo: ${elbowDeg === null ? "-" : elbowDeg.toFixed(0) + "°"} (límite ${bentLimit.toFixed(0)}°)`;
     }
     this.logScissor(
       `estado=${this.state} hombro_y=${y.toFixed(3)} hombros=${shoulderWidth.toFixed(3)} ` +
@@ -20327,7 +20418,7 @@ class WorkoutSession {
         this.logScissor(`[CALIBRADL] torso=${this.toesTorsoRef.toFixed(3)} hombros=${shoulderWidth.toFixed(3)}`);
         if (this.setClosedAt === null || now - this.setClosedAt >= MIN_REST_MS) {
           this.announceStatus(
-            "¡Listo! Empieza los toes to bar: sube las piernas hasta tocar la barra con los pies y baja con control."
+            "¡Listo! Empieza los toes to bar: sube las piernas hasta tocar la barra con los pies y baja con control.", "ready_to_go", "Listo. Sube los pies hasta la barra."
           );
         }
       }
@@ -21302,7 +21393,7 @@ if (this.counterKey === "crunch") {
         // que ya puedes empezar lo da tickRestTimer en cuanto el descanso
         // termina de verdad (ver pendingHangReminder).
         if (this.setClosedAt === null || now - this.setClosedAt >= MIN_REST_MS) {
-          this.announceStatus("¡Listo! Empieza a hacer dominadas.");
+          this.announceStatus("¡Listo! Empieza a hacer dominadas.", "ready_to_go");
         }
       }
       return;
@@ -21476,7 +21567,7 @@ if (this.counterKey === "crunch") {
       this.restPauseUntil = null; // la detección se reanuda junto con el aviso
       beep();
       this.pendingHangReminder = false;
-      this.announceStatus("Descanso acabado");
+      this.setStatus("Descanso acabado"); // la voz ("Se acabó el descanso") la da maybeAnnounceRestEnd
       this.beginPrep();
     }
   }

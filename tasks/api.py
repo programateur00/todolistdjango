@@ -34,6 +34,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from . import ai
+from .models import clamp_web_idle_seconds
 from .models import (
     CourseModule, CoursePlaylist, CourseQuiz, DebugLog, Exercise, Occurrence, Plan, PlanItem,
     ReadingPdf, Routine, RoutineItem, SavedVideo, Task, TimerSession, TrainingSession, WarmupStatus,
@@ -163,6 +164,13 @@ def task_json(t):
         # audio (tab.audible, de siempre) o, en su lugar, solo ausencia de
         # inactividad de ratón/teclado -- ver Task.watch_requires_audio.
         "watch_requires_audio": t.watch_requires_audio,
+        # Solo con subcategory="web" ("Tiempo en una web"): trozo(s) de URL
+        # que debe tener la pestaña (separados por comas), segundos sin
+        # tocar ratón/teclado para dejar de contar, y si el sonido de la
+        # pestaña cuenta como actividad. Ver Task.watch_url y compañía.
+        "watch_url": t.watch_url,
+        "watch_idle_seconds": t.watch_idle_seconds,
+        "watch_audio_counts": t.watch_audio_counts,
         "youtube_video_id": t.youtube_video_id,
         "youtube_playlist_id": t.youtube_playlist_id,
         "target_video_count": t.target_video_count,
@@ -539,6 +547,12 @@ def _apply_task_fields(t, data):
                 t.target_video_count = None
     if "watch_keyword" in data:
         t.watch_keyword = (data.get("watch_keyword") or "").strip()[:120]
+    if "watch_url" in data:
+        t.watch_url = (data.get("watch_url") or "").strip()[:200]
+    if "watch_idle_seconds" in data:
+        t.watch_idle_seconds = clamp_web_idle_seconds(data.get("watch_idle_seconds"))
+    if "watch_audio_counts" in data:
+        t.watch_audio_counts = bool(data.get("watch_audio_counts"))
     if "has_local_video" in data:
         t.has_local_video = bool(data.get("has_local_video"))
     if "sport_mode" in data:
@@ -611,7 +625,7 @@ def _apply_task_fields(t, data):
         )
     # Cada categoría solo admite sus subtipos (y Lectura no lleva vídeo: las
     # tareas de Enfoque ya no existen). Un subtipo vacío o ausente deja el que
-    # ya tenía: la app móvil no conoce los de Estudio (Idiomas, Udemy, Ilerna)
+    # ya tenía: la app móvil no conoce los de Estudio (Idiomas, Udemy, Web)
     # y manda "" al editar -- antes eso se los borraba y la tarea dejaba de
     # contarla la extensión.
     t.normalize_for_category(
@@ -897,7 +911,7 @@ def plan_udemy_courses(request):
     items = PlanItem.objects.filter(
         plan__in=plans_qs().filter(closed_at__isnull=True, is_active=True),
         exercise__isnull=True,
-    ).exclude(watch_keyword="").exclude(watch_site=PlanItem.SITE_ILERNA)
+    ).exclude(watch_keyword="").exclude(watch_site=PlanItem.SITE_WEB)
     return JsonResponse({"courses": [
         {"item_id": i.pk, "watch_keyword": i.watch_keyword, "name": i.display_name}
         for i in items
@@ -1884,12 +1898,12 @@ def routine_result(request, uuid, routine_uuid):
 
 def _item_requires_computer(it):
     """Objetivo de Estudio que solo se puede montar/seguir con la extensión de
-    Chrome del PC (curso de Udemy con palabra clave, o clases de Ilerna)."""
+    Chrome del PC (curso de Udemy con palabra clave, o tiempo en una web)."""
     return bool(it.watch_keyword or it.watch_site)
 
 
 COMPUTER_ONLY_MSG = (
-    "Los planes de Udemy, Ilerna y lectura (PDF) se crean y se editan desde el ordenador."
+    "Los planes de Udemy, de tiempo en una web y de lectura (PDF) se crean y se editan desde el ordenador."
 )
 
 
@@ -1947,10 +1961,11 @@ def plan_json(p, detail=False):
             "youtube_playlist_id": it.youtube_playlist_id,
             "target_minutes": it.target_minutes,
             "target_video_count": it.target_video_count,
-            # Udemy / clases de Ilerna: los cuenta la extensión de Chrome del
+            # Udemy / tiempo en una web: los cuenta la extensión de Chrome del
             # PC, así que la app móvil los enseña pero no los crea ni edita.
             "requires_computer": _item_requires_computer(it),
             "watch_site": it.watch_site,
+            "watch_url": it.watch_url,
         }
 
     data = {
@@ -2348,7 +2363,7 @@ def plan_item_create(request, uuid):
     if plan.plan_type == Plan.PLAN_TYPE_GENERAL:
         return JsonResponse({"ok": False, "error": "Un plan General no necesita objetivos."}, status=400)
     # Un objetivo nuevo de Estudio pasaría a ser el destacado y desplazaría al
-    # de Udemy/Ilerna del ordenador: mejor no tocarlo desde el móvil.
+    # de Udemy/Web del ordenador: mejor no tocarlo desde el móvil.
     head = plan.headline
     if plan.plan_type == Plan.PLAN_TYPE_STUDY and head and _item_requires_computer(head):
         return JsonResponse({"ok": False, "error": COMPUTER_ONLY_MSG}, status=400)

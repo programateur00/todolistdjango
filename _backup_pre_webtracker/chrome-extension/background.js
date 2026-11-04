@@ -1,0 +1,1062 @@
+/**
+ * Service worker de la extensión "Libreta — Tiempo en Udemy y Lectura".
+ *
+ * Qué hace, en corto: mientras una pestaña "trackeable" está en primer
+ * plano (ventana con foco, pestaña activa, sin inactividad) y su título
+ * contiene la palabra clave de alguna tarea pendiente, cuenta el
+ * tiempo. En cuanto deja de cumplirse cualquiera de esas condiciones,
+ * manda UNA sesión con el total a /api/tasks/<uuid>/focus/ — el mismo
+ * endpoint y la misma forma que ya usa el plugin de lectura del móvil
+ * (ver mobile-app/www/js/focus-view.js), con source="pc_usage" en vez
+ * de "app_usage".
+ *
+ * Hay dos tipos de pestaña trackeable, cada uno emparejado con un
+ * subtipo de tarea distinto:
+ *
+ *   - Udemy (category="study", subcategory="udemy"): la pestaña es
+ *     el REPRODUCTOR del curso en udemy.com (URL con /learn/; la portada,
+ *     el buscador o la ficha del curso no cuentan nunca) Y ADEMÁS suena (chrome.tabs.audible) O hay actividad
+ *     reciente de ratón/teclado — el audio es la señal POR DEFECTO desde
+ *     fuera de la página de que la clase se está viendo de verdad, y la
+ *     actividad cubre las pausas y ejercicios en silencio (si no, esos
+ *     minutos se perdían aunque el curso estuviera delante). Un
+ *     curso puesto como "casi sin audio" (Task.watch_requires_audio=false,
+ *     pensado para cursos sobre todo de ejercicios) cambia esa exigencia
+ *     por la misma que usa Lectura más abajo: sin inactividad de
+ *     ratón/teclado (ver IDLE_DETECTION_SECONDS), en vez de requerir
+ *     sonido — ver la rama `udemy` de getActiveMatch().
+ *     MODO "POR VÍDEOS VISTOS" (watch_requires_audio=true, el de por
+ *     defecto): cuenta SOLO si el vídeo suena (tab.audible) o se está
+ *     reproduciendo (<video> sin pausa); una pausa de hasta
+ *     VIDEO_PAUSE_GRACE_SECONDS se tolera y de ahí en adelante para,
+ *     aunque muevas el ratón. MODO "POR TIEMPO EN LA PÁGINA"
+ *     (watch_requires_audio=false): cuenta con la pestaña en primer plano
+ *     y sin inactividad de ratón/teclado (IDLE_DETECTION_SECONDS). Los
+ *     dos modos no se mezclan.
+ *     Además, mientras hay sesión, se comprueba cada minuto cuánto
+ *     lleva el curso (ver checkCourseCompletion) — el % se manda siempre
+ *     que se puede calcular, para la barra de la pantalla del plan, y si
+ *     Udemy lo reporta al 100% eso además cierra la tarea entera, no
+ *     solo el día.
+ *
+ *   - Clases de Ilerna (category="study", subcategory="ilerna"): la pestaña
+ *     es ilernaonline.zoom.us (grabaciones de las clases en Zoom). Misma
+ *     regla que un curso de Udemy por defecto: cuenta si la pestaña suena
+ *     O hay actividad reciente de ratón/teclado (pausas, apuntes), y deja
+ *     de contar si estás inactivo Y en silencio. No hay "curso completado"
+ *     que leer de Zoom -- solo se cuenta tiempo; el día se da por cumplido
+ *     al llegar a los minutos objetivo (focus_save, backend). La palabra
+ *     clave de la tarea (asignatura) es opcional: si hay, tiene que
+ *     aparecer en el título de la pestaña; si no, vale cualquier clase.
+ *
+ *   - Lectura de un PDF (category="work", subcategory="reading"): la
+ *     pestaña es un .pdf (local, file://, o servido por una web) visto
+ *     con el visor nativo de Chrome. No hay forma de detectar "página
+ *     final" desde fuera (el visor nativo no es accesible a scripts de
+ *     extensión), así que aquí solo se cuenta tiempo — el cierre de la
+ *     tarea, si tiene target_minutes, ya lo hace solo el backend cuando
+ *     se llega al objetivo del día (mismo mecanismo que Udemy, ver
+ *     focus_save en tasks/api.py).
+ *
+ * No hay tramos "en pausa": si sales de la pestaña o del contenido,
+ * esa sesión se cierra y se manda tal cual — volver más tarde empieza
+ * una sesión nueva. Es literalmente "cuenta segundos con la pestaña en
+ * primer plano", sin acumular huecos. Los segundos sueltos de cada trozo
+ * no se pierden: se arrastran al siguiente del mismo día (takeWholeMinutes).
+ */
+
+const TASKS_CACHE_TTL_MS = 2 * 60 * 1000;     // 2 min
+const IDLE_DETECTION_SECONDS = 300;            // 5 min sin tocar ratón/teclado = inactivo
+const MIN_SESSION_MINUTES_TO_SEND = 1;         // no se manda 0 min; el resto de segundos se acumula (ver takeWholeMinutes)
+// Cursos de Udemy "por vídeos vistos": solo cuenta mientras el vídeo
+// suena/se reproduce. Una pausa corta (apuntar algo, pensar un ejercicio)
+// se tolera hasta este límite; pasado, la cuenta PARA y lo que quede de
+// pausa no se suma. Ya NO vale mover el ratón con el vídeo parado.
+const VIDEO_PAUSE_GRACE_SECONDS = 60;
+const HEARTBEAT_ALARM = "libreta-udemy-heartbeat";
+const RETRY_ALARM = "libreta-udemy-retry-uploads";
+
+// ------------------------------------------------------------- config
+
+async function getConfig() {
+  const { config } = await chrome.storage.local.get("config");
+  return config || {};
+}
+
+function isConfigured(cfg) {
+  return Boolean(cfg && cfg.baseUrl && cfg.user && cfg.password);
+}
+
+function authHeader(cfg) {
+  return "Basic " + btoa(`${cfg.user}:${cfg.password}`);
+}
+
+function apiUrl(cfg, path) {
+  const base = (cfg.baseUrl || "").replace(/\/+$/, "");
+  return `${base}/api${path}`;
+}
+
+// ------------------------------------------------------- tareas (caché)
+
+async function fetchTasksFromServer(cfg) {
+  // Sin filtro de categoría: aquí se necesitan tareas de dos categorías
+  // distintas (Estudio → Udemy/Ilerna, Lectura), así que se pide
+  // todo lo pendiente de hoy y se filtra en el cliente.
+  const resp = await fetch(apiUrl(cfg, "/tasks/"), {
+    headers: { Authorization: authHeader(cfg) },
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  const pending = Array.isArray(data.pending) ? data.pending : [];
+  // Antes se exigia palabra clave puesta siempre. Ahora una tarea
+  // suelta de Udemy (o de Lectura) SIN palabra clave es un habito
+  // GENERICO a proposito -- "pasa tiempo en Udemy" / "pasa tiempo
+  // leyendo", sin curso ni libro concreto que reconocer -- asi que
+  // tambien se deja pasar. matchTask() es quien decide, mas abajo, que
+  // una palabra clave especifica (normalmente de un Plan) gana siempre
+  // sobre el habito generico si las dos encajan a la vez.
+  // Un Plan de lectura con PDF elegido (reading_mode "plan") lo controla
+  // SU visor dentro de la app -- la extensión no lo vigila ni le manda
+  // minutos, aunque haya otro PDF cualquiera en primer plano. Solo el
+  // Freestyle (y Udemy) pasan por aquí.
+  return pending.filter(
+    (t) =>
+      (t.subcategory === "udemy" || t.subcategory === "ilerna" || t.subcategory === "reading") &&
+      t.reading_mode !== "plan"
+  );
+}
+
+async function refreshTasksCache() {
+  const cfg = await getConfig();
+  if (!isConfigured(cfg)) return;
+  try {
+    const tasks = await fetchTasksFromServer(cfg);
+    await chrome.storage.local.set({ tasksCache: tasks, tasksCacheAt: Date.now() });
+  } catch (err) {
+    // Sin red o servidor caído: nos quedamos con la caché que hubiera.
+    console.warn("[Libreta] no se pudo refrescar la lista de tareas:", err);
+  }
+}
+
+async function getCachedTasks() {
+  const { tasksCache, tasksCacheAt } = await chrome.storage.local.get(["tasksCache", "tasksCacheAt"]);
+  const stale = !tasksCacheAt || Date.now() - tasksCacheAt > TASKS_CACHE_TTL_MS;
+  if (stale) {
+    // No bloquea: se refresca para la próxima vez, esta vez se usa lo que haya.
+    refreshTasksCache();
+  }
+  return Array.isArray(tasksCache) ? tasksCache : [];
+}
+
+// --------------------------------------------------- sesión en curso
+
+async function getCurrentSession() {
+  const { current } = await chrome.storage.session.get("current");
+  return current || null;
+}
+
+async function setCurrentSession(session) {
+  if (session) await chrome.storage.session.set({ current: session });
+  else await chrome.storage.session.remove("current");
+}
+
+function matchTask(tasks, tabTitle) {
+  const title = (tabTitle || "").toLowerCase();
+  let best = null;
+  if (title) {
+    for (const t of tasks) {
+      const kw = (t.watch_keyword || "").trim().toLowerCase();
+      if (kw && title.includes(kw)) {
+        if (!best || kw.length > best.keyword.length) best = { task: t, keyword: kw };
+      }
+    }
+  }
+  if (best) return best;
+  // Ninguna palabra clave especifica encaja: si hay una tarea suelta
+  // "generica" (sin palabra clave puesta a proposito -- ver
+  // _study_link_error en el backend), se lleva el tiempo ella en su
+  // lugar -- es el habito de "pasar tiempo en Udemy/leyendo", sin
+  // curso concreto. Una palabra clave especifica (normalmente de un
+  // Plan) SIEMPRE gana sobre esto -- por eso se prueba primero, arriba
+  // -- para que las dos nunca se pisen ni sumen el mismo rato dos veces.
+  const generic = tasks.find((t) => !(t.watch_keyword || "").trim());
+  return generic ? { task: generic, keyword: "" } : null;
+}
+
+function isUdemyUrl(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    return /(^|\.)udemy\.com$/i.test(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** ¿Es el reproductor del curso (…/course/<curso>/learn/…)? Fuera de ahí
+ * (portada de Udemy, buscador, ficha del curso con su vídeo de presentación,
+ * carrito…) NO se está estudiando, aunque el título de la pestaña lleve la
+ * palabra clave del curso y se mueva el ratón. */
+function isUdemyPlayerUrl(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    return /(^|\.)udemy\.com$/i.test(u.hostname) && u.pathname.includes("/learn/");
+  } catch {
+    return false;
+  }
+}
+
+function isIlernaUrl(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    return /(^|\.)ilernaonline\.zoom\.us$/i.test(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isPdfUrl(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    return /\.pdf($|[?#])/i.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
+/** Nombre corto para guardar como app_package de la sesión de lectura. */
+function pdfFileName(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    const last = u.pathname.split("/").filter(Boolean).pop() || u.pathname;
+    return decodeURIComponent(last).slice(0, 120);
+  } catch {
+    return "pdf_local";
+  }
+}
+
+// --------------------------------------- modo "por vídeos vistos" (Udemy)
+
+/** ¿Hay un <video> de la lección reproduciéndose (no en pausa) en la pestaña?
+ * Cubre vídeo con el sonido silenciado, donde tab.audible sería false. */
+async function isVideoPlayingInTab(tabId) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: () => {
+        // Solo vale el vídeo de una lección: no una vista previa en bucle ni
+        // un vídeo diminuto/oculto (anuncios, miniaturas). La comprobación de
+        // que la pestaña es el reproductor del curso ya la hace quien llama.
+        return Array.from(document.querySelectorAll("video")).some((v) => {
+          if (v.paused || v.ended || v.readyState <= 2 || v.loop) return false;
+          const r = v.getBoundingClientRect();
+          return r.width >= 120 && r.height >= 68;
+        });
+      },
+    });
+    return results.some((r) => r && r.result === true);
+  } catch {
+    return false;
+  }
+}
+
+/** Última vez que se vio el vídeo sonando/reproduciéndose, por pestaña. */
+async function markPlaying(tabId, at) {
+  const { lastPlaying } = await chrome.storage.session.get("lastPlaying");
+  const map = lastPlaying && typeof lastPlaying === "object" ? lastPlaying : {};
+  map[tabId] = at;
+  const keys = Object.keys(map);
+  if (keys.length > 10) {
+    keys.sort((a, b) => map[a] - map[b]).slice(0, keys.length - 10).forEach((k) => delete map[k]);
+  }
+  await chrome.storage.session.set({ lastPlaying: map });
+}
+
+async function getLastPlaying(tabId) {
+  const { lastPlaying } = await chrome.storage.session.get("lastPlaying");
+  return lastPlaying && lastPlaying[tabId] ? lastPlaying[tabId] : null;
+}
+
+/** Tarea+pestaña que tocaría estar contando AHORA MISMO, o null si nada aplica. */
+async function getActiveMatch() {
+  try {
+    const win = await chrome.windows.getLastFocused({ populate: false }).catch(() => null);
+    if (!win || !win.focused) return null;
+
+    const tabs = await chrome.tabs.query({ active: true, windowId: win.id });
+    const tab = tabs[0];
+    if (!tab || !tab.url) return null;
+
+    const udemy = isUdemyUrl(tab.url);
+    const ilerna = !udemy && isIlernaUrl(tab.url);
+    const pdf = !udemy && !ilerna && isPdfUrl(tab.url);
+    if (!udemy && !ilerna && !pdf) return null;
+    // Udemy solo cuenta dentro del reproductor del curso, en los dos modos.
+    // Antes bastaba con cualquier página de udemy.com cuyo título llevara la
+    // palabra clave (la ficha del curso, por ejemplo) y, en "por tiempo en
+    // la página", con mover el ratón: un curso dejado en primer plano sin
+    // ver nada sumaba minutos.
+    if (udemy && !isUdemyPlayerUrl(tab.url)) return null;
+
+    // Qué tarea encaja se mira ANTES de decidir qué se exige para
+    // contar -- en Udemy la exigencia (audio o solo inactividad) depende
+    // de la propia tarea/curso (ver Task.watch_requires_audio), no es
+    // fija como en Lectura.
+    const tasks = await getCachedTasks();
+    const candidates = tasks.filter((t) => t.subcategory === (udemy ? "udemy" : ilerna ? "ilerna" : "reading"));
+    const found = matchTask(candidates, tab.title);
+    if (!found) return null;
+
+    let videoMode = false;
+    // Qué señal dio por buena la pestaña en ESTA comprobación (para el
+    // registro de sesiones del popup): "audio", "video", "pausa" (vídeo
+    // parado pero dentro de la pausa tolerada) o "actividad".
+    let signal = "actividad";
+    // Sesión que SOLO se sostiene con actividad de ratón/teclado (Udemy "por
+    // tiempo en la página" y PDF). Al cerrarla, los minutos de inactividad
+    // que hicieron falta para detectar que te fuiste no cuentan (ver endSession).
+    let activityOnly = false;
+    if (udemy || ilerna) {
+      // Por defecto (watch_requires_audio=true, o caché vieja sin el
+      // campo), la única señal fiable desde fuera de la página de que
+      // la clase se está reproduciendo de verdad es que la pestaña
+      // suene -- estar en el Q&A, las reseñas o el temario del curso
+      // sin el vídeo sonando es contenido trivial, no estudiar, y ahí
+      // NO basta con no estar inactivo. Un curso marcado como "casi sin
+      // audio" (watch_requires_audio=false, sobre todo ejercicios) usa
+      // en su lugar la misma señal que ya usa Lectura de PDF: sin
+      // inactividad de ratón/teclado -- es la única forma de detectar
+      // que se dejó el curso en primer plano sin nadie delante,
+      // haciendo trampa.
+      //
+      // Con audio exigido, que NO suene tampoco corta ya la cuenta si
+      // estás delante: un curso de idiomas tiene pausas, ejercicios y
+      // ratos de leer/anotar en silencio, y con "solo si suena" esos
+      // minutos se perdían del todo aunque el curso estuviera en primer
+      // plano (30 min reales llegaban como 21). Ahora cuenta si suena
+      // O si hay actividad reciente de ratón/teclado; solo se deja de
+      // contar al estar inactivo Y en silencio (curso abandonado).
+      // Ilerna no tiene opción de "casi sin audio": una grabación de
+      // clase siempre suena, así que usa siempre la regla por defecto.
+      const requiresAudio = ilerna ? true : found.task.watch_requires_audio !== false;
+      if (udemy && requiresAudio) {
+        // Curso "por vídeos vistos": SOLO cuenta con el vídeo sonando o
+        // reproduciéndose (más la pausa corta tolerada). La actividad de
+        // ratón/teclado NO basta aquí -- eso es del modo "por tiempo en
+        // la página" (rama de más abajo) y no se mezclan.
+        const now = Date.now();
+        const videoNow = tab.audible ? false : await isVideoPlayingInTab(tab.id);
+        const playing = tab.audible || videoNow;
+        if (playing) {
+          await markPlaying(tab.id, now);
+          signal = tab.audible ? "audio" : "video";
+        } else {
+          const last = await getLastPlaying(tab.id);
+          if (!last || now - last > VIDEO_PAUSE_GRACE_SECONDS * 1000) return null;
+          signal = "pausa";
+        }
+        videoMode = true;
+      } else if (requiresAudio) {
+        if (tab.audible) signal = "audio";
+        else {
+          const idleState = await chrome.idle.queryState(IDLE_DETECTION_SECONDS);
+          if (idleState !== "active") return null;
+        }
+      } else {
+        const idleState = await chrome.idle.queryState(IDLE_DETECTION_SECONDS);
+        if (idleState !== "active") return null;
+        activityOnly = true;
+      }
+    } else {
+      // Un PDF no suena nunca, así que aquí la única señal de "sigues
+      // ahí" que hay es la inactividad de ratón/teclado de Chrome.
+      const idleState = await chrome.idle.queryState(IDLE_DETECTION_SECONDS);
+      if (idleState !== "active") return null;
+      activityOnly = true;
+    }
+
+    return {
+      task: found.task,
+      tabId: tab.id,
+      appPackage: udemy ? "udemy.com" : ilerna ? "ilernaonline.zoom.us" : pdfFileName(tab.url),
+      videoMode,
+      activityOnly,
+      signal,
+    };
+  } catch (err) {
+    console.warn("[Libreta] getActiveMatch falló:", err);
+    return null;
+  }
+}
+
+// --------------------------------------------------------- subir sesión
+
+// La cola de envíos fallidos se lee y se reescribe entera, y la tocan a la vez
+// el latido (cada minuto), la alarma de reintento y el cierre de sesiones: sin
+// este cerrojo dos reintentos simultáneos mandaban el MISMO trozo dos veces
+// (minutos duplicados) y un fallo nuevo que llegaba durante un reintento se
+// perdía al reescribir la lista.
+let uploadLock = Promise.resolve();
+function withUploadLock(fn) {
+  const run = uploadLock.then(fn);
+  uploadLock = run.catch(() => {});
+  return run;
+}
+
+// Un envío con error 4xx (tarea borrada, petición mala...) no se arregla
+// reintentando: se descartaría para siempre en bucle. Sí se reintenta sin red,
+// con 5xx, y con 401 (credenciales mal puestas, que la persona puede corregir),
+// 408 y 429.
+function isRetriableUpload(err) {
+  const status = err && err.status;
+  if (!status) return true;
+  return status >= 500 || status === 401 || status === 408 || status === 429;
+}
+const PENDING_UPLOAD_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+
+function queueFailedUpload(taskUuid, minutes, appPackage) {
+  return withUploadLock(async () => {
+    const { pendingUploads } = await chrome.storage.local.get("pendingUploads");
+    const list = Array.isArray(pendingUploads) ? pendingUploads : [];
+    list.push({ taskUuid, minutes, appPackage, queuedAt: Date.now() });
+    await chrome.storage.local.set({ pendingUploads: list });
+  });
+}
+
+async function postFocusSession(cfg, taskUuid, minutes, appPackage) {
+  const resp = await fetch(apiUrl(cfg, `/tasks/${taskUuid}/focus/`), {
+    method: "POST",
+    headers: { Authorization: authHeader(cfg), "Content-Type": "application/json" },
+    body: JSON.stringify({ minutes, source: "pc_usage", app_package: appPackage }),
+  });
+  if (!resp.ok) {
+    const err = new Error(`HTTP ${resp.status}`);
+    err.status = resp.status;
+    throw err;
+  }
+  return resp.json();
+}
+
+async function sendSessionMinutes(taskUuid, minutes, appPackage) {
+  const cfg = await getConfig();
+  if (!isConfigured(cfg)) return;
+  try {
+    await postFocusSession(cfg, taskUuid, minutes, appPackage);
+    // La lista de tareas pudo cambiar (objetivo cumplido = tarea ya no
+    // pendiente hoy) — se refresca para que la próxima comprobación no
+    // la siga ofreciendo como candidata.
+    refreshTasksCache();
+  } catch (err) {
+    if (!isRetriableUpload(err)) {
+      console.warn("[Libreta] el servidor rechazó la sesión, no se reintenta:", err);
+      return;
+    }
+    console.warn("[Libreta] no se pudo mandar la sesión, se guarda para reintentar:", err);
+    await queueFailedUpload(taskUuid, minutes, appPackage);
+  }
+}
+
+function flushPendingUploads() {
+  return withUploadLock(async () => {
+    const cfg = await getConfig();
+    if (!isConfigured(cfg)) return;
+    const { pendingUploads } = await chrome.storage.local.get("pendingUploads");
+    const list = Array.isArray(pendingUploads) ? pendingUploads : [];
+    if (!list.length) return;
+
+    const stillFailing = [];
+    for (const item of list) {
+      try {
+        await postFocusSession(cfg, item.taskUuid, item.minutes, item.appPackage);
+      } catch (err) {
+        const tooOld = Date.now() - (item.queuedAt || 0) > PENDING_UPLOAD_MAX_AGE_MS;
+        if (isRetriableUpload(err) && !tooOld) stillFailing.push(item);
+      }
+    }
+    await chrome.storage.local.set({ pendingUploads: stillFailing });
+    if (stillFailing.length < list.length) refreshTasksCache();
+  });
+}
+
+// ----------------------------------------------- detección de "100%"
+// (solo aplica a Udemy — un PDF en el visor nativo no es inspeccionable
+// desde la extensión, así que para "reading" nunca se llama a esto.)
+
+// Mínimo de fracciones "x/x" que hacen falta para fiarse del resultado —
+// una sola por casualidad no basta (aunque, al estar acotado al apartado
+// de contenido del curso, ya cuesta mucho más que cuele algo que no sea
+// una sección real).
+const COURSE_PROGRESS_MIN_FRACTIONS = 1;
+
+// Título de "Contenido del curso" tal cual lo pone Udemy según el idioma
+// de la interfaz — para poder acotar la búsqueda SOLO a ese apartado y
+// dejar fuera valoraciones/comentarios ("10/10, lo recomiendo") que
+// también podrían leerse como una fracción si mirásemos toda la página.
+const COURSE_CONTENT_HEADINGS = [
+  "course content",       // inglés
+  "contenido del curso",  // español
+  "contenu du cours",     // francés
+  "kursinhalte",          // alemán
+  "contenuto del corso",  // italiano
+];
+
+/**
+ * Busca el título "Course content" (en cualquiera de los idiomas de
+ * arriba) y devuelve el texto SOLO del bloque que cuelga de él — no toda
+ * la página. El título suele venir en un contenedor pequeño (icono +
+ * texto), así que hay que subir unos pocos niveles hasta dar con el
+ * contenedor que ya incluye la lista de secciones (bastante más texto
+ * que el propio título suelto).
+ *
+ * Si no lo encuentra (Udemy cambió el marcado, título en otro idioma que
+ * no está en la lista...), devuelve null y quien llame usa un respaldo
+ * más conservador en vez de mirar la página entera a lo loco.
+ */
+function getCourseContentSectionText() {
+  const heading = Array.from(
+    document.querySelectorAll('h1,h2,h3,h4,h5,[role="heading"]')
+  ).find((el) => {
+    const t = (el.textContent || "").trim().toLowerCase();
+    return COURSE_CONTENT_HEADINGS.some((h) => t === h || t.startsWith(h));
+  });
+  if (!heading) return null;
+
+  const headingLen = (heading.textContent || "").trim().length;
+  let node = heading;
+  for (let i = 0; i < 6 && node.parentElement; i++) {
+    node = node.parentElement;
+    const len = (node.innerText || "").length;
+    // +200 es un margen arbitrario para asegurarnos de que ya no es solo
+    // el título repetido/envuelto, sino que trae contenido de verdad
+    // (las secciones) debajo.
+    if (len > headingLen + 200) return node.innerText || "";
+  }
+  return node.innerText || null;
+}
+
+/** Extrae fracciones "num/num" de un trozo de texto, descartando lo que
+ * parece nota con decimales ("4.7/5") o fecha ("12/09/2024"). */
+function extractSectionFractions(text) {
+  const fractionRe = /\b(\d{1,3})\s*\/\s*(\d{1,3})\b/g;
+  const fractions = [];
+  let match;
+  while ((match = fractionRe.exec(text)) !== null) {
+    const before = text.slice(Math.max(0, match.index - 2), match.index);
+    const after = text.slice(
+      match.index + match[0].length,
+      match.index + match[0].length + 3
+    );
+    if (/\d\.$/.test(before)) continue;        // "4.7/5" → nota, no lección
+    if (/^\s*\/\s*\d/.test(after)) continue;   // "12/09/2024" → fecha
+    const total = parseInt(match[2], 10);
+    if (total <= 0) continue;                    // "0/0" no dice nada
+    fractions.push([parseInt(match[1], 10), total]);
+  }
+  return fractions;
+}
+
+/** Se ejecuta DENTRO de la página de Udemy — no puede usar nada de fuera.
+ *
+ * OJO: antes esto contaba como "curso completo" cualquier
+ * <progress>/[role="progressbar"] de la página con valor >= 100, pero eso
+ * incluye el propio scrubber del reproductor de vídeo — que llega a 100 al
+ * terminar CUALQUIER lección, no solo la última. Y el texto en español
+ * ("curso"+"100%"+"completado") tampoco vale si Udemy está en otro idioma.
+ *
+ * Detección principal, independiente del idioma: en "Contenido del
+ * curso" cada sección enseña cuántas lecciones tiene vistas como "x/x"
+ * (ej. "10/10") — son solo números, da igual el idioma de la interfaz.
+ * Si TODAS las fracciones de ESE apartado (no de toda la página, para no
+ * colar reseñas) tienen el mismo número a los dos lados, está completo.
+ *
+ * De paso (esto es lo nuevo) se suma nº de lecciones vistas / totales de
+ * TODAS las fracciones del apartado para sacar un % de avance del curso
+ * entero — no solo el "sí/no" de completado — así la pantalla del plan
+ * puede enseñar una barra de "cuánto llevas" en vez de nada hasta que se
+ * termina del todo. Devuelve {complete, pct}: `pct` sale null cuando no
+ * hay suficientes fracciones fiables (mismo umbral que la detección de
+ * completado) o cuando se cae al respaldo de texto, que no da números.
+ */
+async function detectCourseProgressInPage() {
+  // Vía principal: la API de Udemy (misma origin, con la sesión del
+  // usuario). El panel "Contenido del curso" ya no enseña fracciones x/y
+  // como texto, así que leer el DOM no da nada. Ojo: esta función se
+  // serializa y se ejecuta DENTRO de la página, por eso no puede usar
+  // helpers ni constantes definidos fuera de ella.
+  try {
+    const slug = location.pathname.split("/")[2];
+    if (location.pathname.startsWith("/course/") && slug) {
+      const get = async (u) => {
+        const r = await fetch(u, { credentials: "include" });
+        return r.ok ? r.json() : null;
+      };
+      const c = await get(`/api-2.0/courses/${slug}/?fields[course]=id`);
+      if (c && c.id) {
+        const p = await get(
+          `/api-2.0/users/me/subscribed-courses/${c.id}/?fields[course]=completion_ratio,num_published_lectures`
+        );
+        if (p && typeof p.completion_ratio === "number" && p.num_published_lectures > 0) {
+          const total = p.num_published_lectures;
+          const pct = Math.max(0, Math.min(100, Math.round(p.completion_ratio)));
+          const done = Math.min(total, Math.round((total * p.completion_ratio) / 100));
+          return { complete: pct >= 100, pct, done, total };
+        }
+      }
+    }
+  } catch (e) {
+    // sigue con el respaldo de abajo
+  }
+  try {
+    // Varias vías para localizar el temario (Udemy cambia el marcado y
+    // el título "Contenido del curso" no siempre es un <h2>): 1) por
+    // título, 2) por las cabeceras de sección (data-purpose), 3) por el
+    // contenedor del temario. La primera que dé fracciones gana.
+    const candidates = [getCourseContentSectionText()];
+    const collect = (selector) => {
+      const els = Array.from(document.querySelectorAll(selector));
+      return els.length ? els.map((el) => el.innerText || el.textContent || "").join("\n") : null;
+    };
+    candidates.push(collect('[data-purpose*="section-heading"], [data-purpose*="section-title"]'));
+    candidates.push(collect('[data-purpose*="curriculum-section"], [data-purpose*="section-panel"]'));
+    candidates.push(collect('[data-purpose*="curriculum"], [data-purpose*="sidebar"]'));
+    let scoped = null;
+    let fractions = [];
+    for (const c of candidates) {
+      if (!c) continue;
+      const f = extractSectionFractions(c);
+      if (f.length >= COURSE_PROGRESS_MIN_FRACTIONS) { scoped = c; fractions = f; break; }
+    }
+    console.log("[Libreta] curso Udemy: fracciones detectadas =", fractions.length);
+    if (scoped) {
+      if (fractions.length >= COURSE_PROGRESS_MIN_FRACTIONS) {
+        const done = fractions.reduce((sum, [d]) => sum + d, 0);
+        const total = fractions.reduce((sum, [, t]) => sum + t, 0);
+        // El % llega a 100 SOLO si todas las fracciones cuadran: redondear
+        // (399/400 = 99,75 -> 100) enseñaba la barra al 100% con el curso
+        // sin acabar, y el servidor cierra el plan al recibir un 100.
+        const complete = fractions.every(([d, t]) => d === t);
+        return {
+          complete,
+          pct: total > 0 ? (complete ? 100 : Math.min(99, Math.round((done / total) * 100))) : null,
+          done,
+          total,
+        };
+      }
+      // Encontramos el apartado pero no salen suficientes fracciones
+      // ahí (temario con 1 sola sección, colapsado sin contadores...) —
+      // no concluir "no" a ciegas, seguir con el respaldo de texto.
+    }
+
+    // Respaldo si no se pudo acotar el apartado (título no encontrado):
+    // solo el texto en español, más específico que una fracción suelta
+    // y con mucho menos riesgo de colarse desde una reseña. Sin
+    // fracciones no hay con qué sacar un %, así que aquí siempre null.
+    const text = document.body ? document.body.innerText || "" : "";
+    let complete = false;
+    if (/\bcurso\b[^.\n]{0,40}\b100\s?%[^.\n]{0,20}(complet|finaliz)/i.test(text)) complete = true;
+    if (/(complet|finaliz)[a-záéíóúñ]*[^.\n]{0,20}\b100\s?%[^.\n]{0,40}\bcurso\b/i.test(text)) complete = true;
+
+    return { complete, pct: null };
+  } catch {
+    return { complete: false, pct: null };
+  }
+}
+
+async function checkCourseCompletion(taskUuid, tabId, itemId = null) {
+  let progress;
+  try {
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: detectCourseProgressInPage,
+    });
+    progress = result;
+  } catch (err) {
+    // La pestaña pudo cerrarse, cambiar de origen, etc. — no es un error
+    // real, simplemente no se pudo comprobar esta vez.
+    console.warn("[Libreta] no se pudo leer el progreso en la pestaña:", err);
+    return;
+  }
+  console.log("[Libreta] progreso del curso leído:", JSON.stringify(progress));
+  if (!progress) return;
+
+  const cfg = await getConfig();
+  if (!isConfigured(cfg)) return;
+
+  // El % se manda aparte de "completado" -- son dos señales
+  // independientes (ver Task.record_course_progress vs
+  // finish_recurring_series), así que uno puede fallar sin bloquear al
+  // otro.
+  // Si el respaldo de texto dice "curso completado" no hay número, pero sí
+  // hay 100%: se manda igual, para que el servidor cierre el plan también
+  // por la vía pasiva (sin sesión, sin tarea).
+  const pctToSend = progress.pct !== null && progress.pct !== undefined
+    ? progress.pct
+    : (progress.complete ? 100 : null);
+  if (pctToSend !== null) {
+    try {
+      const progressUrl = itemId
+        ? `/plan-items/${itemId}/course-progress/`
+        : `/tasks/${taskUuid}/course-progress/`;
+      const res = await fetch(apiUrl(cfg, progressUrl), {
+        method: "POST",
+        headers: { Authorization: authHeader(cfg), "Content-Type": "application/json" },
+        body: JSON.stringify({ pct: pctToSend, done: progress.done, total: progress.total }),
+      });
+      console.log("[Libreta] % del curso enviado al servidor -> HTTP", res.status);
+    } catch (err) {
+      console.warn("[Libreta] no se pudo mandar el % del curso (se reintentará en el próximo heartbeat):", err);
+    }
+  }
+
+  if (!progress.complete || !taskUuid) return;
+  try {
+    await fetch(apiUrl(cfg, `/tasks/${taskUuid}/mark/course-complete/`), {
+      method: "POST",
+      headers: { Authorization: authHeader(cfg) },
+    });
+    refreshTasksCache();
+  } catch (err) {
+    console.warn("[Libreta] no se pudo avisar de curso completado (se reintentará solo):", err);
+  }
+}
+
+// ------------------------------------------------------------ el ciclo
+
+// Segundos que sobran entre sesiones. La extensión corta la sesión cada vez
+// que sales de la pestaña, y antes cada trozo se redondeaba al minuto por
+// separado (y los de <30 s se tiraban): salir y volver varias veces hacía
+// perder minutos reales (30 min de estudio llegaban como 21). Ahora lo que
+// sobra (o falta) de cada trozo se guarda por tarea y por día y se suma al
+// siguiente, así lo mandado en total difiere del tiempo real menos de 30 s.
+let carryLock = Promise.resolve();
+function withCarryLock(fn) {
+  const run = carryLock.then(fn);
+  carryLock = run.catch(() => {});
+  return run;
+}
+
+function localDayKey(ms) {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Minutos enteros a mandar por este trozo, acumulando el resto en el día.
+function takeWholeMinutes(taskUuid, elapsedMs) {
+  return withCarryLock(async () => {
+    const { sessionCarry } = await chrome.storage.local.get("sessionCarry");
+    const all = sessionCarry && typeof sessionCarry === "object" ? sessionCarry : {};
+    const day = localDayKey(Date.now());
+    const prev = all[taskUuid] && all[taskUuid].day === day ? all[taskUuid].ms : 0;
+    const total = prev + elapsedMs;
+    const minutes = Math.max(0, Math.round(total / 60000));
+    all[taskUuid] = { day, ms: total - minutes * 60000 };
+    // Se limpian las tareas de días anteriores para que no crezca sin fin.
+    for (const key of Object.keys(all)) if (all[key].day !== day) delete all[key];
+    await chrome.storage.local.set({ sessionCarry: all });
+    return minutes;
+  });
+}
+
+// Una sesión solo se cierra (y se manda) UNA vez: reevaluate() lo disparan
+// varios eventos a la vez (cambio de pestaña, foco, inactividad…) y todos
+// leían la misma sesión en curso antes de que ninguno la borrara, así que
+// salían dos envíos casi simultáneos de la misma sesión.
+const endedSessions = new Set();
+
+async function endSession(session) {
+  const key = `${session.task.uuid}:${session.startedAt}`;
+  if (endedSessions.has(key)) return;
+  endedSessions.add(key);
+  if (endedSessions.size > 50) endedSessions.delete(endedSessions.values().next().value);
+
+  await setCurrentSession(null);
+  // En modo vídeo, la sesión no se cuenta más allá de la última vez que el
+  // vídeo estuvo sonando + la pausa tolerada (la sesión se cierra en el
+  // siguiente latido o evento, que puede llegar bastante después).
+  let endAt = Date.now();
+  if (session.videoMode) {
+    const last = await getLastPlaying(session.tabId);
+    if (last) endAt = Math.min(endAt, last + VIDEO_PAUSE_GRACE_SECONDS * 1000);
+  }
+  // Sesión sostenida solo por actividad: chrome.idle avisa DESPUÉS de
+  // IDLE_DETECTION_SECONDS sin tocar nada, así que sin esto cada vez que te
+  // ibas se sumaban 5 minutos en los que no había nadie delante.
+  if (session.activityOnly) {
+    const { idleSince } = await chrome.storage.session.get("idleSince");
+    if (idleSince && idleSince > session.startedAt) endAt = Math.min(endAt, idleSince);
+  }
+  const countedMs = Math.max(0, endAt - session.startedAt);
+  const minutes = await takeWholeMinutes(session.task.uuid, countedMs);
+  await logSession(session, endAt, countedMs, minutes);
+  if (minutes < MIN_SESSION_MINUTES_TO_SEND) return;
+  await sendSessionMinutes(session.task.uuid, minutes, session.appPackage);
+}
+
+// Registro de las últimas sesiones cerradas (para el panel de diagnóstico):
+// cuándo empezó, hasta cuándo se contó, cuántos minutos salieron y QUÉ señales
+// la mantuvieron viva (cuántas comprobaciones por audio, vídeo en marcha,
+// pausa tolerada o actividad). Así, si cuenta tiempo "de la nada", se ve por qué.
+const SESSION_LOG_MAX = 15;
+async function logSession(session, endAt, countedMs, minutes) {
+  try {
+    const { sessionLog } = await chrome.storage.local.get("sessionLog");
+    const list = Array.isArray(sessionLog) ? sessionLog : [];
+    list.push({
+      task: session.task.title,
+      mode: session.videoMode ? "vídeos" : session.activityOnly ? "tiempo en página" : "audio/actividad",
+      startedAt: session.startedAt,
+      endAt,
+      countedSeconds: Math.round(countedMs / 1000),
+      minutes,
+      signals: session.signals || {},
+    });
+    await chrome.storage.local.set({ sessionLog: list.slice(-SESSION_LOG_MAX) });
+  } catch (err) {
+    console.warn("[Libreta] no se pudo guardar el registro de sesión:", err);
+  }
+}
+
+async function noteSignal(current, signal) {
+  if (!current || !signal) return;
+  const signals = Object.assign({}, current.signals);
+  signals[signal] = (signals[signal] || 0) + 1;
+  await setCurrentSession(Object.assign({}, current, { signals }));
+}
+
+async function startSession(match) {
+  await setCurrentSession({
+    task: match.task,
+    tabId: match.tabId,
+    appPackage: match.appPackage,
+    videoMode: Boolean(match.videoMode),
+    activityOnly: Boolean(match.activityOnly),
+    startedAt: Date.now(),
+    signals: match.signal ? { [match.signal]: 1 } : {},
+  });
+}
+
+async function reevaluate({ allowEndOnNoMatch = true } = {}) {
+  const match = await getActiveMatch();
+  const current = await getCurrentSession();
+
+  if (!match) {
+    // chrome.tabs.onUpdated dispara por CUALQUIER cambio en la pestaña —
+    // Udemy cambia el título entre lecciones, un PDF cambia de página
+    // visible, hay instantes de buffering sin sonido, etc. Cortar la
+    // sesión ahí mismo la trocea en un montón de sesiones de segundos
+    // que casi nunca llegan al minuto mínimo, y deja el popup enseñando
+    // "sin actividad" casi todo el rato aunque sí se esté contando. Solo
+    // se corta de verdad ante una señal fiable (cambiaste de pestaña,
+    // perdiste el foco, te quedaste inactivo) o en el latido de cada
+    // minuto, que confirma el estado real.
+    if (current && allowEndOnNoMatch) await endSession(current);
+    return;
+  }
+
+  if (current && current.task.uuid === match.task.uuid && current.tabId === match.tabId) {
+    await noteSignal(current, match.signal);
+    return; // misma sesión, sigue contando sola — nada que hacer aquí
+  }
+
+  if (current) await endSession(current);
+  await startSession(match);
+  if (match.task.subcategory === "udemy" && (match.task.watch_keyword || "").trim()) {
+    checkCourseCompletion(match.task.uuid, match.tabId);
+  }
+}
+
+// El % del curso NO depende de que haya una sesión de tiempo en marcha
+// (que exige audio sonando + ventana enfocada): basta con estar en una
+// pestaña de Udemy cuyo título case con la palabra clave de un curso.
+// Los cursos de Udemy vienen de los OBJETIVOS de los planes activos
+// (palabra clave + id del objetivo), no de la tarea diaria: esa puede no
+// existir hoy, estar hecha o no llevar la palabra clave.
+let udemyCoursesCache = { at: 0, courses: [] };
+async function getUdemyCourses() {
+  if (Date.now() - udemyCoursesCache.at < 5 * 60 * 1000 && udemyCoursesCache.courses.length) {
+    return udemyCoursesCache.courses;
+  }
+  const cfg = await getConfig();
+  if (!isConfigured(cfg)) {
+    console.warn("[Libreta] extensión sin configurar (URL/usuario/contraseña en Opciones)");
+    return [];
+  }
+  try {
+    const resp = await fetch(apiUrl(cfg, "/plans/udemy-courses/"), { headers: { Authorization: authHeader(cfg) } });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const courses = (data.courses || []).filter((c) => (c.watch_keyword || "").trim());
+    udemyCoursesCache = { at: Date.now(), courses };
+    console.log("[Libreta] cursos de Udemy en planes:", courses.map((c) => c.watch_keyword));
+    return courses;
+  } catch (err) {
+    console.warn("[Libreta] no se pudo pedir los cursos de Udemy (¿desplegado el servidor?):", err);
+    return udemyCoursesCache.courses;
+  }
+}
+
+let lastProgressCheckAt = 0;
+async function checkProgressOnActiveUdemyTab(force = false) {
+  try {
+    if (!force && Date.now() - lastProgressCheckAt < 20000) return;
+    const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    const tab = tabs[0];
+    if (!tab || !tab.url || !isUdemyUrl(tab.url)) return;
+    const candidates = await getUdemyCourses();
+    const title = (tab.title || "").toLowerCase();
+    let best = null;
+    for (const c of candidates) {
+      const kw = c.watch_keyword.trim().toLowerCase();
+      if (title.includes(kw) && (!best || kw.length > best.kw.length)) best = { course: c, kw };
+    }
+    if (!best) {
+      console.log("[Libreta] pestaña de Udemy sin curso que case. Título:", tab.title,
+        "| palabras clave:", candidates.map((c) => c.watch_keyword));
+      return;
+    }
+    lastProgressCheckAt = Date.now();
+    await checkCourseCompletion(null, tab.id, best.course.item_id);
+  } catch (err) {
+    console.warn("[Libreta] checkProgressOnActiveUdemyTab falló:", err);
+  }
+}
+
+async function heartbeat() {
+  await checkProgressOnActiveUdemyTab();
+  await reevaluate();
+  const current = await getCurrentSession();
+  if (current && current.task.subcategory === "udemy" && (current.task.watch_keyword || "").trim()) {
+    await checkCourseCompletion(current.task.uuid, current.tabId);
+  }
+  await flushPendingUploads();
+}
+
+// ------------------------------------------------------------ arranque
+
+chrome.tabs.onActivated.addListener(() => { reevaluate(); checkProgressOnActiveUdemyTab(); });
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
+  if (changeInfo.audible === false) {
+    // El vídeo acaba de dejar de sonar: ese es el último instante "viendo".
+    const cur = await getCurrentSession();
+    if (cur && cur.tabId === tabId && cur.videoMode) await markPlaying(tabId, Date.now());
+  }
+  if (
+    changeInfo.title !== undefined ||
+    changeInfo.url !== undefined ||
+    changeInfo.status === "complete" ||
+    changeInfo.audible !== undefined
+  ) {
+    // "Suave": puede EMPEZAR o CAMBIAR de sesión (nueva coincidencia),
+    // pero no la CORTA solo porque en este instante concreto no
+    // coincida nada — ver más arriba, en reevaluate().
+    reevaluate({ allowEndOnNoMatch: false });
+    if (changeInfo.status === "complete") setTimeout(() => checkProgressOnActiveUdemyTab(), 4000);
+  }
+});
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  const current = await getCurrentSession();
+  if (current && current.tabId === tabId) await endSession(current);
+});
+chrome.windows.onFocusChanged.addListener(() => reevaluate());
+chrome.idle.onStateChanged.addListener(async (state) => {
+  // Se apunta CUÁNDO empezó la inactividad antes de reevaluar: "idle" llega
+  // IDLE_DETECTION_SECONDS después del último gesto; "locked" es inmediato
+  // (y si ya estabas inactivo, se conserva el instante anterior).
+  if (state === "active") {
+    await chrome.storage.session.remove("idleSince");
+  } else {
+    const { idleSince } = await chrome.storage.session.get("idleSince");
+    if (state === "idle" || !idleSince) {
+      const since = state === "idle" ? Date.now() - IDLE_DETECTION_SECONDS * 1000 : Date.now();
+      await chrome.storage.session.set({ idleSince: since });
+    }
+  }
+  await reevaluate();
+});
+
+chrome.idle.setDetectionInterval(IDLE_DETECTION_SECONDS);
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === HEARTBEAT_ALARM) heartbeat();
+  if (alarm.name === RETRY_ALARM) flushPendingUploads();
+});
+
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 1 });
+  chrome.alarms.create(RETRY_ALARM, { periodInMinutes: 5 });
+  refreshTasksCache();
+});
+chrome.runtime.onStartup.addListener(() => {
+  chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 1 });
+  chrome.alarms.create(RETRY_ALARM, { periodInMinutes: 5 });
+  refreshTasksCache();
+});
+
+// ------------------------------------------------------------ diagnóstico
+
+/**
+ * Foto del estado ahora mismo, para el panel de diagnóstico del popup:
+ * qué pestaña ve la extensión, cómo la clasifica, qué tareas tiene en
+ * caché con sus palabras clave, y si alguna encaja con el título real
+ * de la pestaña. Todo lo que necesitamos para saber POR QUÉ no está
+ * contando, en vez de adivinarlo desde fuera.
+ */
+async function debugSnapshot() {
+  const cfg = await getConfig();
+
+  const win = await chrome.windows.getLastFocused({ populate: false }).catch(() => null);
+  const focused = Boolean(win && win.focused);
+  let tab = null;
+  if (win) {
+    const tabs = await chrome.tabs.query({ active: true, windowId: win.id });
+    tab = tabs[0] || null;
+  }
+
+  const idleState = await chrome.idle.queryState(IDLE_DETECTION_SECONDS).catch(() => "desconocido");
+  const tasks = await getCachedTasks();
+  const { tasksCacheAt } = await chrome.storage.local.get("tasksCacheAt");
+
+  const hasUrl = Boolean(tab && tab.url);
+  const isUdemyTab = hasUrl && isUdemyUrl(tab.url);
+  const isIlernaTab = hasUrl && !isUdemyTab && isIlernaUrl(tab.url);
+  const isPdfTab = hasUrl && !isUdemyTab && !isIlernaTab && isPdfUrl(tab.url);
+  const noUrlButFileTab = Boolean(tab && !tab.url);
+  const tabKind = isUdemyTab ? "udemy" : isIlernaTab ? "ilerna" : isPdfTab ? "pdf" : "otro";
+
+  const candidates = tasks.filter((t) => t.subcategory === (isUdemyTab ? "udemy" : isIlernaTab ? "ilerna" : "reading"));
+  const match = isUdemyTab || isIlernaTab || isPdfTab ? matchTask(candidates, tab.title) : null;
+
+  const current = await getCurrentSession();
+
+  return {
+    configured: isConfigured(cfg),
+    baseUrl: cfg.baseUrl || null,
+    windowFocused: focused,
+    tab: tab ? { url: tab.url || null, title: tab.title, audible: Boolean(tab.audible) } : null,
+    noUrlButFileTab, // pestaña file:// sin el permiso "acceso a URLs de archivo" concedido
+    tabKind,
+    udemyPlayer: isUdemyTab ? isUdemyPlayerUrl(tab.url) : null, // false = en Udemy pero fuera del reproductor: no cuenta
+    idleState,
+    tasksCount: tasks.length,
+    tasksCacheAgeSeconds: tasksCacheAt ? Math.round((Date.now() - tasksCacheAt) / 1000) : null,
+    tasks: tasks.map((t) => ({
+      title: t.title, subcategory: t.subcategory, watch_keyword: t.watch_keyword,
+      watch_requires_audio: t.watch_requires_audio,
+    })),
+    match: match ? { taskTitle: match.task.title, keyword: match.keyword } : null,
+    currentSession: current
+      ? { taskTitle: current.task.title, subcategory: current.task.subcategory, startedAt: current.startedAt, signals: current.signals || {} }
+      : null,
+    sessionLog: (await chrome.storage.local.get("sessionLog")).sessionLog || [],
+  };
+}
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg && msg.type === "debug-snapshot") {
+    debugSnapshot().then(sendResponse);
+    return true; // respuesta asíncrona
+  }
+  if (msg && msg.type === "debug-refresh-tasks") {
+    refreshTasksCache().then(() => debugSnapshot()).then(sendResponse);
+    return true;
+  }
+});

@@ -36,7 +36,7 @@ BUCKET_LABELS = {
     # no genera TimerSession, va por CourseModule/Occurrence — no hay
     # tiempo real que sumar, solo vídeos vistos.
     "study_udemy": "Estudio · Curso de Udemy",
-    "study_ilerna": "Estudio · Clases de Ilerna",
+    "study_web": "Estudio · Tiempo en webs",
     # Cronómetro opcional de una tarea de General (Task.wants_timer) —
     # esas TimerSession llevan subcategory="" porque General no tiene
     # subcategoría, así que no salen del bucle de FOCUS_SUBCATEGORY_CHOICES
@@ -94,11 +94,11 @@ def time_totals(user):
         "all_time": udemy_minutes_all * 60,
         "this_year": udemy_minutes_year * 60,
     }
-    # Clases de Ilerna (Zoom): igual que Udemy, bucket propio.
-    ilerna_timers = timers.filter(subcategory=Task.SUBCATEGORY_ILERNA)
-    seconds_by_bucket["study_ilerna"] = {
-        "all_time": _sum_field(ilerna_timers, "minutes") * 60,
-        "this_year": _sum_field(ilerna_timers.filter(recorded_at__gte=year_start), "minutes") * 60,
+    # Tiempo en una web (Ilerna, Hyperskill...): igual que Udemy, bucket propio.
+    web_timers = timers.filter(subcategory=Task.SUBCATEGORY_WEB)
+    seconds_by_bucket["study_web"] = {
+        "all_time": _sum_field(web_timers, "minutes") * 60,
+        "this_year": _sum_field(web_timers.filter(recorded_at__gte=year_start), "minutes") * 60,
     }
     # Cronómetro opcional de General (ver BUCKET_LABELS más arriba).
     general_timers = timers.filter(subcategory="")

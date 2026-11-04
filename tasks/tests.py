@@ -2532,12 +2532,13 @@ class UdemyPlanTests(TestCase):
         self.assertEqual(task.subcategory, Task.SUBCATEGORY_UDEMY)
 
 
-class IlernaClassesTests(TestCase):
+class WebTimeTrackerTests(TestCase):
     """
-    Clases de Ilerna (Zoom): un hábito de "ver X minutos de clase al día"
-    que cuenta la extensión de Chrome en ilernaonline.zoom.us. A
-    diferencia de un curso de Udemy NO tiene "100% completado" (el plan
-    se cierra por semanas) y la palabra clave (asignatura) es opcional.
+    "Tiempo en una web" (antes "Clases de Ilerna"): un hábito de "pasar X
+    minutos al día en esta web" que cuenta la extensión de Chrome mientras la
+    URL de la pestaña contenga `watch_url`. A diferencia de un curso de
+    Udemy NO tiene "100% completado" (el plan se cierra por semanas) y la
+    palabra del título es opcional.
     """
 
     def setUp(self):
@@ -2546,7 +2547,7 @@ class IlernaClassesTests(TestCase):
     def _create_plan(self, **extra):
         data = {
             "plan_type": "study", "study_subtype": "general", "is_active": "on",
-            "name": "Clases DAM", "study_source": "ilerna",
+            "name": "Clases DAM", "study_source": "web", "web_url": "ilernaonline.zoom.us",
             "target_minutes": "45", "due_time": "20:00", "repeat": "daily",
             "custom_days": ["0", "2", "4"], "weeks": "8",
         }
@@ -2554,54 +2555,99 @@ class IlernaClassesTests(TestCase):
         data = {k: v for k, v in data.items() if v is not None}
         return self.client.post(reverse("tasks:plan_create"), data)
 
-    def test_web_create_ilerna_plan(self):
-        r = self._create_plan(ilerna_keyword="Programación")
+    def test_web_create_plan(self):
+        r = self._create_plan(web_keyword="Programación")
         self.assertEqual(r.status_code, 302, r.content)
         plan = Plan.objects.get(name="Clases DAM")
         head = plan.headline
-        self.assertEqual(head.watch_site, PlanItem.SITE_ILERNA)
+        self.assertEqual(head.watch_site, PlanItem.SITE_WEB)
+        self.assertEqual(head.watch_url, "ilernaonline.zoom.us")
         self.assertEqual(head.watch_keyword, "Programación")
         self.assertEqual(head.target_minutes, 45)
+        self.assertEqual(head.watch_idle_seconds, 180)   # 3 min por defecto
+        self.assertFalse(head.watch_audio_counts)
         self.assertFalse(head.is_udemy_course)
-        self.assertEqual(head.display_target_text(), "45 min de clase")
+        self.assertEqual(head.display_target_text(), "45 min en ilernaonline.zoom.us")
         self.assertIsNone(head.course_progress())
         task = Task.objects.get(series_id=plan.task_series_id)
-        self.assertEqual(task.subcategory, Task.SUBCATEGORY_ILERNA)
+        self.assertEqual(task.subcategory, Task.SUBCATEGORY_WEB)
+        self.assertEqual(task.watch_url, "ilernaonline.zoom.us")
         self.assertEqual(task.watch_keyword, "Programación")
+        self.assertEqual(task.watch_idle_seconds, 180)
+        self.assertFalse(task.watch_audio_counts)
         self.assertEqual(task.target_minutes, 45)
         self.assertEqual(task.workout_kind, "auto")
 
-    def test_ilerna_plan_without_keyword_is_a_generic_habit(self):
-        r = self._create_plan(ilerna_keyword="")
+    def test_idle_minutes_and_audio_travel_to_the_daily_task(self):
+        self._create_plan(web_idle_minutes="5", web_audio_counts="1")
+        plan = Plan.objects.get(name="Clases DAM")
+        head = plan.headline
+        self.assertEqual((head.watch_idle_seconds, head.watch_audio_counts), (300, True))
+        task = Task.objects.get(series_id=plan.task_series_id)
+        self.assertEqual((task.watch_idle_seconds, task.watch_audio_counts), (300, True))
+
+    def test_idle_minutes_accepts_any_value_in_range(self):
+        self._create_plan(web_idle_minutes="7")
+        plan = Plan.objects.get(name="Clases DAM")
+        self.assertEqual(plan.headline.watch_idle_seconds, 420)
+        r = self.client.get(reverse("tasks:plan_edit", args=[plan.pk]))
+        self.assertContains(r, 'inputmode="numeric"\n                    value="7"')
+        Plan.objects.all().delete()
+        self._create_plan(web_idle_minutes="")        # en blanco -> 3 min por defecto
+        self.assertEqual(Plan.objects.get(name="Clases DAM").headline.watch_idle_seconds, 180)
+
+    def test_idle_minutes_are_clamped(self):
+        self._create_plan(web_idle_minutes="0")
+        self.assertEqual(Plan.objects.get(name="Clases DAM").headline.watch_idle_seconds, 30)
+        Plan.objects.all().delete()
+        self._create_plan(web_idle_minutes="9999")
+        self.assertEqual(Plan.objects.get(name="Clases DAM").headline.watch_idle_seconds, 1800)
+        Plan.objects.all().delete()
+        self._create_plan(web_idle_minutes="abc")
+        self.assertEqual(Plan.objects.get(name="Clases DAM").headline.watch_idle_seconds, 180)
+
+    def test_pasted_url_is_cleaned_and_several_are_allowed(self):
+        self._create_plan(web_url='  "https://www.hyperskill.org/learn" , http://Ilernaonline.zoom.us/rec\n campus.ilerna.es ')
+        head = Plan.objects.get(name="Clases DAM").headline
+        self.assertEqual(head.watch_url, "hyperskill.org/learn,Ilernaonline.zoom.us/rec,campus.ilerna.es")
+
+    def test_web_plan_without_keyword_is_a_generic_habit_on_that_site(self):
+        r = self._create_plan(web_keyword="")
         self.assertEqual(r.status_code, 302, r.content)
         plan = Plan.objects.get(name="Clases DAM")
         task = Task.objects.get(series_id=plan.task_series_id)
-        self.assertEqual(task.subcategory, Task.SUBCATEGORY_ILERNA)
+        self.assertEqual(task.subcategory, Task.SUBCATEGORY_WEB)
         self.assertEqual(task.watch_keyword, "")
 
-    def test_ilerna_plan_needs_minutes(self):
+    def test_web_plan_needs_minutes(self):
         # Un error de validación no guarda NADA (ni el plan ni su tarea
         # diaria): se vuelve al formulario con el aviso.
         r = self._create_plan(target_minutes=None)
         self.assertEqual(r.status_code, 200, r.content)
-        self.assertContains(r, "Clases de Ilerna: pon los minutos")
-        self.assertFalse(PlanItem.objects.filter(watch_site=PlanItem.SITE_ILERNA).exists())
+        self.assertContains(r, "Tiempo en una web: pon los minutos")
+        self.assertFalse(PlanItem.objects.filter(watch_site=PlanItem.SITE_WEB).exists())
         self.assertFalse(Plan.objects.filter(name="Clases DAM").exists())
         self.assertFalse(Task.objects.filter(title="Clases DAM").exists())
 
-    def test_ilerna_plan_does_not_close_like_a_udemy_course(self):
-        self._create_plan(ilerna_keyword="Bases de datos")
+    def test_web_plan_needs_an_address(self):
+        r = self._create_plan(web_url="  ")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertContains(r, "Tiempo en una web: pon un trozo de la dirección")
+        self.assertFalse(Plan.objects.filter(name="Clases DAM").exists())
+
+    def test_web_plan_does_not_close_like_a_udemy_course(self):
+        self._create_plan(web_keyword="Bases de datos")
         plan = Plan.objects.get(name="Clases DAM")
         task = Task.objects.get(series_id=plan.task_series_id)
         # Un Udemy con palabra clave se cierra al marcar el curso completo;
-        # las clases de Ilerna nunca: solo cierran por semanas.
+        # una web nunca: solo cierra por semanas.
         task.finish_recurring_series()
         Plan.auto_close_expired(user=self.user)
         plan.refresh_from_db()
         self.assertIsNone(plan.closed_at)
 
-    def test_switching_ilerna_plan_back_to_udemy_clears_the_site(self):
-        self._create_plan(ilerna_keyword="Redes")
+    def test_switching_web_plan_back_to_udemy_clears_the_web_fields(self):
+        self._create_plan(web_keyword="Redes", web_idle_minutes="10", web_audio_counts="1")
         plan = Plan.objects.get(name="Clases DAM")
         r = self.client.post(reverse("tasks:plan_edit", args=[plan.pk]), {
             "plan_type": "study", "study_subtype": "general", "is_active": "on",
@@ -2612,46 +2658,76 @@ class IlernaClassesTests(TestCase):
         self.assertEqual(r.status_code, 302, r.content)
         head = Plan.objects.get(pk=plan.pk).headline
         self.assertEqual(head.watch_site, "")
+        self.assertEqual((head.watch_url, head.watch_idle_seconds, head.watch_audio_counts), ("", 180, False))
         self.assertTrue(head.is_udemy_course)
         task = Task.objects.get(series_id=plan.task_series_id)
         self.assertEqual(task.subcategory, Task.SUBCATEGORY_UDEMY)
+        self.assertEqual((task.watch_url, task.watch_audio_counts), ("", False))
 
-    def test_plan_form_renders_with_ilerna_headline(self):
-        self._create_plan(ilerna_keyword="Redes")
+    def test_plan_form_renders_with_web_headline(self):
+        self._create_plan(web_keyword="Redes", web_url="hyperskill.org", web_idle_minutes="5")
         plan = Plan.objects.get(name="Clases DAM")
         r = self.client.get(reverse("tasks:plan_edit", args=[plan.pk]))
         self.assertEqual(r.status_code, 200)
-        self.assertContains(r, "Clases de Ilerna (Zoom)")
+        self.assertContains(r, "Tiempo en una web")
         self.assertContains(r, 'value="Redes"')
+        self.assertContains(r, 'value="hyperskill.org"')
+        self.assertContains(r, 'name="web_idle_minutes" min="1" max="30" step="1" inputmode="numeric"\n                    value="5"')
         r = self.client.get(reverse("tasks:plan_detail", args=[plan.pk]))
         self.assertEqual(r.status_code, 200)
         self.assertNotContains(r, "Sin datos todavía")
         r = self.client.get(reverse("tasks:plan_list"))
         self.assertEqual(r.status_code, 200)
-        self.assertContains(r, "45 min de clase")
+        self.assertContains(r, "45 min en hyperskill.org")
 
-    def test_ilerna_is_not_listed_as_a_udemy_course_for_the_extension(self):
-        self._create_plan(ilerna_keyword="Redes")
+    def test_web_is_not_listed_as_a_udemy_course_for_the_extension(self):
+        self._create_plan(web_keyword="Redes")
         r = self.client.get(reverse("api:plan_udemy_courses"))
         self.assertEqual(r.json()["courses"], [])
 
-    def test_freestyle_ilerna_task_keeps_keyword_and_needs_minutes(self):
+    def test_freestyle_web_task_needs_address_and_minutes(self):
         base = {
-            "title": "Clases", "category": "study", "subcategory": "ilerna",
-            "watch_keyword": "Entornos", "due_date": "2026-09-10",
+            "title": "Hyperskill", "category": "study", "subcategory": "web",
+            "watch_keyword": "Entornos", "watch_url": "hyperskill.org", "due_date": "2026-09-10",
             "due_time": "20:00", "repeat": "daily",
         }
         r = self.client.post(reverse("tasks:task_create"), dict(base))
         self.assertEqual(r.status_code, 200, r.content)  # error: faltan minutos
-        self.assertFalse(Task.objects.filter(title="Clases").exists())
-        r = self.client.post(reverse("tasks:task_create"), dict(base, target_minutes="60"))
+        self.assertFalse(Task.objects.filter(title="Hyperskill").exists())
+        r = self.client.post(reverse("tasks:task_create"), dict(base, target_minutes="60", watch_url=" "))
+        self.assertEqual(r.status_code, 200, r.content)  # error: falta la dirección
+        self.assertFalse(Task.objects.filter(title="Hyperskill").exists())
+        r = self.client.post(reverse("tasks:task_create"),
+                             dict(base, target_minutes="60", watch_idle_minutes="10", watch_audio_counts="1"))
         self.assertEqual(r.status_code, 302, r.content)
-        t = Task.objects.get(title="Clases")
-        self.assertEqual(t.watch_keyword, "Entornos")
+        t = Task.objects.get(title="Hyperskill")
+        self.assertEqual((t.watch_keyword, t.watch_url), ("Entornos", "hyperskill.org"))
+        self.assertEqual((t.watch_idle_seconds, t.watch_audio_counts), (600, True))
         self.assertEqual(t.workout_kind, "auto")
 
+    def test_web_fields_are_dropped_when_the_subtype_is_not_web(self):
+        r = self.client.post(reverse("tasks:task_create"), {
+            "title": "Excel", "category": "study", "subcategory": "udemy", "target_minutes": "30",
+            "watch_url": "hyperskill.org", "watch_idle_minutes": "10", "watch_audio_counts": "1",
+            "due_date": "2026-09-10", "due_time": "20:00", "repeat": "daily",
+        })
+        self.assertEqual(r.status_code, 302, r.content)
+        t = Task.objects.get(title="Excel")
+        self.assertEqual((t.watch_url, t.watch_idle_seconds, t.watch_audio_counts), ("", 180, False))
+
+    def test_api_exposes_the_tracker_fields_for_the_extension(self):
+        self._create_plan(web_idle_minutes="1", web_audio_counts="1")
+        plan = Plan.objects.get(name="Clases DAM")
+        task = Task.objects.get(series_id=plan.task_series_id)
+        from .api import task_json
+        row = task_json(task)
+        self.assertEqual(row["subcategory"], "web")
+        self.assertEqual(row["watch_url"], "ilernaonline.zoom.us")
+        self.assertEqual(row["watch_idle_seconds"], 60)
+        self.assertIs(row["watch_audio_counts"], True)
+
     def test_pc_usage_minutes_complete_the_day_and_show_in_stats(self):
-        self._create_plan(ilerna_keyword="")
+        self._create_plan(web_keyword="")
         plan = Plan.objects.get(name="Clases DAM")
         task = Task.objects.get(series_id=plan.task_series_id)
         url = reverse("api:focus_save", args=[task.uuid])
@@ -2667,12 +2743,41 @@ class IlernaClassesTests(TestCase):
 
         from .time_stats import time_totals
         buckets = time_totals(self.user)
-        self.assertEqual(buckets["study_ilerna"]["all_time_hours"], round(50 / 60, 1))
+        self.assertEqual(buckets["study_web"]["all_time_hours"], round(50 / 60, 1))
 
-    def test_meta_exposes_ilerna(self):
+    def test_meta_exposes_web(self):
         r = self.client.get(reverse("api:meta"))
         values = {c["value"] for c in r.json()["study_subcategories"]}
-        self.assertIn("ilerna", values)
+        self.assertIn("web", values)
+        self.assertNotIn("ilerna", values)
+
+    def test_migration_turns_old_ilerna_rows_into_web_rows(self):
+        import importlib
+        from django.apps import apps as django_apps
+        mig = importlib.import_module("tasks.migrations.0128_tiempo_en_una_web")
+        old_task = Task.objects.create(
+            title="Clase vieja", category="study", subcategory="ilerna", target_minutes=45,
+            due_date=date.today(), user=self.user,
+        )
+        plan = Plan.objects.create(
+            name="Ilerna vieja", user=self.user, plan_type=Plan.PLAN_TYPE_STUDY,
+            study_subtype=Plan.STUDY_SUBTYPE_GENERAL, weeks=4, repeat="daily",
+        )
+        item = PlanItem.objects.create(
+            plan=plan, is_headline=True, progression=PlanItem.PROG_COMPLETION,
+            watch_site="ilerna", watch_keyword="Redes", target_minutes=45,
+        )
+        timer = TimerSession.objects.create(
+            task=old_task, user=self.user, subcategory="ilerna", minutes=30, source="pc_usage",
+        )
+        mig.ilerna_to_web(django_apps, None)
+        old_task.refresh_from_db(); item.refresh_from_db(); timer.refresh_from_db()
+        self.assertEqual((old_task.subcategory, old_task.watch_url, old_task.watch_audio_counts,
+                          old_task.watch_idle_seconds),
+                         ("web", "ilernaonline.zoom.us", True, 300))
+        self.assertEqual((item.watch_site, item.watch_url, item.watch_audio_counts, item.watch_keyword),
+                         ("web", "ilernaonline.zoom.us", True, "Redes"))
+        self.assertEqual(timer.subcategory, "web")
 
 
 class DailyCompletionTests(TestCase):
@@ -3720,13 +3825,13 @@ class ComputerOnlyPlanApiTests(TestCase):
         fn = getattr(self.client, method)
         return fn(reverse(name, args=args), data=json.dumps(data), content_type="application/json")
 
-    def test_plan_json_flags_udemy_and_ilerna(self):
+    def test_plan_json_flags_udemy_and_web(self):
         plan, _ = self._study_plan(watch_keyword="Excel", target_minutes=30)
         p = self.client.get(reverse("api:plan_detail", args=[plan.uuid])).json()["plan"]
         self.assertTrue(p["requires_computer"])
         self.assertTrue(p["headline"]["requires_computer"])
 
-        plan2, _ = self._study_plan(watch_site=PlanItem.SITE_ILERNA, target_minutes=60)
+        plan2, _ = self._study_plan(watch_site=PlanItem.SITE_WEB, watch_url="hyperskill.org", target_minutes=60)
         p2 = self.client.get(reverse("api:plan_detail", args=[plan2.uuid])).json()["plan"]
         self.assertTrue(p2["requires_computer"])
 

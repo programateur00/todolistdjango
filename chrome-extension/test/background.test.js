@@ -1,8 +1,13 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { makeEnv, udemyTask } = require("./harness");
+const { makeEnv, udemyTask, webTask } = require("./harness");
 
 const counts = async (env) => Boolean(await env.ctx.getActiveMatch());
+// El listener de la alarma no devuelve la promesa del latido: se deja correr un rato.
+const heartbeat = async (env) => {
+  await env.listeners.alarm({ name: "libreta-udemy-heartbeat" });
+  await new Promise((r) => setTimeout(r, 30));
+};
 
 // ------------------------------------------------ Udemy "por vídeos vistos"
 test("vídeo: sonando cuenta", async () => {
@@ -102,14 +107,198 @@ test("tiempo: volver a estar activo limpia el instante de inactividad", async ()
   assert.equal(env.posts.at(-1).body.minutes, 12);
 });
 
-// ----------------------------------------------------------- Ilerna / PDF
-test("Ilerna: suena o hay actividad cuenta; silencio + inactivo no", async () => {
+// -------------------------------------------- Tiempo en una web (genérico)
+const onWeb = (env, url, title = "Página") => { env.tab.url = url; env.tab.title = title; env.tab.audible = false; };
+
+test("web: cuenta si la URL contiene el texto, en cualquier subpágina, https o www", async () => {
+  const env = makeEnv(); env.setTasks([webTask()]);
+  for (const url of ["https://hyperskill.org/learn/step/1", "http://www.Hyperskill.org/", "https://hyperskill.org/"]) {
+    onWeb(env, url);
+    assert.equal(await counts(env), true, url);
+  }
+  onWeb(env, "https://example.com/redir/hyperskill.org/x"); // el texto está en la ruta: también vale
+  assert.equal(await counts(env), true);
+  onWeb(env, "https://example.com/otra-cosa");
+  assert.equal(await counts(env), false);
+});
+
+test("web: varios trozos separados por comas, vale cualquiera", async () => {
+  const env = makeEnv(); env.setTasks([webTask({ watch_url: "hyperskill.org, ilernaonline.zoom.us/rec" })]);
+  onWeb(env, "https://ilernaonline.zoom.us/rec/play/abc"); assert.equal(await counts(env), true);
+  onWeb(env, "https://ilernaonline.zoom.us/j/123");        assert.equal(await counts(env), false);
+  onWeb(env, "https://hyperskill.org/");                   assert.equal(await counts(env), true);
+});
+
+test("web: los trozos de menos de 3 letras se ignoran (no encajan con todo)", async () => {
+  const env = makeEnv(); env.setTasks([webTask({ watch_url: "a" })]);
+  onWeb(env, "https://example.com/a"); assert.equal(await counts(env), false);
+});
+
+test("web: la palabra del título, si se pone, es obligatoria", async () => {
+  const env = makeEnv(); env.setTasks([webTask({ watch_keyword: "Programación" })]);
+  onWeb(env, "https://hyperskill.org/", "Redes — Hyperskill");        assert.equal(await counts(env), false);
+  onWeb(env, "https://hyperskill.org/", "PROGRAMACIÓN — Hyperskill"); assert.equal(await counts(env), true);
+});
+
+test("web: gana la tarea más específica (con palabra del título, luego trozo más largo)", async () => {
   const env = makeEnv();
-  env.tab.url = "https://ilernaonline.zoom.us/rec/play/abc"; env.tab.title = "Clase";
-  env.setTasks([{ uuid: "t-il", title: "Clases", subcategory: "ilerna", watch_keyword: "", target_minutes: 45 }]);
-  env.tab.audible = true; env.idle = "idle"; assert.equal(await counts(env), true);
+  env.setTasks([
+    webTask({ uuid: "general", watch_url: "hyperskill.org" }),
+    webTask({ uuid: "ruta", watch_url: "hyperskill.org/learn" }),
+    webTask({ uuid: "asig", watch_url: "hyperskill.org", watch_keyword: "java" }),
+  ]);
+  onWeb(env, "https://hyperskill.org/learn/step/1", "Python");
+  assert.equal((await env.ctx.getActiveMatch()).task.uuid, "ruta");
+  onWeb(env, "https://hyperskill.org/learn/step/1", "Java basics");
+  assert.equal((await env.ctx.getActiveMatch()).task.uuid, "asig");
+  onWeb(env, "https://hyperskill.org/", "Home");
+  assert.equal((await env.ctx.getActiveMatch()).task.uuid, "general");
+});
+
+test("web: Udemy sigue yendo por su propia lógica aunque una web encaje con 'udemy'", async () => {
+  const env = makeEnv();
+  env.setTasks([webTask({ uuid: "w", watch_url: "udemy.com" }), udemyTask()]);
+  env.tab.audible = true;                                        // reproductor de Udemy sonando
+  assert.equal((await env.ctx.getActiveMatch()).task.uuid, "t-udemy");
+});
+
+// ---- anti-AFK
+test("web anti-AFK: sin tocar nada más del umbral NO cuenta (aunque la página esté delante)", async () => {
+  const env = makeEnv(); env.setTasks([webTask({ watch_idle_seconds: 120 })]);
+  onWeb(env, "https://hyperskill.org/");
+  env.idleFor = 30;  assert.equal(await counts(env), true);
+  env.idleFor = 119; assert.equal(await counts(env), true);
+  env.idleFor = 121; assert.equal(await counts(env), false);
+});
+
+test("web anti-AFK: cada tarea usa SU umbral de inactividad", async () => {
+  const env = makeEnv(); env.setTasks([webTask({ watch_idle_seconds: 600 })]);
+  onWeb(env, "https://hyperskill.org/");
+  env.idleFor = 400;
+  assert.equal(await counts(env), true);
+  assert.equal(env.idleQueries.at(-1), 600);
+  env.idleFor = 601;
+  assert.equal(await counts(env), false);
+});
+
+test("web anti-AFK: sin umbral en la caché vieja se usa 3 min; los absurdos se acotan", async () => {
+  const env = makeEnv(); env.setTasks([webTask({ watch_idle_seconds: undefined })]);
+  onWeb(env, "https://hyperskill.org/");
+  await counts(env); assert.equal(env.idleQueries.at(-1), 180);
+  env.setTasks([webTask({ watch_idle_seconds: 1 })]);   await counts(env); assert.equal(env.idleQueries.at(-1), 15);
+  env.setTasks([webTask({ watch_idle_seconds: 99999 })]); await counts(env); assert.equal(env.idleQueries.at(-1), 1800);
+});
+
+test("web anti-AFK: la pantalla bloqueada nunca cuenta, ni con audio", async () => {
+  const env = makeEnv(); env.setTasks([webTask({ watch_audio_counts: true })]);
+  onWeb(env, "https://hyperskill.org/"); env.tab.audible = true; env.idle = "locked";
+  assert.equal(await counts(env), false);
+});
+
+test("web: el sonido NO cuenta por defecto (irte con la página sonando no vale)", async () => {
+  const env = makeEnv(); env.setTasks([webTask({ watch_audio_counts: false })]);
+  onWeb(env, "https://hyperskill.org/"); env.tab.audible = true; env.idle = "idle";
+  assert.equal(await counts(env), false);
+});
+
+test("web con audio activado: suena o hay actividad cuenta; silencio + inactivo no", async () => {
+  const env = makeEnv();
+  env.setTasks([webTask({ uuid: "t-il", watch_url: "ilernaonline.zoom.us", watch_audio_counts: true, watch_idle_seconds: 300 })]);
+  onWeb(env, "https://ilernaonline.zoom.us/rec/play/abc", "Clase");
+  env.tab.audible = true;  env.idle = "idle";   assert.equal(await counts(env), true);
   env.tab.audible = false; env.idle = "active"; assert.equal(await counts(env), true);
-  env.tab.audible = false; env.idle = "idle"; assert.equal(await counts(env), false);
+  env.tab.audible = false; env.idle = "idle";   assert.equal(await counts(env), false);
+});
+
+test("web: ventana sin foco o pestaña en segundo plano NO cuenta", async () => {
+  const env = makeEnv(); env.setTasks([webTask()]);
+  onWeb(env, "https://hyperskill.org/");
+  env.focused = false; assert.equal(await counts(env), false);
+  env.focused = true;  assert.equal(await counts(env), true);
+});
+
+test("web: al irte no se suman los minutos de espera (umbral de 2 min)", async () => {
+  const env = makeEnv(); env.configure(); env.setTasks([webTask({ watch_idle_seconds: 120 })]);
+  onWeb(env, "https://hyperskill.org/");
+  await env.ctx.reevaluate();                         // 10:00 empieza
+  env.advance(env.minutes(20));                        // 10:20 dejas de tocar
+  env.advance(120000);                                 // 10:22 chrome avisa: idle (umbral 2 min)
+  env.idle = "idle"; env.idleFor = 121;
+  await env.listeners.idle("idle");
+  assert.equal(env.posts.length, 1);
+  assert.equal(env.posts[0].body.minutes, 20);        // no 22
+  assert.equal(env.posts[0].body.app_package, "hyperskill.org");
+});
+
+test("web: dejarlo olvidado horas NO suma horas (el latido cierra en el instante en que dejaste de tocar)", async () => {
+  const env = makeEnv(); env.configure(); env.setTasks([webTask({ watch_idle_seconds: 120 })]);
+  onWeb(env, "https://hyperskill.org/");
+  await env.ctx.reevaluate();
+  env.advance(env.minutes(10));                        // 10 min de uso real
+  env.idle = "idle"; env.idleFor = 121;
+  env.advance(120000); await env.listeners.idle("idle"); // chrome avisa a los 2 min
+  env.advance(env.minutes(180));                       // te vas 3 horas, el PC sigue encendido
+  await heartbeat(env);
+  assert.equal(env.posts.length, 1);
+  assert.equal(env.posts[0].body.minutes, 10);
+});
+
+test("web con audio: irse con el sonido puesto sigue contando (y lo avisa el formulario); al parar el sonido corta en el último instante presente", async () => {
+  const env = makeEnv(); env.configure();
+  env.setTasks([webTask({ watch_audio_counts: true, watch_idle_seconds: 120 })]);
+  onWeb(env, "https://hyperskill.org/"); env.tab.audible = true;
+  await env.ctx.reevaluate();                          // 10:00
+  env.advance(env.minutes(3));                         // 10:03: dejas de tocar, sigue sonando
+  env.idle = "idle"; env.idleFor = 121;
+  await env.listeners.idle("idle");                    // idleSince ~10:01
+  assert.equal(env.posts.length, 0);                   // sigue contando por el audio
+  env.advance(env.minutes(27));                        // 10:30 sigue sonando
+  await env.ctx.reevaluate();
+  assert.equal(env.posts.length, 0);
+  env.advance(env.minutes(5)); env.tab.audible = false;   // 10:35 deja de sonar
+  await env.listeners.tabUpdated(env.tab.id, { audible: false });
+  env.advance(env.minutes(60));                        // y te quedas ausente
+  await heartbeat(env);
+  assert.equal(env.posts.length, 1);
+  assert.equal(env.posts[0].body.minutes, 35);         // 10:00 -> 10:35 (último sonido), no 95
+});
+
+test("web: cambiar de pestaña cierra la sesión sin perder el tiempo real", async () => {
+  const env = makeEnv(); env.configure(); env.setTasks([webTask()]);
+  onWeb(env, "https://hyperskill.org/");
+  await env.ctx.reevaluate();
+  env.advance(env.minutes(15));
+  onWeb(env, "https://example.com/");                  // cambias de pestaña
+  await env.ctx.reevaluate();
+  assert.equal(env.posts.at(-1).body.minutes, 15);
+});
+
+test("web: el umbral de chrome.idle se ajusta al más estricto de las tareas web (máx. 300 s)", async () => {
+  const env = makeEnv(); env.configure();
+  env.tasks = [webTask({ watch_idle_seconds: 600 }), webTask({ uuid: "b", watch_idle_seconds: 60 })];
+  await env.ctx.refreshTasksCache();
+  assert.equal(env.detection, 60);
+  env.tasks = [webTask({ watch_idle_seconds: 600 })];
+  await env.ctx.refreshTasksCache();
+  assert.equal(env.detection, 300);
+  env.tasks = [webTask({ watch_idle_seconds: 5 })];
+  await env.ctx.refreshTasksCache();
+  assert.equal(env.detection, 15);                     // el mínimo que admite chrome.idle
+  env.tasks = [udemyTask()];
+  await env.ctx.refreshTasksCache();
+  assert.equal(env.detection, 300);
+});
+
+test("web: el registro de la sesión dice que fue por actividad", async () => {
+  const env = makeEnv(); env.configure(); env.setTasks([webTask()]);
+  onWeb(env, "https://hyperskill.org/");
+  await env.ctx.reevaluate();
+  env.advance(env.minutes(2));
+  await env.ctx.reevaluate();
+  onWeb(env, "https://example.com/"); await env.ctx.reevaluate();
+  const entry = env.store.local.sessionLog.at(-1);
+  assert.equal(entry.mode, "web · solo actividad");
+  assert.ok(entry.signals["actividad"] >= 1);
 });
 
 test("PDF: solo cuenta con actividad", async () => {
