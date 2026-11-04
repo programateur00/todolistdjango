@@ -120,7 +120,7 @@ _EXCLUDED_FROM_AUTOGEN = {"bicycle-crunch", "elephant-steps"}
 # 2026-09-28 — movido a `Exercise.level` (campo en la base de datos,
 # mismos 3 valores: beginner/intermediate/advanced) para tener una sola
 # fuente de verdad en vez de dos que se podían desincronizar (ya había
-# pasado: 6 ejercicios nuevos -- burpee, tuck-lever-bar, scapular-pull,
+# pasado: 6 ejercicios nuevos -- burpee, tuck-lever-bar,
 # dead-hang, handstand-push-up, wide-weighted-pullup -- no estaban en
 # este diccionario y se colaban en CUALQUIER nivel sin querer, al no
 # tener entrada). Los valores de aquí se llevaron tal cual a la

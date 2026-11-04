@@ -1,5 +1,5 @@
 """Dead Hang (aguante en barra), vista FRONTAL, colgado de la barra con agarre prono a la anchura de los hombros.
-Mismo montaje (barra + postes), muñeco, manos agarradas y vista que ex_dominadas.py / ex_dominadas_escapulares.py.
+Mismo montaje (barra + postes), muñeco, manos agarradas y vista que ex_dominadas.py.
 Es un ejercicio ISOMETRICO cronometrado (mode=timed, counter_key=deadhang), asi que el cuerpo NO se mueve:
   - los BRAZOS van totalmente ESTIRADOS y los hombros relajados hacia las orejas (colgado pasivo),
   - los PIES NO tocan el suelo y las RODILLAS SE DOBLAN HACIA ATRAS: de frente las espinillas se ven acortadas (es lo que exige

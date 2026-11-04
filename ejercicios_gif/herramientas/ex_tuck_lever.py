@@ -29,7 +29,7 @@ CFG = dict(grip=0.58, sw=0.34, reach=0.998, zbar=0.25, elev=0.22, hipw=0.15,
            thC=118, shC=330, ftC=335,          # tuck lever: muslo hacia la cabeza (angulo de cadera 50 grados), talones cerca del culo
            gap=5,                              # grados que se adelanta/atrasa la pierna lejana respecto a la cercana (profundidad en el perfil)
            pw=240, margin=0.22, labels=1, arrows=1, guide=1, clock=1, png=0, hold=1800)
-# grip: mitad de la separacion de las manos (0.58 = un poco mas ancha que los hombros, como dead hang / escapulares); sw: mitad del ancho de hombros
+# grip: mitad de la separacion de las manos (0.58 = un poco mas ancha que los hombros, como dead hang); sw: mitad del ancho de hombros
 # reach: fraccion del brazo estirado (1 = recto del todo); zbar: la barra queda un poco por DELANTE de los hombros (empujar la barra hacia las caderas)
 # elev: inclinacion de la vista frontal (la camara mira algo desde arriba: lo que esta mas cerca se ve algo mas abajo); phiB: giro del cuerpo a medio camino
 # kneeW / ankW: separacion lateral de las rodillas / tobillos al subir; th*/sh*/ft*: muslo / espinilla / pie en grados (0 = hacia delante, 90 = arriba, vistos de perfil)

@@ -1,5 +1,5 @@
 """Dominadas (pull-up), vista FRONTAL, agarre prono algo más ancho que los hombros.
-Mismo montaje (barra + postes) y vista que dead-hang / scapular-pull de ex_front.py.
+Mismo montaje (barra + postes) y vista que dead-hang de ex_front.py.
 Uso: python ex_dominadas.py [carpeta_salida] [clave=valor ...]   (genera dominadas.gif + PNG de cada fotograma)
 """
 import sys, os

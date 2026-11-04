@@ -22,17 +22,6 @@ if want('dead-hang'):
              R_leg=('fk', 272, 262), L_leg=('fk', 268, 278), shin_R=0.32, shin_L=0.32)
     render_scene([A, B], OUT + 'dead-hang', props=RIG, durations=[1000, 1400])
 
-# ------------------------------------------------------------------ DOMINADAS ESCAPULARES (de espaldas)
-if want('scapular-pull'):
-    mk = lambda hy, shrug: dict(view='front', ground=False, back=True, hip=(0, hy), torso=90, shrug=shrug,
-                                R_arm=('ik', (0.58, BAR), 'ccw'), L_arm=('ik', (-0.58, BAR), 'cw'),
-                                R_leg=('fk', 272, 272), L_leg=('fk', 268, 268))
-    A = mk(2.04, 0.12)       # colgado pasivo, hombros encogidos hacia las orejas
-    B = mk(2.24, -0.06)      # omóplatos bajados: el cuerpo sube un poco con los codos rectos
-    def arrow(pen):
-        draw_line_arrow(pen, (1.0, 2.6), (1.0, 3.1))
-    render_scene([A, B], OUT + 'scapular-pull', props=RIG, durations=[1100, 1100], extras=[None, [arrow]])
-
 # ------------------------------------------------------------------ CÍRCULOS DE BRAZOS
 if want('arm-circles'):
     def pose(th):

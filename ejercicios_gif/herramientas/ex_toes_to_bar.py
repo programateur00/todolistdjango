@@ -1,5 +1,5 @@
 """Toes to bar (pies a la barra), vista FRONTAL, colgado de la barra con agarre prono algo mas ancho que los hombros.
-Mismo montaje (barra + postes), muñeco, manos agarradas y vista que ex_dominadas.py / ex_dead_hang.py / ex_dominadas_escapulares.py.
+Mismo montaje (barra + postes), muñeco, manos agarradas y vista que ex_dominadas.py / ex_dead_hang.py.
 La app usa su propio contador "toestobar" (slug toes-to-bar, processToesToBar en workout.js), que solo mira la ALTURA de los pies
 (el tobillo o la punta mas alta de cada lado) frente a la barra (muñecas) y la cadera, en unidades de torso (vale de frente o de perfil;
 aqui, de frente como el resto de ejercicios de barra):
@@ -23,7 +23,7 @@ BAR = 4.35
 RIG = [('bar', BAR, -1.25, 1.25), ('post', -1.25, 0.0, BAR + 0.25), ('post', 1.25, 0.0, BAR + 0.25)]
 CFG = dict(grip=0.58, rA=0.998, rC=0.975, shrugA=0.14, shrugC=-0.07, spreadA=2, shinA=0.62, tilt=7, feet_up=0.30, tipC=0.04,
            pitchB=33, margin=0.5, arrow_x=1.02, arrows=1, ring=1, ring_r=0.17)
-# grip: mitad de la separacion de las manos (0.58 = un poco mas ancha que los hombros, igual que dead hang / escapulares)
+# grip: mitad de la separacion de las manos (0.58 = un poco mas ancha que los hombros, igual que dead hang)
 # rA / rC: fraccion del brazo estirado (1 = recto del todo) colgado / arriba; shrugA / shrugC: hombros hacia las orejas (+) / bajados (-)
 # spreadA: grados de apertura de las piernas colgando; shinA: acortamiento de la espinilla colgado (rodillas algo flexionadas hacia atras, como en dead hang: asi los pies no tocan el suelo); tilt: grados que se abren las piernas hacia fuera al subir (los pies caen a los lados de la cabeza)
 # feet_up: cuanto sobresale la punta del pie por encima del tobillo cuando el pie apunta a la barra; tipC: hueco entre la punta y la barra

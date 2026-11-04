@@ -152,47 +152,6 @@ export async function exportDebugLogText({ lines, counterKey, statusEl, build = 
 // considerar que hay un cambio de estado real y no ruido de la cámara.
 const MOVE_FACTOR = 0.12;
 const LIFTOFF_FACTOR = 0.04; // primer indicio de movimiento real (para medir bien la duracion)
-// Dominadas escapulares (scapularpull): mismo colgado de la barra que
-// las dominadas normales, pero el movimiento es solo de omóplato
-// (deprimir/retraer la escápula tirando el cuerpo un poco hacia arriba
-// SIN doblar el codo) -- rango de movimiento mucho más pequeño que una
-// dominada real, nunca se acerca a la barra. Calibrado contra vídeo real
-// (scpular_pullups.mp4, 2026-09-27; vosk-model-small-es-0.42 + contact
-// sheets + simulación con pose real PoseLandmarker VIDEO ~10fps): el
-// HOMBRO (no la nariz -- más estable para este movimiento tan sutil, ver
-// processScapularPull) sube y baja de forma consistente ~0.18
-// anchos-de-hombro en dos tomas distintas del mismo vídeo (de espaldas y
-// de frente), muy por encima del ruido de tracking en quieto (~0.02-0.03
-// anchos-de-hombro). El umbral se deja bastante por debajo de ese máximo
-// real para no exigirle a cada usuario el mismo rango exacto que en este
-// vídeo de referencia.
-const SCAPULARPULL_MOVE_FACTOR = 0.07;
-const SCAPULARPULL_LIFTOFF_FACTOR = 0.03;
-// 2026-10-21 (Alex: "con los pies en el suelo y doblo los brazos me lo cuenta como válida"). Antes solo se miraba que las
-// muñecas estuvieran sobre los hombros y que el hombro subiera/bajara 0.07 anchos: de pie bajo la barra, doblando los
-// brazos o las rodillas, el hombro se mueve igual y contaba. Ahora una repetición solo vale si:
-//  - el CUERPO ENTERO sube y baja: en el rango de la repetición los tobillos se mueven al menos SCAPULARPULL_FEET_FOLLOW_MIN_RATIO
-//    de lo que se mueve el hombro (colgado todo el cuerpo sube a la vez; con los pies apoyados los tobillos no se mueven).
-//    Es una medida RELATIVA (no hace falta saber dónde está el suelo). Si los tobillos no se ven en la repetición, no se juzga.
-//  - el codo no se dobla de forma clara al subir (ver el bloque de 2026-11-02 más abajo: ya no hace falta el brazo
-//    perfectamente recto, solo no tirar con los brazos).
-const SCAPULARPULL_FEET_MIN_VISIBILITY = 0.5;      // tobillo con menos visibilidad = no se usa
-const SCAPULARPULL_FEET_FOLLOW_MIN_RATIO = 0.5;    // rango de tobillos / rango de hombro mínimo (colgado ~1.0, apoyado ~0-0.2)
-const SCAPULARPULL_FEET_MIN_SAMPLE_FRACTION = 0.6; // fracción mínima de fotogramas de la repetición con tobillos visibles para juzgarlos
-// 2026-11-02 (Alex: "me dice que no doble los codos y un poco sí que los puedo doblar"): el chequeo de codo era demasiado
-// estricto y rechazaba repeticiones buenas. Causas: (1) 130 grados fijos y solo 3 fotogramas: el ángulo 2D de MediaPipe con los
-// brazos en alto fluctúa y una flexión natural de 10-30 grados ya lo disparaba; (2) la ventana de la repetición NO se reiniciaba
-// mientras esperabas abajo entre repeticiones (solo con un nuevo punto más bajo), así que los fotogramas "doblados" sueltos se
-// iban sumando hasta rechazar una repetición perfecta. Ahora: ángulo suavizado (mediana de SCAPULARPULL_ELBOW_SMOOTH_FRAMES),
-// límite más bajo y RELATIVO a tu codo en la calibración (colgado), la ventana es solo la subida (del despegue a la cima) y se
-// exige que el codo esté doblado en una FRACCIÓN de la subida, no en 3 fotogramas sueltos. Los pies siguen sin poder estar en el suelo.
-const SCAPULARPULL_ELBOW_MIN_VISIBILITY = 0.5;     // codo/muñeca poco visibles (muñeca fuera de encuadre) = no se juzga
-const SCAPULARPULL_ELBOW_BENT_MAX_DEG = 120;       // codo claramente doblado (tirar con los brazos); estirado ~160-180, flexión natural ~135-150
-const SCAPULARPULL_ELBOW_BENT_DROP_DEG = 40;       // o 40 grados menos que tu codo colgado en la calibración (el más bajo de los dos límites)
-const SCAPULARPULL_ELBOW_BENT_FLOOR_DEG = 80;      // el límite nunca baja de aquí
-const SCAPULARPULL_BENT_MIN_FRAMES = 3;            // mínimo de fotogramas doblados para invalidar
-const SCAPULARPULL_BENT_MIN_FRACTION = 0.4;        // ... y que sean al menos el 40 % de los fotogramas de la subida
-const SCAPULARPULL_ELBOW_SMOOTH_FRAMES = 5;        // mediana de los últimos N fotogramas (quita picos de ruido)
 
 // Toes to bar (toestobar): colgado de la barra con los brazos estirados, las piernas suben (casi rectas) hasta que
 // los pies tocan la barra y bajan con control. Se mide solo la ALTURA de los pies (tobillo o punta, el más alto que
@@ -214,11 +173,11 @@ const TOESTOBAR_MIN_REP_SECONDS = 0.25;    // despegar de abajo y llegar arriba 
 const BAR_MARGIN_FACTOR = 0.25; // cuanto por debajo de la barra ya cuenta como "llegaste arriba"
 const BAR_OFFSET_FACTOR = 0.05; // empuja la linea de la barra hacia arriba respecto a la muñeca (~2cm en un adulto medio, ver nota abajo)
 // Dominadas (todas las variantes con counter "pullup": normales, anchas, chin-ups, con peso, con salto,
-// commando; NO la escapular, que tiene su propio contador). 2026-10-12: contaba como válidas subidas muy
-// cortas (casi escapulares) porque lo único que se miraba era la nariz contra la barra calibrada. Ahora
+// commando). 2026-10-12: contaba como válidas subidas muy
+// cortas (casi sin recorrido) porque lo único que se miraba era la nariz contra la barra calibrada. Ahora
 // además hay que (a) subir de verdad desde el punto más bajo y (b) doblar el codo. Solo un poco más
 // exigente que antes, no hace falta tocar pecho con la barra. Sube estos números para exigir más.
-const PULLUP_MIN_RISE_FACTOR = 0.40;    // subida mínima de la nariz desde el punto más bajo, en anchos de hombro (escapular ~0.18, dominada completa ~0.8-0.9)
+const PULLUP_MIN_RISE_FACTOR = 0.40;    // subida mínima de la nariz desde el punto más bajo, en anchos de hombro (dominada completa ~0.8-0.9)
 const PULLUP_TOP_ELBOW_MAX_DEG = 100;   // codo (2D, suavizado) como máximo así de abierto arriba; si no se ve codo/muñeca no se mira
 const PULLUP_ELBOW_SMOOTH_ALPHA = 0.5;
 // Dominadas COMMANDO (2026-10-13): comparten contador con las dominadas, pero reportado "no cuenta ninguna".
@@ -6689,7 +6648,7 @@ class WorkoutSession {
     // Calentamiento (session-runner.js pone data-auto-advance="1" cuando el
     // circuito es el de calentamiento): al cumplir el objetivo pasa solo al
     // siguiente ejercicio, sea cual sea el contador (antes solo lo hacian
-    // NO_REST_COUNTERS y las flexiones -- dominada escapular se quedaba
+    // NO_REST_COUNTERS y las flexiones -- el resto se quedaba
     // esperando). Fuera del calentamiento no hay atributo y nada cambia.
     this.autoAdvanceOnGoal = root.dataset.autoAdvance === "1" && typeof window.__workoutSubmit === "function";
     // Contrarreloj (Cindy): armado y calibración más cortos, para no perder reps al empezar.
@@ -16604,8 +16563,8 @@ class WorkoutSession {
    * "Al fallo" (sin objetivo de reps ni de segundos, solo N series): al
    * cerrarse la serie N, dentro de un plan/circuito (window.__workoutSubmit),
    * pasa solo al siguiente ejercicio, sin avisos nuevos. Lo usan los cierres de serie que NO pasan por
-   * closeActiveSet() -- soltarse de la barra en dominadas, arquero y
-   * escapulares (2026-10-01, a peticion de Alex: "TODOS los ejercicios al
+   * closeActiveSet() -- soltarse de la barra en dominadas y arquero
+   * (2026-10-01, a peticion de Alex: "TODOS los ejercicios al
    * fallo"). setsDone = series ya cerradas INCLUIDA la que se cierra ahora.
    * Devuelve true si ya ha programado el paso al siguiente ejercicio (el
    * llamador NO debe seguir con descanso/recalibrado). finish() cierra la
@@ -20016,319 +19975,9 @@ class WorkoutSession {
     return null;
   }
 
-  /** Ángulo medio del codo (hombro-codo-muñeca) de los brazos visibles, o null si no se ve fiable (escapulares). */
-  scapularElbowDeg(lm) {
-    const arms = [[lm[L_SHOULDER], lm[L_ELBOW], lm[L_WRIST]], [lm[R_SHOULDER], lm[R_ELBOW], lm[R_WRIST]]]
-      .filter((arm) => arm.every((p) => p && (p.visibility ?? 1) >= SCAPULARPULL_ELBOW_MIN_VISIBILITY))
-      .map((arm) => angle(arm[0], arm[1], arm[2]))
-      .filter((a) => a !== null);
-    return arms.length ? arms.reduce((s, v) => s + v, 0) / arms.length : null;
-  }
-
-  /**
-   * Dominadas escapulares (scapularpull): te cuelgas de la barra con los
-   * brazos totalmente estirados (misma comprobación de partida que las
-   * dominadas normales/de arquero -- armsUpNow/armsClearlyReleased) y,
-   * SIN doblar el codo, deprimes y retraes el omóplato para subir el
-   * cuerpo un poco y lo vuelves a bajar con control. A diferencia de
-   * processResult (dominadas normales) o processArcherPullup, aquí NO
-   * hay "llegar a la barra": el rango de movimiento real es mucho más
-   * pequeño (ver SCAPULARPULL_MOVE_FACTOR arriba, calibrado contra vídeo
-   * real) y el cuerpo nunca se acerca a la barra, así que una repetición
-   * es solo "subiste lo suficiente y volviste a bajar lo suficiente",
-   * sin comprobar la altura absoluta respecto a ella.
-   *
-   * Se sigue el HOMBRO (shoulderMidY), no la nariz: contra el vídeo de
-   * referencia fue la señal más consistente (mismo rango, ~0.18
-   * anchos-de-hombro, en dos tomas distintas del mismo vídeo -- de
-   * espaldas y de frente), menos afectada que la nariz por el propio
-   * movimiento de la cabeza al hablar/mirar alrededor.
-   */
-  processScapularPull(lm, now) {
-    const lShoulder = lm[L_SHOULDER];
-    const rShoulder = lm[R_SHOULDER];
-    const lElbow = lm[L_ELBOW];
-    const rElbow = lm[R_ELBOW];
-    const lWrist = lm[L_WRIST];
-    const rWrist = lm[R_WRIST];
-    const shoulderWidth = Math.hypot(lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y);
-    const shoulderMidYRaw = (lShoulder.y + rShoulder.y) / 2;
-    // 0 = arriba del todo del encuadre, 1 = abajo del todo -- seguimos el
-    // hombro, no la nariz (ver comentario de la función).
-    const y = shoulderMidYRaw;
-    const wristMidY = (lWrist.y + rWrist.y) / 2;
-    const elbowMidY = (lElbow.y + rElbow.y) / 2;
-    const wristVisible = ((lWrist.visibility ?? 1) + (rWrist.visibility ?? 1)) / 2 > 0.4;
-    const elbowVisible = ((lElbow.visibility ?? 1) + (rElbow.visibility ?? 1)) / 2 > 0.4;
-
-    const armsUpNow = wristVisible
-      ? wristMidY < shoulderMidYRaw - HANG_MARGIN_FACTOR * shoulderWidth
-      : elbowVisible && elbowMidY < shoulderMidYRaw - HANG_MARGIN_FACTOR * shoulderWidth;
-    const armsClearlyReleased = wristVisible
-      ? wristMidY > shoulderMidYRaw + RELEASE_MARGIN_FACTOR * shoulderWidth
-      : elbowVisible && elbowMidY > shoulderMidYRaw + RELEASE_MARGIN_FACTOR * shoulderWidth;
-
-    if (this.prepping) {
-      const waitedSeconds = Math.floor((now - this.prepStartTs) / 1000);
-      if ((wristVisible || elbowVisible) && !this.startupVoiceGiven) {
-        this.startupVoiceGiven = true;
-        this.announceStatus(
-          "Cuélgate de la barra con los brazos estirados y las rodillas dobladas hacia atrás (posición de dead hang) para empezar.",
-          "startup_ready",
-          "Cuélgate de la barra con las rodillas dobladas."
-        );
-      }
-
-      // 2026-10-21 (Alex): la posición inicial es un DEAD HANG de verdad (colgado, pies sin tocar el suelo); no se empieza
-      // a calibrar ni a contar hasta verla. Mismo criterio que el ejercicio dead hang (checkDeadHangPosture): de pie con los
-      // brazos arriba no se distingue de colgado con las piernas rectas, así que se piden las rodillas dobladas hacia atrás.
-      const hangPose = armsUpNow ? checkDeadHangPosture(lm, false) : null;
-      const hangPoseOk = armsUpNow && hangPose.ok;
-
-      if (hangPoseOk) {
-        if (this.hangStableSince === null) this.hangStableSince = now;
-        if (now - this.hangStableSince >= HANG_STABLE_MS) {
-          this.prepping = false;
-          this.calibrating = true;
-          this.calibrationStartTs = now;
-          this.calibrationSamples = [];
-        } else {
-          this.setStatus("Te veo colgado… confirmando (no te muevas)");
-        }
-      } else if (armsUpNow) {
-        this.hangStableSince = null;
-        this.setStatus(`Agarrado a la barra, pero aún no cuenta: despega los pies del suelo y dobla las rodillas hacia atrás (dead hang). ${hangPose.reason ?? ""}`.trim());
-      } else {
-        this.hangStableSince = null;
-        this.setStatus(
-          waitedSeconds < 8
-            ? "Ve a la barra y cuélgate con los brazos estirados…"
-            : `Esperando a verte colgado (llevas ${waitedSeconds}s)… comprueba que la cámara vea tus brazos y hombros enteros`
-        );
-      }
-      if (this.debugEl) {
-        this.debugEl.textContent = `brazos en alto: ${armsUpNow ? "sí" : "no"} | dead hang: ${hangPoseOk ? "sí" : "no"}` +
-          `${hangPose && hangPose.debug ? ` (${hangPose.debug.piernaIzq ?? hangPose.debug.fail ?? ""} / ${hangPose.debug.piernaDer ?? ""})` : ""} | espera: ${waitedSeconds}s`;
-      }
-      return;
-    }
-
-    if (this.calibrating) {
-      if (!armsUpNow || !checkDeadHangPosture(lm, true).ok) {
-        this.prepping = true;
-        this.calibrating = false;
-        this.hangStableSince = null;
-        this.prepStartTs = now;
-        this.calibrationSamples = [];
-        return;
-      }
-      this.calibrationSamples.push({ y, shoulderWidth, elbowDeg: this.scapularElbowDeg(lm) });
-      const elapsed = now - this.calibrationStartTs;
-      const remaining = Math.max(0, Math.ceil((CALIBRATION_MS - elapsed) / 1000));
-      this.setStatus(`Calibrando, quédate colgado y quieto… (${remaining || 1}s)`);
-      if (elapsed >= CALIBRATION_MS) {
-        const ys = this.calibrationSamples.map((s) => s.y).sort((a, b) => a - b);
-        const ws = this.calibrationSamples.map((s) => s.shoulderWidth).sort((a, b) => a - b);
-        this.shoulderWidth = ws[Math.floor(ws.length / 2)];
-        this.localBottomY = ys[Math.floor(ys.length / 2)];
-        this.localTopY = this.localBottomY;
-        this.calibrating = false;
-        this.repStartTime = now;
-        this.lastRepTime = now;
-        this.restAlerted = false;
-        this.updateSetDisplay();
-        // Codo de referencia: cómo mide TU codo colgado y quieto (si ya lo tienes algo flexionado, el límite baja con él).
-        const elbowRefs = this.calibrationSamples.map((s) => s.elbowDeg).filter((v) => v != null && v !== undefined).sort((a, b) => a - b);
-        this.spElbowBase = elbowRefs.length >= 3 ? elbowRefs[Math.floor(elbowRefs.length / 2)] : null;
-        this.spElbowHist = [];
-        this.logScissor(`[CALIBRADL] hombro_y=${this.localBottomY.toFixed(3)} hombros=${this.shoulderWidth.toFixed(3)} codo_base=${this.spElbowBase === null ? "-" : this.spElbowBase.toFixed(0) + "°"}`);
-        if (this.setClosedAt === null || now - this.setClosedAt >= MIN_REST_MS) {
-          this.announceStatus(
-            "¡Listo! Empieza las dominadas escapulares: sin doblar el codo, baja los omóplatos para subir un poco el cuerpo y vuelve a bajar con control.", "ready_to_go", "Listo. Sube y baja los omóplatos, sin doblar los codos."
-          );
-        }
-      }
-      return;
-    }
-
-    if (!this.shoulderWidth) return;
-
-    const scaleChange = Math.abs(shoulderWidth - this.shoulderWidth) / this.shoulderWidth;
-    const scaleOk = scaleChange < SCALE_TOLERANCE;
-
-    if (!armsUpNow || !scaleOk) {
-      this.logScissor(
-        `[frame descartado] brazos_arriba=${armsUpNow} escala_ok=${scaleOk} cambio_escala=${scaleChange.toFixed(2)}(máx ${SCALE_TOLERANCE}) ` +
-        `estado=${this.state} reps_serie=${this.currentSetReps}`
-      );
-      if (!armsUpNow) {
-        this.localBottomY = null;
-        this.localTopY = null;
-        this.liftoffTime = null;
-      }
-
-      if (armsClearlyReleased) {
-        if (this.armsDownSince === null) this.armsDownSince = now;
-        if (now - this.armsDownSince >= ARMS_DOWN_STABLE_MS && this.currentSetReps > 0) {
-          const closedReps = this.currentSetReps;
-          this.armsDownSince = null;
-          // "Al fallo": si esta era la ultima serie prescrita, pasa solo al
-          // siguiente ejercicio (ver failureGoalReached).
-          if (this.failureGoalReached(this.sets.length + 1, `Serie de ${closedReps}`)) return;
-          this.pendingHangReminder = true;
-          this.announceSetComplete(`Serie de ${closedReps}`, "");
-          this.restVoiceQuiet = true;
-          this.beginPrep();
-          return;
-        }
-      } else {
-        this.armsDownSince = null;
-      }
-
-      if (this.debugEl) {
-        this.debugEl.textContent = !armsUpNow
-          ? "esperando a que agarres la barra (brazos en alto)…"
-          : "distancia a la cámara cambió demasiado, recalibra si sigue así";
-      }
-      return;
-    }
-
-    this.armsDownSince = null;
-
-    const moveThresh = SCAPULARPULL_MOVE_FACTOR * this.shoulderWidth;
-
-    // --- Cuerpo entero + codo estirado (ver SCAPULARPULL_FEET_FOLLOW_MIN_RATIO) ---
-    const ankleYs = [lm[L_ANKLE], lm[R_ANKLE]]
-      .filter((p) => p && (p.visibility ?? 1) >= SCAPULARPULL_FEET_MIN_VISIBILITY)
-      .map((p) => p.y);
-    const ankleYRaw = ankleYs.length ? ankleYs.reduce((s, v) => s + v, 0) / ankleYs.length : null;
-    if (ankleYRaw !== null) {
-      this.spAnkleSmoothY = this.spAnkleSmoothY == null ? ankleYRaw : this.spAnkleSmoothY + 0.5 * (ankleYRaw - this.spAnkleSmoothY);
-    } else {
-      this.spAnkleSmoothY = null;
-    }
-    const ankleY = ankleYRaw === null ? null : this.spAnkleSmoothY;
-    // Codo suavizado (mediana de los últimos fotogramas) y su límite de "doblado" (ver las constantes de 2026-11-02).
-    const elbowRaw = this.scapularElbowDeg(lm);
-    const elbowHist = (this.spElbowHist = this.spElbowHist || []);
-    let elbowDeg = null;
-    if (elbowRaw !== null) {
-      elbowHist.push(elbowRaw);
-      while (elbowHist.length > SCAPULARPULL_ELBOW_SMOOTH_FRAMES) elbowHist.shift();
-      const sortedHist = [...elbowHist].sort((a, b) => a - b);
-      elbowDeg = sortedHist[Math.floor(sortedHist.length / 2)];
-    }
-    const elbowBase = this.spElbowBase ?? null;
-    const bentLimit = elbowBase === null
-      ? SCAPULARPULL_ELBOW_BENT_MAX_DEG
-      : Math.max(SCAPULARPULL_ELBOW_BENT_FLOOR_DEG, Math.min(SCAPULARPULL_ELBOW_BENT_MAX_DEG, elbowBase - SCAPULARPULL_ELBOW_BENT_DROP_DEG));
-
-    // Ventana de la repetición en curso: desde el último punto más bajo del hombro hasta contarla. Se descarta la de
-    // otra serie/calibración (calibrationStartTs cambia en cada calibración).
-    // La ventana del CODO es solo la subida (del despegue a la cima): se vacía mientras esperas abajo y deja de contar al empezar a bajar.
-    const resetElbowWindow = () => {
-      this.spBentFrames = 0;
-      this.spRiseFrames = 0;
-      this.spElbowMin = null;
-      this.spRiseDone = false;
-    };
-    const noteElbow = () => {
-      if (elbowDeg === null) return;
-      this.spRiseFrames++;
-      this.spElbowMin = this.spElbowMin === null ? elbowDeg : Math.min(this.spElbowMin, elbowDeg);
-      if (elbowDeg < bentLimit) this.spBentFrames++;
-    };
-    const resetRepWindow = () => {
-      this.spWinCal = this.calibrationStartTs;
-      this.spAnkleLo = null;
-      this.spAnkleHi = null;
-      this.spAnkleFrames = 0;
-      this.spFrames = 0;
-      resetElbowWindow();
-    };
-    if (this.spWinCal !== this.calibrationStartTs) resetRepWindow();
-
-    if (this.state === "down" && (this.localBottomY === null || y > this.localBottomY)) resetRepWindow();
-
-    this.spFrames++;
-    if (ankleY !== null) {
-      this.spAnkleFrames++;
-      this.spAnkleLo = this.spAnkleLo === null ? ankleY : Math.min(this.spAnkleLo, ankleY);
-      this.spAnkleHi = this.spAnkleHi === null ? ankleY : Math.max(this.spAnkleHi, ankleY);
-    }
-
-    if (this.state === "down") {
-      if (this.localBottomY === null || y > this.localBottomY) {
-        this.localBottomY = y;
-        this.liftoffTime = null;
-      }
-      const risenFromBottom = this.localBottomY - y;
-
-      if (this.liftoffTime === null && risenFromBottom > SCAPULARPULL_LIFTOFF_FACTOR * this.shoulderWidth) {
-        this.liftoffTime = now;
-      }
-
-      // Esperando abajo: la ventana del codo se vacía; solo cuenta desde que despegas.
-      if (risenFromBottom <= SCAPULARPULL_LIFTOFF_FACTOR * this.shoulderWidth) resetElbowWindow();
-      else noteElbow();
-
-      if (risenFromBottom > moveThresh) {
-        this.state = "up";
-        this.localTopY = y;
-        this.repStartTime = this.liftoffTime ?? now;
-      }
-    } else {
-      if (this.localTopY === null || y < this.localTopY) {
-        this.localTopY = y;
-      }
-      const fallenFromTop = y - this.localTopY;
-      if (fallenFromTop > SCAPULARPULL_LIFTOFF_FACTOR * this.shoulderWidth) this.spRiseDone = true;
-      if (!this.spRiseDone) noteElbow();
-      if (fallenFromTop > moveThresh) {
-        const shoulderRange = this.localBottomY - this.localTopY;
-        const ankleRange = this.spAnkleLo !== null ? this.spAnkleHi - this.spAnkleLo : null;
-        const feetJudgeable = ankleRange !== null && shoulderRange > 0 &&
-          this.spAnkleFrames >= Math.max(3, SCAPULARPULL_FEET_MIN_SAMPLE_FRACTION * this.spFrames);
-        const feetPlanted = feetJudgeable && ankleRange < SCAPULARPULL_FEET_FOLLOW_MIN_RATIO * shoulderRange;
-        const armsBent = this.spBentFrames >= SCAPULARPULL_BENT_MIN_FRAMES &&
-          this.spBentFrames >= SCAPULARPULL_BENT_MIN_FRACTION * this.spRiseFrames;
-        const detail =
-          `hombro_rango=${shoulderRange.toFixed(3)} tobillo_rango=${ankleRange === null ? "-" : ankleRange.toFixed(3)} ` +
-          `tobillos_juzgables=${feetJudgeable ? "sí" : "no"} codo_min=${this.spElbowMin === null ? "-" : this.spElbowMin.toFixed(0)}° ` +
-          `fotogramas_codo_doblado=${this.spBentFrames}/${this.spRiseFrames} limite_codo=${bentLimit.toFixed(0)}° codo_base=${elbowBase === null ? "-" : elbowBase.toFixed(0) + "°"}`;
-        if (feetPlanted || armsBent) {
-          this.logScissor(`[REP descartada] motivo=${feetPlanted ? "pies en el suelo" : "codo doblado"} ${detail}`);
-          if (feetPlanted) {
-            this.announceStatus("Despega los pies del suelo: cuélgate de verdad de la barra para que cuente.", "scapularpull_feet", "Despega los pies del suelo.");
-          } else {
-            this.announceStatus("Sube con los omóplatos, sin tirar con los brazos: casi sin doblar los codos.", "scapularpull_elbow", "Sin tirar con los brazos.");
-          }
-        } else {
-          this.logScissor(`[REP intentada] duración=${((now - this.repStartTime) / 1000).toFixed(2)}s ${detail}`);
-          this.countRep((now - this.repStartTime) / 1000, now, "Dominada escapular");
-        }
-        this.state = "down";
-        this.localBottomY = y;
-        resetRepWindow();
-      }
-    }
-
-    if (this.debugEl) {
-      this.debugEl.textContent =
-        `estado: ${this.state} | hombro_y: ${y.toFixed(3)} | ref abajo: ${this.localBottomY === null ? "-" : this.localBottomY.toFixed(3)} ` +
-        `| ref arriba: ${this.localTopY === null ? "-" : this.localTopY.toFixed(3)} | umbral: ${moveThresh.toFixed(3)} (${SCAPULARPULL_MOVE_FACTOR}) ` +
-        `| codo: ${elbowDeg === null ? "-" : elbowDeg.toFixed(0) + "°"} (límite ${bentLimit.toFixed(0)}°)`;
-    }
-    this.logScissor(
-      `estado=${this.state} hombro_y=${y.toFixed(3)} hombros=${shoulderWidth.toFixed(3)} ` +
-      `abajo_ref=${this.localBottomY === null ? "-" : this.localBottomY.toFixed(3)} arriba_ref=${this.localTopY === null ? "-" : this.localTopY.toFixed(3)} ` +
-      `despegue=${this.liftoffTime === null ? "no" : "sí"}`
-    );
-  }
-
   /**
    * Toes to bar (toestobar): te cuelgas de la barra con los brazos estirados (misma comprobación de partida y
-   * mismo cierre al soltar la barra que processScapularPull) y subes las piernas hasta que los pies llegan a
+   * mismo cierre al soltar la barra que las dominadas) y subes las piernas hasta que los pies llegan a
    * la barra. Ver el bloque TOESTOBAR_* de arriba: se sigue la altura de los pies frente a muñecas (barra) y
    * cadera, en unidades de torso calibrado, sin depender de que la cámara esté de frente o de perfil.
    */
@@ -21247,10 +20896,6 @@ if (this.counterKey === "crunch") {
     }
     if (this.counterKey === "archerpullup") {
       this.processArcherPullup(lm, now);
-      return;
-    }
-    if (this.counterKey === "scapularpull") {
-      this.processScapularPull(lm, now);
       return;
     }
     if (this.counterKey === "toestobar") {
