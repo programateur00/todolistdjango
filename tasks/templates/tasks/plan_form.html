@@ -300,10 +300,10 @@
                 </details>
             </label>
             <label class="field">
-                <span class="field__label">Palabra en el título de la pestaña (opcional)</span>
+                <span class="field__label">Palabra en el título o la dirección de la pestaña (opcional)</span>
                 <input type="text" name="web_keyword" maxlength="120"
                     value="{% if study_headline.watch_site == 'web' %}{{ study_headline.watch_keyword }}{% endif %}"
-                    placeholder="Ej: 'Programación' — solo cuenta si el título la lleva">
+                    placeholder="Ej: 'Programación' o 'learn' — solo cuenta si el título o la dirección la llevan">
             </label>
             <label class="field">
                 <span class="field__label">Dejar de contar si no tocas ratón ni teclado durante…</span>

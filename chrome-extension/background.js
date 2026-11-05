@@ -241,7 +241,9 @@ function webIdleSeconds(task) {
 /**
  * ¿Qué tarea "Tiempo en una web" encaja con esta pestaña? La URL tiene que
  * contener algún trozo de `watch_url` y, si la tarea trae `watch_keyword`,
- * el título también. Si encajan varias, gana la más específica: primero la que
+ * esa palabra tiene que salir en el título O en la dirección de la pestaña
+ * (antes solo en el título: "learn" para hyperskill.org/learn/... no encajaba
+ * nunca, porque el título de cada lección no lleva esa palabra). Si encajan varias, gana la más específica: primero la que
  * exige palabra del título, luego la de trozo de URL más largo. Devuelve
  * {task, term} o null.
  */
@@ -257,7 +259,7 @@ function matchWebTask(tasks, tabUrl, tabTitle) {
       .sort((a, b) => b.length - a.length)[0];
     if (!term) continue;
     const kw = (t.watch_keyword || "").trim().toLowerCase();
-    if (kw && !title.includes(kw)) continue;
+    if (kw && !title.includes(kw) && !url.includes(kw)) continue;
     const score = (kw ? 1000 + kw.length : 0) + term.length;
     if (!best || score > best.score) best = { task: t, term, score };
   }

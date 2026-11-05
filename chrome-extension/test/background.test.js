@@ -134,6 +134,22 @@ test("web: los trozos de menos de 3 letras se ignoran (no encajan con todo)", as
   onWeb(env, "https://example.com/a"); assert.equal(await counts(env), false);
 });
 
+test("web: la palabra opcional también vale si sale en la DIRECCIÓN (hyperskill.org + 'learn')", async () => {
+  const env = makeEnv(); env.configure(); env.setTasks([webTask({ watch_keyword: "learn" })]);
+  // El título de una lección de Hyperskill no lleva "learn", pero la ruta sí.
+  onWeb(env, "https://hyperskill.org/learn/step/1234", "Print function - Hyperskill");
+  assert.equal(await counts(env), true);
+  onWeb(env, "https://hyperskill.org/", "Hyperskill");              // ni título ni ruta
+  assert.equal(await counts(env), false);
+  // y de extremo a extremo: sesión de 10 min = 10 min mandados al servidor
+  onWeb(env, "https://hyperskill.org/learn/step/1234", "Print function - Hyperskill");
+  await env.ctx.reevaluate();
+  env.advance(env.minutes(10));
+  onWeb(env, "https://example.com/");
+  await env.ctx.reevaluate();
+  assert.equal(env.posts.at(-1).body.minutes, 10);
+});
+
 test("web: la palabra del título, si se pone, es obligatoria", async () => {
   const env = makeEnv(); env.setTasks([webTask({ watch_keyword: "Programación" })]);
   onWeb(env, "https://hyperskill.org/", "Redes — Hyperskill");        assert.equal(await counts(env), false);

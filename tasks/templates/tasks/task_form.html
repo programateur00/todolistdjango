@@ -223,7 +223,7 @@
                 <span class="field__hint">
                     La extensión de Chrome cuenta el tiempo mientras la pestaña en primer plano
                     tenga ese texto en su dirección (da igual https, www o la subpágina:
-                    "hyperskill.org" vale para todas). Con la palabra del título de abajo puedes
+                    "hyperskill.org" vale para todas). Con la palabra de abajo (título o dirección) puedes
                     afinar más (ej. una asignatura concreta).
                 </span>
             </details>
@@ -551,8 +551,8 @@
         udemyFields.style.display = (esLectura || esWeb) ? 'block' : 'none';
         // El mismo input sirve a Lectura (PDF) y a la web (palabra del título):
         // solo cambia el texto, para no mandar dos watch_keyword.
-        watchKeywordLabel.textContent = esWeb ? 'Palabra en el título de la pestaña (opcional)' : 'Palabra clave del PDF (opcional)';
-        watchKeywordInput.placeholder = esWeb ? "Ej: 'Programación' — solo cuenta si el título la lleva" : 'Ej: clean-code';
+        watchKeywordLabel.textContent = esWeb ? 'Palabra en el título o la dirección de la pestaña (opcional)' : 'Palabra clave del PDF (opcional)';
+        watchKeywordInput.placeholder = esWeb ? "Ej: 'Programación' o 'learn' — solo cuenta si el título o la dirección la llevan" : 'Ej: clean-code';
         // Los campos de la web solo se mandan si el subtipo es "web": los
         // demás llegan deshabilitados (si no, un valor viejo viajaría igual).
         webFields.style.display = esWeb ? 'block' : 'none';

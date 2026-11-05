@@ -48,8 +48,9 @@ tipos de pestaña trackeable, cada uno emparejado con un tipo de tarea:
     varios separados por comas (vale cualquiera). Los trozos de menos de 3
     letras se ignoran. Al guardar se limpia lo que pegues de más
     (`https://www.hyperskill.org/learn` → `hyperskill.org/learn`).
-  - **Palabra en el título (opcional)**: además tiene que salir en el
-    título de la pestaña (p. ej. una asignatura). Si encajan varias
+  - **Palabra en el título o la dirección (opcional)**: además tiene que
+    salir en el título de la pestaña O en su dirección (p. ej. una asignatura,
+    o `learn` para quedarte solo con `hyperskill.org/learn/...`). Si encajan varias
     tareas con la misma pestaña, gana la que pide palabra del título y,
     luego, la de trozo de URL más largo.
   - **Condición anti-AFK** (ver abajo): minutos sin tocar ratón/teclado a
@@ -120,7 +121,7 @@ recargar de esta extensión (cambió el manifest a la 1.3.0).
    un plan de Estudio → "Tiempo en una web") y rellena:
    - la dirección: un trozo que tenga la URL (`hyperskill.org`),
    - los minutos al día (obligatorios),
-   - opcional: una palabra del título de la pestaña,
+   - opcional: una palabra que salga en el título o en la dirección de la pestaña,
    - tras cuántos minutos sin tocar ratón/teclado deja de contar,
    - opcional: si el sonido de la pestaña también cuenta.
 2. Ponte con la web en Chrome, con esa pestaña en primer plano. La
